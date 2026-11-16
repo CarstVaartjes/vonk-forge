@@ -53,6 +53,22 @@ def acceptance(result: dict[str, object]) -> object:
     return submission["acceptance"]
 
 
+def entries(result: dict[str, object], key: str) -> list[dict[str, object]]:
+    value = result[key]
+    assert isinstance(value, list)
+    assert all(isinstance(entry, dict) for entry in value)
+    return value
+
+
+def posted_digests(client: FakeClient) -> list[object]:
+    bodies = [call[2] for call in client.calls if call[0] == "POST"]
+    digests = []
+    for body in bodies:
+        assert body is not None
+        digests.append(body["review_digest"])
+    return digests
+
+
 def _fresh_observation(client, noun):
     path = f"/api/{noun}/requests/{KEY}"
     client.responses[("GET", path)] = receipt(noun)
@@ -777,11 +793,11 @@ def test_unused_review_keeps_what_the_controller_keeps_and_totals_the_rest():
         ("model", "remove", "--unused", "--review", "--json"), _unused_client()
     )
     assert status == 0
-    assert [e["selector"] for e in result["removals"]] == ["a"]
-    assert [(e["selector"], e["reason"]) for e in result["retained"]] == [
+    assert [e["selector"] for e in entries(result, "removals")] == ["a"]
+    assert [(e["selector"], e["reason"]) for e in entries(result, "retained")] == [
         ("b", "A live operation names this model.")
     ]
-    assert [e["selector"] for e in result["unreviewed"]] == ["c"]
+    assert [e["selector"] for e in entries(result, "unreviewed")] == ["c"]
     assert result["totals"] == {"nas_bytes": 100, "sparks": {"spk_1": 7}}
 
 
@@ -800,9 +816,8 @@ def test_unused_yes_replans_a_moved_scope_with_the_fresh_digest():
         _fleet_review("a", removable=True, digest="e"),
     ]
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
-    posts = [call[2] for call in client.calls if call[0] == "POST"]
-    assert [body["review_digest"] for body in posts] == ["d" * 64, "e" * 64]
-    assert [e["request_key"] for e in result["submissions"]] == [KEY]
+    assert posted_digests(client) == ["d" * 64, "e" * 64]
+    assert [e["request_key"] for e in entries(result, "submissions")] == [KEY]
     assert status == 0 and "partial" not in result
 
 
@@ -815,7 +830,7 @@ def test_unused_yes_refused_everywhere_exits_nonzero_and_keeps_the_key():
     )
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
     assert status != 0 and result["partial"] is True
-    [entry] = result["submissions"]
+    [entry] = entries(result, "submissions")
     assert entry["request_key"] == KEY and entry["failure"]
 
 
@@ -836,5 +851,4 @@ def test_fleet_remove_replans_once_when_the_scope_moved_before_acceptance():
     argv = ("model", "remove", "a", "--fleet", "--yes", "--detach", "--json")
     status, result = run(argv, client)
     assert status == 0 and result["operation_id"]
-    posts = [call[2] for call in client.calls if call[0] == "POST"]
-    assert [body["review_digest"] for body in posts] == ["d" * 64, "e" * 64]
+    assert posted_digests(client) == ["d" * 64, "e" * 64]

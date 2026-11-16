@@ -60,7 +60,6 @@ def _setup(postgres_engine, tmp_path, blobs, tag):
     model_a = _one_model(tmp_path, f"{tag}-a")
     model_b = _one_model(tmp_path, f"{tag}-b")
     selector_a = _register_model(sessions, model_a)
-    selector_b = _register_model(sessions, model_b)
     digest_a = document_sha256(model_a.model_dump(mode="json"))
     digest_b = document_sha256(model_b.model_dump(mode="json"))
     set_a = _download_set(service, tmp_path, "a", blobs, digest_a, _key(tag, 1))
@@ -72,6 +71,10 @@ def _setup(postgres_engine, tmp_path, blobs, tag):
         model_content_sha256=digest_a,
     )
     assert service._observe_model_removal_scope(removal.id)
+    # B is registered only now: a model whose files are all stored counts as
+    # cached at once, so an earlier B would already share the object when the
+    # scope was observed. The newer set must arrive after it.
+    selector_b = _register_model(sessions, model_b)
     source_b = tmp_path / "source-b"
     source_b.mkdir()
     artifact_b = _artifact(source_b, b"abc", model_content_sha256=digest_b)
