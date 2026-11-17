@@ -22,6 +22,7 @@ from vonk_forge_contracts import RecipeDefinition
 from ..cluster_mappings import mapping_option_choices
 from ..content_identity import catalog_reference_membership
 from ..fleet_profile_contract import FleetProfileAssignment, FleetProfileAssignmentState
+from ..installation_transitions import IN_FLIGHT
 from ..machine_states import rank_installed
 from ..models import (
     STOPPABLE_RUN_STATES,
@@ -371,8 +372,7 @@ class FleetProfileService:
         if not exact_installed:
             state: FleetProfileAssignmentState = (
                 ObservedAssignmentState.INSTALLING
-                if installation.state
-                in {InstallationState.PLANNED, InstallationState.INSTALLING}
+                if installation.state in IN_FLIGHT
                 else ObservedAssignmentState.DEGRADED
             )
             return cls._AssignmentState(

@@ -80,3 +80,30 @@ test("a Spark that is not reporting live gets no all-clear row, only what is kno
     ],
   );
 });
+
+test("an incomplete installation row comes from the Controller's warning; an install in flight has none", () => {
+  const evidence = {
+    installation_id: "i1",
+    title: "GLM",
+    group_state: "partial",
+    present_ranks: [0],
+    expected_rank_count: 2,
+  };
+  const inFlight = { installation_id: "i2", complete: false, group_state: "planned" };
+  const node = {
+    ...live({}),
+    installed: [inFlight],
+    warnings: [
+      {
+        code: "install.partial",
+        detail: "GLM is incomplete",
+        severity: "warning",
+        install_partial: evidence,
+      },
+    ],
+  };
+  const rows = nodeHealth(node as never, [], NOW, [], false).filter((row) => row.installationId);
+  expect(rows.map((row) => [row.title, row.detail, row.installationId])).toEqual([
+    ["partial", "GLM · 1 of 2 ranks", "i1"],
+  ]);
+});

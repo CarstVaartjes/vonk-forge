@@ -11,7 +11,11 @@ from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    InstallationState,
+    InstallDegradedReason,
+    canonical_message,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -27,6 +31,7 @@ from vonk_control.fleet_projection import (
     NodeConnection,
     RecipePresence,
     TelemetryPoint,
+    _install_partial_warnings,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.inventory_repository import (
@@ -2464,6 +2469,28 @@ def test_a_complete_or_in_flight_installation_raises_no_install_partial_warning(
 ) -> None:
     _installation_id, snapshot = _mutated_group(mutation)
     assert not [w for w in snapshot.nodes[0].warnings if w.code == "install.partial"]
+
+
+def test_an_in_flight_installation_with_unreadable_evidence_still_warns() -> None:
+    presence = RecipePresence(
+        installation_id="00000000-0000-4000-8000-000000000001",
+        recipe_id="00000000-0000-4000-8000-000000000002",
+        recipe_revision_id="00000000-0000-4000-8000-000000000003",
+        title="Recipe",
+        topology_name="pair",
+        expected_rank_count=2,
+        present_ranks=[0, 1],
+        member_node_ids=[NODE_A],
+        rank=0,
+        role="entrypoint",
+        group_state=InstallationState.PLANNED,
+        rank_state=InstallationState.PLANNED,
+        complete=None,
+        projection_issue="Stored recipe revision is unreadable.",
+        degraded_reason=InstallDegradedReason.INSTALLATION_NOT_INSTALLED,
+    )
+    (warning,) = _install_partial_warnings([presence])
+    assert warning.code == "install.partial"
 
 
 def test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation() -> (

@@ -176,7 +176,8 @@ def _install_partial_warnings(
     progress, not a fault: its owning operation finishes it, or the residue
     sweep ends it as ``partial`` and it warns then, the same rule as
     ``attempt_residues.incomplete_installation_ids``. A structural reason
-    (wrong or missing ranks) still warns while in flight.
+    (wrong or missing ranks) and unreadable evidence still warn while in
+    flight.
     """
 
     incomplete = [
@@ -187,6 +188,7 @@ def _install_partial_warnings(
             value.group_state in IN_FLIGHT
             and value.degraded_reason
             == InstallDegradedReason.INSTALLATION_NOT_INSTALLED
+            and value.projection_issue is None
         )
     ]
     named = incomplete[:_INSTALL_PARTIAL_MAX_NAMED]
