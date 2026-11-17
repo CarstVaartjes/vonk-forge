@@ -69,7 +69,6 @@ from .common import (
     HostRuntimeGrantRequest,
     OrphanStopGrantRequest,
     PackageActivationGrantRequest,
-    _authenticated_activation_identity,
     _authenticated_identity,
     _body_node_matches,
     _host_grant_response,
@@ -626,7 +625,7 @@ def install_authority_routes(
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_activation_identity(request, required)
+        identity = _authenticated_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
             outcome = _require_enrollment(required).activate(

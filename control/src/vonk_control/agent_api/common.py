@@ -508,17 +508,6 @@ def _authenticated_identity(
     return identity
 
 
-def _authenticated_activation_identity(
-    request: Request, services: AgentApiServices
-) -> AgentIdentity:
-    identity = validated_agent_identity_from_scope(dict(request.scope))
-    if identity is None:
-        raise SecurityHTTPError(
-            status_code=401, detail="agent certificate cannot activate"
-        )
-    return identity
-
-
 def _body_node_matches(value: str, identity: AgentIdentity) -> None:
     if value != identity.node_id:
         raise SecurityHTTPError(

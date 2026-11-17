@@ -246,17 +246,60 @@ def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
     assert lookups == [NODE]
     assert seen[0] is not None and seen[0].node_id == NODE
 
-    # A request that skipped the middleware, or forged the marker, is unvalidated.
+    # A request that skipped the middleware is unvalidated.
     identity = AgentIdentity(NODE, "123", "fingerprint", True)
     assert (
         validated_agent_identity_from_scope({"vonk.agent_identity": identity}) is None
     )
+
+    # A forged marker on a path the middleware does not validate is stripped.
     forged = {
         "type": "http",
-        "path": "/api/x",
-        "headers": (),
+        "path": "/agent/enroll",
+        "headers": headers,
         "vonk.agent_validated": identity,
     }
     asyncio.run(middleware(forged, lambda: None, lambda _: None))
     assert seen[1] is None
     assert lookups == [NODE]
+
+
+def test_agent_handler_reuses_the_middleware_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any, cast
+
+    from fastapi.testclient import TestClient
+    from vonk_control.agent_api import common
+    from vonk_control.api import application, create_app
+    from vonk_control.auth import TokenCodec
+
+    lookups: list[object] = []
+
+    def count(*_: object) -> bool:
+        lookups.append(1)
+        return True
+
+    monkeypatch.setattr(application, "active_agent_identity", count)
+    monkeypatch.setattr(common, "active_agent_identity", count)
+    app = create_app(
+        jobs=cast(Any, object()),
+        tokens=TokenCodec(b"t" * 32),
+        agent=cast(common.AgentApiServices, object()),
+        trusted_agent_proxy_auth=b"test",
+    )
+    headers = {
+        "x-vonk-agent-proxy-auth": "test",
+        "x-vonk-agent-node": NODE,
+        "x-vonk-agent-serial": "serial",
+        "x-vonk-agent-fingerprint": "fingerprint",
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-source": "192.0.2.1",
+    }
+    path = "/agent/artifacts/" + "a" * 64
+    with TestClient(app, raise_server_exceptions=False) as client:
+        client.get(path, headers=headers)
+        assert len(lookups) == 1
+        # Without the proxy identity the middleware refuses before any handler.
+        assert client.get(path).status_code == 401
+        assert len(lookups) == 1
