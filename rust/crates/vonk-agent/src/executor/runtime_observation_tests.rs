@@ -373,7 +373,7 @@ async fn refused_reobservation_stays_unconfirmed_instead_of_failing_the_start() 
             schema_version: 1,
             request_id: Some(frame.request_id),
             status: HostHelperResponseStatus::Rejected,
-            error_code: Some(HelperErrorCode::GrantTimeWindow),
+            error_code: Some(HelperErrorCode::PeerIdentityInvalid),
             process_running: None,
             exit_code: None,
             installation_intent_nonce: None,
