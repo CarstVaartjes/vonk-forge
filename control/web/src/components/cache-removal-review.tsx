@@ -34,7 +34,9 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
               <p>
                 {target.observation_available
                   ? `${target.reclaimable_bytes} bytes can be freed from the model store`
-                  : "Waiting for a complete model-store observation"}
+                  : target.installations.length === 0
+                    ? "No complete model-store observation; this Spark has no installation of the model, so it is not checked and its copies age out through store retention"
+                    : "Waiting for a complete model-store observation"}
               </p>
               {target.installations.some(
                 (item) => item.disposition === FleetRemovalDisposition.REMOVE,

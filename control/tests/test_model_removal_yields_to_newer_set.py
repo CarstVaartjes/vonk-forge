@@ -201,13 +201,9 @@ def _artifacts(tmp_path, name, blobs, model_digest):
 
 def _request_set(service, selector, tmp_path, name, blobs, model_digest, key):
     artifacts = _artifacts(tmp_path, name, blobs, model_digest)
-    preview = service.download_preview(
-        model_content_sha256=model_digest, artifacts=artifacts
-    )
     return service.start_download(
         actor="operator",
         request_key=key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_digest,
         artifacts=artifacts,
         force=True,

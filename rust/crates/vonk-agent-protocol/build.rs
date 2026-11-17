@@ -83,6 +83,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.join("telemetry_capacity.rs"),
         format!("pub const MAX_TELEMETRY_CAPACITY_BYTES: u64 = {capacity};"),
     )?;
+    // The lists of reported ids (installation directories, run scopes) are
+    // bounded by the wire contract; the agent's own validation and its listing
+    // caps read each bound from it, never a copy.
+    let mut limits = String::new();
+    let inventory = graph["$defs"]["InventoryRequest"]["properties"]
+        .as_object()
+        .ok_or("InventoryRequest needs properties in the wire schema")?;
+    for (field, schema) in inventory {
+        let list = &schema["anyOf"][0];
+        if list.pointer("/items/pattern").is_none() {
+            continue;
+        }
+        let maximum = list["maxItems"]
+            .as_u64()
+            .ok_or("every reported id list needs a maxItems in the wire schema")?;
+        limits.push_str(&format!(
+            "/// The most {field} one inventory names (the wire limit).\npub const MAX_REPORTED_{}: usize = {maximum};\n",
+            field.to_uppercase()
+        ));
+    }
+    fs::write(output.join("reported_limits.rs"), limits)?;
     fs::write(
         output.join("generated.rs"),
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,

@@ -18,7 +18,6 @@ from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
     RecipeOptionError,
-    document_sha256,
     read_recipe,
 )
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
@@ -389,11 +388,15 @@ class ResolvedRecipe:
 
 
 def resolve_recipe_entities(
-    session: Session, document: Mapping[str, object]
+    session: Session, revision: CatalogDocumentRevision
 ) -> ResolvedRecipe:
-    """Resolve a canonical recipe and its exact active Model revisions."""
+    """Resolve a stored recipe revision and its exact active Model revisions.
+
+    The revision's digest was verified at ingress; the document is not hashed
+    again.
+    """
     try:
-        recipe = read_recipe(document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError) as error:
         raise RecipeRuntimeSpecError(
             "recipe does not satisfy the canonical contract"
@@ -402,7 +405,7 @@ def resolve_recipe_entities(
     models: list[CatalogDocumentRevision] = []
     for selection in recipe.models:
         reference = selection.model
-        revision = session.scalar(
+        model = session.scalar(
             select(CatalogDocumentRevision)
             .where(
                 CatalogDocumentRevision.kind == "model",
@@ -413,12 +416,12 @@ def resolve_recipe_entities(
             )
             .limit(1)
         )
-        if revision is None:
+        if model is None:
             raise RecipeRuntimeSpecError("exact recipe model is not active")
-        models.append(revision)
+        models.append(model)
     return ResolvedRecipe(
         recipe=recipe,
-        recipe_digest=document_sha256(document),
+        recipe_digest=revision.content_digest,
         model_revisions=tuple(models),
     )
 

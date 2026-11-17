@@ -273,7 +273,6 @@ def test_download_plan_binds_content_across_publication(
     admitted = nas.cache.start_download(
         actor="admin",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         artifact_set_sha256=wanted,
     )
     assert admitted.state == LifecycleState.QUEUED
@@ -284,7 +283,6 @@ def test_download_plan_binds_content_across_publication(
     replanned = nas.cache.start_download(
         actor="admin",
         request_key=str(uuid.uuid4()),
-        plan_digest="0" * 64,
         artifact_set_sha256=wanted,
     )
     assert replanned.artifact_set_sha256 == wanted

@@ -342,7 +342,7 @@ class RecipePackageClient:
                     return persisted
             raw, publication, release = self._fetch_release(resolved)
         except (httpx2.HTTPError, OSError) as error:
-            persisted = self._read_persisted_snapshot()
+            persisted = self._offline_snapshot()
             if persisted is not None:
                 return persisted
             raise RecipePackageUnsettled(
@@ -352,7 +352,7 @@ class RecipePackageClient:
             # Only an unreachable publication falls back to the previous
             # verified generation; an integrity failure is always surfaced.
             if error.code == RecipePackageCode.UNAVAILABLE:
-                persisted = self._read_persisted_snapshot()
+                persisted = self._offline_snapshot()
                 if persisted is not None:
                     return persisted
             raise
@@ -773,6 +773,17 @@ class RecipePackageClient:
             return None
         value = payload.get("library_digest") if isinstance(payload, Mapping) else None
         return value if isinstance(value, str) else None
+
+    def _offline_snapshot(self) -> RecipeLibrarySnapshot | None:
+        """The last verified generation while the publisher is unreachable.
+
+        The in-memory generation was verified when it was loaded; the persisted
+        index is parsed again only after a restart, when nothing is in memory.
+        """
+
+        if self._snapshot is not None and self._release is not None:
+            return self._snapshot
+        return self._read_persisted_snapshot()
 
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
         """Read the offline index cache, or ``None`` when it is unusable.

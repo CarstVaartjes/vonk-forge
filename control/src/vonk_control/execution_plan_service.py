@@ -95,7 +95,7 @@ def compile_job_invocation(
         raise ExecutionPlanCompilationError("job memory floor is invalid")
     if type(reserved_memory_bytes) is not int or reserved_memory_bytes <= 0:
         raise ExecutionPlanCompilationError("job memory reservation is invalid")
-    resolved = resolve_recipe_entities(session, revision.document)
+    resolved = resolve_recipe_entities(session, revision)
     models = resolved.models
     if build is None:
         raise ExecutionPlanEvidenceUnknown("job build receipt is unavailable")
@@ -242,7 +242,7 @@ class ControllerExecutionPlanService:
             resolved = (
                 resolved_entities
                 if resolved_entities is not None
-                else resolve_recipe_entities(session, revision.document)
+                else resolve_recipe_entities(session, revision)
             )
             models = resolved.models
             resolver = getattr(self._model_cache, "resolve_artifact_set", None)

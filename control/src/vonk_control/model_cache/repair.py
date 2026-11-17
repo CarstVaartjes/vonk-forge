@@ -88,13 +88,11 @@ class RepairMixin:
         actor: str,
         request_key: str,
         artifact_set_sha256: str,
-        plan_digest: str,
     ) -> CacheOperationView:
         cache = cast("ModelCacheService", self)
         digest = _optional_digest(artifact_set_sha256)
-        assert digest is not None and _optional_digest(plan_digest) is not None
-        # The request is declarative: a preview that moved on since the
-        # caller's is re-planned (the operation records the current plan).
+        assert digest is not None
+        # The request is declarative: the operation records the current plan.
         requested_plan = str(cache.repair_preview(digest)["plan_digest"])
         request_key = _request_key(request_key)
         with cache._session() as session:

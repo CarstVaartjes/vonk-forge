@@ -149,11 +149,9 @@ def service(tmp_path: Path, sessions, hub: FakeHub):
 
 
 def _start(service: ModelCacheService, artifact, key: str, **kwargs):
-    preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     return service.start_download(
         actor="test",
         request_key=key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=MODEL,
         artifacts=[artifact],
         **kwargs,
@@ -454,11 +452,9 @@ def test_catalog_model_with_parts_resolves_and_downloads_per_part_sources(
         HOST + _part_name(index) for index in range(3)
     ]
     assert [part.expected_bytes for part in spec.parts] == list(PART_SIZES)
-    preview = service.download_preview(model_content_sha256=digest)
     operation = service.start_download(
         actor="test",
         request_key=KEY.format(9),
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=digest,
     )
     service.run_pending()

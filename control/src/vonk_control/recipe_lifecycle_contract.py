@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
     RecipeUninstallResult,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
 from .library_contract import NodeId, UuidId
 from .strict_json import StrictJSONModel
@@ -117,6 +118,11 @@ class RecipeOperationStoppedResult(LifecycleModel):
     stopped: Literal[True]
 
 
+#: The job recipe's start: an activation, whose run is created by its child.
+JOB_ACTIVATION = "recipe.job.activate.v1"
+#: The jobs that start a run's workload; every observer of a start matches all.
+START_CHILD_KINDS = (WireAgentOperation.RECIPE_START.value, JOB_ACTIVATION)
+
 RecipeLifecycleResult = (
     RecipeOperationResult
     | RecipeOperationProgressResult
@@ -130,7 +136,7 @@ RecipeLifecycleResult = (
 def parse_recipe_lifecycle_result(kind: str, value: object) -> RecipeLifecycleResult:
     """Validate one persisted lifecycle result against its operation kind."""
 
-    if kind == "recipe.job.activate.v1":
+    if kind == JOB_ACTIVATION:
         models = (RecipeOperationActivatedResult,)
     elif kind == "recipe.stop":
         models = (

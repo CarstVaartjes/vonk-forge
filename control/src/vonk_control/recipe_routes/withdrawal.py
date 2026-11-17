@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
@@ -209,7 +209,7 @@ def prepare_withdrawal_in_session(
     served: ServedModelInfo,
 ) -> _RecipeWithdrawal:
     excluded = set(initial_run_ids)
-    run_count = len(tuple(session.scalars(select(RecipeRun.id))))
+    run_count = session.scalar(select(func.count()).select_from(RecipeRun)) or 0
     candidate: _RecipeCandidate | None = None
     for _attempt in range(run_count + 1):
         try:

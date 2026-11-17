@@ -61,7 +61,6 @@ from .common import Protocol as Protocol
 from .common import RunState as RunState
 from .common import RunSwitchCode as RunSwitchCode
 from .common import TypeAdapter as TypeAdapter
-from .common import UninstallPlan as UninstallPlan
 from .common import dataclass as dataclass
 from .common import job_states as job_states
 from .common import logging as logging

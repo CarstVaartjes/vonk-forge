@@ -32,10 +32,11 @@ from .. import job_states, model_cache_states
 from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import read_wait, schedule_wait
+from ..recipe_lifecycle_contract import START_CHILD_KINDS
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stored_json import read_row_column
 from .awaited_children import awaited_jobs, child_job_ids, start_request_key
-from .constants import _OPERATION_KINDS, _START_CHILD_KINDS
+from .constants import _OPERATION_KINDS
 from .planning_helpers import _aware, _stored_job_plan
 from .result_helpers import _read_progress
 
@@ -151,7 +152,7 @@ def _owners_awaiting(session: Session, child_ids: frozenset[str]) -> frozenset[s
         session.scalars(
             select(Job.request_id).where(
                 Job.id.in_(child_ids),
-                Job.kind.in_(_START_CHILD_KINDS),
+                Job.kind.in_(START_CHILD_KINDS),
             )
         )
     )

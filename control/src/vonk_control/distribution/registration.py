@@ -207,26 +207,3 @@ class RegistrationMixin:
                 "oci_archive_sha256": row.oci_archive_sha256,
             }
         )
-
-    def revoke(self, *, plan_digest: str, node_id: str) -> None:
-        """Revoke a durable assignment; revocation is fail-closed on reads."""
-        service = cast("DistributionService", self)
-        with service._authorized_lock:
-            service._authorized.pop((plan_digest, node_id), None)
-        if service.sessions is None:
-            with service._lock:
-                service._assignments.pop((plan_digest, node_id), None)
-            return
-        with service.sessions.begin() as session:
-            row = session.scalar(
-                select(ArtifactDistributionAssignment)
-                .where(
-                    ArtifactDistributionAssignment.plan_digest == plan_digest,
-                    ArtifactDistributionAssignment.node_id == node_id,
-                )
-                .with_for_update()
-            )
-            if row is not None:
-                row.state = "revoked"
-                row.revoked_at = service.clock()
-                row.updated_at = service.clock()

@@ -1268,7 +1268,6 @@
         "model_cache.payload_invalid",
         "model_cache.pin_mismatch",
         "model_cache.pin_required",
-        "model_cache.plan_invalid",
         "model_cache.range_invalid",
         "model_cache.rate_limited",
         "model_cache.recipe_identity_ambiguous",

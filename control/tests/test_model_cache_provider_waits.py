@@ -142,22 +142,16 @@ class _Harness:
     def start(self) -> str:
         service = self.service
         if self.catalog_digest is not None:
-            preview = service.download_preview(model_content_sha256=self.catalog_digest)
             return service.start_download(
                 actor="operator",
                 request_key=str(uuid4()),
-                plan_digest=str(preview["plan_digest"]),
                 model_content_sha256=self.catalog_digest,
             ).id
         artifacts = [_hf_artifact(self.provider.data)]
         model = str(artifacts[0]["model_content_sha256"])
-        preview = service.download_preview(
-            model_content_sha256=model, artifacts=artifacts
-        )
         return service.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=model,
             artifacts=artifacts,
         ).id

@@ -101,13 +101,9 @@ def test_gone_source_ends_without_holding_up_a_fresh_download(cache, tmp_path):
             return service.get_operation(receipt.id)
 
         def fresh(_world):
-            preview = service.download_preview(
-                model_content_sha256="b" * 64, artifacts=[artifact]
-            )
             return service.start_download(
                 actor="test",
                 request_key="00000000-0000-4000-8000-00000000c003",
-                plan_digest=str(preview["plan_digest"]),
                 model_content_sha256="b" * 64,
                 artifacts=[artifact],
             )

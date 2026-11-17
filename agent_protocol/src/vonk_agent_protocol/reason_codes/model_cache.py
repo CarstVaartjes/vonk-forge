@@ -64,7 +64,6 @@ class ModelCacheCode(WireEnum):
     PAYLOAD_INVALID = "model_cache.payload_invalid"
     PIN_MISMATCH = "model_cache.pin_mismatch"
     PIN_REQUIRED = "model_cache.pin_required"
-    PLAN_INVALID = "model_cache.plan_invalid"
     RANGE_INVALID = "model_cache.range_invalid"
     RATE_LIMITED = "model_cache.rate_limited"
     RECIPE_IDENTITY_AMBIGUOUS = "model_cache.recipe_identity_ambiguous"

@@ -88,11 +88,9 @@ class AvailabilityMixin:
             )
             if present or active or row is None:
                 return
-            preview = cache._download_preview_for_manifest(manifest)
             cache.start_download(
                 actor=_REVERIFY_ACTOR,
                 request_key=str(uuid.uuid4()),
-                plan_digest=str(preview["plan_digest"]),
                 artifact_set_sha256=manifest.digest,
             )
         except Exception as error:  # noqa: BLE001 - re-verification is best effort

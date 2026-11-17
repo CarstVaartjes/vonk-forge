@@ -122,6 +122,7 @@ from .recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from .recipe_lifecycle_contract import (
+    JOB_ACTIVATION,
     RecipeOperationActivatedResult,
     RecipeOperationCancellationResult,
     RecipeOperationProgressResult,
@@ -269,7 +270,7 @@ bind(
         "recipe.uninstall": RecipeUninstallParent,
         "recipe.reconcile": RecipeReconcileParent,
         "recipe.job.run.v1": RecipeJobRunParent,
-        "recipe.job.activate.v1": RecipeJobActivateParent,
+        JOB_ACTIVATION: RecipeJobActivateParent,
         "recipe.build.v1": RecipeBuildParent,
         "recipe.build.cleanup.v1": RecipeBuildCleanupParent,
         ProfileChildJobKind.RUN_SWITCH.value: RunSwitchJobPayload,
@@ -303,7 +304,7 @@ bind(
         "recipe.build.v1": _LIFECYCLE_RESULT,
         "recipe.build.cleanup.v1": _LIFECYCLE_RESULT,
         "recipe.job.run.v1": RecipeJobRunResult | RecipeOperationCancellationResult,
-        "recipe.job.activate.v1": RecipeOperationActivatedResult,
+        JOB_ACTIVATION: RecipeOperationActivatedResult,
         ProfileChildJobKind.RUN_SWITCH.value: RunSwitchOperationResult,
         ProfileChildJobKind.STOP.value: RunSwitchOperationResult,
         ProfileChildJobKind.CLEANUP.value: RunSwitchOperationResult,

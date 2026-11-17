@@ -372,7 +372,6 @@ class ReconciliationAuthorityMixin:
             # The helper refreshed every locked row after acquiring the full
             # set in canonical table/primary-key order. Keep later reads free
             # of ad-hoc locks that could invert that order.
-            lock = False
             allow_active_reconciliation = False
 
         def blocked(code: str, detail: str) -> NoReturn:
@@ -381,7 +380,7 @@ class ReconciliationAuthorityMixin:
         # The revision row is provenance: retention may remove it while the
         # installation's bytes remain, so their cleanup names the digest the
         # installation's accepted plan recorded.
-        revision = _uninstall_recipe(session, installation, lock=lock)
+        revision = _uninstall_recipe(session, installation, lock=False)
         if revision is None:
             blocked(
                 ReconcileCode.RECIPE_REVISION_UNAVAILABLE,
@@ -407,8 +406,6 @@ class ReconciliationAuthorityMixin:
             .order_by(InstallationNode.rank, InstallationNode.node_id)
             .limit(_MAX_ACTION_NODES + 1)
         )
-        if lock:
-            node_statement = node_statement.with_for_update(of=InstallationNode)
         all_nodes = tuple(session.scalars(node_statement))
         if not all_nodes or len(all_nodes) > _MAX_ACTION_NODES:
             blocked(
@@ -418,18 +415,12 @@ class ReconciliationAuthorityMixin:
         mapping_statement = select(ClusterMapping).where(
             ClusterMapping.id == installation.mapping_id
         )
-        if lock:
-            mapping_statement = mapping_statement.with_for_update(of=ClusterMapping)
         mapping = session.scalar(mapping_statement)
         mapping_nodes_statement = (
             select(ClusterMappingNode)
             .where(ClusterMappingNode.mapping_id == installation.mapping_id)
             .order_by(ClusterMappingNode.rank, ClusterMappingNode.node_id)
         )
-        if lock:
-            mapping_nodes_statement = mapping_nodes_statement.with_for_update(
-                of=ClusterMappingNode
-            )
         mapping_nodes = tuple(session.scalars(mapping_nodes_statement))
         actual_membership = tuple(
             (node.node_id, node.rank, node.role) for node in all_nodes
@@ -455,8 +446,6 @@ class ReconciliationAuthorityMixin:
         active_runs_statement = select(RecipeRun).where(
             RecipeRun.installation_id == installation.id
         )
-        if lock:
-            active_runs_statement = active_runs_statement.with_for_update(of=RecipeRun)
         installation_runs = tuple(session.scalars(active_runs_statement))
         if any(
             run.state != RunState.STOPPED or run.route_state != RouteState.WITHDRAWN
@@ -486,8 +475,6 @@ class ReconciliationAuthorityMixin:
                 )
             ),
         )
-        if lock:
-            active_jobs_statement = active_jobs_statement.with_for_update(of=Job)
         active_jobs = tuple(session.scalars(active_jobs_statement))
         run_ids = {run.id for run in installation_runs}
         active_run_jobs = (
@@ -537,8 +524,6 @@ class ReconciliationAuthorityMixin:
             .where(AgentNode.node_id.in_(node_by_id))
             .order_by(AgentNode.node_id)
         )
-        if lock:
-            agent_nodes_statement = agent_nodes_statement.with_for_update(of=AgentNode)
         agent_nodes = tuple(session.scalars(agent_nodes_statement))
         agent_node_by_id = {node.node_id: node for node in agent_nodes}
         targets: list[RunSwitchReconciliationTarget] = []

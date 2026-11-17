@@ -98,14 +98,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
     service = ModelCacheService(
         sessions, cache_root, free_fraction=0, fixture_sources=True
     )
-    preview = service.download_preview(
-        model_content_sha256="a" * 64, artifacts=[artifact]
-    )
     operation = service.start_download(
         actor="operator",
         request_key=OPERATION_REQUEST,
         selector="qwen",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
@@ -152,14 +148,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         assert receipt["cancellation"]["request_key"] == CANCEL_REQUEST
         assert receipt["cancellation"]["reason"] == CANCEL_REASON
 
-        shared_preview = shared.download_preview(
-            model_content_sha256="a" * 64, artifacts=[artifact]
-        )
         shared_operation = shared.start_download(
             actor="operator",
             request_key=SHARED_REQUEST,
             selector="qwen",
-            plan_digest=str(shared_preview["plan_digest"]),
             model_content_sha256="a" * 64,
             artifacts=[artifact],
         )
@@ -214,14 +206,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         else:
             raise AssertionError("a second cancellation identity replaced the first")
 
-        preserve_preview = restarted.download_preview(
-            model_content_sha256="a" * 64, artifacts=[artifact]
-        )
         verified_operation = restarted.start_download(
             actor="operator",
             request_key=PRESERVE_REQUEST,
             selector="qwen",
-            plan_digest=str(preserve_preview["plan_digest"]),
             model_content_sha256="a" * 64,
             artifacts=[artifact],
         )
@@ -237,14 +225,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         # A new explicit download can bind a new request identity and reuse
         # the verified object without consulting its now-removed source file.
         Path(unquote(urlsplit(str(artifact["source"])).path)).unlink()
-        later_preview = restarted.download_preview(
-            model_content_sha256="a" * 64, artifacts=[artifact]
-        )
         later = restarted.start_download(
             actor="operator",
             request_key=LATER_REQUEST,
             selector="qwen",
-            plan_digest=str(later_preview["plan_digest"]),
             model_content_sha256="a" * 64,
             artifacts=[artifact],
         )

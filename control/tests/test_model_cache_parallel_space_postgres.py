@@ -37,11 +37,9 @@ def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):
 def _admit(service: ModelCacheService, root: Path, model: str, data: bytes) -> str:
     root.mkdir()
     artifact = _artifact(root, data, model_content_sha256=model)
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     return service.start_download(
         actor="operator",
         request_key=str(uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     ).id
@@ -209,7 +207,6 @@ def test_a_running_repair_holds_its_copy_beside_the_verified_one(
             actor="operator",
             request_key=str(uuid4()),
             artifact_set_sha256=set_digest,
-            plan_digest=str(service.repair_preview(set_digest)["plan_digest"]),
         )
         assert service._claim_operations(
             limit=1, respect_backoff=False, transfer_slots=1

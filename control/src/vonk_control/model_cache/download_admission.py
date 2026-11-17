@@ -64,7 +64,6 @@ class DownloadAdmissionMixin:
         *,
         actor: str,
         request_key: str,
-        plan_digest: str,
         artifact_set_sha256: str | None = None,
         model_content_sha256: str | None = None,
         recipe_revision_sha256: str | None = None,
@@ -84,11 +83,6 @@ class DownloadAdmissionMixin:
                 )
                 if replay is not None:
                     return replay
-        requested_plan = _optional_digest(plan_digest)
-        if requested_plan is None:
-            raise ModelCacheConflictInvalid(
-                ModelCacheCode.PLAN_INVALID, "download plan digest is invalid"
-            )
         manifest = cache._resolve_requested_manifest(
             artifact_set_sha256=artifact_set_sha256,
             model_content_sha256=model_content_sha256,
@@ -112,8 +106,7 @@ class DownloadAdmissionMixin:
             if replay is not None:
                 return replay
         preview = cache._download_preview_for_manifest(manifest)
-        # The request is declarative: a preview that moved on since the
-        # caller's is re-planned (the operation records the current plan).
+        # The request is declarative: the operation records the current plan.
         requested_plan = str(preview["plan_digest"])
         waiting_for = "; ".join(
             str(item)

@@ -35,6 +35,7 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )
+from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..recipe_progress import _catalog_recipe
 from ..run_admission import (
     RunPlan,
@@ -80,7 +81,7 @@ class JobActivationMixin:
         reviewed = plan
         existing = service._idempotent(
             request_id,
-            "recipe.job.activate.v1",
+            JOB_ACTIVATION,
             None,
             installation_id=plan.installation_id,
         )
@@ -91,7 +92,7 @@ class JobActivationMixin:
             replay = service._idempotent_in_session(
                 session,
                 request_id,
-                "recipe.job.activate.v1",
+                JOB_ACTIVATION,
                 None,
                 installation_id=plan.installation_id,
             )
@@ -183,7 +184,7 @@ class JobActivationMixin:
             # work; a run-switch child carries its parent's exact ordinal.
             workload_intent_ordinal = service._admit_workload_intent(
                 session,
-                kind="recipe.job.activate.v1",
+                kind=JOB_ACTIVATION,
                 targets=targets,
                 workload_intent_ordinal=workload_intent_ordinal,
                 now=now,
@@ -201,7 +202,7 @@ class JobActivationMixin:
             job = new_recipe_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
-                kind="recipe.job.activate.v1",
+                kind=JOB_ACTIVATION,
                 state=LifecycleState.SUCCEEDED.value,
                 actor=actor,
                 authority_revision=revision.content_digest or "",
@@ -213,7 +214,7 @@ class JobActivationMixin:
                     )
                 ),
                 result=serialize_json_value(
-                    _validated_result("recipe.job.activate.v1", {"activated": True})
+                    _validated_result(JOB_ACTIVATION, {"activated": True})
                 ),
                 created_at=now,
                 updated_at=now,
@@ -253,7 +254,7 @@ class JobActivationMixin:
                 return duplicate.replay(
                     lambda: service._idempotent(
                         request_id,
-                        "recipe.job.activate.v1",
+                        JOB_ACTIVATION,
                         None,
                         installation_id=plan.installation_id,
                     )

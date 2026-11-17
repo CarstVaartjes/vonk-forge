@@ -299,14 +299,9 @@ def _download(
     request_key: str,
     interrupt_after_bytes: int | None = None,
 ):
-    preview = service.download_preview(
-        model_content_sha256=model_content_sha256,
-        artifacts=artifacts,
-    )
     operation = service.start_download(
         actor="test",
         request_key=request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_content_sha256,
         artifacts=artifacts,
         interrupt_after_bytes=interrupt_after_bytes,
@@ -1699,7 +1694,6 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         admitted = service.start_download(
             actor="test",
             request_key=str(uuid.uuid4()),
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=model,
             artifacts=[artifact],
         )
@@ -1795,7 +1789,6 @@ def test_operation_transfer_progress_counts_only_missing_objects(
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000017",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[cached, missing],
     )
@@ -1847,15 +1840,10 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
     model = "1" * 64
     data = b"queued payload"
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    preview = service.download_preview(
-        model_content_sha256=model,
-        artifacts=[artifact],
-    )
 
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000014",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -1888,14 +1876,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
             path=f"weights-{index}.bin",
             model_content_sha256=model,
         )
-        preview = service.download_preview(
-            model_content_sha256=model,
-            artifacts=[artifact],
-        )
         operation = service.start_download(
             actor="test",
             request_key=f"00000000-0000-4000-8000-00000000001{index}",
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=model,
             artifacts=[artifact],
         )
@@ -2021,11 +2004,9 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     data = bytes(range(256)) * 12_000
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
 
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     partial = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
         interrupt_after_bytes=1_100_000,
@@ -2049,7 +2030,6 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     replay = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -2103,7 +2083,6 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000019",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -2134,7 +2113,6 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     model = "a" * 64
     data = b"persistent retry payload"
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     calls = 0
     failures = 4
@@ -2150,7 +2128,6 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000020",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -2183,7 +2160,6 @@ def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
     service, _sessions = cache
     model = "d" * 64
     artifact = _artifact(tmp_path, b"waiting payload", model_content_sha256=model)
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     failing = True
 
@@ -2196,7 +2172,6 @@ def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000021",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -2221,7 +2196,6 @@ def test_operator_retry_of_a_failed_download_is_always_accepted(
     service, _sessions = cache
     model = "c" * 64
     artifact = _artifact(tmp_path, b"retry after terminal", model_content_sha256=model)
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     denied = [True]
 
@@ -2236,7 +2210,6 @@ def test_operator_retry_of_a_failed_download_is_always_accepted(
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000022",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=[artifact],
     )
@@ -2339,12 +2312,10 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     assert target.read_bytes() == good
 
     source.write_bytes(b"bad! payload")
-    bad_preview = service.repair_preview(set_digest)
     failed = service.start_repair(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000005",
         artifact_set_sha256=set_digest,
-        plan_digest=str(bad_preview["plan_digest"]),
     )
     service.run_pending()
     failed = service.get_operation(failed.id)
@@ -2601,12 +2572,10 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     )
     digest = downloaded.artifact_set_sha256
     assert digest is not None
-    preview = service.repair_preview(digest)
     repair = service.start_repair(
         actor="test",
         request_key="00000000-0000-4000-8000-000000001002",
         artifact_set_sha256=digest,
-        plan_digest=preview["plan_digest"],
     )
     service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
     assert service.get_operation(repair.id).state == LifecycleState.BACKOFF
@@ -2718,7 +2687,6 @@ def test_atomic_repair_keeps_path_and_open_reader_available(
             actor="test",
             request_key="00000000-0000-4000-8000-000000001004",
             artifact_set_sha256=digest,
-            plan_digest=service.repair_preview(digest)["plan_digest"],
         )
         service.run_pending()
     assert service.get_operation(repair.id).state == "succeeded"
@@ -2810,7 +2778,6 @@ def test_repair_capacity_admission_preserves_verified_object(
         actor="test",
         request_key="00000000-0000-4000-8000-000000001007",
         artifact_set_sha256=digest,
-        plan_digest=service.repair_preview(digest)["plan_digest"],
     )
     assert queued.state == "queued"
     assert queued.failure is not None
@@ -2860,11 +2827,9 @@ def test_sampled_progress_writes_once_per_interval_and_rate_survives_restart(
     half = timedelta(seconds=PROGRESS_CHECKPOINT_SECONDS / 2)
     service._clock = lambda: clock[0]
     raw = _artifact(tmp_path, b"x" * 100)
-    preview = service.download_preview(artifacts=[raw])
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000991",
-        plan_digest=preview["plan_digest"],
         artifacts=[raw],
     )
     with sessions() as session:
@@ -2953,11 +2918,9 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
         )
         for index in range(streams)
     ]
-    preview = service.download_preview(artifacts=raws)
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000995",
-        plan_digest=preview["plan_digest"],
         artifacts=raws,
     )
     with sessions() as session:
@@ -3271,14 +3234,10 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
     monkeypatch.setattr(service, "_checkpoint_artifact", checked_checkpoint)
     artifact = _http_artifact(payload)
     try:
-        preview = service.download_preview(
-            model_content_sha256="b" * 64, artifacts=[artifact]
-        )
         if mode == "interrupt":
             interrupted = service.start_download(
                 actor="test",
                 request_key="00000000-0000-4000-8000-000000000993",
-                plan_digest=str(preview["plan_digest"]),
                 model_content_sha256="b" * 64,
                 artifacts=[artifact],
                 interrupt_after_bytes=durable_after,
@@ -3289,7 +3248,6 @@ def test_fragmented_http_final_progress_is_durable_and_resumes(
             queued = service.start_download(
                 actor="test",
                 request_key="00000000-0000-4000-8000-000000000994",
-                plan_digest=str(preview["plan_digest"]),
                 model_content_sha256="b" * 64,
                 artifacts=[artifact],
             )
@@ -3347,13 +3305,9 @@ def test_fragmented_http_shutdown_preserves_sub_chunk_tail(
     sampled, _writes = _track_checkpoint_sessions(service)
     artifact = _http_artifact(payload)
     try:
-        preview = service.download_preview(
-            model_content_sha256="b" * 64, artifacts=[artifact]
-        )
         operation = service.start_download(
             actor="test",
             request_key="00000000-0000-4000-8000-000000000995",
-            plan_digest=_required_text(preview["plan_digest"], "preview plan digest"),
             model_content_sha256="b" * 64,
             artifacts=[artifact],
         )
@@ -3591,13 +3545,9 @@ def test_download_resyncs_retained_bytes_after_disk_failure(
 def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"cancel me")
-    preview = service.download_preview(
-        model_content_sha256="a" * 64, artifacts=[artifact]
-    )
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000001010",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
@@ -3659,13 +3609,9 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
 
     service, client = _http_cache_service(tmp_path, sessions, handler)
     artifact = _http_artifact(payload)
-    preview = service.download_preview(
-        model_content_sha256="b" * 64, artifacts=[artifact]
-    )
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000001011",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="b" * 64,
         artifacts=[artifact],
     )
@@ -3777,13 +3723,9 @@ def test_remove_model_supersedes_an_older_download_of_the_same_set(
     )
     assert first.state == second.state == "succeeded"
     artifact = _artifact(tmp_path, payload, model_content_sha256=digest_a)
-    preview = service.download_preview(
-        model_content_sha256=digest_a, artifacts=[artifact]
-    )
     pending = service.start_download(
         actor="operator",
         request_key="00000000-0000-4000-8000-000000001032",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=digest_a,
         artifacts=[artifact],
         force=True,
@@ -4228,13 +4170,9 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
 def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatch):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"verified but cancelled")
-    preview = service.download_preview(
-        model_content_sha256="a" * 64, artifacts=[artifact]
-    )
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000001021",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
@@ -4310,13 +4248,9 @@ def test_permanent_missing_source_ends_and_admits_a_fresh_download(
     )
     try:
         artifact = _http_artifact(payload)
-        preview = service.download_preview(
-            model_content_sha256="b" * 64, artifacts=[artifact]
-        )
         operation = service.start_download(
             actor="test",
             request_key="00000000-0000-4000-8000-000000000940",
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256="b" * 64,
             artifacts=[artifact],
         )
@@ -4429,9 +4363,6 @@ def test_operation_reads_answer_without_an_operator_selector(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000944",
         artifact_set_sha256=download.artifact_set_sha256 or "",
-        plan_digest=str(
-            service.repair_preview(download.artifact_set_sha256 or "")["plan_digest"]
-        ),
     )
     actor = Actor("test", "administrator")
     app = FastAPI()
@@ -4538,13 +4469,9 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
         assert gone.state == "failed"
         assert gone.failure is not None
         assert gone.next_attempt_at is None
-        preview = service.download_preview(
-            model_content_sha256="b" * 64, artifacts=artifacts
-        )
         fresh = service.start_download(
             actor="test",
             request_key=str(uuid.uuid4()),
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256="b" * 64,
             artifacts=artifacts,
         )
@@ -4570,13 +4497,9 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
     )
     try:
         artifact = _http_artifact(payload)
-        preview = service.download_preview(
-            model_content_sha256="b" * 64, artifacts=[artifact]
-        )
         operation = service.start_download(
             actor="test",
             request_key="00000000-0000-4000-8000-000000000951",
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256="b" * 64,
             artifacts=[artifact],
         )
@@ -4633,13 +4556,9 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
 
 
 def _admit_fresh_download(service, model_digest, artifact):
-    preview = service.download_preview(
-        model_content_sha256=model_digest, artifacts=[artifact]
-    )
     return service.start_download(
         actor="test",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_digest,
         artifacts=[artifact],
     )

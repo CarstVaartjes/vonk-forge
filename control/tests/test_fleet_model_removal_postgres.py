@@ -957,3 +957,86 @@ def test_profile_draft_cannot_cross_accepted_fleet_object_fence(
             )
     finally:
         world.close()
+
+
+def test_offline_spark_without_the_model_does_not_block_fleet_removal(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches an enrolled Spark with no inventory refusing a model it never
+    installed; the reporting Spark still gates its own objects."""
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    offline = "spk_" + "3" * 32
+    with world.sessions.begin() as session:
+        session.add(AgentNode(node_id=offline, state=NodeIdentityState.ACTIVE))
+    now = [datetime.now(UTC)]
+    cache = ModelCacheService(
+        world.sessions,
+        tmp_path / "nas",
+        free_fraction=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    try:
+        selector, _digest, path = _prepare_removal_target(
+            cache, world.sessions, tmp_path, slug="offline-model", data=b"weights"
+        )
+        inventory(
+            world.sessions,
+            NODE,
+            now[0],
+            [ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)],
+        )
+        review = cache.review_fleet_model_removal(selector)
+        assert review.fleet is not None
+        assert review.fleet.nas_remove and not review.fleet.observation_issues
+        accepted = cache.remove_fleet_model_selector(
+            selector,
+            actor="operator",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        assert accepted.state == LifecycleState.QUEUED
+        now[0] += timedelta(seconds=60)
+        inventory(world.sessions, NODE, now[0], [])
+        for _ in range(6):
+            cache.advance_removals()
+        result = cache.get_operation(accepted.id)
+        assert result.state == LifecycleState.SUCCEEDED, result.last_error
+        assert not path.exists()
+        submit_model_download(cache, tmp_path)
+    finally:
+        cache.close()
+
+
+def test_offline_spark_with_an_installation_of_the_model_blocks_removal(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches removal proceeding while a Spark that may still use the model
+    cannot report: its references are unknown."""
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine, nodes=1, mapping_node_count=1
+    )
+    first = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, first.owner_id)
+        assert installation is not None
+        selector = installation.model_content_sha256
+        assert selector is not None
+    cache = ModelCacheService(
+        sessions,
+        tmp_path / "nas",
+        free_fraction=0,
+        fixture_sources=True,
+        clock=lambda: NOW + timedelta(seconds=1),
+    )
+    cache._fleet_lifecycle = lifecycle
+    try:
+        review = cache.review_fleet_model_removal(selector)
+        assert review.fleet is not None
+        assert not review.fleet.nas_remove
+        assert review.fleet.observation_issues
+    finally:
+        cache.close()

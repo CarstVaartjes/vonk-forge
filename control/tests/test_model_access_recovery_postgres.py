@@ -82,14 +82,10 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
     cache = service()
     artifact = _http_artifact(DATA)
     artifact["source"] = SOURCE
-    preview = cache.download_preview(
-        model_content_sha256="b" * 64, artifacts=[artifact]
-    )
     operation = cache.start_download(
         actor="operator",
         request_key=str(uuid4()),
         selector="dinov3",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="b" * 64,
         artifacts=[artifact],
     )
@@ -159,7 +155,6 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
                     actor="operator",
                     request_key=str(uuid4()),
                     selector="dinov3",
-                    plan_digest=str(preview["plan_digest"]),
                     model_content_sha256="b" * 64,
                     artifacts=[artifact],
                 )
@@ -231,14 +226,10 @@ def test_manual_access_api_reconciles_replays_and_retains_exact_transfer(
     )
     artifact = _http_artifact(DATA)
     artifact["source"] = SOURCE
-    preview = cache.download_preview(
-        model_content_sha256="b" * 64, artifacts=[artifact]
-    )
     operation = cache.start_download(
         actor="operator",
         request_key=str(uuid4()),
         selector="dinov3",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="b" * 64,
         artifacts=[artifact],
     )
