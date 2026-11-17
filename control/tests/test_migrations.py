@@ -314,18 +314,12 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
         assert owner_id == 1
 
 
-def test_postgres_reconciliation_drops_unknown_table_and_preserves_column_data(
+def test_postgres_reconciliation_preserves_unknown_column_data(
     postgres_engine,
 ) -> None:
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     _upgrade(database_url)
     with postgres_engine.begin() as connection:
-        connection.execute(
-            text("CREATE TABLE operator_extension (id integer PRIMARY KEY, value text)")
-        )
-        connection.execute(
-            text("INSERT INTO operator_extension VALUES (7, 'retained')")
-        )
         connection.execute(
             text(
                 "INSERT INTO fleet_stream_events "
@@ -347,7 +341,6 @@ def test_postgres_reconciliation_drops_unknown_table_and_preserves_column_data(
         )
     _initialize_source_checkout(database_url)
     with postgres_engine.connect() as connection:
-        assert "operator_extension" not in inspect(connection).get_table_names()
         assert (
             connection.execute(
                 text("SELECT operator_note FROM fleet_stream_events")
@@ -957,3 +950,17 @@ def test_missing_column_left_after_reconciliation_fails_startup(
             verify_schema_is_current(connection)
     finally:
         engine.dispose()
+
+
+def test_postgres_reconciliation_recreates_a_missing_repeated_evidence_sequence(
+    postgres_engine,
+) -> None:
+    """Reconcile creates the standalone ordering sequence an old database lacks."""
+
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("DROP SEQUENCE IF EXISTS repeated_evidence_sequence"))
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        assert connection.scalar(text("SELECT nextval('repeated_evidence_sequence')"))

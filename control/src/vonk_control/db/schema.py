@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from .connections import _reraise_contention
 from .constants import _LOGGER
 from .schema_helpers import (
+    _FOREIGN_TABLES,
     _REPLACED_CONSTRAINT_NAMES,
     _TOLERATED_SCHEMA_DIFFERENCES,
     SchemaDrift,
@@ -58,7 +59,7 @@ def reconcile_schema(connection: Connection) -> None:
     from sqlalchemy import inspect
 
     from ..exact_integer_adoption import adopt_exact_integer_columns
-    from ..models import Base
+    from ..models import REPEATED_EVIDENCE_SEQUENCE, Base
 
     adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
@@ -68,7 +69,7 @@ def reconcile_schema(connection: Connection) -> None:
         _unhandled_differences(differences)
     )
     inspector = inspect(connection)
-    tables = set(inspector.get_table_names()) - {"alembic_version"}
+    tables = set(inspector.get_table_names()) - _FOREIGN_TABLES
     metadata_tables = set(Base.metadata.tables)
     column_key = lambda difference: (
         str(difference[2]),
@@ -90,6 +91,8 @@ def reconcile_schema(connection: Connection) -> None:
         if difference[0] == "modify_nullable"
     }
 
+    # The ordering sequence is standalone: reconcile must create it itself.
+    REPEATED_EVIDENCE_SEQUENCE.create(connection, checkfirst=True)
     # Create absent tables as a group so foreign-key dependencies are present.
     for table in Base.metadata.sorted_tables:
         if table.name in tables:
@@ -315,7 +318,7 @@ def reconcile_schema(connection: Connection) -> None:
     # Unknown columns on model-owned tables can prevent new rows from being
     # inserted when they are NOT NULL without a default. Keep their data and
     # definition, but remove that insertion barrier. Tables outside our models
-    # remain completely untouched.
+    # are dropped by ``_drop_undeclared_tables``.
     inspector = inspect(connection)
     for table_name in sorted(tables & metadata_tables):
         model_columns = set(Base.metadata.tables[table_name].columns.keys())
