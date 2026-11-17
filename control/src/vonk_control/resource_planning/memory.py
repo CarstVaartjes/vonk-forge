@@ -6,8 +6,11 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 
+from vonk_agent_protocol import ResourcePlanningCode
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts.qualification_status import PublishedRoleMemory
 from vonk_forge_contracts.recipe import (
     RecipeMemoryResources,
 )
@@ -17,6 +20,7 @@ from ..run_switch_contract import (
 )
 from .demand import _resource_evidence, resource_demand
 from .memory_kinds import memory_reservation_kind, memory_reservation_kinds
+from .reasons import _reason
 from .settings import resolve_effective_settings
 from .types import (
     NO_SWAP,
@@ -37,6 +41,7 @@ def memory_requirement(
     model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None,
     *,
     observed_peak_bytes: int | None,
+    measured: PublishedRoleMemory | None = None,
     settings: object | None = None,
     platform_floor_bytes: int = 0,
 ) -> MemoryRequirement:
@@ -47,6 +52,13 @@ def memory_requirement(
     really used on this memory kind over a whole run (``None`` when nothing was
     observed). Every caller passes it: it bounds the load phase only, never
     the steady demand.
+
+    ``measured`` is the steady peak the signed catalog published for this role
+    of this exact content (``None`` when it published none): the steady demand
+    is its ``peak_bytes`` instead of the declared one. The declared load peak
+    is an absolute level, so its rise above the steady peak is re-based on the
+    measured one. A measurement above the admission maximum keeps the declared
+    peak (its ``peak_bytes`` says so) and adds a warning.
     """
     if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")
@@ -56,22 +68,43 @@ def memory_requirement(
         if isinstance(selected, EffectiveResourceSettings)
         else resolve_effective_settings(selected)
     )
+    steady_bytes = measured.peak_bytes if measured is not None else memory.peak_bytes
     evidence = _resource_evidence(
         recipe_document,
         role_name,
         model_documents,
-        memory.peak_bytes,
+        steady_bytes,
         resolution.settings,
         observed_peak_bytes,
-        declared_load_rise_bytes=memory.load_peak_bytes - memory.peak_bytes
+        declared_load_rise_bytes=max(memory.load_peak_bytes - steady_bytes, 0)
         if memory.load_peak_bytes is not None
         else 0,
         minimum_swap_bytes=memory.minimum_swap_bytes,
     )
+    if (
+        measured is not None
+        and not measured.exceeds_admission_maximum
+        and evidence.evidence_state == "declared"
+    ):
+        evidence = replace(evidence, evidence_state="measured")
     demand = resource_demand(
         resolution.settings if resolution.settings is not None else selected,
         evidence,
     )
+    if measured is not None and measured.exceeds_admission_maximum:
+        demand = replace(
+            demand,
+            reasons=(
+                *demand.reasons,
+                _reason(
+                    ResourcePlanningCode.ESTIMATE_UNCERTAIN,
+                    f"Hardware measured {measured.measured_peak_bytes} bytes for "
+                    f"role {role_name}, more than can be admitted; admitting on "
+                    f"the declared {memory.peak_bytes} bytes.",
+                    severity=ProfileReasonSeverity.WARNING.value,
+                ),
+            ),
+        )
     return MemoryRequirement("unified", platform_floor_bytes, demand)
 
 

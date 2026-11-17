@@ -20,6 +20,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
 from ..attempt_residues import unowned_never_installed
+from ..catalog_revision_contract import published_steady_peaks
 from ..disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,
@@ -143,6 +144,7 @@ class ResourceFitMixin:
         observed_peaks = (
             observed_role_peaks(session, revision.content_digest) if revision else {}
         )
+        measured_peaks = published_steady_peaks(revision) if revision else {}
         excluded = set(excluded_run_ids)
         for item in group.nodes:
             snapshot, evidence = inventory.read(item.node_id)
@@ -281,6 +283,7 @@ class ResourceFitMixin:
                             observed_peak_bytes=observed_peaks.get(item.role)
                             if snapshot is not None and snapshot.memory_pool == "shared"
                             else None,
+                            measured=measured_peaks.get(item.role),
                             settings=effective_settings,
                             platform_floor_bytes=service._memory_floor,
                         )

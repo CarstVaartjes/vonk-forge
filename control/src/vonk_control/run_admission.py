@@ -39,6 +39,7 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
+from .catalog_revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
@@ -603,6 +604,7 @@ class RunAdmissionService:
             model_version = resolved_models[0] if resolved_models else None
             model_display = stored_model_display(session, model_version)
             observed_peaks = observed_role_peaks(session, revision.content_digest)
+            measured_peaks = published_steady_peaks(revision)
             legal_admission = territorial_admission(
                 model_display,
                 operation="run",
@@ -761,6 +763,7 @@ class RunAdmissionService:
                 observed_peak_bytes=observed_peaks.get(placement.role)
                 if snapshot is not None and snapshot.memory_pool == "shared"
                 else None,
+                measured=measured_peaks.get(placement.role),
                 platform_floor_bytes=self._floor,
             )
             required = memory_need.demand.total_bytes
