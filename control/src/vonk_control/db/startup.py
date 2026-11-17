@@ -9,6 +9,7 @@ from sqlalchemy.exc import (
 )
 
 from .connections import (
+    _CONTENTION_SQLSTATES,
     _database_sqlstate,
     _DatabaseStartupContention,
     build_engine,
@@ -62,7 +63,7 @@ def initialize_database(
                         with lock_connection.begin():
                             verify_schema_is_current(lock_connection)
                     except SQLAlchemyError as error:
-                        if _database_sqlstate(error) == "55P03":
+                        if _database_sqlstate(error) in _CONTENTION_SQLSTATES:
                             raise _DatabaseStartupContention(
                                 "Controller schema relation is busy; startup will retry"
                             ) from None
@@ -81,7 +82,7 @@ def initialize_database(
                     )
                     lock_connection.commit()
         except SQLAlchemyError as error:
-            if _database_sqlstate(error) == "55P03":
+            if _database_sqlstate(error) in _CONTENTION_SQLSTATES:
                 raise _DatabaseStartupContention(
                     "Controller schema relation is busy; startup will retry"
                 ) from None

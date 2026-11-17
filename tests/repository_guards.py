@@ -62,6 +62,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "control/tests/test_schema_contention.py",
+        "Startup schema repair re-raises lock timeouts and deadlocks so startup retries; other errors stay logged skips.",
+    ),
+    (
         "control/tests/test_identity_creation_postgres.py",
         "Concurrent PostgreSQL insert, replay and row-lock fault injection at content and request boundaries.",
     ),
