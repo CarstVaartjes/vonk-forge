@@ -349,8 +349,9 @@ class ExecutorPreflightMixin:
                     agent_payload=dict(stored_plan),
                 )
             except (TypeError, ValueError) as error:
-                raise RunSwitchRetryLater(
+                raise retry_later_unless_deterministic(
                     f"{RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID}: {error}",
+                    error,
                     reason=WaitReason.STALE_PLAN,
                 ) from error
         child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
