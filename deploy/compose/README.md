@@ -169,10 +169,16 @@ publication artifact provide evidence inputs, not the installed image policy.
 
 ## Database backups
 
-PostgreSQL runs with `synchronous_commit=off` (fsync and full_page_writes stay on): model downloads share the NAS pool and made every commit wait on WAL fsync, slowing the API to 4-7 s. Any unclean PostgreSQL stop may lose the commits of the last moments (up to the WAL fsync time, normally ~0.6 s), never corrupt data; the platform self-heals. Enrollment and certificate rotation commits stay synchronous, because agents act on them at once.
-
 PostgreSQL writes automatic dumps to `./backups/` in the project folder. See
 [backup settings and restoration](../../docs/postgres-backups.md).
+
+Controller connections commit with `synchronous_commit=off`, set per connection
+in `postgresql_connect_args`: model downloads share the NAS pool and made every
+commit wait on the WAL fsync. LiteLLM's database in the same cluster stays
+synchronous, and the Controller's security writes (enrollment and certificate
+state, browser logout) opt back in with `require_durable_commit`. Any unclean
+PostgreSQL stop may lose the Controller's commits of the last moments (up to the
+WAL fsync time, normally ~0.6 s), never corrupt data; the platform self-heals.
 
 ### Runtime asset startup observation
 

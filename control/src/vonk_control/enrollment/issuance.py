@@ -35,6 +35,7 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..categorized_errors import InvalidValue
+from ..db.connections import require_durable_commit
 from ..enrollment_contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
@@ -187,11 +188,9 @@ class EnrollmentCore:
                                 "timeout": f"{DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms}ms"
                             },
                         )
-                        # The cluster commits asynchronously; certificate state
-                        # is acknowledged to agents, so it must survive a crash.
-                        session.execute(
-                            text("SELECT set_config('synchronous_commit', 'on', true)")
-                        )
+                        # Certificate state is acknowledged to agents, so it
+                        # must survive a crash.
+                        require_durable_commit(session)
                     yield session
             finally:
                 if local:

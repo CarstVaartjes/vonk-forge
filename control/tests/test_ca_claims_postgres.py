@@ -560,17 +560,20 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
             engine.dispose()
 
 
-def test_enrollment_transactions_commit_durably_on_an_async_cluster(postgres_engine):
-    database = postgres_engine.url.database
-    with postgres_engine.connect() as connection:
-        connection.exec_driver_sql(
-            f'ALTER DATABASE "{database}" SET synchronous_commit = off'
-        )
-        connection.commit()
-    postgres_engine.dispose()  # new connections take the cluster-like default
-    with postgres_engine.connect() as connection:
-        assert connection.exec_driver_sql("SHOW synchronous_commit").scalar() == "off"
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    service = EnrollmentService(sessions, RecordingAuthority(), clock=lambda: NOW)
-    with service._transaction() as session:
-        assert session.execute(text("SHOW synchronous_commit")).scalar() == "on"
+def test_enrollment_transactions_commit_durably_on_async_controller_connections(
+    postgres_engine,
+):
+    from vonk_control import db
+
+    engine = db.build_engine(postgres_engine.url.render_as_string(hide_password=False))
+    try:
+        with engine.connect() as connection:
+            assert (
+                connection.exec_driver_sql("SHOW synchronous_commit").scalar() == "off"
+            )
+        sessions = sessionmaker(engine, expire_on_commit=False)
+        service = EnrollmentService(sessions, RecordingAuthority(), clock=lambda: NOW)
+        with service._transaction() as session:
+            assert session.execute(text("SHOW synchronous_commit")).scalar() == "on"
+    finally:
+        engine.dispose()
