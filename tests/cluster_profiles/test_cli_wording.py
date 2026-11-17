@@ -20,12 +20,16 @@ from library_route_fixtures import _library_detail, _recipe_projection
 from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli_render import _library_item, render_payload
+from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
 from cluster_profiles.cli_render.profile import _connection_examples, _profile_endpoints
 from cluster_profiles.cli_render.throttle import throttle_words
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
 from cluster_profiles.generated_control.models.catalog_vocabulary import (
     CatalogVocabulary,
+)
+from cluster_profiles.generated_control.models.host_check_advice import (
+    HostCheckAdvice,
 )
 
 _FIXTURES = Path(__file__).parents[1] / "fixtures"
@@ -165,6 +169,45 @@ def test_fleet_row_serving_is_the_vector_words(printed):
 )
 def test_throttle_reason_mask_reads_the_vector_words(case):
     assert throttle_words(case["reasons"]) == case["words"]
+
+
+@pytest.mark.parametrize(
+    "case",
+    _vector("fleet-wording-host-checks.json")["cases"],
+    ids=lambda case: case["advice"]["check"],
+)
+def test_host_checks_read_the_vector_lines(case):
+    assert host_check_lines(HostCheckAdvice.from_dict(case["advice"])) == case["lines"]
+
+
+def test_fleet_detail_prints_every_host_check_after_the_warnings(printed):
+    # Catches dropping a command or the checks of an older Controller (none).
+    cases = _vector("fleet-wording-host-checks.json")["cases"]
+    node = {
+        "id": "spk_00000000000000000000000000000001",
+        "display_name": "Alpha",
+        "lifecycle": "ready",
+        "connection": {"online_state": "online", "last_seen_at": None},
+        "inventory": None,
+        "telemetry": None,
+        "loaded": [],
+        "installed": [],
+        "warnings": [],
+    }
+    lines = printed(render_payload, node, "fleet", action="detail")
+    shown = printed(
+        render_payload,
+        node | {"host_checks": [case["advice"] for case in cases]},
+        "fleet",
+        action="detail",
+    )
+    expected = [
+        line
+        for case in cases
+        for line in [f"Host check: {case['lines'][0]}"]
+        + [f"  {command}" for command in case["lines"][1:]]
+    ]
+    assert shown == lines + expected
 
 
 # Library: the published vocabulary, recipe links and version lines.

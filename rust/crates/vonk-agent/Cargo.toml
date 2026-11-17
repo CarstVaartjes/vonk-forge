@@ -17,7 +17,7 @@ reqwest.workspace = true
 ring.workspace = true
 rusqlite.workspace = true
 rustls-pemfile.workspace = true
-rustix.workspace = true
+rustix = { workspace = true, features = ["param"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

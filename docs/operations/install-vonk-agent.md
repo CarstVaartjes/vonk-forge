@@ -103,4 +103,9 @@ If the command fails, read its final error and retry after correcting that
 condition. A readiness failure preserves pairing; retry without `--enroll`.
 Release verification failures stop before privilege escalation.
 
+After enrollment, `vonkctl fleet detail <spark>` and the web Spark page list
+the [Spark host checks](spark-host-checks.md): informative advice, with the
+measured value and the `sudo` commands, for desktop services and kernel
+settings that cost a headless Spark memory.
+
 To remove the agent from a Spark, follow [Remove Vonk Forge](uninstall.md).

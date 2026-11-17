@@ -53,6 +53,7 @@ from ..models import (
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..strict_json import StrictModel
 from ..telemetry import TelemetrySampleView
+from .host_checks import HostCheck, HostCheckAdvice
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""
 
@@ -513,6 +514,8 @@ class FleetNode(StrictModel):
     loaded: list[LoadedPresence]
     reservations: CapacityReservations
     warnings: list[ProjectionReason] = Field(max_length=128)
+    # Informative host advice from the agent's host tuning; never attention.
+    host_checks: list[HostCheckAdvice] = Field(default=[], max_length=len(HostCheck))
 
 
 class FleetSnapshot(StrictModel):

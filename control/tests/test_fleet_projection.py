@@ -21,6 +21,7 @@ from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
     CapacityReservations,
+    FleetNode,
     FleetProjection,
     FleetSnapshot,
     NodeConnection,
@@ -2882,6 +2883,11 @@ def test_expired_certificate_attention_preserves_security_and_names_enrollment_a
 
 
 def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
+    node = _host_node(host_settings)
+    return [w.code for w in node.warnings if w.code.startswith("host.")]
+
+
+def _host_node(host_settings: dict[str, object] | None) -> FleetNode:
     """Report one agent inventory through the store and project its node."""
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -2951,7 +2957,7 @@ def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
     node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
     assert node.inventory is not None
     assert node.inventory.host_settings == report.host_settings
-    return [w.code for w in node.warnings if w.code.startswith("host.")]
+    return node
 
 
 def test_a_spark_off_its_headless_settings_needs_attention() -> None:
@@ -2971,6 +2977,69 @@ def test_a_spark_off_its_headless_settings_needs_attention() -> None:
     )
     # An older agent reports nothing: unknown is never a warning.
     assert _host_codes(None) == []
+
+
+def _shared_tuning() -> dict[str, object]:
+    vector = json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/host-tuning-v1.json")
+        .read_text(encoding="utf-8")
+    )
+    return vector["observation"]
+
+
+def test_host_tuning_reaches_the_fleet_node_as_advice_never_attention() -> None:
+    # Catches a fact lost in storage, or a host check raised as a warning
+    # (which would mark every stock Spark as needing attention).
+    from vonk_control.fleet_projection.host_checks import HostCheck
+
+    headless: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+    }
+    node = _host_node(headless | {"tuning": _shared_tuning()})
+    assert [advice.check for advice in node.host_checks] == list(HostCheck)
+    assert [w.code for w in node.warnings if w.code.startswith("host.")] == []
+    # An older agent reports no tuning: no advice, nothing guessed.
+    assert _host_node(headless).host_checks == []
+
+
+def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> None:
+    from vonk_agent_protocol.host_tuning import HostTuning
+    from vonk_control.fleet_projection.host_checks import (
+        SERVICE_UNITS,
+        HostCheck,
+        host_checks,
+    )
+
+    tuning = HostTuning.model_validate(_shared_tuning())
+    advice = {item.check: item for item in host_checks(tuning)}
+    # A service check disables every unit of it installed on the Spark, active
+    # or not (cups.path), and never one that is not (snapd.snap-repair.timer).
+    installed = {item.unit for item in tuning.units or ()}
+    for check, units in SERVICE_UNITS.items():
+        assert advice[check].commands[-1].split()[4:] == [
+            unit.value for unit in units if unit in installed
+        ]
+    assert "snap-repair" not in advice[HostCheck.SNAPD].commands[-1]
+    assert "cups.path" not in advice[HostCheck.PRINTING].finding
+    assert "15000" in advice[HostCheck.WATERMARK_BOOST].finding
+    # Measured: 78.7 of 116.7 GiB free in 2 MiB blocks.
+    assert "78.7" in advice[HostCheck.MEMORY_FRAGMENTATION].finding
+    assert "116.7" in advice[HostCheck.MEMORY_FRAGMENTATION].finding
+    # A snap that is not a desktop app is named.
+    server = host_checks(tuning.model_copy(update={"snaps": ["core22", "lxd"]}))
+    assert "lxd" in next(i for i in server if i.check is HostCheck.SNAPD).explanation
+    # The longest explanation fits its bound (every snap unknown, max length).
+    many = [f"s{index:02d}" + "x" * 37 for index in range(128)]
+    assert host_checks(tuning.model_copy(update={"snaps": many}))
+    # Unknown readings and an already tuned host give no advice.
+    assert host_checks(None) == []
+    assert host_checks(HostTuning()) == []
+    assert (
+        host_checks(HostTuning(units=[], watermark_boost_factor=0, kernel_splash=False))
+        == []
+    )
 
 
 def test_retention_failure_survives_inventory_storage_and_projects_one_warning() -> (

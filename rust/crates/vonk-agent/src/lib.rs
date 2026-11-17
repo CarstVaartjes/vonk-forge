@@ -15,6 +15,7 @@ pub mod health;
 mod held_lock;
 pub mod helper_codes;
 pub mod host_runtime;
+mod host_tuning;
 pub mod identity;
 pub mod image_store;
 pub mod inventory;

@@ -47,6 +47,7 @@ pub use operation_progress::{
     OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
 };
 
+pub mod buddyinfo;
 pub mod failure_evidence;
 pub mod gpu_clock;
 pub mod host_memory_guard_policy;
