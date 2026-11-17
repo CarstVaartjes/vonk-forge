@@ -1480,6 +1480,18 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         route_failed.healthy,
         route_failed.degraded_reason,
     ) == ([0, 1], [NODE_A, NODE_B], "failed", False, "route-not-published")
+
+    # A route that is still pending its first publication is not degraded; one
+    # that already spent attempts is.
+    for attempts, expected in ((0, None), (2, "route-not-published")):
+        with sessions.begin() as session:
+            run = session.get(RecipeRun, route_failed_run_id)
+            assert run is not None
+            run.route_state = "pending"
+            run.route_attempts = attempts
+        reread = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+        pending = next(v for v in reread.loaded if v.run_id == route_failed_run_id)
+        assert pending.degraded_reason == expected
     assert [value.installation_id for value in beta.installed] == [
         complete_installation_id
     ]

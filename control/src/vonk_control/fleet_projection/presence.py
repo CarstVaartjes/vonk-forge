@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     InstallationState,
     InstallDegradedReason,
     RouteState,
+    RunDegradedReason,
     RunState,
 )
 
@@ -240,6 +241,12 @@ def _loaded_presence(
                     rank_states=(node.state for node in nodes),
                     ranks_fresh=all(freshness[node.id][1] for node in nodes),
                 )
+                if (
+                    reason == RunDegradedReason.ROUTE_NOT_PUBLISHED
+                    and run.route_state == RouteState.PENDING
+                    and not run.route_attempts
+                ):
+                    reason = None  # Its first publication is still in flight.
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             update = recipe_update_notice(
