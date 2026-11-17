@@ -506,16 +506,6 @@ class GatewayKeyService:
                     if retained.completed:
                         return GatewayKeyRevoked(name=name, request_id=identity)
                 else:
-                    owners = [
-                        self._read_receipt(self._intent_path(alias))
-                        for alias in aliases
-                    ]
-                    if not any(
-                        owner is not None and not owner.superseded for owner in owners
-                    ) and not any(self._gateway_exists(alias) for alias in aliases):
-                        raise HTTPException(
-                            status_code=409, detail=InvalidRequestReason.NOT_READY
-                        )
                     retained = GatewayMutationReceipt(
                         request_id=identity,
                         actor=actor,
