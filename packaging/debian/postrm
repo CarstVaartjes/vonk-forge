@@ -10,7 +10,6 @@ if [ "${1:-}" = purge ]; then
         vonk-forge-docker-firewall.service \
         vonk-forge-package-rollback.service; do
         deb-systemd-helper purge "$unit" >/dev/null || true
-        deb-systemd-helper unmask "$unit" >/dev/null || true
     done
 fi
 

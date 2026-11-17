@@ -842,8 +842,11 @@ def test_postrm_forgets_unit_enablement_on_purge_only(
     if action == "remove":
         assert calls == []
     else:
-        assert "purge vonk-forge-package-rollback.service" in calls
-        assert "unmask vonk-forge-package-rollback.service" in calls
+        enabled = re.findall(
+            r"deb-systemd-helper enable (vonk-forge-[\w.-]+)", POSTINST.read_text()
+        )
+        assert enabled
+        assert sorted(calls) == sorted(f"purge {unit}" for unit in enabled)
 
 
 def test_prerm_disables_every_unit_the_package_enables_on_removal() -> None:
