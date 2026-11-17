@@ -244,7 +244,7 @@ def _loaded_presence(
                 if (
                     reason == RunDegradedReason.ROUTE_NOT_PUBLISHED
                     and run.route_state == RouteState.PENDING
-                    and not run.route_attempts
+                    and run.route_error is None
                 ):
                     reason = None  # Its first publication is still in flight.
             present_ranks = [node.rank for node in visible_nodes]
