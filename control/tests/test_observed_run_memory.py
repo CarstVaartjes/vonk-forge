@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
+from sqlalchemy import inspect as sa_inspect
 from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
@@ -540,29 +541,44 @@ def test_a_measurement_over_the_admission_maximum_keeps_the_declared_peak(
     service = _publish_measured(sessions, installation, now, 900, exceeds=True)
     plan = service.plan_run(installation, alias="qwen", now=now)
     assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    warning = next(
+        item
+        for item in plan.nodes[0].warnings
+        if "more than can be admitted" in item.detail
+    )
+    assert "admitting on the declared 225 bytes" in warning.detail
 
 
 def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> None:
-    """Catches a sync-delivered measurement re-planning or stopping live work."""
+    """Catches a sync-delivered measurement re-planning or stopping live work.
+
+    After the measurement is recorded, a planning review of the same recipe runs
+    (the path that reads it); the running run's rows, reservations and Jobs are
+    exactly as admitted.
+    """
     from vonk_control.models import Job
 
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
-    run_id = _admit_run(sessions, now, node, installation)
+    _admit_run(sessions, now, node, installation)
 
-    def state():
+    def rows(model):
         with sessions() as session:
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            return (
-                run.state,
-                run.version,
-                sorted(
-                    (item.kind, item.amount_bytes, item.plan_digest, item.state)
-                    for item in session.scalars(select(ResourceReservation))
-                ),
-                session.scalars(select(Job.id)).all(),
+            return sorted(
+                repr(
+                    {
+                        attribute.key: getattr(item, attribute.key)
+                        for attribute in sa_inspect(model).column_attrs
+                    }
+                )
+                for item in session.scalars(select(model))
             )
 
+    def state():
+        return [rows(model) for model in (RecipeRun, RunNode, ResourceReservation, Job)]
+
     before = state()
-    _publish_measured(sessions, installation, now, 280)
+    assert before[0] and before[2]
+    service = _publish_measured(sessions, installation, now, 280)
+    review = service.plan_run(installation, alias="another", now=now)
+    assert review.nodes[0].required_memory_bytes == 280
     assert state() == before
