@@ -906,6 +906,32 @@ def test_restart_offline_reverifies_the_persisted_release(
     unsigned.close()
 
 
+def test_unreachable_publisher_serves_the_loaded_generation_without_reparsing(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """Catches re-reading the persisted index on every tick of an outage."""
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    cache = tmp_path / "packages"
+    online = [True]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if online[0]:
+            return release.handler(request)
+        raise httpx2.ConnectError("offline", request=request)
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=cache,
+        transport=httpx2.MockTransport(handler),
+    )
+    loaded = client.list()
+    (cache / "snapshot.json").write_text("not json")
+    online[0] = False
+    assert client.list() == loaded
+    client.close()
+
+
 # Opt-in only: downloads every package of a real release (~140 MB) over the
 # public network.
 @pytest.mark.slow(60)
