@@ -2413,6 +2413,13 @@ def _set(installation_state=None, rank_state=None, role=None, installed_bytes=No
         (_set(rank_state="failed"), "rank-not-installed", "installed", "failed", [0]),
         (_set(role="worker"), "rank-membership-mismatch", "installed", "installed", []),
         (
+            _set(installation_state="planned", role="worker"),
+            "rank-membership-mismatch",
+            "planned",
+            "installed",
+            [],
+        ),
+        (
             _set(installed_bytes=40),
             "rank-incomplete-bytes",
             "installed",
@@ -2442,8 +2449,20 @@ def test_install_partial_names_the_installation_the_rank_and_the_reason(
     assert evidence.required_bytes == 100
 
 
-def test_a_complete_installation_raises_no_install_partial_warning() -> None:
-    _installation_id, snapshot = _mutated_group(_set())
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        _set(),
+        # In flight: its operation finishes it or the residue sweep ends it as
+        # partial, which warns then.
+        _set(installation_state="planned", rank_state="planned"),
+        _set(installation_state="installing", rank_state="planned"),
+    ],
+)
+def test_a_complete_or_in_flight_installation_raises_no_install_partial_warning(
+    mutation,
+) -> None:
+    _installation_id, snapshot = _mutated_group(mutation)
     assert not [w for w in snapshot.nodes[0].warnings if w.code == "install.partial"]
 
 
