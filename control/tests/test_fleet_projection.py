@@ -3027,6 +3027,9 @@ def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> 
     # A snap that is not a desktop app is named.
     server = host_checks(tuning.model_copy(update={"snaps": ["core22", "lxd"]}))
     assert "lxd" in next(i for i in server if i.check is HostCheck.SNAPD).explanation
+    # The longest explanation fits its bound (every snap unknown, max length).
+    many = [f"s{index:02d}" + "x" * 37 for index in range(128)]
+    assert host_checks(tuning.model_copy(update={"snaps": many}))
     # Unknown readings and an already tuned host give no advice.
     assert host_checks(None) == []
     assert host_checks(HostTuning()) == []

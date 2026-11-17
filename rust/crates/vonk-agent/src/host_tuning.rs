@@ -43,6 +43,8 @@ const fn position(unit: HostUnit) -> usize {
 }
 
 const MAX_SNAPS: usize = 128;
+/// The contract's memory bound (`host_tuning.MemoryBytes`, 16 TiB).
+const MAX_MEMORY_BYTES: u64 = 16 << 40;
 /// /proc files are small; a longer read is not the file we expect.
 const READ_LIMIT: u64 = 64 * 1024;
 
@@ -104,7 +106,11 @@ fn parse_show(text: &str) -> Option<Vec<ActiveUnit>> {
         if block.lines().any(|line| line == "ActiveState=active") {
             active[position(unit)] = Some(ActiveUnit {
                 unit,
-                memory_bytes: property("MemoryCurrent").and_then(|value| value.parse().ok()),
+                // An unset value some systemd versions print as u64::MAX is
+                // unknown, never 16 EiB (the contract bounds it to 16 TiB).
+                memory_bytes: property("MemoryCurrent")
+                    .and_then(|value| value.parse().ok())
+                    .filter(|bytes| *bytes <= MAX_MEMORY_BYTES),
             });
         }
     }

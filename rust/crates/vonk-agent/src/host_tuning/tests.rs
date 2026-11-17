@@ -63,6 +63,12 @@ fn each_reading_that_fails_is_unknown_on_its_own() {
     assert_eq!(observed.free_memory, None);
     // An answer that names none of the units is no answer either.
     assert_eq!(parse_show("active\n"), None);
+    // systemd's unset u64::MAX is unknown memory, not a value the contract refuses.
+    let unset = parse_show(
+        "MemoryCurrent=18446744073709551615\nId=bluetooth.service\nActiveState=active\n",
+    )
+    .unwrap();
+    assert_eq!(unset[0].memory_bytes, None);
 }
 
 #[test]

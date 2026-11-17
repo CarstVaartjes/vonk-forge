@@ -12,7 +12,7 @@ export function SparkHostChecks({ node }: { node: VisualFleetNode }) {
         {checks.map((advice) => {
           const [text, ...commands] = hostCheckLines(advice);
           return (
-            <li key={advice.check} data-level={advice.level}>
+            <li key={advice.check}>
               <p>{text}</p>
               {commands.map((command) => (
                 <pre key={command}>

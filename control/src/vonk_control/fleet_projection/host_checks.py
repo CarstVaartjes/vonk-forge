@@ -38,16 +38,8 @@ class HostCheck(StrEnum):
     MEMORY_FRAGMENTATION = "memory-fragmentation"
 
 
-class HostCheckLevel(StrEnum):
-    #: A change that returns memory or quiets the host; the operator decides.
-    ADVICE = "advice"
-    #: A reading or a cosmetic change with little effect.
-    INFO = "info"
-
-
 class HostCheckAdvice(StrictModel):
     check: HostCheck
-    level: HostCheckLevel
     #: What the agent measured, with its value.
     finding: Text256
     #: What it costs and why, in plain words.
@@ -132,7 +124,6 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
         advice.append(
             HostCheckAdvice(
                 check=HostCheck.WATERMARK_BOOST,
-                level=HostCheckLevel.ADVICE,
                 finding=f"vm.watermark_boost_factor is {factor}.",
                 explanation=(
                     "After memory fragments, the kernel raises its free-memory "
@@ -147,7 +138,6 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
         advice.append(
             HostCheckAdvice(
                 check=HostCheck.BOOT_SPLASH,
-                level=HostCheckLevel.INFO,
                 finding="The kernel command line has splash.",
                 explanation=(
                     "Cosmetic: the boot splash hides kernel messages on the console "
@@ -161,7 +151,6 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
         advice.append(
             HostCheckAdvice(
                 check=HostCheck.MEMORY_FRAGMENTATION,
-                level=HostCheckLevel.INFO,
                 finding=(
                     f"{_gib(free.free_2mib_block_bytes)} of {_gib(free.free_bytes)} "
                     f"free is in blocks of 2 MiB or more ({share}%)."
@@ -194,7 +183,6 @@ def _service(
         explanation += " " + _snaps(snaps)
     return HostCheckAdvice(
         check=check,
-        level=HostCheckLevel.ADVICE,
         finding=finding,
         explanation=explanation,
         commands=[
