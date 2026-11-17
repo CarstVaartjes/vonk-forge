@@ -85,8 +85,8 @@ from .constants import _MODULE_ALEMBIC_CONFIG as _MODULE_ALEMBIC_CONFIG
 from .constants import _SOURCE_ALEMBIC_CONFIG as _SOURCE_ALEMBIC_CONFIG
 from .constants import _STARTUP_ADVISORY_LOCK as _STARTUP_ADVISORY_LOCK
 from .schema import reconcile_schema as reconcile_schema
+from .schema_helpers import _FOREIGN_TABLES as _FOREIGN_TABLES
 from .schema_helpers import _REPLACED_CONSTRAINT_NAMES as _REPLACED_CONSTRAINT_NAMES
-from .schema_helpers import _RETIRED_TABLES as _RETIRED_TABLES
 from .schema_helpers import (
     _TOLERATED_SCHEMA_DIFFERENCES as _TOLERATED_SCHEMA_DIFFERENCES,
 )
@@ -96,14 +96,12 @@ from .schema_helpers import (
 from .schema_helpers import _column_default_sql as _column_default_sql
 from .schema_helpers import _constraint_kind as _constraint_kind
 from .schema_helpers import _cosmetic_type_difference as _cosmetic_type_difference
+from .schema_helpers import _drop_undeclared_tables as _drop_undeclared_tables
 from .schema_helpers import _flatten_schema_differences as _flatten_schema_differences
 from .schema_helpers import (
     _is_generated_sequence_default as _is_generated_sequence_default,
 )
 from .schema_helpers import _quoted as _quoted
-from .schema_helpers import (
-    _release_retired_table_foreign_keys as _release_retired_table_foreign_keys,
-)
 from .schema_helpers import _repair_check_constraints as _repair_check_constraints
 from .schema_helpers import _schema_difference_key as _schema_difference_key
 from .startup import initialize_database as initialize_database

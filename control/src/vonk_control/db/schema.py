@@ -19,11 +19,11 @@ from .schema_helpers import (
     _constraint_kind,
     _constraint_label,
     _cosmetic_type_difference,
+    _drop_undeclared_tables,
     _flatten_schema_differences,
     _install_foreign_keys,
     _is_generated_sequence_default,
     _quoted,
-    _release_retired_table_foreign_keys,
     _repair_check_constraints,
     _schema_difference_key,
     _unhandled_differences,
@@ -500,7 +500,7 @@ def reconcile_schema(connection: Connection) -> None:
     drift[SchemaDriftKind.UNDECLARED_UNIQUE_CONSTRAINT].extend(
         sorted(undeclared_uniques)
     )
-    _release_retired_table_foreign_keys(connection, ops)
+    _drop_undeclared_tables(connection, ops)
 
     from .node_facts import (
         move_contact_facts,

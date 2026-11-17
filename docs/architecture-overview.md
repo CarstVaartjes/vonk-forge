@@ -131,8 +131,10 @@ editorial successor with the same inputs has no build row of its own), found by
 `vonk_control.revision_images`, and retention, the library and removal read
 that, the installations and runs, and the digests live operation payloads name.
 The retired `runtime_image_authorizations` table is not defined, read or written;
-an upgraded database keeps it with its rows, and startup only releases its
-foreign keys. `RecipeBuild`, `Job`, and agent-operation rows retain
+startup schema reconciliation drops it with every other table in the Controller's
+schema `public` that the code does not declare. The rule is
+by declaration, not by list: a Controller rolled back to an older release drops
+the tables a newer one added. `RecipeBuild`, `Job`, and agent-operation rows retain
 request and output identities, coordination, and reported results; they do not
 independently prove that an image is available.
 
