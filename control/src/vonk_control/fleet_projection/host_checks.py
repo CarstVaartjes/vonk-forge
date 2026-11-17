@@ -61,8 +61,10 @@ def host_checks_note(spark: str) -> Text1024:
     """The one line above a Spark's checks: where to run them and when they clear."""
     return (
         f"Run these on {spark} itself, in a terminal or over SSH, as a user with "
-        "sudo; the Controller never changes a Spark. Advice clears on the Spark's "
-        f"next report (about 2 minutes). Reasons and undo steps: {DOCS_URL}"
+        "sudo; the Controller never changes a Spark. A check clears on the Spark's "
+        "next report (about 2-3 minutes) once its change has taken effect: boot "
+        "splash after a reboot; memory fragmentation is a reading and stays. "
+        f"Reasons and undo steps: {DOCS_URL}"
     )
 
 
@@ -113,14 +115,11 @@ _DESKTOP_SNAP = re.compile(
 )
 _SHOWN_SNAPS = 8
 
-_WATERMARK_UNDO = [
-    "sudo rm /etc/sysctl.d/90-watermark-boost.conf",
-    "sudo sysctl -w vm.watermark_boost_factor=15000",
-]
 #: Puts splash back on the stock Ubuntu line of /etc/default/grub.
 _SPLASH_UNDO = (
-    "sudo sed -i -E 's/^(GRUB_CMDLINE_LINUX_DEFAULT=\")/\\1splash /' "
-    "/etc/default/grub && sudo update-grub"
+    'sudo sed -i -E \'/^GRUB_CMDLINE_LINUX_DEFAULT="/{/[ "]splash[ "]/!'
+    "s/^(GRUB_CMDLINE_LINUX_DEFAULT=\")/\\1splash /}' /etc/default/grub "
+    "&& sudo update-grub"
 )
 _WATERMARK_COMMANDS = [
     "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
@@ -164,7 +163,10 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                     "boost off, now and at every boot."
                 ),
                 commands=_WATERMARK_COMMANDS,
-                undo=_WATERMARK_UNDO,
+                undo=[
+                    "sudo rm -f /etc/sysctl.d/90-watermark-boost.conf",
+                    f"sudo sysctl -w vm.watermark_boost_factor={factor}",
+                ],
             )
         )
     if tuning.kernel_splash:

@@ -3010,6 +3010,22 @@ def test_host_tuning_reaches_the_fleet_node_as_advice_never_attention() -> None:
     assert _host_node(headless).host_checks_note is None
 
 
+def test_shared_host_check_fixture_is_the_controller_output() -> None:
+    # Catches the clients' vector drifting from the words the Controller sends.
+    from vonk_agent_protocol.host_tuning import HostTuning
+    from vonk_control.fleet_projection.host_checks import host_checks, host_checks_note
+
+    path = Path(__file__).parents[2] / "tests/fixtures/fleet-wording-host-checks.json"
+    fixture = json.loads(path.read_text(encoding="utf-8"))
+    sent = {
+        advice.check.value: advice.model_dump(mode="json")
+        for advice in host_checks(HostTuning.model_validate(_shared_tuning()))
+    }
+    assert fixture["note"] == host_checks_note("Alpha")
+    for case in fixture["cases"]:
+        assert case["advice"] == sent[case["advice"]["check"]]
+
+
 def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> None:
     from vonk_agent_protocol.host_tuning import HostTuning
     from vonk_control.fleet_projection.host_checks import (

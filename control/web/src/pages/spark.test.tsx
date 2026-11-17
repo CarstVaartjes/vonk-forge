@@ -198,13 +198,15 @@ test("host checks list the Controller's advice with each command, and none hides
     host_checks_note: vectors.note,
   });
   const section = screen.getByRole("region", { name: "Host checks" });
-  expect(within(section).getByText(vectors.note)).toBeVisible();
+  const url = vectors.note.slice(vectors.note.lastIndexOf("http"));
+  expect(within(section).getByRole("link", { name: url })).toHaveAttribute("href", url);
+  expect(section).toHaveTextContent(vectors.note);
   for (const { lines } of vectors.cases) {
     expect(within(section).getByText(lines[0])).toBeVisible();
     for (const command of lines.slice(1))
       if (command !== "Undo:") expect(within(section).getByText(command)).toBeVisible();
   }
-  expect(within(section).getAllByText("Undo:")).toHaveLength(2);
+  expect(within(section).getAllByText("Undo:")).toHaveLength(3);
   fireEvent.click(within(section).getAllByRole("button", { name: "Copy command" })[0]);
   expect(write).toHaveBeenCalledWith(vectors.cases[0].lines[1]);
   expect(screen.queryByText("needs attention")).toBeNull();
