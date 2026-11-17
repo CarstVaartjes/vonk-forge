@@ -3014,11 +3014,14 @@ def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> 
 
     tuning = HostTuning.model_validate(_shared_tuning())
     advice = {item.check: item for item in host_checks(tuning)}
-    # A service check disables every unit it covers, active or not (cups.path).
+    # A service check disables every unit of it installed on the Spark, active
+    # or not (cups.path), and never one that is not (snapd.snap-repair.timer).
+    installed = {item.unit for item in tuning.units or ()}
     for check, units in SERVICE_UNITS.items():
-        assert advice[check].commands[-1].split()[-len(units) :] == [
-            unit.value for unit in units
+        assert advice[check].commands[-1].split()[4:] == [
+            unit.value for unit in units if unit in installed
         ]
+    assert "snap-repair" not in advice[HostCheck.SNAPD].commands[-1]
     assert "cups.path" not in advice[HostCheck.PRINTING].finding
     assert "15000" in advice[HostCheck.WATERMARK_BOOST].finding
     # Measured: 78.7 of 116.7 GiB free in 2 MiB blocks.
@@ -3034,9 +3037,7 @@ def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> 
     assert host_checks(None) == []
     assert host_checks(HostTuning()) == []
     assert (
-        host_checks(
-            HostTuning(active_units=[], watermark_boost_factor=0, kernel_splash=False)
-        )
+        host_checks(HostTuning(units=[], watermark_boost_factor=0, kernel_splash=False))
         == []
     )
 

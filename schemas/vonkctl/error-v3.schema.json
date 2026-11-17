@@ -1,32 +1,5 @@
 {
   "$defs": {
-    "ActiveUnit": {
-      "description": "One unit systemd reports active now.",
-      "properties": {
-        "memory_bytes": {
-          "anyOf": [
-            {
-              "maximum": 17592186044416,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Memory Bytes"
-        },
-        "unit": {
-          "$ref": "#/$defs/HostUnit"
-        }
-      },
-      "required": [
-        "unit"
-      ],
-      "title": "ActiveUnit",
-      "type": "object"
-    },
     "AdmissionCode": {
       "description": "The shared admission lock refused because capacity is held by another admission.",
       "enum": [
@@ -8167,22 +8140,6 @@
     "HostTuning": {
       "description": "The measured host settings the host checks explain.",
       "properties": {
-        "active_units": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/ActiveUnit"
-              },
-              "maxItems": 12,
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Active Units"
-        },
         "free_memory": {
           "anyOf": [
             {
@@ -8222,6 +8179,22 @@
           ],
           "default": null,
           "title": "Snaps"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/InstalledUnit"
+              },
+              "maxItems": 12,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Units"
         },
         "watermark_boost_factor": {
           "anyOf": [
@@ -8500,6 +8473,38 @@
       ],
       "title": "InstallationState",
       "type": "string"
+    },
+    "InstalledUnit": {
+      "description": "One listed unit installed on the Spark (systemd LoadState ``loaded``).",
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "memory_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Bytes"
+        },
+        "unit": {
+          "$ref": "#/$defs/HostUnit"
+        }
+      },
+      "required": [
+        "unit",
+        "active"
+      ],
+      "title": "InstalledUnit",
+      "type": "object"
     },
     "IntegerParameter": {
       "properties": {

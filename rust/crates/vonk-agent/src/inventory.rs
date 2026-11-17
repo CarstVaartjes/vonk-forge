@@ -546,6 +546,9 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
                     &meminfo,
                     Path::new(vonk_agent_protocol::store_retention::HELPER_DATA_ROOT),
                 );
+                // Sequential like the other host-settings queries: one local,
+                // 5 s-bounded systemctl call per inventory (every 2 minutes);
+                // a thread here would save milliseconds.
                 host.tuning = Some(crate::host_tuning::observe(
                     self.runner,
                     Path::new("/"),

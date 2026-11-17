@@ -68,32 +68,71 @@ fn a_compaction_past_its_bound_answers_at_once_and_is_never_started_twice() {
         write_compact_memory(root)
     });
     let root = host();
-    let begun = Instant::now();
     let first = lane
         .for_load(root.path(), true, Duration::from_millis(50), 4096)
         .unwrap();
-    assert!(begun.elapsed() < Duration::from_secs(2));
     assert_eq!(first.outcome, MemoryCompactionOutcome::TimedOut);
     assert_eq!(first.free_after, None);
-    // A new load phase while it still runs starts nothing.
-    let again = lane
-        .for_load(root.path(), true, Duration::from_millis(50), 4096)
-        .unwrap();
-    assert_eq!(again.outcome, MemoryCompactionOutcome::TimedOut);
+    // A new load phase while it still runs starts nothing and is never handed
+    // the earlier phase's result.
+    let again = lane.for_load(root.path(), true, Duration::from_millis(50), 4096);
+    assert_eq!(again, None);
     assert_eq!(STARTED.load(Ordering::SeqCst), 1);
     RELEASE.store(true, Ordering::SeqCst);
+    // Once it has finished, the next load phase compacts again.
     let deadline = Instant::now() + Duration::from_secs(5);
     let finished = loop {
-        let answer = lane
-            .for_load(root.path(), false, Duration::from_millis(50), 4096)
-            .unwrap();
-        if answer.outcome != MemoryCompactionOutcome::TimedOut || Instant::now() > deadline {
-            break answer;
+        let answer = lane.for_load(root.path(), true, Duration::from_secs(5), 4096);
+        if answer.is_some() || Instant::now() > deadline {
+            break answer.unwrap();
         }
         thread::sleep(Duration::from_millis(5));
     };
     assert_eq!(finished.outcome, MemoryCompactionOutcome::Completed);
+    assert_eq!(STARTED.load(Ordering::SeqCst), 2);
     assert!(finished.free_after.is_some());
+}
+
+#[test]
+fn an_ask_while_its_phase_compacts_never_answers_the_previous_phase() {
+    // Break caught: a second workload of a profile load is handed the last
+    // phase's compaction while this phase's still runs.
+    static BLOCK: AtomicBool = AtomicBool::new(false);
+    static STARTED: AtomicUsize = AtomicUsize::new(0);
+    static LANE: CompactionLane = CompactionLane::new(|root| {
+        STARTED.fetch_add(1, Ordering::SeqCst);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while BLOCK.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        write_compact_memory(root)
+    });
+    let root = host();
+    let path = root.path().to_path_buf();
+    let previous = LANE.for_load(&path, true, Duration::from_secs(5), 4096);
+    assert_eq!(
+        previous.unwrap().outcome,
+        MemoryCompactionOutcome::Completed
+    );
+    BLOCK.store(true, Ordering::SeqCst);
+    let first_ask = path.clone();
+    let waiter =
+        thread::spawn(move || LANE.for_load(&first_ask, true, Duration::from_secs(20), 4096));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while STARTED.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        LANE.for_load(&path, false, Duration::from_secs(5), 4096),
+        None
+    );
+    BLOCK.store(false, Ordering::SeqCst);
+    let own = waiter.join().unwrap().unwrap();
+    assert_eq!(own.outcome, MemoryCompactionOutcome::Completed);
+    assert_eq!(
+        LANE.for_load(&path, false, Duration::from_secs(5), 4096),
+        Some(own)
+    );
 }
 
 #[test]

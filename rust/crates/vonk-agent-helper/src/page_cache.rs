@@ -228,6 +228,9 @@ pub fn handle(
         PAGE_CACHE_SYNC_TIMEOUT,
         request.request_id,
     );
+    // Drop first, then compact: the freed clean cache pages give compaction
+    // more free memory to regroup, and pages about to be dropped are never
+    // migrated first.
     report.compaction = COMPACTION.for_load(
         Path::new("/"),
         entering,
@@ -277,9 +280,11 @@ mod tests {
         };
         assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
         // The phase's first ask (sync, drop, compaction) answers before the
-        // agent stops waiting.
+        // agent stops waiting: the bounded parts take at most half the reply
+        // bound, the rest is headroom for the unbounded drop write and reads.
         assert!(
-            PAGE_CACHE_SYNC_TIMEOUT + MEMORY_COMPACTION_TIMEOUT < PAGE_CACHE_DROP_REPLY_TIMEOUT
+            (PAGE_CACHE_SYNC_TIMEOUT + MEMORY_COMPACTION_TIMEOUT) * 2
+                <= PAGE_CACHE_DROP_REPLY_TIMEOUT
         );
     }
 

@@ -89,7 +89,9 @@ class PageCacheDropReport(WireModel):
     sync: PageCacheSync | None = None
     problem: PageCacheDropProblem | None = None
     # The compaction of this load phase: made by this ask, or the earlier one
-    # every later ask in the phase answers from. None before any compaction.
+    # every later ask in the phase answers from. None while the phase has no
+    # result yet (its compaction still runs, or an earlier phase's does);
+    # never an earlier phase's compaction.
     compaction: MemoryCompaction | None = None
 
 

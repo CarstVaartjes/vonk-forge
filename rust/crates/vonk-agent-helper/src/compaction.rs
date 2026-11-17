@@ -22,8 +22,8 @@ use vonk_agent_protocol::generated::{
 
 const COMPACT_MEMORY: &str = "proc/sys/vm/compact_memory";
 
-/// One compaction at a time; the last result answers every ask until the
-/// next load phase. A compaction that outlives its bound keeps running (the
+/// One compaction at a time; the phase's result answers every later ask of
+/// that phase. A compaction that outlives its bound keeps running (the
 /// kernel's write cannot be cancelled) and is never started twice.
 pub struct CompactionLane {
     state: Mutex<State>,
@@ -31,27 +31,39 @@ pub struct CompactionLane {
 }
 
 struct State {
+    /// The current load phase, counted from helper start.
+    phase: u64,
+    /// The current phase's result; never an earlier phase's.
     last: Option<MemoryCompaction>,
-    /// An ask is waiting on a compaction it started.
-    waiting: bool,
-    /// A compaction that outlived its bound and still runs.
-    overdue: Option<mpsc::Receiver<MemoryCompaction>>,
+    run: Run,
+}
+
+/// Whether a compaction runs, and whose result it will be.
+enum Run {
+    Idle,
+    /// An ask waits on the compaction it started for this phase.
+    Running,
+    /// A compaction of `phase` outlived its bound and still runs.
+    Overdue {
+        phase: u64,
+        receiver: mpsc::Receiver<MemoryCompaction>,
+    },
 }
 
 impl CompactionLane {
     pub const fn new(compact: fn(&Path) -> std::io::Result<()>) -> Self {
         Self {
             state: Mutex::new(State {
+                phase: 0,
                 last: None,
-                waiting: false,
-                overdue: None,
+                run: Run::Idle,
             }),
             compact,
         }
     }
 
     /// Compact when `entering` a load phase and none still runs; otherwise
-    /// the last result. The lane is never held while a compaction runs.
+    /// this phase's result. The lane is never held while a compaction runs.
     pub fn for_load(
         &self,
         root: &Path,
@@ -59,19 +71,27 @@ impl CompactionLane {
         bound: Duration,
         page_size: u64,
     ) -> Option<MemoryCompaction> {
-        let (receiver, provisional) = {
+        let (receiver, provisional, started_phase) = {
             let mut state = self.lock();
-            if let Some(overdue) = state.overdue.take() {
-                match overdue.try_recv() {
+            if let Run::Overdue { phase, receiver } = std::mem::replace(&mut state.run, Run::Idle) {
+                match receiver.try_recv() {
                     Ok(done) => {
                         log(&done);
-                        state.last = Some(done);
+                        if phase == state.phase {
+                            state.last = Some(done);
+                        }
                     }
-                    Err(mpsc::TryRecvError::Empty) => state.overdue = Some(overdue),
+                    Err(mpsc::TryRecvError::Empty) => {
+                        state.run = Run::Overdue { phase, receiver };
+                    }
                     Err(mpsc::TryRecvError::Disconnected) => {}
                 }
             }
-            if !entering || state.waiting || state.overdue.is_some() {
+            if entering {
+                state.phase += 1;
+                state.last = None;
+            }
+            if !entering || !matches!(state.run, Run::Idle) {
                 return state.last.clone();
             }
             let started = Instant::now();
@@ -103,16 +123,19 @@ impl CompactionLane {
                 state.last = Some(failed.clone());
                 return Some(failed);
             }
-            state.waiting = true;
-            (receiver, provisional)
+            state.run = Run::Running;
+            (receiver, provisional, state.phase)
         };
         let answer = receiver.recv_timeout(bound);
         let mut state = self.lock();
-        state.waiting = false;
+        state.run = Run::Idle;
         let result = match answer {
             Ok(done) => done,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                state.overdue = Some(receiver);
+                state.run = Run::Overdue {
+                    phase: started_phase,
+                    receiver,
+                };
                 provisional
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => MemoryCompaction {
@@ -121,7 +144,9 @@ impl CompactionLane {
             },
         };
         log(&result);
-        state.last = Some(result.clone());
+        if state.phase == started_phase {
+            state.last = Some(result.clone());
+        }
         Some(result)
     }
 

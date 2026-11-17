@@ -36,10 +36,11 @@ class HostUnit(WireEnum):
     FWUPD_REFRESH = "fwupd-refresh.timer"
 
 
-class ActiveUnit(WireModel):
-    """One unit systemd reports active now."""
+class InstalledUnit(WireModel):
+    """One listed unit installed on the Spark (systemd LoadState ``loaded``)."""
 
     unit: HostUnit
+    active: bool
     # systemd's MemoryCurrent for the unit's cgroup; None when systemd does not
     # account it (a timer, a socket, accounting off).
     memory_bytes: MemoryBytes | None = None
@@ -67,11 +68,9 @@ class FreeMemory(WireModel):
 class HostTuning(WireModel):
     """The measured host settings the host checks explain."""
 
-    # The listed units that are active, in HostUnit order; None when systemd
-    # gave no answer. A unit that is not installed is inactive.
-    active_units: list[ActiveUnit] | None = Field(
-        default=None, max_length=len(HostUnit)
-    )
+    # The listed units installed on this Spark, in HostUnit order; a unit that
+    # is not installed (or masked) is absent. None when systemd gave no answer.
+    units: list[InstalledUnit] | None = Field(default=None, max_length=len(HostUnit))
     # Installed snaps by name, sorted; None when /snap is absent or unreadable.
     snaps: list[SnapName] | None = Field(default=None, max_length=MAX_REPORTED_SNAPS)
     # /proc/sys/vm/watermark_boost_factor.
@@ -82,7 +81,7 @@ class HostTuning(WireModel):
 
     @model_validator(mode="after")
     def _distinct(self) -> HostTuning:
-        units = [item.unit for item in self.active_units or ()]
+        units = [item.unit for item in self.units or ()]
         if len(set(units)) != len(units):
             raise ValueError("a unit is reported twice")
         if self.snaps is not None and len(set(self.snaps)) != len(self.snaps):
