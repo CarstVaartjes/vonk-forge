@@ -27,7 +27,7 @@ A revision is **kept** while anything still points at it:
   head or candidate recipe document names its digest.
 
 Everything else is removed together with the dead rows only it owned: its
-uninstalled installations, stopped runs, mappings, finished builds and model
+uninstalled installations, stopped runs, mappings, builds no live work owns and model
 bindings. Audit history of those is not kept.
 
 A source bundle (archive bytes stored in PostgreSQL) is removed once no
