@@ -13,7 +13,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason, canonical_message
-from vonk_control.job_documents import RecipeStartParent, controller_recipe_document
+from vonk_control.job_documents import (
+    RecipeJobActivateParent,
+    RecipeStartParent,
+    controller_recipe_document,
+)
 from vonk_control.models import Job, ModelCacheOperation
 from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
@@ -192,20 +196,30 @@ def test_a_recovery_child_ending_wakes_its_parent(tmp_path) -> None:
     assert _due(sessions, operation_id) == NOW
 
 
-def test_the_start_a_run_switch_issued_ending_wakes_its_parent(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "kind", [WireAgentOperation.RECIPE_START.value, "recipe.job.activate.v1"]
+)
+def test_the_start_a_run_switch_issued_ending_wakes_its_parent(
+    tmp_path, kind: str
+) -> None:
     """Catches a parent left for the rotation when its own start ended."""
     service, _executor, operation_id, _child_id = _waiting_on_transfer(tmp_path)
     service.wake_on_child_end()
     sessions = service._sessions
     start_id = str(uuid.uuid4())
+    parent_type = (
+        RecipeStartParent
+        if kind == WireAgentOperation.RECIPE_START.value
+        else RecipeJobActivateParent
+    )
     with sessions.begin() as session:
         start = _job_row(start_id, "running")
-        start.kind = WireAgentOperation.RECIPE_START.value
+        start.kind = kind
         start.request_id = start_request_key(_get(session, Job, operation_id))
         start.payload = cast(
             dict[str, object],
             controller_recipe_document(
-                RecipeStartParent(
+                parent_type(
                     schema_version=1,
                     owner_kind="run",
                     owner_id=str(uuid.uuid4()),
