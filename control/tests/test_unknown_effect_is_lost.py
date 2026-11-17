@@ -210,9 +210,11 @@ def test_a_failed_start_without_exact_cleanup_authority_is_lost(
     _fresh_load(sessions, service, installation_id, "n" * 36)
 
 
+@pytest.mark.parametrize("claimed", [True, False])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_lost_run_whose_spark_reports_its_exit_ends_with_that_evidence(
     agent_system,  # noqa: F811
+    claimed: bool,
 ):
     """The Spark's own report ends a lost run, and the exit's cause is kept."""
     client, services, _, clock = agent_system
@@ -248,19 +250,20 @@ def test_a_lost_run_whose_spark_reports_its_exit_ends_with_that_evidence(
                 updated_at=before,
             )
         )
-        session.add(
-            ResourceReservation(
-                node_id=NODE_A,
-                kind="unified-memory",
-                resource_key=run_id,
-                amount_bytes=1,
-                owner_kind="run",
-                owner_id=run_id,
-                state="active",
-                plan_digest="1" * 64,
-                created_at=before,
+        if claimed:
+            session.add(
+                ResourceReservation(
+                    node_id=NODE_A,
+                    kind="unified-memory",
+                    resource_key=run_id,
+                    amount_bytes=1,
+                    owner_kind="run",
+                    owner_id=run_id,
+                    state="active",
+                    plan_digest="1" * 64,
+                    created_at=before,
+                )
             )
-        )
     empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
     diagnostics = FailureDiagnostics(
         collected_at=clock.now.isoformat(),
