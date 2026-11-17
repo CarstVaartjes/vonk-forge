@@ -388,17 +388,15 @@ class ResolvedRecipe:
 
 
 def resolve_recipe_entities(
-    session: Session, document: object, *, content_digest: str
+    session: Session, revision: CatalogDocumentRevision
 ) -> ResolvedRecipe:
-    """Resolve a canonical recipe and its exact active Model revisions.
+    """Resolve a stored recipe revision and its exact active Model revisions.
 
-    ``content_digest`` is the stored revision's digest, verified at ingress; the
-    document is not hashed again.
+    The revision's digest was verified at ingress; the document is not hashed
+    again.
     """
     try:
-        if not isinstance(document, Mapping):
-            raise TypeError("recipe document is not a mapping")
-        recipe = read_recipe(document)
+        recipe = read_recipe(revision.document)
     except (TypeError, ValueError) as error:
         raise RecipeRuntimeSpecError(
             "recipe does not satisfy the canonical contract"
@@ -407,7 +405,7 @@ def resolve_recipe_entities(
     models: list[CatalogDocumentRevision] = []
     for selection in recipe.models:
         reference = selection.model
-        revision = session.scalar(
+        model = session.scalar(
             select(CatalogDocumentRevision)
             .where(
                 CatalogDocumentRevision.kind == "model",
@@ -418,12 +416,12 @@ def resolve_recipe_entities(
             )
             .limit(1)
         )
-        if revision is None:
+        if model is None:
             raise RecipeRuntimeSpecError("exact recipe model is not active")
-        models.append(revision)
+        models.append(model)
     return ResolvedRecipe(
         recipe=recipe,
-        recipe_digest=content_digest,
+        recipe_digest=revision.content_digest,
         model_revisions=tuple(models),
     )
 

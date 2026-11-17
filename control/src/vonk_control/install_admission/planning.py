@@ -194,9 +194,7 @@ class InstallPlanningService:
             }
             document = revision.document
             try:
-                resolved_entities = resolve_recipe_entities(
-                    session, document, content_digest=revision.content_digest
-                )
+                resolved_entities = resolve_recipe_entities(session, revision)
             except RecipeRuntimeSpecError as error:
                 raise BookkeepingUnknown(
                     "exact recipe dependencies are unavailable",

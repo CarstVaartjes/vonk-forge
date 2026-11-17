@@ -353,9 +353,7 @@ class CompositeDistributionPhaseExecutor(
                 build_input_sha256=build.build_input_sha256,
                 platform="linux/arm64",
             )
-            entities = resolve_recipe_entities(
-                session, revision.document, content_digest=revision.content_digest
-            )
+            entities = resolve_recipe_entities(session, revision)
             option_choices, settings = split_option_choices(
                 plan.mapping.parameters if plan.mapping is not None else None
             )

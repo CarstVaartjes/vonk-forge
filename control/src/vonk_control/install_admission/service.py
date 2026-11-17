@@ -278,9 +278,7 @@ class InstallAdmissionService(InstallPlanningService):
                 InstallAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
             )
         try:
-            resolve_recipe_entities(
-                session, revision.document, content_digest=revision.content_digest
-            )
+            resolve_recipe_entities(session, revision)
         except RecipeRuntimeSpecError as error:
             raise InstallPlanStale(
                 InstallAdmissionCode.DEPENDENCIES_STALE,
