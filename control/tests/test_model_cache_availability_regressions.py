@@ -105,11 +105,9 @@ def _artifact(
 
 def _start(service: ModelCacheService, artifacts: list[dict[str, object]], key: str):
     model = str(artifacts[0]["model_content_sha256"])
-    preview = service.download_preview(model_content_sha256=model, artifacts=artifacts)
     return service.start_download(
         actor="test",
         request_key=key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model,
         artifacts=artifacts,
     )
@@ -937,14 +935,12 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
         }
     ]
     model = str(artifacts[0]["model_content_sha256"])
-    preview = service.download_preview(model_content_sha256=model, artifacts=artifacts)
 
     def start(key: str, selector: str):
         # Selector requests never attach, so two live transfers can exist.
         return service.start_download(
             actor="operator",
             request_key=key,
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=model,
             artifacts=artifacts,
             selector=selector,

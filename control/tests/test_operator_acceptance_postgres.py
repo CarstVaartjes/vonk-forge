@@ -208,14 +208,10 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
     )
     try:
         artifact = _artifact(tmp_path / "source", b"receipt boundary")
-        preview = service.download_preview(
-            model_content_sha256="a" * 64, artifacts=[artifact]
-        )
         operation = service.start_download(
             actor="operator",
             request_key=str(uuid4()),
             selector="fixture",
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256="a" * 64,
             artifacts=[artifact],
         )

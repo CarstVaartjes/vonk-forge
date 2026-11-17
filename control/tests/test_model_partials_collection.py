@@ -216,12 +216,10 @@ def test_live_repair_keeps_its_partial_and_a_failed_one_loses_it_a_day_later(
     for leftover in (service.root / "partials").iterdir():
         leftover.rmdir()
     serving[0] = False
-    preview = service.repair_preview(set_digest)
     repair = service.start_repair(
         actor="test",
         request_key=str(uuid4()),
         artifact_set_sha256=set_digest,
-        plan_digest=str(preview["plan_digest"]),
     )
     owner = service._partial_owner(repair.id, set_digest)
     assert owner.startswith(REPAIR_PARTIALS_PREFIX)

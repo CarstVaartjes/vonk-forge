@@ -40,14 +40,10 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
     service = ModelCacheService(
         sessions, cache_root, free_fraction=0, fixture_sources=True
     )
-    preview = service.download_preview(
-        model_content_sha256="a" * 64, artifacts=[artifact]
-    )
     operation = service.start_download(
         actor="operator",
         request_key=operation_key,
         selector="qwen",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )
@@ -196,7 +192,6 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
             actor="operator",
             request_key=str(uuid4()),
             selector="qwen",
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256="a" * 64,
             artifacts=[artifact],
         )

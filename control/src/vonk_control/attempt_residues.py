@@ -95,7 +95,6 @@ from .owner_liveness import (
     referencing_active_job,
 )
 from .persisted_waits import schedule_wait
-from .recipe_action_plans import UninstallPlan
 from .reservation_owners import (
     ADOPTION_WINDOW,
     release_dead_owner_reservations,
@@ -238,8 +237,6 @@ def superseded_plan_ids(
 
 class LeftoverRemoval(Protocol):
     """The recipe lifecycle's uninstall, as the residue sweep uses it."""
-
-    def preview_uninstall(self, installation_id: str) -> UninstallPlan: ...
 
     def uninstall(
         self,
@@ -510,16 +507,6 @@ class AttemptResidueReconciler:
             if not self._cleanup_due(installation_id):
                 continue
             try:
-                plan = self._removal.preview_uninstall(installation_id)
-                if not plan.allowed:
-                    code = plan.blockers[0].code if plan.blockers else "not allowed"
-                    self._log(
-                        "incomplete-installation",
-                        installation_id,
-                        "kept",
-                        reason=str(code),
-                    )
-                    continue
 
                 def still_unowned(
                     session: Session, owner: str = installation_id

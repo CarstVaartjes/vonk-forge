@@ -174,7 +174,6 @@ def _ensure_model_child(
             operation = self._model_cache.start_download(
                 actor=actor,
                 request_key=child_request_key,
-                plan_digest=plan_digest,
                 recipe_revision_id=recipe_revision_id,
             )
     except RecipeImageAvailabilityError:
@@ -276,7 +275,6 @@ def _start_model_repair(
         actor=actor,
         request_key=request_key,
         artifact_set_sha256=artifact_set_sha256,
-        plan_digest=plan_digest,
     )
 
 

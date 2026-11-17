@@ -78,7 +78,6 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     downloaded = cache.start_download(
         actor="operator",
         request_key=_DOWNLOAD_KEY,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=original_digest,
         selector=f"{original.publisher}/{original.slug}",
         artifacts=[artifact],

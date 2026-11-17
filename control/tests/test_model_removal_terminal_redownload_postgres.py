@@ -79,7 +79,6 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
         accepted = service.start_download(
             actor="operator",
             request_key=fresh_key,
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=removal.model_content_sha256,
             artifacts=[artifact],
             selector=removal.selector,

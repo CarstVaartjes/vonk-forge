@@ -95,7 +95,6 @@ def _force_model_request(
     return service.start_download(
         actor="operator",
         request_key=request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=digest,
         artifacts=[artifact],
         force=True,

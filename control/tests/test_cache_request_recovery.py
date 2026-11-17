@@ -103,7 +103,6 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
             request_key=key,
             selector="selected-model",
             artifact_set_sha256=manifest.digest,
-            plan_digest=str(preview["plan_digest"]),
             force=True,
         )
 
@@ -143,7 +142,6 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
                 request_key=key,
                 selector="selected-model",
                 artifact_set_sha256=manifest.digest,
-                plan_digest=str(preview["plan_digest"]),
                 force=True,
             )
     else:
@@ -172,7 +170,6 @@ def test_model_reference_contention_ends_bounded_and_fresh_request_admits(
     )
     with sessions.begin() as session:
         service._ensure_set(session, manifest)
-    preview = service.download_preview(artifact_set_sha256=manifest.digest)
     with sessions.begin() as session:
         lock_reference_gates(
             session,
@@ -185,14 +182,12 @@ def test_model_reference_contention_ends_bounded_and_fresh_request_admits(
                 actor="operator",
                 request_key=str(uuid.uuid4()),
                 artifact_set_sha256=manifest.digest,
-                plan_digest=str(preview["plan_digest"]),
             )
         assert time.monotonic() - started < 8
     fresh = service.start_download(
         actor="operator",
         request_key=str(uuid.uuid4()),
         artifact_set_sha256=manifest.digest,
-        plan_digest=str(preview["plan_digest"]),
     )
     assert fresh.state == LifecycleState.QUEUED
     service.run_pending()
@@ -437,7 +432,6 @@ def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path)
         request_key=str(uuid.uuid4()),
         artifacts=[artifact],
         model_content_sha256="a" * 64,
-        plan_digest=str(before["plan_digest"]),
     )
     service.run_pending()
     assert service.get_operation(first.id).state == LifecycleState.SUCCEEDED
@@ -448,7 +442,6 @@ def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path)
         actor="operator",
         request_key=str(uuid.uuid4()),
         artifact_set_sha256=manifest.digest,
-        plan_digest=str(before["plan_digest"]),
     )
     service.run_pending()
     assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED

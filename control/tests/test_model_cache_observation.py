@@ -803,7 +803,6 @@ def test_a_lost_object_is_healed_by_reads_and_a_download_is_admitted(observed_ca
     admitted = cache.start_download(
         actor="test",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         artifact_set_sha256=manifest.digest,
     )
     assert admitted.state == LifecycleState.QUEUED

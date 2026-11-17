@@ -99,7 +99,6 @@ class _Nas:
         return self.service.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=self.digest,
         )
 

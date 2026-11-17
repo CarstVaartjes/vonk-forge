@@ -831,17 +831,10 @@ class FleetRemovalMixin:
                             return False
                         pending = f"Waiting for uninstall {child.id}; its existing worker owns recovery."
                         continue
-                # Re-plan on conflict, once per worker pass. New references
-                # shrink the permitted effects; they never expand consent.
-                plan = lifecycle.preview_uninstall(
-                    installation_id, preserve_model_files=True
-                )
-                if not plan.allowed:
-                    pending = "Installation is now protected: " + "; ".join(
-                        item.detail for item in plan.blockers
-                    )
-                    continue
 
+                # Re-plan on conflict, once per worker pass: uninstall plans
+                # for itself. New references shrink the permitted effects;
+                # they never expand consent.
                 def unused(
                     session: Session, installation_id: str = installation_id
                 ) -> None:
