@@ -12291,6 +12291,24 @@
       "title": "PrometheusAttention",
       "type": "object"
     },
+    "PublishedMeasuredMemory": {
+      "description": "A catalog entry's sibling key ``measured_memory``: roles of exactly its content.\n\nNever part of :class:`PublishedQualificationStatusView`, which forbids unknown\nfields: an older Controller reads the status unchanged and ignores this key.",
+      "properties": {
+        "roles": {
+          "items": {
+            "$ref": "#/$defs/PublishedRoleMemory"
+          },
+          "minItems": 1,
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "title": "PublishedMeasuredMemory",
+      "type": "object"
+    },
     "PublishedQualificationStatusView": {
       "properties": {
         "changed": {
@@ -12357,6 +12375,40 @@
         "required_sparks"
       ],
       "title": "PublishedQualificationStatusView",
+      "type": "object"
+    },
+    "PublishedRoleMemory": {
+      "description": "What one role of one content measured on hardware, as the catalog carries it.\n\n``measured_peak_bytes`` is information: the role's workload bytes (the\nobserved Spark use less the OS floor), never the recipe's declaration.\n``peak_bytes`` is the one value admission reads: the measured peak, or, when\nthat exceeds the admission maximum (``exceeds_admission_maximum``), the\nrole's declared peak. The Controller admits on ``peak_bytes`` and, for the\nflagged case, shows a warning that hardware measured more than it can admit.",
+      "properties": {
+        "exceeds_admission_maximum": {
+          "default": false,
+          "title": "Exceeds Admission Maximum",
+          "type": "boolean"
+        },
+        "measured_peak_bytes": {
+          "minimum": 0,
+          "title": "Measured Peak Bytes",
+          "type": "integer"
+        },
+        "peak_bytes": {
+          "minimum": 0,
+          "title": "Peak Bytes",
+          "type": "integer"
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "peak_bytes",
+        "measured_peak_bytes"
+      ],
+      "title": "PublishedRoleMemory",
       "type": "object"
     },
     "QualificationBlame": {
@@ -15373,6 +15425,17 @@
           },
           "title": "Interfaces",
           "type": "array"
+        },
+        "measured_memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublishedMeasuredMemory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "models": {
           "items": {
