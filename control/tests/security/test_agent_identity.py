@@ -11,6 +11,7 @@ from vonk_control.auth import (
     TrustedProxyAgentIdentityMiddleware,
     agent_identity_from_scope,
     agent_source_from_scope,
+    validated_agent_identity_from_scope,
 )
 
 NODE = "spk_" + "a" * 32
@@ -217,3 +218,45 @@ def test_slow_identity_database_validation_does_not_park_other_requests() -> Non
 
     asyncio.run(exercise())
     assert replies[0]["status"] == 401
+
+
+def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
+    lookups, seen = [], []
+
+    def validate(identity):
+        lookups.append(identity.node_id)
+        return True
+
+    async def app(scope, receive, send):
+        seen.append(validated_agent_identity_from_scope(scope))
+
+    middleware = TrustedProxyAgentIdentityMiddleware(
+        app, trusted_proxy_auth=b"p" * 32, agent_identity_validator=validate
+    )
+    headers = (
+        (b"x-vonk-agent-node", NODE.encode()),
+        (b"x-vonk-agent-serial", b"123"),
+        (b"x-vonk-agent-fingerprint", b"fingerprint"),
+        (b"x-vonk-agent-verified", b"1"),
+        (b"x-vonk-agent-proxy-auth", b"p" * 32),
+        (b"x-vonk-agent-source", b"10.0.0.42"),
+    )
+    scope = {"type": "http", "path": "/agent/telemetry", "headers": headers}
+    asyncio.run(middleware(scope, lambda: None, lambda _: None))
+    assert lookups == [NODE]
+    assert seen[0] is not None and seen[0].node_id == NODE
+
+    # A request that skipped the middleware, or forged the marker, is unvalidated.
+    identity = AgentIdentity(NODE, "123", "fingerprint", True)
+    assert (
+        validated_agent_identity_from_scope({"vonk.agent_identity": identity}) is None
+    )
+    forged = {
+        "type": "http",
+        "path": "/api/x",
+        "headers": (),
+        "vonk.agent_validated": identity,
+    }
+    asyncio.run(middleware(forged, lambda: None, lambda _: None))
+    assert seen[1] is None
+    assert lookups == [NODE]

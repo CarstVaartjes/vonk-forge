@@ -27,6 +27,7 @@ _ROLES = frozenset({"viewer", "operator", "administrator"})
 _AGENT_NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _AGENT_IDENTITY_SCOPE_KEY = "vonk.agent_identity"
 _AGENT_SOURCE_SCOPE_KEY = "vonk.agent_source"
+_AGENT_VALIDATED_SCOPE_KEY = "vonk.agent_validated"
 _CURSOR_DOMAIN = b"vonk-forge/control-cursor/v1\0"
 _CURSOR_SIGNATURE_LENGTH = len(
     base64.urlsafe_b64encode(hashlib.sha256().digest()).rstrip(b"=")
@@ -184,6 +185,16 @@ def agent_identity_from_scope(scope: dict[str, Any]) -> AgentIdentity | None:
     return identity
 
 
+def validated_agent_identity_from_scope(
+    scope: Scope,
+) -> AgentIdentity | None:
+    """Return the identity the middleware already validated against the database."""
+    identity = agent_identity_from_scope(dict(scope))
+    if identity is None or scope.get(_AGENT_VALIDATED_SCOPE_KEY) != identity:
+        return None
+    return identity
+
+
 def agent_source_from_scope(scope: dict[str, Any]) -> AgentSource | None:
     """Return only a typed source bound to the scope's verified identity."""
     source = scope.get(_AGENT_SOURCE_SCOPE_KEY)
@@ -238,6 +249,7 @@ class TrustedProxyAgentIdentityMiddleware:
         safe_scope = dict(scope)
         safe_scope.pop(_AGENT_IDENTITY_SCOPE_KEY, None)
         safe_scope.pop(_AGENT_SOURCE_SCOPE_KEY, None)
+        safe_scope.pop(_AGENT_VALIDATED_SCOPE_KEY, None)
         safe_scope["headers"] = sanitized
         supplied_proxy_auth = forwarded.get("x-vonk-agent-proxy-auth", "").encode()
         proxy_auth = self._trusted_proxy_auth
@@ -290,14 +302,16 @@ class TrustedProxyAgentIdentityMiddleware:
             and path.startswith("/agent/")
             and path
             not in {"/agent/bootstrap", "/agent/enroll", "/agent/renew/expired"}
-            and (
+        ):
+            if (
                 scoped_identity is None
                 or validator is None
                 or not await asyncio.to_thread(validator, scoped_identity)
-            )
-        ):
-            await Response(status_code=401)(safe_scope, receive, send)
-            return
+            ):
+                await Response(status_code=401)(safe_scope, receive, send)
+                return
+            # Validated once here; handlers reuse it instead of a second query.
+            safe_scope[_AGENT_VALIDATED_SCOPE_KEY] = scoped_identity
         await self.app(safe_scope, receive, send)
 
 
