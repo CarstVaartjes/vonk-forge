@@ -185,9 +185,6 @@ RECIPE_RUN_LOCK_VERDICTS: dict[str, dict[str, str]] = {
     "recipe_operations/job_run_stop.py": {
         "_stop_logical_job_run": "retain: exact logical Stop admission",
     },
-    "recipe_operations/reconciliation_authority.py": {
-        "_reconciliation_authority_in_session": "retain: authority binds inactive runs",
-    },
     "recipe_operations/start.py": {
         "enqueue_one_shot_job_in_session": "retain: capacity and current-run admission",
     },

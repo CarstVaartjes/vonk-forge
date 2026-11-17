@@ -431,8 +431,6 @@ def require_admissible(plan: RunPlan) -> None:
 def _active_recipe_revision(
     session: Session,
     revision_id: str | None,
-    *,
-    for_update: bool = False,
 ) -> CatalogDocumentRevision | None:
     """Load only an active canonical Recipe revision for run admission."""
 
@@ -443,8 +441,6 @@ def _active_recipe_revision(
         CatalogDocumentRevision.kind == "recipe",
         CatalogDocumentRevision.state == "active",
     )
-    if for_update:
-        statement = statement.with_for_update(of=CatalogDocumentRevision)
     return session.scalar(statement)
 
 
