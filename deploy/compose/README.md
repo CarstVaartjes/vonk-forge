@@ -136,6 +136,10 @@ Controller API image. On every start the API stages it into the
 restart with it. A pull and redeploy therefore rolls out configuration too; the
 installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
+Each of those services waits for its staged files for
+`VONK_RUNTIME_ASSET_WAIT_SECONDS` (one value in `compose.yaml`, 120) and then
+exits so the restart policy retries; the Controller API healthcheck
+`start_period` (2m) covers the same wait.
 The LiteLLM supervisor script comes from the API image, but the route
 activation contract it imports is baked into the LiteLLM image. Each may run
 with the other's previous release. Transitions follow deploy order, with no

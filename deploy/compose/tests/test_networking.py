@@ -57,7 +57,7 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
             "host_ip": "10.0.0.2",
         }
     ]
-    assert caddy["environment"] == {"VONK_CONTROL_HOSTNAME": "control.test.example"}
+    assert caddy["environment"]["VONK_CONTROL_HOSTNAME"] == "control.test.example"
 
 
 def test_litellm_has_no_network_path_from_control_services() -> None:
@@ -368,3 +368,15 @@ def test_caddy_disables_admin_and_sets_edge_guards() -> None:
     assert "source-bundles" not in text
     assert "Strict-Transport-Security" in text
     assert "X-Frame-Options" in text
+
+
+def test_control_api_waits_out_startup_and_asset_waits_have_one_owner() -> None:
+    services = _rendered()["services"]
+
+    assert services["control-api"]["healthcheck"]["start_period"] == "2m0s"
+    waiting = ["postgres", "litellm", "prometheus", "caddy", "registry"]
+    for name in waiting:
+        service = services[name]
+        text = str(service.get("entrypoint", "")) + str(service.get("command", ""))
+        assert "-ge 120" not in text
+        assert service["environment"]["VONK_RUNTIME_ASSET_WAIT_SECONDS"] == "120"
