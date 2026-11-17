@@ -61,7 +61,7 @@ from ..run_switch_contract import (
     RunSwitchStopResult,
 )
 from .artifact_validation import _validate_artifact_execution
-from .constants import _is_artifact_phase
+from .constants import _JOB_ACTIVATION, _is_artifact_phase
 from .errors import (
     RunSwitchInstallPreflightExpired,
     RunSwitchIssuedWorkloadPending,
@@ -83,9 +83,6 @@ from .result_helpers import _bound_workload_intent, _phase_result
 
 if TYPE_CHECKING:
     from .executor import RecipeLifecyclePhaseExecutor
-
-#: The child that activates a job recipe's run instead of starting a service.
-_JOB_ACTIVATION = "recipe.job.activate.v1"
 
 
 @contextmanager
