@@ -104,6 +104,11 @@ In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet
 types the words (the `web-not-reported` added-line guard enforces it). Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
 
+Startup schema reconciliation drops every table in the Controller's schema `public`
+that `Base.metadata` does not declare (except `alembic_version`), foreign keys
+first, no CASCADE. Never keep another tool's table there (LiteLLM has its own
+database). A rollback to an older Controller drops the tables a newer one added.
+
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or
 Ctrl-C stops observation; remote cancellation is explicit and retains its own

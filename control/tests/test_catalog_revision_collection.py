@@ -19,7 +19,16 @@ from typing import get_args
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import create_engine, delete, event, func, insert, select, text, update
+from sqlalchemy import (
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeBuildRequest, canonical_message
@@ -34,7 +43,6 @@ from vonk_control.catalog_revision_collection import (
     CatalogRevisionCollector,
 )
 from vonk_control.catalog_revision_contract import ModelRevisionProjection
-from vonk_control.db import verify_schema_is_current
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.models import (
     AgentNode,
@@ -1384,56 +1392,6 @@ def test_a_rescinded_slow_batch_skips_no_untried_row_on_postgres(
     assert collector._cursor is None
     assert catalog.exists(named)
     assert not any(catalog.exists(revision) for revision in (first, third, fourth))
-
-
-def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
-    postgres_engine: Engine,
-) -> None:
-    """Catches a retired table whose RESTRICT keys refuse the revision delete.
-
-    Controllers before the image-identity change wrote ``runtime_image_authorizations``
-    rows naming a revision and a build. The table is no longer defined, read or
-    written, and an upgraded database keeps it with its rows; startup releases its
-    keys so the rows can neither block nor be needed by the collector.
-    """
-
-    Base.metadata.create_all(postgres_engine)
-    catalog = Catalog(postgres_engine)
-    old, head = _refresh(catalog, "glm")
-    build = catalog.build(old)
-    catalog.build(head, updated=OLD + timedelta(hours=1))
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "CREATE TABLE runtime_image_authorizations ("
-                "id VARCHAR(36) PRIMARY KEY, "
-                "recipe_revision_id VARCHAR(36) NOT NULL, "
-                "build_id VARCHAR(36) NOT NULL, "
-                "CONSTRAINT fk_runtime_image_authorizations_recipe_revision "
-                "FOREIGN KEY (recipe_revision_id) "
-                "REFERENCES catalog_document_revisions (id) ON DELETE RESTRICT, "
-                "CONSTRAINT fk_runtime_image_authorizations_build "
-                "FOREIGN KEY (build_id) REFERENCES recipe_builds (id) "
-                "ON DELETE RESTRICT)"
-            )
-        )
-        connection.execute(
-            text(
-                "INSERT INTO runtime_image_authorizations "
-                "VALUES ('retained', :revision, :build)"
-            ),
-            {"revision": old, "build": build},
-        )
-        verify_schema_is_current(connection)
-
-    catalog.collector().collect()
-
-    assert not catalog.exists(old)
-    with postgres_engine.connect() as connection:
-        retained = connection.execute(
-            text("SELECT count(*) FROM runtime_image_authorizations")
-        ).scalar_one()
-    assert retained == 1
 
 
 def _model_depending_on(*digests: str) -> dict[str, object]:

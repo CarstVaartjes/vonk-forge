@@ -34,12 +34,10 @@ _TOLERATED_SCHEMA_DIFFERENCES = frozenset(
 _REPLACED_CONSTRAINT_NAMES = frozenset({"uq_control_process_heartbeats_kind"})
 
 
-# A table the model retired is kept with its rows (schema reconciliation never
-# drops data), but its foreign keys must not outlive it: a ``RESTRICT`` key
-# would refuse the deletion of the revision or build a retained row names. Every
-# key on a retired table is dropped, whatever it was named; nothing reads or
-# writes the table any more.
-_RETIRED_TABLES = frozenset({"runtime_image_authorizations"})
+# Tables in the Controller's schema that are not model tables and must stay.
+# LiteLLM keeps its own database (postgres/init-databases.sh), so only the
+# migration marker lives here.
+_FOREIGN_TABLES = frozenset({"alembic_version"})
 
 
 def _schema_difference_key(difference: tuple[object, ...]) -> tuple[str, str | None]:
@@ -316,16 +314,27 @@ def _repair_check_constraints(connection: Connection) -> None:
                     )
 
 
-def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> None:
-    """Drop the foreign keys of retired tables so their old rows never block."""
+def _drop_undeclared_tables(connection: Connection, ops: Any) -> None:
+    """Drop every table in the schema that the model no longer declares.
+
+    The rule, not a list: a table the code does not declare is nothing the
+    Controller reads or writes. Rolling back to an older Controller therefore
+    drops the tables a newer one added. Foreign keys go first so a RESTRICT key
+    cannot block a delete; the drop has no CASCADE, so a table a declared table
+    still references is refused, logged and retried on the next start.
+    """
 
     if connection.dialect.name != "postgresql":
         return
     from sqlalchemy import inspect
 
+    from ..models import Base
+
     inspector = inspect(connection)
-    live_tables = set(inspector.get_table_names())
-    for table_name in sorted(_RETIRED_TABLES & live_tables):
+    undeclared = sorted(
+        set(inspector.get_table_names()) - set(Base.metadata.tables) - _FOREIGN_TABLES
+    )
+    for table_name in undeclared:
         for key in inspector.get_foreign_keys(table_name):
             name = key["name"]
             if not name:
@@ -333,15 +342,19 @@ def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> Non
             try:
                 with connection.begin_nested():
                     ops.drop_constraint(name, table_name, type_="foreignkey")
-                _LOGGER.info("Dropped retired foreign key %s.%s", table_name, name)
             except SQLAlchemyError as error:
                 _reraise_contention(error)
                 _LOGGER.warning(
-                    "Could not drop retired foreign key %s.%s: %s",
-                    table_name,
-                    name,
-                    error,
+                    "Could not drop foreign key %s.%s: %s", table_name, name, error
                 )
+    for table_name in undeclared:
+        try:
+            with connection.begin_nested():
+                ops.drop_table(table_name)
+            _LOGGER.info("Dropped undeclared table %s", table_name)
+        except SQLAlchemyError as error:
+            _reraise_contention(error)
+            _LOGGER.warning("Could not drop undeclared table %s: %s", table_name, error)
 
 
 class SchemaDriftKind(StrEnum):
@@ -358,9 +371,9 @@ class SchemaDriftKind(StrEnum):
 SchemaDrift = dict[SchemaDriftKind, list[str]]
 
 
-# Every Alembic difference kind reconciliation has a rule for. Tables and
-# columns the model no longer declares are kept with their data, and an
-# obsolete index stays until its replacement exists; those are decisions, not
+# Every Alembic difference kind reconciliation has a rule for. Tables the model
+# no longer declares are dropped, columns it no longer declares are kept with
+# their data, and an obsolete index stays until its replacement exists; those are decisions, not
 # drift. Any other kind is reported as unhandled.
 _RECONCILED_DIFFERENCES = frozenset(
     {
