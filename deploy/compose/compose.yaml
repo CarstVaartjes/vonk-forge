@@ -7,13 +7,13 @@ x-bounded-logging: &bounded-logging
     max-size: 10m
     max-file: "5"
 
-# The Controller's whole site configuration. Everything else (secret paths,
-# internal relays, tuning) is fixed in code. Only the NAS address and the
-# control hostname are required; the rest heals to a sensible default.
 # Seconds each service waits for its staged runtime assets; the control-api
 # healthcheck start_period (2m) covers the same wait.
 x-runtime-asset-wait-seconds: &runtime-asset-wait-seconds "120"
 
+# The Controller's whole site configuration. Everything else (secret paths,
+# internal relays, tuning) is fixed in code. Only the NAS address and the
+# control hostname are required; the rest heals to a sensible default.
 x-control-environment: &control-environment
   VONK_PROMETHEUS_URL: http://prometheus:9090
   VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
