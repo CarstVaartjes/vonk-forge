@@ -140,15 +140,6 @@ class FakeLifecycle:
         assert actor == ACTOR and workload_intent_ordinal is not None
         self.stopped.append(run_id)
 
-    def preview_uninstall(
-        self, installation_id: str, *, also_removing=(), preserve_model_files=False
-    ):
-        # The sweep has judged the installation unused; a load can still
-        # arrive before the removal is queued.
-        if self._between is not None:
-            self._between(installation_id)
-        return SimpleNamespace(allowed=True, blockers=(), plan_digest="f" * 64)
-
     def uninstall(
         self,
         installation_id: str,
@@ -161,6 +152,10 @@ class FakeLifecycle:
     ) -> None:
         assert actor == ACTOR and unattended_guard is not None
         assert preserve_model_files
+        # The sweep has judged the installation unused; a load can still
+        # arrive before the removal is queued.
+        if self._between is not None:
+            self._between(installation_id)
         self.also_removing[installation_id] = tuple(sorted(also_removing))
         if installation_id in self._refuse:
             raise RecipeOperationConflict("refused")
@@ -3020,7 +3015,7 @@ def test_a_request_that_removal_can_meet_is_reported_as_evicting(
     assert (relief.needed_bytes, relief.freeable_bytes) == (50 * GIB, 240 * GIB)
 
 
-@pytest.mark.parametrize("failure", ["refused", "blocked", "deferred"])
+@pytest.mark.parametrize("failure", ["refused", "deferred"])
 def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     world: Catalog, monkeypatch, failure: str
 ) -> None:
@@ -3036,16 +3031,8 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     stuck, _ = world.workload(old, run="stopped")
     _size(world, stuck, 80 * GIB)
     lifecycle = FakeLifecycle(world.sessions)
-    preview, uninstall = lifecycle.preview_uninstall, lifecycle.uninstall
+    uninstall = lifecycle.uninstall
     failing = [True]
-
-    def refusing_preview(installation_id, **kwargs):
-        if failure == "blocked" and failing[0]:
-            code = "recipe.uninstall.rank_membership_changed"
-            return SimpleNamespace(
-                allowed=False, blockers=(SimpleNamespace(code=code),)
-            )
-        return preview(installation_id, **kwargs)
 
     def refusing_uninstall(installation_id, **kwargs):
         if failure == "refused" and failing[0]:
@@ -3056,7 +3043,6 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
             )
         return uninstall(installation_id, **kwargs)
 
-    monkeypatch.setattr(lifecycle, "preview_uninstall", refusing_preview)
     monkeypatch.setattr(lifecycle, "uninstall", refusing_uninstall)
     collector = _collector(
         world, lifecycle, free=400 * GIB, demands=StorageDemands(lambda: world.now)
@@ -3080,9 +3066,7 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     else:
         assert told.code == STORAGE_INSUFFICIENT
         assert told.freeable_bytes == 0
-        assert (failure if failure == "refused" else "uninstall blocked") in (
-            told.detail
-        )
+        assert "refused" in told.detail
 
     # It heals by itself: a later pass that can remove it does.
     failing[0] = False

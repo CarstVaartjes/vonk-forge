@@ -78,13 +78,11 @@ class RemovalReviewMixin:
                 return replay
         digest = cache._resolve_model_selector(selector)
         manifest = cache.resolve_artifact_set(model_content_sha256=digest)
-        preview = cache._download_preview_for_manifest(manifest)
         # A capacity blocker is a wait, not a refusal: start_download queues the
         # operation, which is claimed once the space it needs exists.
         return cache.start_download(
             actor=actor,
             request_key=request_key,
-            plan_digest=str(preview["plan_digest"]),
             artifact_set_sha256=manifest.digest,
             model_content_sha256=digest,
             selector=selector,

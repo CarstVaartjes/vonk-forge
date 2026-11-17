@@ -1128,7 +1128,6 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
     )
     assert result.operation_id == cache_view.id
     assert _call_argument(calls[0], "preview")["artifact_set_sha256"] == "d" * 64
-    assert _call_argument(calls[1], "start")["plan_digest"] == "e" * 64
     replay = executor.execute(
         plan,
         phase,
@@ -1209,15 +1208,9 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         "roles": ["model"],
         "model_content_sha256": model_content_sha256,
     }
-    seed_preview = service.download_preview(
-        model_content_sha256=model_content_sha256,
-        recipe_revision_sha256=recipe_digest,
-        artifacts=[artifact],
-    )
     seeded = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000011",
-        plan_digest=str(seed_preview["plan_digest"]),
         model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=[artifact],
@@ -1360,7 +1353,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     seeded = cache.start_download(
         actor="operator",
         request_key=cache_request,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_digest,
         artifacts=artifacts,

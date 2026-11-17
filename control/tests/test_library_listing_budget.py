@@ -515,7 +515,6 @@ def _queued_download_progress(sessions, tmp_path, cache):
     cache.start_download(
         actor="test",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         recipe_revision_id=recipe.identity.recipe_revision_id,
     )
     listed = projection.recipe_library(assess=False).recipes[0].local
@@ -1101,13 +1100,9 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
             assert pages[2].models[0].local.controller == expected
         else:
             assert pages[2].models == []
-            preview = cache.download_preview(
-                model_content_sha256=digest, artifacts=artifacts
-            )
             fresh = cache.start_download(
                 actor="test",
                 request_key=str(uuid.uuid4()),
-                plan_digest=str(preview["plan_digest"]),
                 model_content_sha256=digest,
                 artifacts=artifacts,
             )

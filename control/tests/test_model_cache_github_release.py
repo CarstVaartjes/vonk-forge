@@ -198,7 +198,6 @@ def _preview_and_start(
     operation = service.start_download(
         actor="operator",
         request_key=request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=digest,
         **kwargs,
     )
@@ -523,11 +522,9 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
 
     client = _client(_serve_release_and_asset(data, requests, cdn_handler=cdn))
     service = _service(sessions, tmp_path / "resume-cache", client)
-    preview = service.download_preview(model_content_sha256=digest)
     interrupted = service.start_download(
         actor="operator",
         request_key="00000000-0000-4000-8000-000000001203",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=digest,
         interrupt_after_bytes=1_100_000,
     )

@@ -835,17 +835,10 @@ class FleetRemovalMixin:
                             return False
                         pending = f"Waiting for uninstall {child.id}; its existing worker owns recovery."
                         continue
-                # Re-plan on conflict, once per worker pass. New references
-                # shrink the permitted effects; they never expand consent.
-                plan = lifecycle.preview_uninstall(
-                    installation_id, preserve_model_files=True
-                )
-                if not plan.allowed:
-                    pending = "Installation is now protected: " + "; ".join(
-                        item.detail for item in plan.blockers
-                    )
-                    continue
 
+                # Re-plan on conflict, once per worker pass: uninstall plans
+                # for itself. New references shrink the permitted effects;
+                # they never expand consent.
                 def unused(
                     session: Session, installation_id: str = installation_id
                 ) -> None:
@@ -870,7 +863,7 @@ class FleetRemovalMixin:
                 except RecipeRequestInvalid as error:
                     if error.typed_reason != InvalidRequestReason.SUPERSEDED:
                         raise
-                    pending = f"Uninstall {installation_id} changed during admission; next attempt derives a fresh plan."
+                    pending = f"Uninstall {installation_id} refused: {error}"
                     continue
                 pending = f"Waiting for uninstall {installation_id} and exact Spark confirmation."
         if pending is None:

@@ -125,11 +125,9 @@ def test_missing_managed_model_object_is_redownloaded_without_rebuilding_image(
         fixture_sources=True,
         http_client=client,
     )
-    preview = cache.download_preview(recipe_revision_id=recipe_revision_id)
     seeded = cache.start_download(
         actor="operator",
         request_key="00000000-0000-4000-8000-000000000801",
-        plan_digest=str(preview["plan_digest"]),
         recipe_revision_id=recipe_revision_id,
     )
     _drain(cache, seeded.id)

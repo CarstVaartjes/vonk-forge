@@ -134,13 +134,9 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
         for spec in single.artifacts
     )
     # A manifest returned by resolution need not already have a set row.
-    single_preview = cache.download_preview(
-        model_content_sha256=single.model_content_sha256
-    )
     seeded = cache.start_download(
         actor="operator",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(single_preview["plan_digest"]),
         model_content_sha256=single.model_content_sha256,
     )
     cache.run_pending()

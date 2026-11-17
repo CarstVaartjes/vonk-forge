@@ -46,12 +46,6 @@ def _uninstall(
 
     others = tuple(item for item in group if item != installation_id)
     self._stop_failed_runs(installation_id)
-    plan = self._lifecycle.preview_uninstall(
-        installation_id, also_removing=others, preserve_model_files=True
-    )
-    if not plan.allowed:
-        code = plan.blockers[0].code if plan.blockers else "not allowed"
-        raise _Kept(f"uninstall blocked ({code})")
 
     def still_unused(session: Session) -> None:
         reason = _installation_kept(

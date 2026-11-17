@@ -487,26 +487,6 @@ def parse_model_cache_payload(
         raise ValueError(f"invalid {kind} model cache operation payload") from error
 
 
-class ModelCacheDownloadRequest(StrippedStrictModel):
-    schema_version: Literal[2] = 2
-    request_key: str = Field(pattern=UUID_PATTERN)
-    plan_digest: Digest
-    artifact_set_sha256: Digest | None = None
-    model_content_sha256: Digest | None = None
-    recipe_revision_sha256: Digest | None = None
-    recipe_revision_id: str | None = Field(default=None, min_length=1, max_length=128)
-    source_policy: Literal["nas-first"] = "nas-first"
-
-    @model_validator(mode="after")
-    def recipe_identity_is_unambiguous(self) -> ModelCacheDownloadRequest:
-        if (
-            self.recipe_revision_sha256 is not None
-            and self.recipe_revision_id is not None
-        ):
-            raise ValueError("recipe revision digest and ID cannot both be supplied")
-        return self
-
-
 class ModelCacheDownloadPreviewRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest | None = None
@@ -530,24 +510,9 @@ class ModelCacheRepairPreviewRequest(StrippedStrictModel):
     artifact_set_sha256: Digest
 
 
-class ModelCacheRepairRequest(StrippedStrictModel):
-    schema_version: Literal[2] = 2
-    request_key: str = Field(pattern=UUID_PATTERN)
-    artifact_set_sha256: Digest
-    plan_digest: Digest
-    source_policy: Literal["nas-first"] = "nas-first"
-
-
 class ModelCacheRetryRequest(StrippedStrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
-
-
-class ModelCacheAccessResumeRequest(StrippedStrictModel):
-    schema_version: Literal[2] = 2
-    request_key: str = Field(pattern=UUID_PATTERN)
-    artifact_set_sha256: Digest
-    plan_digest: Digest
 
 
 class ModelCacheOperatorRequest(StrippedStrictModel):
@@ -903,14 +868,12 @@ __all__ = [
     "CachedRecipeResolution",
     "CachedResourceEstimate",
     "ModelCacheAccessRecheck",
-    "ModelCacheAccessResumeRequest",
     "ModelCacheCancellation",
     "ModelCacheCancellationRequest",
     "ModelCacheCoverage",
     "ModelCacheDownloadPayload",
     "ModelCacheDownloadPreviewRequest",
     "ModelCacheDownloadPreviewResponse",
-    "ModelCacheDownloadRequest",
     "ModelCacheDownloadResult",
     "ModelCacheEntryState",
     "ModelCacheIngressMismatch",
@@ -933,7 +896,6 @@ __all__ = [
     "ModelCacheRepairPayload",
     "ModelCacheRepairPreviewRequest",
     "ModelCacheRepairPreviewResponse",
-    "ModelCacheRepairRequest",
     "ModelCacheRetry",
     "ModelCacheRetryRequest",
     "ModelCacheTransfer",

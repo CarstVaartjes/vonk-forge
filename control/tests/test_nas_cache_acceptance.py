@@ -104,15 +104,9 @@ def _download(
     recipe_revision_sha256: str,
     request_key: str,
 ):
-    preview = cache.download_preview(
-        model_content_sha256=model_content_sha256,
-        recipe_revision_sha256=recipe_revision_sha256,
-        artifacts=artifacts,
-    )
     operation = cache.start_download(
         actor="acceptance",
         request_key=request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_content_sha256,
         recipe_revision_sha256=recipe_revision_sha256,
         artifacts=artifacts,
@@ -648,14 +642,9 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(
     expected = b"declared metadata"
     artifact["sha256"] = hashlib.sha256(expected).hexdigest()
     artifact["download_bytes"] = len(expected)
-    preview = cache.download_preview(
-        model_content_sha256="c" * 64,
-        artifacts=[artifact],
-    )
     operation = cache.start_download(
         actor="acceptance",
         request_key="00000000-0000-4000-8000-000000000105",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="c" * 64,
         artifacts=[artifact],
     )

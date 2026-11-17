@@ -284,7 +284,6 @@ class CompositeDistributionPhaseExecutor(
         view = start_method(
             actor=actor,
             request_key=cache_request_key,
-            plan_digest=preview.plan_digest,
             **pins,
         )
         return PhaseExecution(

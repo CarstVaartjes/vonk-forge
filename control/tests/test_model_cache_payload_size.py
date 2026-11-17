@@ -46,11 +46,9 @@ def _files(root: Path, count: int) -> list[dict[str, object]]:
 
 
 def _start(service, artifacts, request_key: str):
-    preview = service.download_preview(model_content_sha256=_MODEL, artifacts=artifacts)
     return service.start_download(
         actor="test",
         request_key=request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=_MODEL,
         artifacts=artifacts,
     )

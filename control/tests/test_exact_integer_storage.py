@@ -826,14 +826,10 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
             )
             artifact["download_bytes"] = expected
             assert draft.content_digest is not None
-            preview = cache.download_preview(
-                artifacts=[artifact], model_content_sha256=draft.content_digest
-            )
             request_key = str(uuid.uuid4())
             receipt = cache.start_download(
                 actor="operator",
                 request_key=request_key,
-                plan_digest=str(preview["plan_digest"]),
                 artifacts=[artifact],
                 model_content_sha256=draft.content_digest,
             )

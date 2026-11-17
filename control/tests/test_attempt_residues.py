@@ -751,12 +751,7 @@ def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
             assert row is not None
             row.state = "uninstalled"
 
-    removal = SimpleNamespace(
-        preview_uninstall=lambda owner: SimpleNamespace(
-            allowed=True, plan_digest="exact"
-        ),
-        uninstall=uninstall,
-    )
+    removal = SimpleNamespace(uninstall=uninstall)
     reconciler = AttemptResidueReconciler(
         catalog.sessions,
         abandon_never_installed=uninstall

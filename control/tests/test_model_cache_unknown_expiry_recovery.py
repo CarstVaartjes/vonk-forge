@@ -43,13 +43,9 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
     )
     restarted: ModelCacheService | None = None
     try:
-        preview = service.download_preview(
-            model_content_sha256=model_digest, artifacts=[artifact]
-        )
         original = service.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(preview["plan_digest"]),
             model_content_sha256=model_digest,
             artifacts=[artifact],
         )
@@ -119,13 +115,9 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             assert (
                 restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
             )
-        reviewed = restarted.download_preview(
-            model_content_sha256=model_digest, artifacts=[artifact]
-        )
         fresh = restarted.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(reviewed["plan_digest"]),
             model_content_sha256=model_digest,
             artifacts=[artifact],
         )
@@ -160,13 +152,9 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
 
         # The conservative read must also leave a normal, confirmed cancellation
         # recoverable. It cannot turn UNKNOWN into a permanent admission blocker.
-        confirmed_preview = restarted.download_preview(
-            model_content_sha256=model_digest, artifacts=[artifact]
-        )
         confirmed = restarted.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(confirmed_preview["plan_digest"]),
             model_content_sha256=model_digest,
             artifacts=[artifact],
         )
@@ -253,13 +241,9 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             )
         # Verified storage, not a terminal word, proves reusable exact bytes.
         Path(unquote(urlsplit(str(artifact["source"])).path)).unlink()
-        reusable_preview = restarted.download_preview(
-            model_content_sha256=model_digest, artifacts=[artifact]
-        )
         reusable = restarted.start_download(
             actor="operator",
             request_key=str(uuid4()),
-            plan_digest=str(reusable_preview["plan_digest"]),
             model_content_sha256=model_digest,
             artifacts=[artifact],
         )

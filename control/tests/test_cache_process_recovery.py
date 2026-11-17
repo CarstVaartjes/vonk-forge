@@ -174,15 +174,11 @@ def test_model_worker_death_resumes_real_prefix_and_fresh_cli_reconnects(
     )
     data = bytes(range(256)) * 16000
     artifact = _artifact(tmp_path, data, model_content_sha256="c" * 64)
-    preview = service.download_preview(
-        model_content_sha256="c" * 64, artifacts=[artifact]
-    )
     key = str(uuid.uuid4())
     accepted = service.start_download(
         actor="test",
         request_key=key,
         selector="cached-model",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="c" * 64,
         artifacts=[artifact],
     )

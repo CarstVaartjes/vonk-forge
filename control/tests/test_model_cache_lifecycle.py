@@ -59,11 +59,9 @@ def _clock_at(service: ModelCacheService, start: datetime | None = None):
 
 def _queue(service: ModelCacheService, tmp_path: Path, key: str, data: bytes = b"x"):
     artifact = _artifact(tmp_path, data, model_content_sha256=MODEL)
-    preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     operation = service.start_download(
         actor="test",
         request_key=key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=MODEL,
         artifacts=[artifact],
     )
@@ -249,11 +247,9 @@ def test_a_consumer_of_a_cancelled_shared_download_asks_again_and_gets_a_fresh_o
 
 def _queue_forced(service, tmp_path, *, force: bool):
     artifact = _artifact(tmp_path, b"x", model_content_sha256=MODEL)
-    preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     return service.start_download(
         actor="test",
         request_key=str(uuid.uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=MODEL,
         artifacts=[artifact],
         force=force,
@@ -638,7 +634,6 @@ def test_a_stored_object_is_reused_by_the_next_download_not_fetched(cache, tmp_p
     operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-00000000a061",
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=MODEL,
         artifacts=[artifact],
     )

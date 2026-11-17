@@ -16,13 +16,9 @@ from .test_model_cache import cache as cache  # noqa: PLC0414 -- pytest fixture
 
 
 def _start(service, artifact):
-    preview = service.download_preview(
-        model_content_sha256="a" * 64, artifacts=[artifact]
-    )
     return service.start_download(
         actor="test",
         request_key=str(uuid4()),
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256="a" * 64,
         artifacts=[artifact],
     )

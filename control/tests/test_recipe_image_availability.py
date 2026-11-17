@@ -3599,7 +3599,6 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
         return
     assert len(model_cache.repair_calls) == 1
     assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
-    assert model_cache.repair_calls[0]["plan_digest"] == "e" * 64
 
     completed = service.get(parent.id)
     assert completed.state == "succeeded"
@@ -4014,13 +4013,9 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
             f"vonk:recipe-availability-model:{revision_id}:{parent_request_id}",
         )
     )
-    preview = cache.download_preview(
-        model_content_sha256=model_digest, artifacts=[artifact]
-    )
     child = cache.start_download(
         actor="operator",
         request_key=child_request_key,
-        plan_digest=str(preview["plan_digest"]),
         model_content_sha256=model_digest,
         artifacts=[artifact],
         interrupt_after_bytes=1,
