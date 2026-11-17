@@ -103,9 +103,6 @@ _OPERATION_KINDS = frozenset(
 )
 
 
-#: The child that activates a job recipe's run instead of starting a service.
-
-
 _MEMORY_CAPACITY_REFUSALS = frozenset(
     {
         f"run-switch.{ResourceBlockerCode.INSUFFICIENT_CAPACITY}",

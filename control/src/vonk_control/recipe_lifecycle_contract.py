@@ -136,7 +136,7 @@ RecipeLifecycleResult = (
 def parse_recipe_lifecycle_result(kind: str, value: object) -> RecipeLifecycleResult:
     """Validate one persisted lifecycle result against its operation kind."""
 
-    if kind == "recipe.job.activate.v1":
+    if kind == JOB_ACTIVATION:
         models = (RecipeOperationActivatedResult,)
     elif kind == "recipe.stop":
         models = (

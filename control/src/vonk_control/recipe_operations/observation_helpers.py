@@ -63,6 +63,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_plan,
     parse_stored_build_policy,
 )
+from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
@@ -194,7 +195,7 @@ _RECIPE_PARENT_READERS: dict[str, TypeAdapter[RecipeParent]] = {
     WireAgentOperation.RECIPE_UNINSTALL.value: TypeAdapter(RecipeUninstallParent),
     WireAgentOperation.RECIPE_RECONCILE.value: TypeAdapter(RecipeReconcileParent),
     WireAgentOperation.RECIPE_JOB_RUN.value: TypeAdapter(RecipeJobRunParent),
-    "recipe.job.activate.v1": TypeAdapter(RecipeJobActivateParent),
+    JOB_ACTIVATION: TypeAdapter(RecipeJobActivateParent),
     WireAgentOperation.RECIPE_BUILD.value: TypeAdapter(RecipeBuildParent),
     WireAgentOperation.RECIPE_BUILD_CLEANUP.value: TypeAdapter(
         RecipeBuildCleanupParent

@@ -44,6 +44,7 @@ from ..recipe_execution_contract import (
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
+from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..recipe_progress import (
     _catalog_recipe as _catalog_recipe,  # noqa: PLC0414 -- shared helper export
 )
@@ -251,7 +252,7 @@ def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
             session.scalar(
                 select(Job.id)
                 .where(
-                    Job.kind == "recipe.job.activate.v1",
+                    Job.kind == JOB_ACTIVATION,
                     Job.owner_kind == "run",
                     Job.owner_id == run.id,
                 )
