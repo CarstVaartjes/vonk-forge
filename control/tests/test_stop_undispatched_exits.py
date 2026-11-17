@@ -55,7 +55,11 @@ class _Sessions:
         return self
 
     def __enter__(self):
-        return SimpleNamespace(get=lambda *_a, **_k: _Row(), flush=lambda: None)
+        # Not PostgreSQL, so the admission lock timeout is not set.
+        sqlite = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+        return SimpleNamespace(
+            get=lambda *_a, **_k: _Row(), flush=lambda: None, get_bind=lambda: sqlite
+        )
 
     def __exit__(self, *_exc):
         return False
