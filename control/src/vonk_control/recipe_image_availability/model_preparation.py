@@ -24,7 +24,6 @@ from ..job_documents import (
 from ..model_cache_contract import (
     CacheManifest,
     ModelCacheOperationProgress,
-    ModelCacheRepairPreviewResponse,
 )
 from ..model_cache_progress import project_cache_progress
 from ..operation_blockers import OperationBlocker
@@ -243,24 +242,11 @@ def _start_model_repair(
             recovery_actions=("retry",),
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    repair_preview = getattr(self._model_cache, "repair_preview", None)
     start_repair = getattr(self._model_cache, "start_repair", None)
-    if repair_preview is None or start_repair is None:
+    if start_repair is None:
         raise RecipeImageAvailabilityUnknown(
             RecipeImageCode.MODEL_CACHE_UNAVAILABLE,
             "ModelCache does not expose the canonical repair workflow",
-            retryable=True,
-            recovery_actions=("retry",),
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    preview = _read(
-        ModelCacheRepairPreviewResponse, repair_preview(artifact_set_sha256)
-    )
-    plan_digest = preview.plan_digest if preview else None
-    if not isinstance(plan_digest, str):
-        raise RecipeImageAvailabilityUnknown(
-            RecipeImageCode.MODEL_CACHE_INVALID,
-            "ModelCache returned an incomplete repair plan",
             retryable=True,
             recovery_actions=("retry",),
             reason=WaitReason.OBSERVATION_UNAVAILABLE,

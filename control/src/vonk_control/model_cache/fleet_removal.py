@@ -859,7 +859,7 @@ class FleetRemovalMixin:
                 except RecipeRequestInvalid as error:
                     if error.typed_reason != InvalidRequestReason.SUPERSEDED:
                         raise
-                    pending = f"Uninstall {installation_id} changed during admission; next attempt derives a fresh plan."
+                    pending = f"Uninstall {installation_id} refused: {error}"
                     continue
                 pending = f"Waiting for uninstall {installation_id} and exact Spark confirmation."
         if pending is None:
