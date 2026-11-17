@@ -65,6 +65,8 @@ REQUIRED_PAYLOAD = {
     "usr/share/keyrings/vonk-forge-release.pub",
 }
 REQUIRED_CONTROL = {"control", "conffiles", "md5sums", "postinst", "preinst", "prerm"}
+#: The pinned repair package ships none of these; only an ordinary package does.
+ORDINARY_ONLY_CONTROL = {"postrm"}
 REPAIR_PROBE_CONTROL = "vonk-repair-helper.probe"
 FORBIDDEN_MAINTAINER = re.compile(
     rb"(?:\bcurl\b|\bwget\b|\bgit\s+(?:clone|pull|fetch)\b|https?://|\bapt(?:-get)?\b)",
@@ -444,7 +446,9 @@ def _verify_control(
 ) -> None:
     entries = {path.name: path for path in control.iterdir()}
     names = set(entries)
-    if not REQUIRED_CONTROL.issubset(names):
+    if not REQUIRED_CONTROL.issubset(names) or (
+        not repair and not ORDINARY_ONLY_CONTROL.issubset(names)
+    ):
         raise VerificationError("Debian control archive is incomplete")
     if repair:
         expected_names = REQUIRED_CONTROL | {REPAIR_PROBE_CONTROL}
@@ -497,7 +501,7 @@ def _verify_control(
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
     if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
         raise VerificationError("package conffile set is invalid")
-    for name in ("postinst", "preinst", "prerm"):
+    for name in ("postinst", "preinst", "prerm", *(() if repair else ("postrm",))):
         raw = (control / name).read_bytes()
         mode = stat.S_IMODE((control / name).stat().st_mode)
         if mode != 0o755 or FORBIDDEN_MAINTAINER.search(raw):

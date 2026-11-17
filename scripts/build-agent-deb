@@ -1414,6 +1414,12 @@ def build(
             install_file(
                 stage, f"DEBIAN/{name}", source(f"packaging/debian/{name}"), 0o755
             )
+        if repair_probe is None:
+            # The repair package is pinned to its recorded packaging source and
+            # carries no postrm; an ordinary package purges its unit state.
+            install_file(
+                stage, "DEBIAN/postrm", source("packaging/debian/postrm"), 0o755
+            )
         postinst = repair_postinst or source("packaging/debian/postinst").replace(
             b"@VERSION@", version.encode()
         )
