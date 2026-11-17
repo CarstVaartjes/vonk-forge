@@ -388,7 +388,7 @@ class ResolvedRecipe:
 
 
 def resolve_recipe_entities(
-    session: Session, document: Mapping[str, object], *, content_digest: str
+    session: Session, document: object, *, content_digest: str
 ) -> ResolvedRecipe:
     """Resolve a canonical recipe and its exact active Model revisions.
 
@@ -396,6 +396,8 @@ def resolve_recipe_entities(
     document is not hashed again.
     """
     try:
+        if not isinstance(document, Mapping):
+            raise TypeError("recipe document is not a mapping")
         recipe = read_recipe(document)
     except (TypeError, ValueError) as error:
         raise RecipeRuntimeSpecError(
