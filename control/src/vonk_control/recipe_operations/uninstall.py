@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
+from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
@@ -31,6 +32,7 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
+from ..agent_operation_facts import aware
 from ..install_admission import (
     InstallAdmissionBusy,
 )
@@ -339,7 +341,7 @@ class UninstallMixin:
         return service.get(job.id)
 
     def abandon_never_installed(
-        self, installation_id: str
+        self, installation_id: str, *, untouched_since: datetime | None = None
     ) -> RecipeInstallationAbandonResult:
         """Resolve a persisted plan that never reached a node.
 
@@ -349,8 +351,10 @@ class UninstallMixin:
         bytes, only the admission record and its disk reservation.  The
         assessment is re-derived under the installation row lock, so a
         concurrent install turns this into a refusal rather than a silent
-        state flip.  The installation row and its immutable plan are retained,
-        so the history stays auditable.
+        state flip.  With ``untouched_since`` a row touched after it (an adoption
+        stamps ``updated_at`` under this lock) is refused the same way.  The
+        installation row and its immutable plan are retained, so the history
+        stays auditable.
         """
         service = typing_cast("RecipeOperationService", self)
 
@@ -370,6 +374,13 @@ class UninstallMixin:
                 return RecipeInstallationAbandonResult(
                     installation_id=installation_id,
                     disposition=RecipeInstallationDisposal.ABANDONED,
+                )
+            if untouched_since is not None and aware(installation.updated_at) > aware(
+                untouched_since
+            ):
+                raise RecipeRequestInvalid(
+                    "installation was adopted meanwhile; it cannot be abandoned",
+                    reason=InvalidRequestReason.UNSUPPORTED,
                 )
             plan = service._uninstall_plan_in_session(
                 session, installation_id, lock=True
