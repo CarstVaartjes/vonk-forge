@@ -4,7 +4,9 @@
 //! weights a load just read through the page cache as used, and a start dies
 //! with NVRM allocation failures while gigabytes are still reclaimable. The
 //! agent peer asks; the helper syncs within a bound and drops the clean page
-//! cache. Nothing here refuses a start: a drop that cannot happen is reported.
+//! cache. The first ask of a load phase also compacts memory once
+//! (`crate::compaction`). Nothing here refuses a start: a drop that cannot
+//! happen is reported.
 use std::{
     fs::OpenOptions,
     io::{ErrorKind, Write},
@@ -19,8 +21,10 @@ use vonk_agent_protocol::generated::{
     ResourceTermProblem,
 };
 use vonk_agent_protocol::host_memory_guard_policy::{
-    LOADING_PHASE_WINDOW, PAGE_CACHE_SYNC_TIMEOUT,
+    LOADING_PHASE_WINDOW, MEMORY_COMPACTION_TIMEOUT, PAGE_CACHE_SYNC_TIMEOUT,
 };
+
+use crate::compaction::CompactionLane;
 
 use crate::host_memory_guard::meminfo_bytes;
 use crate::protocol::{GrantVerifier, HelperError, PeerIdentity};
@@ -89,6 +93,7 @@ impl SyncLane {
 }
 
 static SYNC: SyncLane = SyncLane::new(rustix::fs::sync);
+static COMPACTION: CompactionLane = CompactionLane::new(crate::compaction::write_compact_memory);
 
 /// Sync within `bound`, drop, and read `Cached` around it. Never fails: a drop
 /// that could not happen is the report's problem.
@@ -108,6 +113,7 @@ pub fn drop_page_cache(
                 "vonk-agent-helper: page cache drop request={request_id} answered at once: an earlier drop has not returned"
             );
             return PageCacheDropReport {
+                compaction: None,
                 request_id,
                 dropped_at: chrono::Utc::now().fixed_offset(),
                 cached_before_bytes: meminfo_bytes(&now, "Cached:"),
@@ -133,6 +139,7 @@ pub fn drop_page_cache(
         });
     let after = meminfo();
     let report = PageCacheDropReport {
+        compaction: None,
         request_id,
         dropped_at: chrono::Utc::now().fixed_offset(),
         cached_before_bytes: meminfo_bytes(&before, "Cached:"),
@@ -168,11 +175,23 @@ pub fn drop_page_cache(
 /// one owner of "a load is in progress" for the host memory guard.
 static LAST_LOAD_ASK: Mutex<Option<Instant>> = Mutex::new(None);
 
-fn record_load_ask(now: Instant) {
-    let mut last = LAST_LOAD_ASK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+/// Records an ask; true when it starts a load phase.
+fn record_load_ask(now: Instant) -> bool {
+    enter(
+        &mut LAST_LOAD_ASK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        now,
+    )
+}
+
+/// An ask starts a load phase when none came within `LOADING_PHASE_WINDOW`
+/// before it; deciding and recording under one lock lets only one of two
+/// simultaneous first asks start it.
+fn enter(last: &mut Option<Instant>, now: Instant) -> bool {
+    let entering = !loading_since(*last, now);
     *last = Some(last.map_or(now, |previous| previous.max(now)));
+    entering
 }
 
 /// Whether a load asked within `LOADING_PHASE_WINDOW`. A silent agent (dead,
@@ -201,13 +220,19 @@ pub fn handle(
     };
     verifier.authorize_peer(peer)?;
     // Heard at the ask and again at its answer: a slow drop never reads as a
-    // finished load.
-    record_load_ask(Instant::now());
-    let report = drop_page_cache(
+    // finished load. Only the first ask after a quiet window compacts.
+    let entering = record_load_ask(Instant::now());
+    let mut report = drop_page_cache(
         Path::new("/"),
         &SYNC,
         PAGE_CACHE_SYNC_TIMEOUT,
         request.request_id,
+    );
+    report.compaction = COMPACTION.for_load(
+        Path::new("/"),
+        entering,
+        MEMORY_COMPACTION_TIMEOUT,
+        rustix::param::page_size() as u64,
     );
     record_load_ask(Instant::now());
     Ok(Some(report))
@@ -224,6 +249,19 @@ mod tests {
     };
 
     #[test]
+    fn only_the_first_ask_after_a_quiet_window_starts_a_load_phase() {
+        // Break caught: compacting on every drop of a load's cadence, under the
+        // workloads already serving.
+        use vonk_agent_protocol::host_memory_guard_policy::PAGE_CACHE_DROP_INTERVAL;
+        let (mut last, ask) = (None, Instant::now());
+        assert!(enter(&mut last, ask));
+        assert!(!enter(&mut last, ask + PAGE_CACHE_DROP_INTERVAL));
+        assert!(!enter(&mut last, ask + 2 * PAGE_CACHE_DROP_INTERVAL));
+        let quiet = ask + 2 * PAGE_CACHE_DROP_INTERVAL + LOADING_PHASE_WINDOW;
+        assert!(enter(&mut last, quiet + Duration::from_millis(1)));
+    }
+
+    #[test]
     fn the_drop_cadence_marks_a_load_until_it_falls_silent() {
         let ask = Instant::now();
         assert!(!loading_since(None, ask));
@@ -238,6 +276,11 @@ mod tests {
             PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
         };
         assert!(LOADING_PHASE_WINDOW > PAGE_CACHE_DROP_INTERVAL + PAGE_CACHE_DROP_REPLY_TIMEOUT);
+        // The phase's first ask (sync, drop, compaction) answers before the
+        // agent stops waiting.
+        assert!(
+            PAGE_CACHE_SYNC_TIMEOUT + MEMORY_COMPACTION_TIMEOUT < PAGE_CACHE_DROP_REPLY_TIMEOUT
+        );
     }
 
     const MEMINFO: &str =

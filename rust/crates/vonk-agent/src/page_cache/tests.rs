@@ -6,6 +6,7 @@ const GIB: u64 = 1024 * 1024 * 1024;
 
 fn report(problem: Option<PageCacheDropProblem>) -> PageCacheDropReport {
     PageCacheDropReport {
+        compaction: None,
         request_id: Uuid::new_v4(),
         dropped_at: Utc::now().fixed_offset(),
         cached_before_bytes: problem.is_none().then_some(9 * GIB),

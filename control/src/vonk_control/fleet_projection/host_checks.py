@@ -158,8 +158,9 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                 explanation=(
                     "The GPU driver takes unified memory in physically contiguous "
                     "blocks of 2 MiB or more, so a load can run short while smaller "
-                    "free blocks remain. Compaction regroups free memory; run it while "
-                    "no workload is loading."
+                    "free blocks remain. Compaction regroups free memory: the helper "
+                    "compacts once whenever loading starts on this Spark; to compact "
+                    "now, run this while no workload is loading."
                 ),
                 commands=[_COMPACT_COMMAND],
             )

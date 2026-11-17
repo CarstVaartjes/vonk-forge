@@ -14,4 +14,5 @@ pub mod host_memory_guard;
 
 pub mod display_memory;
 
+pub mod compaction;
 pub mod page_cache;
