@@ -118,6 +118,6 @@ class StartCleanupDispatch:
                 cleanup.run_id,
                 exc_info=True,
             )
-            return
-        if queued:
-            service._agent_jobs.notify_available()
+        else:
+            if queued:
+                service._agent_jobs.notify_available()

@@ -2542,10 +2542,12 @@ def test_failed_start_result_commits_when_cleanup_admission_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A refused admission never rolls the failed Start's result back: the run is
-    left ``stopping`` and the same cleanup request queues its Stop later."""
+    left ``stopping`` and the orphaned-run reaper queues its Stop after the grace."""
+    from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
+    from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
     from vonk_control.recipe_operations import start_cleanup
 
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
         nodes=2,
         distributed_lifecycle=True,
@@ -2558,45 +2560,56 @@ def test_failed_start_result_commits_when_cleanup_admission_refuses(
     start = service.start(
         plan, plan_digest=plan.plan_digest, actor="admin", request_id="y" * 36
     )
-    with sessions() as session:
-        launch = session.scalars(
-            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-        ).first()
-        assert launch is not None
-
-    staged: list[start_cleanup.StartCleanup] = []
-    real_run = start_cleanup.StartCleanupDispatch.run
-
-    def refuse(self: object, cleanup: start_cleanup.StartCleanup) -> None:
-        staged.append(cleanup)
-        monkeypatch.setattr(
-            start_cleanup,
-            "end_unfinished_run",
-            lambda *_a, **_k: (_ for _ in ()).throw(
-                RuntimeError("node locks are held")
-            ),
+    with sessions.begin() as session:
+        launches = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
         )
-        real_run(self, cleanup)  # type: ignore[arg-type]
+        launch = launches[0]
+        for order in launches:
+            order.current_attempt = 1  # claimed: the Start did launch
+        launch_payload = launch.payload
+        launch_node = launch.node_id
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
 
-    monkeypatch.setattr(start_cleanup.StartCleanupDispatch, "run", refuse)
+    def refused(*_args: object, **_kwargs: object) -> bool:
+        raise NodeLocksHeld("node locks are held")
+
+    monkeypatch.setattr(start_cleanup, "end_unfinished_run", refused)
     service._clock = lambda: NOW + timedelta(seconds=60)
     service.record_node_result(
         start.id,
-        launch.node_id,
+        launch_node,
         succeeded=True,
-        evidence=start_evidence(launch.payload),
+        evidence=start_evidence(launch_payload),
     )
+
+    def stops() -> list[Job]:
+        with sessions() as session:
+            return [
+                job
+                for job in session.scalars(select(Job).where(Job.kind == "recipe.stop"))
+                if job.payload.get("owner_id") == start.owner_id
+            ]
 
     with sessions() as session:
         assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
-        assert session.scalar(select(Job).where(Job.kind == "recipe.stop")) is None
-    (cleanup,) = staged
+    assert stops() == []
+
     monkeypatch.undo()
-    start_cleanup.StartCleanupDispatch(service).run(cleanup)
+    DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: (
+            NOW + timedelta(seconds=60) + OWNER_SETTLE_GRACE + timedelta(minutes=1)
+        ),
+        run_endings=service,
+    ).tick()
     with sessions() as session:
-        stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None
-        assert stop.request_id == cleanup.request_id
+        assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
+    assert len(stops()) == 1
 
 
 def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
