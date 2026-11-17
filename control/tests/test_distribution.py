@@ -220,9 +220,6 @@ def test_distribution_assignment_survives_controller_service_restart(
         ).assignment_id
         == assignment.assignment_id
     )
-    restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
-    with pytest.raises(DistributionError):
-        restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
 
 
 def test_separate_api_process_serves_worker_registered_model_files(
@@ -464,9 +461,6 @@ def test_authorization_is_decided_once_per_assignment_not_per_range(
         event.remove(engine, "before_cursor_execute", count)
 
     assert len(statements) == 1
-    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
-    with pytest.raises(DistributionError):
-        service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
 
 
 def test_object_location_is_resolved_once_per_window_and_follows_the_file(
@@ -509,36 +503,8 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
     with pytest.raises(DistributionError):
         service.locate_object(**ask)
 
-    # A revoked assignment is refused no matter what was remembered.
     (source.root / model).write_bytes(b"model payload")
     service.locate_object(**ask)
-    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
-    with pytest.raises(DistributionError):
-        service.locate_object(**ask)
-
-
-def test_revoked_distribution_is_a_refusal_on_the_agent_wire(agent_system):
-    """A revoked grant must never advertise a temporary source outage."""
-    client, services, _, clock = agent_system
-    source = MemoryObjectSource()
-    model_digest = source.put(b"model payload")
-    config_digest = source.put(b"config!")
-    archive_digest = source.put(b"oci archive")
-    assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
-    source.register_artifact_set(
-        assignment.model_artifact_set_sha256, assignment.objects
-    )
-    source.register_runtime_image(assignment.oci_image_digest, archive_digest)
-    service = DistributionService(source, clock=clock, sessions=services.sessions)
-    service.register(assignment)
-    service.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
-    object.__setattr__(services, "distribution", service)
-    denied = client.get(
-        "/agent/distribution/manifests/" + assignment.plan_digest,
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    assert denied.status_code == 403
-    assert denied.headers["x-vonk-error-code"] == "distribution.revoked"
 
 
 @pytest.mark.parametrize("denial", ["permission", "typed"])

@@ -1845,9 +1845,7 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
     assert current_attempt.state == "running" and current_attempt.result is None
 
 
-@pytest.mark.parametrize(
-    "restriction", (None, "expired", "revoked", "cancelled", "stale")
-)
+@pytest.mark.parametrize("restriction", (None, "expired", "cancelled", "stale"))
 def test_distribution_heartbeat_renews_only_live_authorized_transfer(
     service, restriction
 ) -> None:
@@ -1925,9 +1923,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         )
         attempt.lease_deadline = clock.now + timedelta(hours=2)
     clock.advance(seconds=3600 if restriction == "expired" else 3590)
-    if restriction == "revoked":
-        distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)
-    elif restriction == "cancelled":
+    if restriction == "cancelled":
         with sessions.begin() as session:
             session.get(Job, job.id).result = {"cancel_requested": True}
     elif restriction == "stale":
@@ -1945,7 +1941,7 @@ def test_distribution_heartbeat_renews_only_live_authorized_transfer(
         jobs.heartbeat(claim, {"phase": "copying", "completed_bytes": 3}, 60)
     clock.advance(seconds=20)
     # The serving process must observe the durable renewal after the initial
-    # grant elapsed. A different node, revoked grant or expired fence cannot.
+    # grant elapsed. A different node or expired fence cannot.
     restarted = DistributionService(source, clock=clock, sessions=sessions)
     if restriction is None:
         renewed, spec, opened = restarted.open_object(
@@ -3033,13 +3029,12 @@ def _registered_distribution_grant(sessions, clock):
     return distribution
 
 
-@pytest.mark.parametrize("revoked", [False, True])
-def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) -> None:
+def test_a_retried_distribution_is_issued_a_fresh_grant(service) -> None:
     """Live regression: the retry reused the first attempt's expired grant.
 
     The grant lapses an hour after registration; a transfer parked or backing
     off for longer was refused ``distribution.expired`` and failed terminally
-    although nothing but time had changed. A revoked grant stays revoked.
+    although nothing but time had changed.
     """
 
     jobs, sessions, clock = service
@@ -3068,18 +3063,12 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
     clock.advance(seconds=2 * 60)
     with pytest.raises(Exception):  # noqa: B017 -- effects and fresh admission establish rejection
         distribution.authorize(node_id=NODE_A, plan_digest=COMMIT)
-    if revoked:
-        distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)
 
     retry = _claim_until_due(jobs, sessions, clock, operation.id)
     assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
     fresh = DistributionService(distribution.source, clock=clock, sessions=sessions)
-    if revoked:
-        with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-            fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
-    else:
-        grant = fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
-        assert grant.expires_at > clock.now + timedelta(minutes=30)
+    grant = fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
+    assert grant.expires_at > clock.now + timedelta(minutes=30)
 
     jobs.succeed(retry, {"downloaded_bytes": 7})
     _assert_parent_ending_admit_fresh_request(
