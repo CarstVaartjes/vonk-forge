@@ -385,6 +385,7 @@ class ManagedRecipeCatalogSyncService:
         after the observation, not before it.
         """
         errors: list[Exception] = []
+        reconcile_errors: list[Exception] = []
         observed_id = None
         catalog_failed = True
         try:
@@ -410,15 +411,15 @@ class ManagedRecipeCatalogSyncService:
             try:
                 reconciled = reconcile()
                 if isinstance(reconciled, UnknownError):
-                    errors.append(
+                    reconcile_errors.append(
                         CatalogSyncUnsettled(
                             reconciled.reason,
                             "default gateway key observation unavailable",
                         )
                     )
             except Exception as error:  # noqa: BLE001 - independent recovery path
-                errors.append(error)
-        failures = failures + 1 if errors else 0
+                reconcile_errors.append(error)
+        failures = failures + 1 if errors or reconcile_errors else 0
         delay = catalog_sync_retry_delay(failures, interval_seconds)
         try:
             self.record_automatic_wait(
@@ -428,6 +429,8 @@ class ManagedRecipeCatalogSyncService:
             errors.append(error)
         for error in errors:
             _log_automatic_failure(error, delay)
+        for error in reconcile_errors:
+            _log_reconcile_failure(error, delay)
         return _AutomaticSyncStep(failures, delay)
 
     def redrive(self, sync_id: str, interval_seconds: int) -> bool:
@@ -490,19 +493,12 @@ class ManagedRecipeCatalogSyncService:
     def record_automatic_wait(
         self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
     ) -> None:
+        # No observation of ours means no row to wait on: the newest row may be
+        # another sync's, and the in-memory delay still paces the next attempt.
+        if observed_id is None:
+            return
         with self._sessions.begin() as session:
-            run = (
-                session.get(RecipeLibrarySyncRun, observed_id)
-                if observed_id is not None
-                else session.scalar(
-                    select(RecipeLibrarySyncRun)
-                    .where(RecipeLibrarySyncRun.repository == self._repository)
-                    .order_by(
-                        RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
-                    )
-                    .limit(1)
-                )
-            )
+            run = session.get(RecipeLibrarySyncRun, observed_id)
             if run is not None:
                 now = self._clock()
                 previous = tuple(
@@ -1157,6 +1153,14 @@ async def run_automatic_sync(
 def _log_automatic_failure(error: Exception, delay: int) -> None:
     _LOGGER.warning(
         "automatic managed recipe catalog sync failed: %s; retrying in %s seconds",
+        catalog_sync_failure_reason(error),
+        delay,
+    )
+
+
+def _log_reconcile_failure(error: Exception, delay: int) -> None:
+    _LOGGER.warning(
+        "library or gateway reconcile after the catalog sync failed: %s; retrying in %s seconds",
         catalog_sync_failure_reason(error),
         delay,
     )
