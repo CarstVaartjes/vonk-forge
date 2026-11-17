@@ -47,7 +47,7 @@ from .catalog_sync_contract import (
     ManagedCatalogWithdrawnRecipe,
     reviewed_catalog_content,
 )
-from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
+from .models import CatalogDocumentRevision, RecipeLibrarySyncRun
 from .owner_liveness import OwnerKind, OwnerRef, owner
 from .persisted_waits import read_wait, schedule_wait, typed_wait_reason
 from .recipe_library_types import (
@@ -607,35 +607,40 @@ class ManagedRecipeCatalogSyncService:
                 and row.source_bundle_sha256 != item.source_bundle_sha256
             ):
                 return False
-        with self._sessions() as session:
-            for model in snapshot.catalog_entities:
-                # The catalog reader verified this digest at ingress.
-                digest = model.entry.content_sha256
-                row = session.scalar(
-                    select(CatalogDocumentRevision)
-                    .join(
-                        CatalogDocument,
-                        CatalogDocument.id == CatalogDocumentRevision.document_id,
+        digests = {model.entry.content_sha256 for model in snapshot.catalog_entities}
+        if digests:
+            # The catalog reader verified these digests at ingress.
+            with self._sessions() as session:
+                rows = {
+                    row.content_digest: row
+                    for row in session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.content_digest.in_(sorted(digests))
+                        )
                     )
-                    .where(
-                        CatalogDocumentRevision.content_digest == digest,
+                }
+                if rows.keys() != digests:
+                    return False
+                heads = {
+                    row.document_id: row
+                    for row in session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.document_id.in_(
+                                sorted({row.document_id for row in rows.values()})
+                            ),
+                            active_head_revision(),
+                        )
                     )
-                )
-                if row is None:
-                    return False
-                selected = session.scalar(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.document_id == row.document_id,
-                        active_head_revision(),
-                    )
-                )
-                if selected is None:
-                    return False
-                if not (
-                    catalog_document_readable(row)
-                    and catalog_document_readable(selected)
-                ):
-                    return False
+                }
+                for row in rows.values():
+                    selected = heads.get(row.document_id)
+                    if selected is None:
+                        return False
+                    if not (
+                        catalog_document_readable(row)
+                        and catalog_document_readable(selected)
+                    ):
+                        return False
         return not snapshot.problems
 
     def _record_read_failure(self, code: str, detail: str) -> None:

@@ -165,3 +165,59 @@ def test_stale_local_identity_is_a_miss_and_cannot_veto_verified_import(tmp_path
     assert catalog.imported == [item.content_sha256]
     _sync(tmp_path, catalog, item)
     assert catalog.imported == [item.content_sha256, item.content_sha256]
+
+
+def test_snapshot_availability_costs_constant_queries_per_check(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches two queries per catalog entity on every automatic sync check."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import event, select
+    from vonk_control import catalog_sync
+    from vonk_control.models import CatalogDocumentRevision
+
+    from .test_catalog_revision_collection import Catalog
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'available.sqlite'}")
+    Base.metadata.create_all(engine)
+    world = Catalog(engine)
+    for index in range(20):
+        world.revision(f"model-{index}", 1, kind="model", head="active")
+    monkeypatch.setattr(catalog_sync, "catalog_document_readable", lambda _row: True)
+    service = ManagedRecipeCatalogSyncService(
+        world.sessions,
+        catalog=SimpleNamespace(recipe_catalog_local_revisions=lambda _keys: {}),  # type: ignore[arg-type]
+        reader=_Reader(None),  # type: ignore[arg-type]
+        clock=lambda: datetime(2026, 9, 29, tzinfo=UTC),
+    )
+    with world.sessions() as session:
+        digests = list(session.scalars(select(CatalogDocumentRevision.content_digest)))
+    statements: list[str] = []
+    event.listen(
+        engine, "before_cursor_execute", lambda *args: statements.append(args[2])
+    )
+
+    def available(count: int) -> bool:
+        statements.clear()
+        snapshot = SimpleNamespace(
+            items=[],
+            catalog_entities=[
+                SimpleNamespace(entry=SimpleNamespace(content_sha256=digest))
+                for digest in digests[:count]
+            ],
+            problems=[],
+        )
+        return service._snapshot_available(snapshot)  # type: ignore[arg-type]
+
+    assert available(1)
+    one = len(statements)
+    assert available(20)
+    assert len(statements) == one
+    statements.clear()
+    missing = SimpleNamespace(
+        items=[],
+        catalog_entities=[SimpleNamespace(entry=SimpleNamespace(content_sha256="0"))],
+        problems=[],
+    )
+    assert not service._snapshot_available(missing)  # type: ignore[arg-type]
