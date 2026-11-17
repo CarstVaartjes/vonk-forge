@@ -1,5 +1,4 @@
 import type { VisualFleetNode, VisualFleetSnapshot } from "../api/types";
-import { OutcomeKind } from "../api/vocabulary.generated";
 import {
   MEMORY_LOW_WORDS,
   attentionText,
@@ -63,12 +62,16 @@ export function nodeHealth(
       title: "Update available",
       detail: update.detail,
     });
-  for (const item of node.installed.filter((entry) => entry.complete === false))
+  // The Controller's install.partial warning is the one rule for an incomplete installation: an
+  // install still in flight is progress and raises none.
+  for (const item of node.warnings.flatMap((warning) =>
+    warning.install_partial ? [warning.install_partial] : [],
+  ))
     rows.push({
       key: `install-${item.installation_id}`,
       tone: "warn",
-      title: item.group_state ?? OutcomeKind.UNKNOWN,
-      detail: `${item.title} · ${item.present_ranks?.length ?? OutcomeKind.UNKNOWN} of ${item.expected_rank_count ?? OutcomeKind.UNKNOWN} ranks`,
+      title: item.group_state,
+      detail: `${item.title} · ${item.present_ranks.length} of ${item.expected_rank_count} ranks`,
       installationId: item.installation_id,
     });
 
