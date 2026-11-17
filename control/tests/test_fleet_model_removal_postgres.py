@@ -990,6 +990,21 @@ def test_offline_spark_without_the_model_does_not_block_fleet_removal(
         review = cache.review_fleet_model_removal(selector)
         assert review.fleet is not None
         assert review.fleet.nas_remove and not review.fleet.observation_issues
+        accepted = cache.remove_fleet_model_selector(
+            selector,
+            actor="operator",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        assert accepted.state == LifecycleState.QUEUED
+        now[0] += timedelta(seconds=60)
+        inventory(world.sessions, NODE, now[0], [])
+        for _ in range(6):
+            cache.advance_removals()
+        result = cache.get_operation(accepted.id)
+        assert result.state == LifecycleState.SUCCEEDED, result.last_error
+        assert not path.exists()
+        submit_model_download(cache, tmp_path)
     finally:
         cache.close()
 

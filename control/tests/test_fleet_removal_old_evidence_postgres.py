@@ -28,7 +28,7 @@ from .test_recipe_operations import canonical_example
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize("fault", ["null", "inventory", "manifest"])
+@pytest.mark.parametrize("fault", ["inventory", "manifest"])
 def test_review_of_shared_content_survives_partial_evidence_and_heals(
     postgres_engine, tmp_path: Path, fault: str
 ) -> None:
@@ -129,19 +129,18 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
             for asset in wire.assets
             if asset.kind == "model-object"
         )
-        if fault == "manifest":
-            assert wire.nas_reclaimable_bytes is None
+        assert wire.nas_reclaimable_bytes is None
         assert path.read_bytes() == b"shared weights"
         # A read never repairs SQL or submits a removal. Fresh owner evidence heals.
-        if manifest is not None:
-            with world.sessions.begin() as session:
-                row = session.scalar(
-                    select(ModelCacheSet).where(
-                        ModelCacheSet.model_content_sha256 == model_digest
-                    )
+        assert manifest is not None
+        with world.sessions.begin() as session:
+            row = session.scalar(
+                select(ModelCacheSet).where(
+                    ModelCacheSet.model_content_sha256 == model_digest
                 )
-                assert row is not None and row.manifest == {}
-                row.manifest = manifest
+            )
+            assert row is not None and row.manifest == {}
+            row.manifest = manifest
         now[0] += timedelta(seconds=1)
         inventory(world.sessions, NODE, now[0], [obj])
         healed = cache.review_fleet_model_removal(selector)

@@ -255,12 +255,7 @@ export function LibraryCacheAction({
             <button
               type="button"
               className="button secondary"
-              disabled={
-                busy ||
-                !review ||
-                (!review.fleet && review.blockers.length > 0) ||
-                Boolean(review.fleet?.targets.some((target) => !target.observation_available))
-              }
+              disabled={busy || !review || review.blockers.length > 0}
               onClick={() => void remove()}
             >
               Confirm remove
