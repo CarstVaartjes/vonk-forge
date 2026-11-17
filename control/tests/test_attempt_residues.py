@@ -878,6 +878,21 @@ def test_a_residue_of_an_ended_attempt_goes_while_other_work_is_live(
     assert len(_uninstalls(load, installation_id)) == 1
 
 
+def test_a_never_installed_plan_goes_while_other_work_is_live_on_its_sparks(
+    tmp_path: Path,
+) -> None:
+    """Catches a busy Spark holding an unadopted plan (and its disk claim) forever."""
+
+    load = _load(tmp_path)
+    planned_id = _planned_left_by_failed_copy(load)
+    _unrelated_live_work_on(load, planned_id)
+    assert not _reconciler(load, after=timedelta()).tick()
+    assert _reconciler(load, after=ADOPTION_WINDOW + timedelta(seconds=1)).tick()
+    with load.sessions() as session:
+        installation = session.get(RecipeInstallation, planned_id)
+        assert installation is not None and installation.state == "uninstalled"
+
+
 def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
     """A finished load whose installation then falls short of its payload."""
 

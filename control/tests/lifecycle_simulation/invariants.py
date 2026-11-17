@@ -99,11 +99,8 @@ IN_FLIGHT_KINDS = (
         "installation",
         RecipeInstallation,
         InstallationState,
-        # ``planned`` is unowned until an attempt adopts it: it joins when its
-        # own release path (per installation, not per Spark) lands.
         frozenset(
             {
-                InstallationState.PLANNED,
                 InstallationState.INSTALLED,
                 InstallationState.PARTIAL,
                 InstallationState.FAILED,

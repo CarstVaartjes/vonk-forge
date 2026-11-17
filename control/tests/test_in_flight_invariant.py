@@ -58,9 +58,11 @@ def test_in_flight_states_are_the_enum_minus_the_settled_ones() -> None:
 
 def test_the_kinds_checked_and_their_in_flight_states() -> None:
     by_name = {kind.name: kind.in_flight for kind in IN_FLIGHT_KINDS}
-    # ``planned`` installations join with the release path that owns them.
     assert by_name == {
-        "installation": (InstallationState.INSTALLING.value,),
+        "installation": (
+            InstallationState.PLANNED.value,
+            InstallationState.INSTALLING.value,
+        ),
         "run": (
             RunState.PLANNED.value,
             RunState.STARTING.value,
