@@ -293,7 +293,7 @@ class AttemptResidueReconciler:
         self,
         sessions: sessionmaker[Session],
         *,
-        abandon_never_installed: Callable[[str], object],
+        abandon_never_installed: Callable[..., object],
         removal: LeftoverRemoval | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -390,7 +390,14 @@ class AttemptResidueReconciler:
             try:
                 # The lifecycle re-derives "never reached a node" under the
                 # installation row lock, so a concurrent install refuses this.
-                self._abandon(installation_id)
+                # An unsuperseded plan is refused under that lock when a retry
+                # adopted it (touching the row) after this sweep's snapshot.
+                self._abandon(
+                    installation_id,
+                    untouched_since=None
+                    if installation_id in superseded
+                    else now - ADOPTION_WINDOW,
+                )
                 self._cleanup_settled(installation_id)
             except UnknownOutcomeError as error:
                 self._defer(installation_id, error)

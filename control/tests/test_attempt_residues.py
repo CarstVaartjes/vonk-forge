@@ -893,6 +893,28 @@ def test_a_never_installed_plan_goes_while_other_work_is_live_on_its_sparks(
         assert installation is not None and installation.state == "uninstalled"
 
 
+def test_a_plan_adopted_just_before_its_release_is_not_abandoned(
+    tmp_path: Path,
+) -> None:
+    """Catches releasing a plan a retry adopted after the sweep's snapshot."""
+
+    load = _load(tmp_path)
+    planned_id = _planned_left_by_failed_copy(load)
+    clock = load.lifecycle._clock() + ADOPTION_WINDOW + timedelta(seconds=1)
+    # The sweep decided on a stale row, then the adoption touched it.
+    with load.sessions.begin() as session:
+        row = session.get(RecipeInstallation, planned_id)
+        assert row is not None
+        row.updated_at = clock
+    with pytest.raises(RuntimeError):
+        load.lifecycle.abandon_never_installed(
+            planned_id, untouched_since=clock - ADOPTION_WINDOW
+        )
+    with load.sessions() as session:
+        installation = session.get(RecipeInstallation, planned_id)
+        assert installation is not None and installation.state == "planned"
+
+
 def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
     """A finished load whose installation then falls short of its payload."""
 
