@@ -1,4 +1,4 @@
-use std::{fs, time::Duration};
+use std::{collections::BTreeMap, fs, time::Duration};
 
 use super::*;
 use crate::process::{ProcessError, ProcessOutput};
@@ -6,6 +6,21 @@ use crate::process::{ProcessError, ProcessOutput};
 const VECTOR: &str = include_str!(
     "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/host-tuning-v1.json"
 );
+
+/// The shared vector's shape: the host the agent reads and what it reports.
+#[derive(serde::Deserialize)]
+struct Vector {
+    host: Host,
+    observation: HostTuning,
+}
+
+#[derive(serde::Deserialize)]
+struct Host {
+    page_size: u64,
+    systemctl_show: String,
+    files: BTreeMap<String, String>,
+    snap_directories: Vec<String>,
+}
 
 struct Systemd(Option<String>);
 
@@ -30,24 +45,24 @@ impl ProcessRunner for Systemd {
 
 #[test]
 fn the_shared_host_reads_as_the_shared_observation() {
-    let vector: serde_json::Value = serde_json::from_str(VECTOR).unwrap();
-    let host = &vector["host"];
+    let vector: Vector = serde_json::from_str(VECTOR).unwrap();
     let root = tempfile::tempdir().unwrap();
-    for (path, text) in host["files"].as_object().unwrap() {
+    for (path, text) in &vector.host.files {
         let path = root.path().join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, text.as_str().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
     }
-    for name in host["snap_directories"].as_array().unwrap() {
-        fs::create_dir_all(root.path().join("snap").join(name.as_str().unwrap())).unwrap();
+    for name in &vector.host.snap_directories {
+        fs::create_dir_all(root.path().join("snap").join(name)).unwrap();
     }
     // A file in /snap (its README) is not a snap.
     fs::write(root.path().join("snap/README"), b"").unwrap();
-    let runner = Systemd(Some(host["systemctl_show"].as_str().unwrap().to_owned()));
-    let observed = observe(&runner, root.path(), host["page_size"].as_u64().unwrap());
+    let runner = Systemd(Some(vector.host.systemctl_show.clone()));
+    let observed = observe(&runner, root.path(), vector.host.page_size);
+    // Canonical bytes: an omitted field and an explicit null must agree too.
     assert_eq!(
-        serde_json::to_value(&observed).unwrap(),
-        vector["observation"]
+        vonk_agent_protocol::canonical_generated_json(&observed).unwrap(),
+        vonk_agent_protocol::canonical_generated_json(&vector.observation).unwrap()
     );
 }
 
