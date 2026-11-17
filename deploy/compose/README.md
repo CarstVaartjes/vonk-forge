@@ -232,7 +232,7 @@ any non-running state Docker does not own, is started while its restart policy
 is `always` or `unless-stopped`; one stopped after it ran has no start error
 and stays stopped. `restarting`, `paused`, `removing` and `dead` are logged and
 left to Docker. A network that does not exist waits for the next `compose up`.
-Each repair backs off exponentially with jitter (30 s doubling to an hour) while
+Each repair backs off exponentially with jitter (30 s doubling to five minutes) while
 it does not converge. Containers sharing another container's network namespace
 are not touched.
 
