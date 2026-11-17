@@ -153,11 +153,10 @@ def test_a_newer_load_supersedes_a_backing_off_load(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_failure_an_older_controller_kept_retrying_is_adopted_as_backoff(
+def test_a_failed_load_is_never_relabelled_on_recovery_ticks(
     tmp_path: Path,
 ) -> None:
-    """Upgrade: an older Controller stored a failure it retried as ``failed``
-    (presented queued).  It is adopted once as the backoff it was, and retried."""
+    """A ``failed`` load is an end: recovery ticks never turn it into a backoff."""
 
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -170,19 +169,11 @@ def test_a_failure_an_older_controller_kept_retrying_is_adopted_as_backoff(
 
     clock = {"now": lifecycle._clock() + timedelta(hours=2)}
     service._clock = lambda: clock["now"]
-    service.tick()
-    adopted = service.application(first.id)
-    assert adopted.state == "backoff"
-    assert _CAUSE in (adopted.status_reason or "")
-    assert adopted.next_attempt_at is not None
-
-    for _ in range(6):
+    for _ in range(3):
         clock["now"] += timedelta(hours=2)
         service.tick()
-        if _others(sessions, first.id):
-            break
-    (retry,) = _others(sessions, first.id)
-    assert service.application(first.id).superseded_by == retry.id
+    assert service.application(first.id).state == "failed"
+    assert not _others(sessions, first.id)
 
 
 def test_a_failure_that_is_not_retried_keeps_its_recorded_end(

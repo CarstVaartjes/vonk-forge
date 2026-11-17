@@ -204,14 +204,12 @@ class FleetProfileService:
             progress.intended_profile.scope.node_ids
         ) == current_scope and self._retry_eligible(session, row)
 
-    def _settle_retry_candidates(
-        self, adopted: Sequence[str], ended: Sequence[str], now: datetime
-    ) -> None:
-        """Adopt legacy retried failures as backoff, and end the backoffs that
-        will not be retried any more (each once, under its row lock)."""
+    def _settle_retry_candidates(self, ended: Sequence[str], now: datetime) -> None:
+        """End the backoffs that will not be retried any more (each once, under
+        its row lock)."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        for application_id in (*adopted, *ended):
+        for application_id in ended:
             with self._sessions.begin() as session:
                 row = session.get(
                     FleetProfileApplication, application_id, with_for_update=True
@@ -223,12 +221,7 @@ class FleetProfileService:
                     ending = self._retry_ending(session, row, progress)
                 except (FleetProfileConflict, ValidationError, TypeError, ValueError):
                     continue
-                if row.state == LifecycleState.FAILED.value:
-                    if ending is None and self._recovery_possible(
-                        session, row, progress
-                    ):
-                        self._lifecycle.adopt_backoff(row, now, session=session)
-                elif row.state == LifecycleState.BACKOFF.value and ending is not None:
+                if row.state == LifecycleState.BACKOFF.value and ending is not None:
                     self._end_backoff(session, row, progress, now)
                     _LOGGER.warning(
                         "profile application %s is not retried: %s",
@@ -287,12 +280,10 @@ class FleetProfileService:
     ) -> tuple[str, str] | None:
         """Find one backing-off profile load whose replay is due and admissible.
 
-        The same bounded scan ends a backoff that will not be retried any more
-        and adopts a legacy ``failed`` row an older Controller still retried.
+        The same bounded scan ends a backoff that will not be retried any more.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        adopted: list[str] = []
         ended: list[str] = []
         try:
             with self._sessions() as session:
@@ -313,11 +304,7 @@ class FleetProfileService:
                     )
                     .where(
                         FleetProfileApplication.state.in_(
-                            (
-                                *fleet_profile_states.RETRY_PENDING,
-                                # A legacy retried failure, adopted below.
-                                LifecycleState.FAILED.value,
-                            )
+                            fleet_profile_states.RETRY_PENDING
                         ),
                         or_(
                             retry_at.is_(None),
@@ -358,14 +345,6 @@ class FleetProfileService:
                         ValueError,
                     ):
                         continue
-                    if row.state == LifecycleState.FAILED.value:
-                        # An older Controller retried a replayable failure it
-                        # stored as failed; one this Controller wrote never is.
-                        if ending is None and self._recovery_possible(
-                            session, row, progress
-                        ):
-                            adopted.append(row.id)
-                        continue
                     if ending is not None:
                         if row.state == LifecycleState.BACKOFF.value:
                             ended.append(row.id)
@@ -382,7 +361,7 @@ class FleetProfileService:
                     self._recovery_cursor = row.id
                     return row.id, row.actor
         finally:
-            self._settle_retry_candidates(adopted, ended, now)
+            self._settle_retry_candidates(ended, now)
         return None
 
     @staticmethod
