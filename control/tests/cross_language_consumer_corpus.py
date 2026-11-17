@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_control.catalog_sync import _empty_result
 from vonk_control.catalog_sync_contract import ManagedCatalogSyncResult
 from vonk_control.fleet_profile_contract import (
@@ -290,7 +290,9 @@ def corpus() -> dict:
                 document[key] = [
                     {"name": "x" * 64, "value": "y" * 256} for _ in range(count)
                 ]
-            document["stdout"]["text"] = document["stderr"]["text"] = "z" * 2048
+            document["stdout"]["text"] = document["stderr"]["text"] = (
+                "z" * LOG_TAIL_BYTES
+            )
             document["collector_errors"] = ["e" * 256] * 8
         add(
             "diagnostics-" + mutation,

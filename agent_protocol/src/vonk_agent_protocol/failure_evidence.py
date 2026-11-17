@@ -21,6 +21,22 @@ HOST_MEMORY_EXHAUSTED_TOKEN: str = json.loads(
 )["tokens"]["HostMemoryExhausted"]
 
 
+class FailureLogPolicy(WireModel):
+    """Exported with the wire graph: the Controller, the agent and the helper
+    (Rust reads these through the generated ``FAILURE_LOG_POLICY``) bound every
+    retained failure log with these two numbers."""
+
+    # UTF-8 bytes retained per stream. Characters never exceed bytes, so the same
+    # number bounds the wire text length.
+    log_tail_bytes: Literal[16384] = 16384
+    # A whole diagnostics document: both streams, JSON escaping and properties.
+    document_bytes: Literal[65536] = 65536
+
+
+FAILURE_LOG_POLICY = FailureLogPolicy()
+LOG_TAIL_BYTES = FAILURE_LOG_POLICY.log_tail_bytes
+
+
 def add_known_dropped_bytes(prior: int | None, additional: int) -> int | None:
     """Retain unknown stream counts, including an unrepresentable sum."""
     if prior is None:
@@ -30,7 +46,7 @@ def add_known_dropped_bytes(prior: int | None, additional: int) -> int | None:
 
 
 class FailureLogTail(WireModel):
-    text: str = Field(max_length=2048)
+    text: str = Field(max_length=LOG_TAIL_BYTES)
     truncated: bool
     # The collectors count physical buffers with usize/Py_ssize_t, rather
     # than accepting an arbitrary mathematical counter. Unknown remains null.
@@ -100,6 +116,9 @@ class FailureDiagnostics(WireModel):
 
     @model_validator(mode="after")
     def bounded_document(self) -> "FailureDiagnostics":
-        if len(self.model_dump_json().encode("utf-8")) > 16 * 1024:
-            raise ValueError("failure diagnostics exceed 16 KiB")
+        if (
+            len(self.model_dump_json().encode("utf-8"))
+            > FAILURE_LOG_POLICY.document_bytes
+        ):
+            raise ValueError("failure diagnostics exceed their document bound")
         return self

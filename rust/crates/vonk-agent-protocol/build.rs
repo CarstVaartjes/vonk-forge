@@ -55,6 +55,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "storage_policy.rs",
             &["low_free_percent"][..],
         ),
+        (
+            "FailureLogPolicy",
+            "FAILURE_LOG_POLICY",
+            "failure_log_policy.rs",
+            &["log_tail_bytes", "document_bytes"][..],
+        ),
     ] {
         let policy = &graph["$defs"][model]["properties"];
         let mut fields = Vec::new();

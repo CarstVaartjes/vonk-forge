@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
+    LOG_TAIL_BYTES,
     FailureDiagnostics,
     FailureLogTail,
     add_known_dropped_bytes,
@@ -54,7 +55,7 @@ from .operation_item_contract import OperationItem, OperationResultFacts, operat
 from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
-MAX_LOG_BYTES = 2048
+MAX_LOG_BYTES = LOG_TAIL_BYTES
 MAX_LOG_LINES = 32
 _SENSITIVE = re.compile(
     r"password|secret|token|authorization|cookie|credential|private.?key|api.?key|environment",

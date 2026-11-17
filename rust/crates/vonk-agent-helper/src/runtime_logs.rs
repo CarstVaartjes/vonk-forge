@@ -45,10 +45,10 @@ use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 /// Bytes retained per container stream: the protocol's bound for this field.
 ///
 /// Every later reader keeps it whole: the agent and the Controller each bound
-/// the text to 2048 after redaction, shrinking the window and keeping the
+/// the text to the same bound after redaction, shrinking the window and keeping the
 /// causes ahead of the omission marker, and the evidence bundle and the
 /// operator log projection carry it as it arrives.
-const RETAINED_BYTES: usize = 2048;
+const RETAINED_BYTES: usize = vonk_agent_protocol::failure_evidence::LOG_TAIL_BYTES;
 /// Bytes reserved for the line that marks the output omitted between the
 /// retained failure lines and the tail.
 const OMISSION_MARKER_BYTES: usize = 48;
@@ -1049,11 +1049,14 @@ pub fn exited_diagnostic(exit_summary: &str, capture_error: Option<&str>) -> Str
 mod tests {
     use super::*;
 
+    /// Scales the fixtures that are sized against the retained bound.
+    const SCALE: usize = RETAINED_BYTES / 2048;
+
     /// A traceback with no exception line, as a process killed mid-write leaves
     /// it: the frames are the last thing written.
     fn cut_off_traceback() -> Vec<u8> {
         let mut value = String::from("Traceback (most recent call last):\n");
-        for index in 0..24 {
+        for index in 0..24 * SCALE {
             value.push_str(&format!(
                 "(APIServer pid=56) File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/async_llm.py\", line {}, in from_vllm_config\n",
                 200 + index
@@ -1070,6 +1073,29 @@ mod tests {
                 .to_vec();
         stream.extend(cut_off_traceback());
         stream
+    }
+
+    #[test]
+    fn a_rank_one_traceback_above_the_rank_zero_pointer_is_retained_whole() {
+        // Wrong implementation this catches: a 2 KiB bound kept the pointer and
+        // the tail of the traceback it points at, so the first frames of the
+        // rank-1 failure (about 3 KB above "See root cause above") were lost.
+        let mut stream =
+            b"(EngineCore pid=401) ERROR Traceback (most recent call last):\n".to_vec();
+        for index in 0..26 {
+            stream.extend(
+                format!("(EngineCore pid=401)   File \"/opt/vllm/rank1/stage_{index:02}.py\", line {index}, in run_stage\n(EngineCore pid=401)     stage_{index:02}.run()\n").into_bytes(),
+            );
+        }
+        stream.extend(b"(EngineCore pid=401) ValueError: rank 1 ran out of memory\n");
+        stream.extend(b"(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above.\n");
+        assert!((3000..4000).contains(&stream.len()), "{}", stream.len());
+        let tail = retain(&stream);
+        assert!(tail.text.contains("rank1/stage_00.py"), "{}", tail.text);
+        assert!(tail.text.contains("ValueError: rank 1 ran out of memory"));
+        assert!(tail.text.ends_with("See root cause above.\n"));
+        assert!(tail.text.len() > 2048 && tail.text.len() <= RETAINED_BYTES);
+        assert!(!tail.truncated);
     }
 
     #[test]
@@ -1105,6 +1131,8 @@ mod tests {
     /// the pipeline's own log, PyTorch's native abort report, its C++ stack,
     /// then the job adapter's traceback for the child that died, whose
     /// closing line echoes the whole command.
+    const FINAL_FRAMES: usize = 60 * SCALE;
+
     fn native_abort_under_a_wrapper(wrapped: bool) -> Vec<u8> {
         let mut stream = String::new();
         for step in 0..80 {
@@ -1122,7 +1150,7 @@ mod tests {
                 "frame #{frame}: c10::Error::Error(c10::SourceLocation, std::string) + 0x{frame}c (0xe8472ad284c4 in /usr/local/lib/python3.12/dist-packages/torch/lib/libc10.so)\n"
             ));
         }
-        for frame in 9..38 {
+        for frame in 9..FINAL_FRAMES {
             stream.push_str(&format!("frame #{frame}: python3() [0x4f9e4c]\n"));
         }
         if wrapped {
@@ -1186,7 +1214,10 @@ mod tests {
         );
         assert!(text.contains("  what():  CUDA error: an illegal memory access"));
         assert!(
-            text.ends_with("frame #37: python3() [0x4f9e4c]\n"),
+            text.ends_with(&format!(
+                "frame #{}: python3() [0x4f9e4c]\n",
+                FINAL_FRAMES - 1
+            )),
             "{text}"
         );
         assert!(text.len() <= RETAINED_BYTES, "{}", text.len());
@@ -1210,13 +1241,14 @@ mod tests {
         let opener = "terminate called after throwing an instance of 'c10::Error'\n";
         let message = format!("  what():  CUDA error: {}\n", "e".repeat(176));
         assert_eq!(message.len(), 200);
-        let frames: String = (0..50)
+        // The window keeps the bound less the causes and the marker reserve,
+        // which opens inside the message line: the frames fill all of it but
+        // half a message (every frame line is 33 bytes).
+        let window = RETAINED_BYTES - opener.len() - message.len() - OMISSION_MARKER_BYTES;
+        let count = (window - message.len() / 2) / 33;
+        let frames: String = (0..count)
             .map(|frame| format!("frame #{frame:03}: python3() [0x4f9e4c]\n"))
             .collect();
-        // The window keeps the bound less the causes and the marker reserve:
-        // 2048 - 260 - 48 = 1740 bytes, which opens inside the message line
-        // (it spans the 1850..1650 bytes before the end).
-        let window = RETAINED_BYTES - opener.len() - message.len() - OMISSION_MARKER_BYTES;
         assert!(frames.len() < window && window < frames.len() + message.len());
         let stream = format!("{}{opener}{message}{frames}", "INFO loading\n".repeat(40));
         let tail = retain(stream.as_bytes());
@@ -1226,7 +1258,10 @@ mod tests {
             tail.text
         );
         assert_eq!(tail.text.matches("what():").count(), 1, "{}", tail.text);
-        assert!(tail.text.ends_with("frame #049: python3() [0x4f9e4c]\n"));
+        assert!(
+            tail.text
+                .ends_with(&format!("frame #{:03}: python3() [0x4f9e4c]\n", count - 1))
+        );
         assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
     }
 
@@ -1238,7 +1273,7 @@ mod tests {
         let stream = format!(
             "terminate called without an active exception\n{}{}",
             "worker 3 still holds the device\n".repeat(20),
-            "frame\n".repeat(400)
+            "frame\n".repeat(400 * SCALE)
         );
         let tail = retain(stream.as_bytes());
         let marker = tail.text.find(" bytes omitted]\n").expect(&tail.text);
@@ -1297,7 +1332,7 @@ mod tests {
         // Wrong implementation this catches: the window kept only the last
         // frames and the exception, so every "No available memory for the
         // cache blocks" failure lost the figures needed to size its fix.
-        let stream = kv_cache_exhausted_start(30);
+        let stream = kv_cache_exhausted_start(30 * SCALE);
         let plain = String::from_utf8_lossy(&stream[stream.len() - RETAINED_BYTES..]);
         assert!(!plain.contains("Available KV cache memory"));
         let tail = retain(&stream);
@@ -1535,7 +1570,7 @@ mod tests {
         // final line -- retained only the handful of bytes after it. The first
         // live GLM 5.3 Flash observation arrived as 1024 characters of an
         // EngineCore traceback for exactly this reason.
-        let mut stream = b"zz\n".repeat(1000);
+        let mut stream = b"zz\n".repeat(1000 * SCALE);
         stream.extend_from_slice(b"ERROR engine core died\n");
         let tail = retain(&stream);
         assert!(
@@ -1705,12 +1740,17 @@ mod tests {
         // engine core's own frames on both streams and its exit summary named
         // the pointer, not the worker's Triton error that it pointed at.
         let worker_cause = "(Worker_TP0 pid=512) ERROR 10-25 09:45:46 [multiproc_executor.py:1018] RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\n";
+        // Records after the engine's report keep the worker's report out of
+        // the plain tail.
+        let after = "(EngineCore pid=403) INFO 10-25 09:45:52 [core.py:1] shutting down\n"
+            .repeat(RETAINED_BYTES / 32);
         let stdout = triton_worker()
             + &triton_engine_core(
                 "(EngineCore pid=403) ERROR 10-25 09:45:46 [core.py:1355] ",
                 "EngineCore failed to start.",
             )
-            + TRITON_NCCL_AFTER;
+            + TRITON_NCCL_AFTER
+            + &after;
         let stdout = stdout.as_bytes();
         let plain = String::from_utf8_lossy(&stdout[stdout.len() - RETAINED_BYTES..]);
         assert!(!plain.contains(worker_cause));
@@ -1837,7 +1877,7 @@ mod tests {
         let canary = "RuntimeError: kv-canary: kernel_run_counter did not increase since previous check for tags=[DECODE] at step=128; canary path is not executing\n";
         let mut stream = b"Traceback (most recent call last):\n  File \"warmup.py\", line 3, in probe\nKeyError: 'optional_feature'\n".to_vec();
         stream.extend(b"Traceback (most recent call last):\n");
-        for _ in 0..30 {
+        for _ in 0..30 * SCALE {
             stream.extend(b"  File \"/sgl-workspace/sglang/python/sglang/srt/kv_canary/runner/health_checker.py\", line 73, in _postprocess_on_host\n    raise RuntimeError(\n");
         }
         stream.extend(canary.as_bytes());
@@ -2015,7 +2055,7 @@ mod tests {
         ]
         .iter()
         .cycle()
-        .take(24)
+        .take(24 * SCALE)
         .enumerate()
         {
             stream.extend(
@@ -2137,7 +2177,7 @@ mod tests {
         assert_eq!(exception.chars().count(), EXCEPTION_CHARS);
         // An exception line longer than the whole budget still yields a
         // bounded window rather than a slice past the line's end.
-        stream.extend(format!("ValueError: {}\n", "x ".repeat(2000)).into_bytes());
+        stream.extend(format!("ValueError: {}\n", "x ".repeat(2000 * SCALE)).into_bytes());
         let tail = retain(&stream);
         assert!(tail.text.len() <= RETAINED_BYTES);
         assert!(tail.truncated);

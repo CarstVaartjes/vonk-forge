@@ -3,6 +3,12 @@ pub use crate::generated::{
     FailureProperty,
 };
 
+include!(concat!(env!("OUT_DIR"), "/failure_log_policy.rs"));
+
+/// Bytes retained per failure log stream, from `FailureLogPolicy` in the Python
+/// protocol: the helper, the agent and the Controller bound a log by this one number.
+pub const LOG_TAIL_BYTES: usize = FAILURE_LOG_POLICY.log_tail_bytes as usize;
+
 /// The field of a process-exit summary that carries the uncaught exception
 /// the workload printed last, as free text.  It is always the summary's final
 /// field, so a reader takes the facts before it as `key=value` tokens and the
@@ -129,15 +135,16 @@ impl FailureDiagnostics {
                         && value.value.chars().count() <= FAILURE_PROPERTY_VALUE_CHARS
                 })
         };
-        let valid = serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 16 * 1024)
+        let valid = serde_json::to_vec(self)
+            .is_ok_and(|bytes| bytes.len() <= FAILURE_LOG_POLICY.document_bytes as usize)
             && self.collected_at.chars().count() <= 64
             && self.process_exit_code.is_none_or(|code| code <= 255)
             && self.schema_version == 1
             && chrono::DateTime::parse_from_rfc3339(&self.collected_at).is_ok()
             && !self.phase.is_empty()
             && self.phase.chars().count() <= 80
-            && self.stdout.text.chars().count() <= 2048
-            && self.stderr.text.chars().count() <= 2048
+            && self.stdout.text.chars().count() <= LOG_TAIL_BYTES
+            && self.stderr.text.chars().count() <= LOG_TAIL_BYTES
             && properties(&self.versions, 8)
             && properties(&self.sandbox, 12)
             && properties(&self.storage, 8)
@@ -159,7 +166,9 @@ impl FailureDiagnostics {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExitCause, FailureDiagnostics, is_omission_marker, omission_marker};
+    use super::{
+        ExitCause, FailureDiagnostics, LOG_TAIL_BYTES, is_omission_marker, omission_marker,
+    };
 
     #[test]
     fn the_shared_omission_vector_reads_the_marker_as_it_is_written() {
@@ -247,8 +256,8 @@ mod tests {
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/failure-diagnostics-v1.json"
         ))
         .unwrap();
-        value.stdout.text = "😀".repeat(2048);
-        value.stderr.text = "😀".repeat(2048);
+        value.stdout.text = "😀".repeat(LOG_TAIL_BYTES);
+        value.stderr.text = "😀".repeat(LOG_TAIL_BYTES);
         assert!(value.validate().is_err());
     }
 
