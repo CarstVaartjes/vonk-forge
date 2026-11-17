@@ -53,6 +53,7 @@ from .common import (
     telemetry_point,
 )
 from .display_memory import display_memory_advice
+from .host_checks import host_checks
 
 if TYPE_CHECKING:
     from .service import FleetProjection
@@ -355,6 +356,11 @@ def _node(
             port_count=reservations.get("port", (0, 0))[1],
         ),
         warnings=warnings,
+        host_checks=host_checks(
+            None
+            if inventory_state is None or inventory_state.host_settings is None
+            else inventory_state.host_settings.tuning
+        ),
     )
 
 

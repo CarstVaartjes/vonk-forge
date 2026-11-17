@@ -546,6 +546,11 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
                     &meminfo,
                     Path::new(vonk_agent_protocol::store_retention::HELPER_DATA_ROOT),
                 );
+                host.tuning = Some(crate::host_tuning::observe(
+                    self.runner,
+                    Path::new("/"),
+                    rustix::param::page_size() as u64,
+                ));
                 host
             }),
             installations,
@@ -603,6 +608,7 @@ fn host_settings<R: ProcessRunner>(
             .filter(|output| output.success)
             .and_then(|output| vonk_agent_protocol::gpu_clock::supported_range(&output.stdout)),
         swap: None,
+        tuning: None,
     })
 }
 

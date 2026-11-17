@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SparkPage } from "./spark";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import type { ControlApi } from "../api/types";
+import type { HostCheckAdvice } from "../lib/host-checks";
 
 let nodes: unknown[] = [];
 vi.mock("../hooks/use-fleet-stream", () => ({
@@ -181,6 +183,23 @@ test("display reservation stays unknown and renders Controller advice", async ()
   });
   expect(await screen.findByText(`${detail} ${recommendation}`)).toBeVisible();
   expect(screen.getByText(/Reserved unknown · SoC unknown/)).toBeVisible();
+});
+
+test("host checks list the Controller's advice with each command, and none hides the section", () => {
+  // Break caught: a command dropped, or host advice raised as attention on the status line.
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-host-checks.json", "utf8"),
+  ) as { cases: { advice: HostCheckAdvice; lines: string[] }[] };
+  const first = show({ ...node, host_checks: vectors.cases.map((item) => item.advice) });
+  const section = screen.getByRole("region", { name: "Host checks" });
+  for (const { lines } of vectors.cases) {
+    expect(within(section).getByText(lines[0])).toBeVisible();
+    for (const command of lines.slice(1)) expect(within(section).getByText(command)).toBeVisible();
+  }
+  expect(screen.queryByText("needs attention")).toBeNull();
+  first.unmount();
+  show({ ...node, host_checks: [] });
+  expect(screen.queryByRole("region", { name: "Host checks" })).toBeNull();
 });
 
 test("the frame shows the Spark's own facts, or Not reported", () => {

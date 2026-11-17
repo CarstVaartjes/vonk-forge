@@ -6,6 +6,7 @@ import { nodeHealth } from "../lib/node-health";
 import { HealthList } from "./health-list";
 import { SparkCharts } from "./spark-charts";
 import { SparkGpuNow } from "./spark-gpu-now";
+import { SparkHostChecks } from "./spark-host-checks";
 import { SparkMemory } from "./spark-memory";
 import { SensorStrip } from "./sensor-strip";
 import { SparkServing } from "./spark-serving";
@@ -102,6 +103,7 @@ export function SparkOverview({
           </dd>
         </div>
       </dl>
+      <SparkHostChecks node={node} />
       {node.loaded.some((item) => item.load_swap_held_bytes != null) && (
         <ul className="spark-run-swap" aria-label="Swap held while loading">
           {node.loaded
