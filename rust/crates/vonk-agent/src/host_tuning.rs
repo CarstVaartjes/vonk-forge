@@ -4,7 +4,10 @@
 //! and never fails the inventory.
 use std::{fs, io::Read, path::Path, time::Duration};
 
-use vonk_agent_protocol::generated::{ActiveUnit, HostTuning, HostUnit};
+use vonk_agent_protocol::{
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    generated::{HostTuning, HostUnit, InstalledUnit},
+};
 
 use crate::process::{ProcessRunner, Program};
 
@@ -42,9 +45,9 @@ const fn position(unit: HostUnit) -> usize {
     }
 }
 
+/// `host_tuning.MAX_REPORTED_SNAPS`: the contract's bound on reported snaps
+/// (a nested list, so build.rs exports no constant for it).
 const MAX_SNAPS: usize = 128;
-/// The contract's memory bound (`host_tuning.MemoryBytes`, 16 TiB).
-const MAX_MEMORY_BYTES: u64 = 16 << 40;
 /// /proc files are small; a longer read is not the file we expect.
 const READ_LIMIT: u64 = 64 * 1024;
 
@@ -61,7 +64,7 @@ pub fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> Hos
         Some(text)
     };
     HostTuning {
-        active_units: active_units(runner),
+        units: installed_units(runner),
         snaps: snaps(&root.join("snap")),
         watermark_boost_factor: read("proc/sys/vm/watermark_boost_factor")
             .and_then(|text| text.trim().parse().ok())
@@ -73,12 +76,12 @@ pub fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> Hos
     }
 }
 
-/// One `systemctl show` for all units. A unit that is not installed reads
-/// inactive; no answer at all is unknown.
-fn active_units<R: ProcessRunner>(runner: &R) -> Option<Vec<ActiveUnit>> {
+/// One `systemctl show` for all units. A unit that is not installed (or is
+/// masked) is left out, so advice never names it; no answer at all is unknown.
+fn installed_units<R: ProcessRunner>(runner: &R) -> Option<Vec<InstalledUnit>> {
     let mut arguments = vec![
         "show".to_owned(),
-        "--property=Id,ActiveState,MemoryCurrent".to_owned(),
+        "--property=Id,LoadState,ActiveState,MemoryCurrent".to_owned(),
         "--".to_owned(),
     ];
     arguments.extend(UNITS.iter().map(ToString::to_string));
@@ -90,8 +93,8 @@ fn active_units<R: ProcessRunner>(runner: &R) -> Option<Vec<ActiveUnit>> {
 }
 
 /// `systemctl show` prints one `Key=value` block per unit, blank-line separated.
-fn parse_show(text: &str) -> Option<Vec<ActiveUnit>> {
-    let mut active: [Option<ActiveUnit>; UNITS.len()] = std::array::from_fn(|_| None);
+fn parse_show(text: &str) -> Option<Vec<InstalledUnit>> {
+    let mut installed: [Option<InstalledUnit>; UNITS.len()] = std::array::from_fn(|_| None);
     let mut answered = 0;
     for block in text.split("\n\n") {
         let property = |key: &str| {
@@ -103,18 +106,19 @@ fn parse_show(text: &str) -> Option<Vec<ActiveUnit>> {
             continue;
         };
         answered += 1;
-        if block.lines().any(|line| line == "ActiveState=active") {
-            active[position(unit)] = Some(ActiveUnit {
+        if block.lines().any(|line| line == "LoadState=loaded") {
+            installed[position(unit)] = Some(InstalledUnit {
                 unit,
+                active: block.lines().any(|line| line == "ActiveState=active"),
                 // An unset value some systemd versions print as u64::MAX is
                 // unknown, never 16 EiB (the contract bounds it to 16 TiB).
                 memory_bytes: property("MemoryCurrent")
                     .and_then(|value| value.parse().ok())
-                    .filter(|bytes| *bytes <= MAX_MEMORY_BYTES),
+                    .filter(|bytes| *bytes <= MAX_TELEMETRY_CAPACITY_BYTES),
             });
         }
     }
-    (answered > 0).then(|| active.into_iter().flatten().collect())
+    (answered > 0).then(|| installed.into_iter().flatten().collect())
 }
 
 /// Snap names from `/snap/<name>` (no snapd call), sorted; `None` without `/snap`.

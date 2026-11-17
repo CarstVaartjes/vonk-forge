@@ -56,7 +56,7 @@ fn each_reading_that_fails_is_unknown_on_its_own() {
     // Fault: systemd does not answer and the host has no /proc or /snap here.
     let root = tempfile::tempdir().unwrap();
     let observed = observe(&Systemd(None), root.path(), 4096);
-    assert_eq!(observed.active_units, None);
+    assert_eq!(observed.units, None);
     assert_eq!(observed.snaps, None);
     assert_eq!(observed.watermark_boost_factor, None);
     assert_eq!(observed.kernel_splash, None);
@@ -65,10 +65,13 @@ fn each_reading_that_fails_is_unknown_on_its_own() {
     assert_eq!(parse_show("active\n"), None);
     // systemd's unset u64::MAX is unknown memory, not a value the contract refuses.
     let unset = parse_show(
-        "MemoryCurrent=18446744073709551615\nId=bluetooth.service\nActiveState=active\n",
+        "MemoryCurrent=18446744073709551615\nId=bluetooth.service\nLoadState=loaded\nActiveState=active\n",
     )
     .unwrap();
     assert_eq!(unset[0].memory_bytes, None);
+    // A unit that is not installed is never named, even when systemd answers.
+    let missing = "Id=cups.path\nLoadState=not-found\nActiveState=inactive\n";
+    assert_eq!(parse_show(missing), Some(vec![]));
 }
 
 #[test]

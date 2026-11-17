@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import Annotated
 
 from pydantic import Field, StringConstraints
-from vonk_agent_protocol.host_tuning import ActiveUnit, HostTuning, HostUnit
+from vonk_agent_protocol.host_tuning import HostTuning, HostUnit, InstalledUnit
 
 from ..strict_json import StrictModel
 
@@ -99,10 +99,13 @@ _WATERMARK_COMMANDS = [
     "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
     "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf",
 ]
-_SPLASH_COMMANDS = [
-    "sudo sed -i -E '/^GRUB_CMDLINE_LINUX_DEFAULT=/s/ *\\bsplash\\b//' /etc/default/grub",
-    "sudo update-grub",
-]
+#: One command: edits only the GRUB files that set splash (/etc/default/grub or
+#: a /etc/default/grub.d drop-in), then regenerates the boot configuration.
+_SPLASH_COMMAND = (
+    "grep -lE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\\bsplash\\b' /etc/default/grub "
+    "/etc/default/grub.d/*.cfg 2>/dev/null | sudo xargs -r sed -i -E "
+    "'/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/s/ *\\bsplash\\b//' && sudo update-grub"
+)
 _COMPACT_COMMAND = (
     "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; "
     "echo 1 | sudo tee /proc/sys/vm/compact_memory"
@@ -114,11 +117,11 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
     if tuning is None:
         return []
     advice: list[HostCheckAdvice] = []
-    active = {item.unit: item for item in tuning.active_units or ()}
+    installed = {item.unit: item for item in tuning.units or ()}
     for check, units in SERVICE_UNITS.items():
-        running = [active[unit] for unit in units if unit in active]
-        if running:
-            advice.append(_service(check, units, running, tuning.snaps))
+        present = [installed[unit] for unit in units if unit in installed]
+        if any(item.active for item in present):
+            advice.append(_service(check, present, tuning.snaps))
     factor = tuning.watermark_boost_factor
     if factor is not None and factor > 0:
         advice.append(
@@ -143,7 +146,7 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                     "Cosmetic: the boot splash hides kernel messages on the console "
                     "of a headless Spark. Low impact; the change applies at the next boot."
                 ),
-                commands=_SPLASH_COMMANDS,
+                commands=[_SPLASH_COMMAND],
             )
         )
     if (free := tuning.free_memory) is not None and free.free_bytes > 0:
@@ -169,10 +172,12 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
 
 def _service(
     check: HostCheck,
-    units: Sequence[HostUnit],
-    running: Sequence[ActiveUnit],
+    present: Sequence[InstalledUnit],
     snaps: Sequence[str] | None,
 ) -> HostCheckAdvice:
+    """Disables every unit of the check installed on this Spark, active or not
+    (an idle socket or path starts its service again); never a missing one."""
+    running = [item for item in present if item.active]
     names = ", ".join(item.unit.value for item in running)
     memory = [item.memory_bytes for item in running if item.memory_bytes is not None]
     finding = f"Active: {names}" + (
@@ -186,7 +191,8 @@ def _service(
         finding=finding,
         explanation=explanation,
         commands=[
-            "sudo systemctl disable --now " + " ".join(unit.value for unit in units)
+            "sudo systemctl disable --now "
+            + " ".join(item.unit.value for item in present)
         ],
     )
 

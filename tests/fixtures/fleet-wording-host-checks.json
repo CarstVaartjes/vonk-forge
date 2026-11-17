@@ -4,15 +4,15 @@
     {
       "advice": {
         "check": "snapd",
-        "finding": "Active: snapd.service, snapd.socket, snapd.seeded.service, snapd.snap-repair.timer; 26 MiB in use now.",
+        "finding": "Active: snapd.service, snapd.socket, snapd.seeded.service; 26 MiB in use now.",
         "explanation": "snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
         "commands": [
-          "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service snapd.snap-repair.timer"
+          "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
         ]
       },
       "lines": [
-        "Active: snapd.service, snapd.socket, snapd.seeded.service, snapd.snap-repair.timer; 26 MiB in use now. snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
-        "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service snapd.snap-repair.timer"
+        "Active: snapd.service, snapd.socket, snapd.seeded.service; 26 MiB in use now. snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
+        "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
       ]
     },
     {
