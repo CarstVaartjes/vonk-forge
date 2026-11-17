@@ -36,7 +36,7 @@ from vonk_agent_protocol.enrollment import (
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 
 from ..agent_jobs import CLAIM_LEASE_SECONDS, AgentResultRefused, StaleAgentAttempt
-from ..auth import AgentIdentity, agent_identity_from_scope
+from ..auth import AgentIdentity, validated_agent_identity_from_scope
 from ..contract_graph import raw_json_body
 from ..enrollment import (
     EnrollmentDenied,
@@ -69,7 +69,6 @@ from .common import (
     HostRuntimeGrantRequest,
     OrphanStopGrantRequest,
     PackageActivationGrantRequest,
-    _authenticated_activation_identity,
     _authenticated_identity,
     _body_node_matches,
     _host_grant_response,
@@ -80,7 +79,6 @@ from .common import (
     _require_services,
     _scope_identity,
     _validated_authenticated_source,
-    active_agent_identity,
     contract_verdict_or_wait,
     is_contract_verdict,
 )
@@ -132,8 +130,8 @@ def install_authority_routes(
         # never acted on; the Spark's next accepted result clears it.
         if services is None:
             return
-        identity = agent_identity_from_scope(dict(request.scope))
-        if identity is None or not active_agent_identity(services, identity):
+        identity = validated_agent_identity_from_scope(dict(request.scope))
+        if identity is None:
             return
         with suppress(SQLAlchemyError), services.sessions.begin() as session:
             if refused is None:
@@ -627,7 +625,7 @@ def install_authority_routes(
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_activation_identity(request, required)
+        identity = _authenticated_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
             outcome = _require_enrollment(required).activate(

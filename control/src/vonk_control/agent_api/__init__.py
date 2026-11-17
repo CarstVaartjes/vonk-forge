@@ -95,9 +95,6 @@ from .common import SignedHostHelperGrant as SignedHostHelperGrant
 from .common import SourceBundleStoreProtocol as SourceBundleStoreProtocol
 from .common import StrictJSONModel as StrictJSONModel
 from .common import _agent_identity_state as _agent_identity_state
-from .common import (
-    _authenticated_activation_identity as _authenticated_activation_identity,
-)
 from .common import _authenticated_identity as _authenticated_identity
 from .common import _body_node_matches as _body_node_matches
 from .common import _commit_recipe_image_upload as _commit_recipe_image_upload
