@@ -258,6 +258,7 @@ def run_artifact_job(
             client,
             lambda timeout: _download(args, client, quote, timeout),
             lambda timeout: None,
+            retry_if=_transient_failure,
         )
     raise ValueError(f"unsupported recipe job action: {action}")
 

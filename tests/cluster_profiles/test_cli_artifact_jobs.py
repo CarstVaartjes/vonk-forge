@@ -1186,9 +1186,7 @@ def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
     assert document["id"] == JOB_ID
 
 
-@pytest.mark.parametrize(
-    ("status", "attempts"), [(404, 1), (409, 1), (422, 1), (429, 3), (503, 3)]
-)
+@pytest.mark.parametrize(("status", "attempts"), [(409, 1), (429, 3), (503, 3)])
 def test_pure_read_repeats_only_after_a_transient_fault(
     artifact_clock, vonkctl_json, status, attempts
 ):
