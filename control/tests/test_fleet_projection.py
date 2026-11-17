@@ -1480,6 +1480,23 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         route_failed.healthy,
         route_failed.degraded_reason,
     ) == ([0, 1], [NODE_A, NODE_B], "failed", False, "route-not-published")
+
+    # A route pending its first publication, with nothing recorded against it,
+    # is not degraded. A waiting publication and a health-recovery re-publish
+    # carry a route_error and stay degraded.
+    for route_error, expected in (
+        (None, None),
+        ("supervisor busy; publication waits", "route-not-published"),
+        ("recipe rank health requires recovery", "route-not-published"),
+    ):
+        with sessions.begin() as session:
+            run = session.get(RecipeRun, route_failed_run_id)
+            assert run is not None
+            run.route_state = "pending"
+            run.route_error = route_error
+        reread = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+        pending = next(v for v in reread.loaded if v.run_id == route_failed_run_id)
+        assert pending.degraded_reason == expected
     assert [value.installation_id for value in beta.installed] == [
         complete_installation_id
     ]
