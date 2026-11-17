@@ -10,6 +10,7 @@ from vonk_agent_protocol import (
     RecipeJobRunResult,
     canonical_message,
 )
+from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureLogTail
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
@@ -75,7 +76,21 @@ def test_generic_failure_round_trip_and_diagnostic_guard_are_narrow():
 
 def test_diagnostics_enforce_whole_utf8_byte_budget():
     document = json.loads((VECTORS / "failure-diagnostics-v1.json").read_text())
-    document["stdout"]["text"] = "😀" * 2048
-    document["stderr"]["text"] = "😀" * 2048
-    with pytest.raises(ValidationError, match="16 KiB"):
+    document["stdout"]["text"] = "😀" * LOG_TAIL_BYTES
+    document["stderr"]["text"] = "😀" * LOG_TAIL_BYTES
+    with pytest.raises(ValidationError, match="document bound"):
         FailureDiagnostics.model_validate(document)
+
+
+def test_a_log_tail_holds_exactly_the_policy_bytes():
+    def tail(text: str) -> dict[str, object]:
+        return {
+            "text": text,
+            "truncated": False,
+            "dropped_bytes": 0,
+            "dropped_lines": 0,
+        }
+
+    assert FailureLogTail.model_validate(tail("x" * LOG_TAIL_BYTES))
+    with pytest.raises(ValidationError):
+        FailureLogTail.model_validate(tail("x" * (LOG_TAIL_BYTES + 1)))

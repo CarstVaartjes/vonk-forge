@@ -215,7 +215,8 @@ fn an_incidental_line_far_above_never_names_the_exit() {
 WARNING 11-02 23:40:01 [numa.py:12] set_mempolicy: invalid argument, keeping the default policy\n",
     );
     stderr.push_str(
-        &"INFO 11-02 23:40:02 [loader.py:88] Loading safetensors checkpoint shard\n".repeat(150),
+        // More than the retained bound, fewer than the capture holds.
+        &"INFO 11-02 23:40:02 [loader.py:88] Loading safetensors checkpoint shard\n".repeat(300),
     );
     let mut traceback = stderr.clone();
     traceback.push_str(
