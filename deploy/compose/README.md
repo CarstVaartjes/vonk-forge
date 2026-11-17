@@ -136,6 +136,10 @@ Controller API image. On every start the API stages it into the
 restart with it. A pull and redeploy therefore rolls out configuration too; the
 installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
+Each of those services waits for its staged files for
+`VONK_RUNTIME_ASSET_WAIT_SECONDS` (one value in `compose.yaml`, 120) and then
+exits so the restart policy retries; the Controller API healthcheck
+`start_period` (2m) covers the same wait.
 The LiteLLM supervisor script comes from the API image, but the route
 activation contract it imports is baked into the LiteLLM image. Each may run
 with the other's previous release. Transitions follow deploy order, with no
@@ -232,7 +236,7 @@ any non-running state Docker does not own, is started while its restart policy
 is `always` or `unless-stopped`; one stopped after it ran has no start error
 and stays stopped. `restarting`, `paused`, `removing` and `dead` are logged and
 left to Docker. A network that does not exist waits for the next `compose up`.
-Each repair backs off exponentially with jitter (30 s doubling to an hour) while
+Each repair backs off exponentially with jitter (30 s doubling to five minutes) while
 it does not converge. Containers sharing another container's network namespace
 are not touched.
 

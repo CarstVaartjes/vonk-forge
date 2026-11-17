@@ -306,3 +306,73 @@ async fn a_busy_or_long_polling_lane_keeps_observing_other_exact_children() {
         |result| result.fence == accepted.fence && result.state == AgentResultState::Succeeded
     ));
 }
+
+/// A helper that refuses the probe's peer or grant says nothing about the
+/// content effect: the observation stays unconfirmed, never a failure.
+#[tokio::test]
+async fn refused_content_probe_stays_unconfirmed_instead_of_failing_the_distribution() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+    use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
+    let mut accepted = claim();
+    accepted.operation = AgentOperation::ArtifactDistributionV1;
+    accepted.payload = serde_json::from_str(include_str!(
+        "../../../../../agent_protocol/fixtures/artifact-distribution-payload.json"
+    ))
+    .unwrap();
+    let root = tempdir().unwrap();
+    let AgentClaimPayload::ArtifactDistributionPayload(request) = &accepted.payload else {
+        panic!("distribution");
+    };
+    let models = root.path().join("distribution/models");
+    fs::create_dir_all(&models).unwrap();
+    for object in &request.assignment.objects {
+        let path = models.join(&object.sha256);
+        fs::write(&path, vec![0; object.bytes as usize]).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let socket = root.path().join("helper.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let peer = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let frame: vonk_agent_protocol::RecipeRunInspectionRequest =
+            vonk_agent_protocol::parse_strict(&body).unwrap();
+        let response = HostHelperResponse {
+            schema_version: 1,
+            request_id: Some(frame.request_id),
+            status: HostHelperResponseStatus::Rejected,
+            error_code: Some(HelperErrorCode::PeerIdentityInvalid),
+            process_running: None,
+            exit_code: None,
+            installation_intent_nonce: None,
+            job_progress_at: None,
+            diagnostic: None,
+            process_logs: None,
+            container_labels: None,
+        };
+        let body = super::canonical_json(&response).unwrap();
+        stream
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&body).unwrap();
+    });
+    let http = AgentHttpClient::for_http_test("http://127.0.0.1:1/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &http,
+        helper_socket: &socket,
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        },
+        runtime_root: root.path(),
+    };
+
+    let observed = executor.observe_operation(&accepted, None).await;
+    drop(peer);
+
+    assert!(matches!(observed, OperationObservation::Unknown(_)));
+}

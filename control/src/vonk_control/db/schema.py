@@ -5,10 +5,9 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import (
-    SQLAlchemyError,
-)
+from sqlalchemy.exc import SQLAlchemyError
 
+from .connections import _reraise_contention
 from .constants import _LOGGER
 from .schema_helpers import (
     _REPLACED_CONSTRAINT_NAMES,
@@ -138,6 +137,7 @@ def reconcile_schema(connection: Connection) -> None:
                         existing_type=model_column.type,
                     )
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 _LOGGER.warning(
                     "Kept temporary backfill default on %s.%s: %s",
                     table_name,
@@ -213,6 +213,7 @@ def reconcile_schema(connection: Connection) -> None:
                     if lossy_value is None:
                         _LOGGER.info("Changed type of %s.%s", table_name, column.name)
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 _LOGGER.warning(
                     "Skipped uncastable type change for %s.%s: %s",
                     table_name,
@@ -255,6 +256,7 @@ def reconcile_schema(connection: Connection) -> None:
                         )
                     _LOGGER.info("Made column %s.%s NOT NULL", table_name, column.name)
                 except SQLAlchemyError as error:
+                    _reraise_contention(error)
                     _LOGGER.warning(
                         "Skipped NOT NULL change for %s.%s: %s",
                         table_name,
@@ -276,6 +278,7 @@ def reconcile_schema(connection: Connection) -> None:
                         )
                     _LOGGER.info("Made column %s.%s nullable", table_name, column.name)
                 except SQLAlchemyError as error:
+                    _reraise_contention(error)
                     _LOGGER.warning(
                         "Skipped nullable change for %s.%s: %s",
                         table_name,
@@ -301,6 +304,7 @@ def reconcile_schema(connection: Connection) -> None:
                         "Changed server default for %s.%s", table_name, column.name
                     )
                 except SQLAlchemyError as error:
+                    _reraise_contention(error)
                     _LOGGER.warning(
                         "Skipped server default change for %s.%s: %s",
                         table_name,
@@ -331,6 +335,7 @@ def reconcile_schema(connection: Connection) -> None:
                         existing_type=old["type"],
                     )
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 _LOGGER.warning(
                     "Could not make extra column %s.%s nullable: %s",
                     table_name,
@@ -355,6 +360,7 @@ def reconcile_schema(connection: Connection) -> None:
                     index.create(connection, checkfirst=True)
                 _LOGGER.info("Created index %s", index.name)
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 failed_index_tables.add(index.table.name)
                 _LOGGER.warning("Skipped index %s: %s", index.name, error)
         elif difference[0] == "add_constraint":
@@ -373,6 +379,7 @@ def reconcile_schema(connection: Connection) -> None:
                     "Created %s constraint %s", kind or "database", constraint.name
                 )
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 failed_constraint_tables.add(constraint.table.name)
                 drift[
                     SchemaDriftKind.MISSING_UNIQUE_CONSTRAINT
@@ -459,6 +466,7 @@ def reconcile_schema(connection: Connection) -> None:
                         "Dropped obsolete constraint %s.%s", constraint.table.name, name
                     )
                 except SQLAlchemyError as error:
+                    _reraise_contention(error)
                     _LOGGER.warning(
                         "Could not drop obsolete constraint %s: %s", name, error
                     )
@@ -484,6 +492,7 @@ def reconcile_schema(connection: Connection) -> None:
                     index.drop(connection, checkfirst=True)
                 _LOGGER.info("Dropped obsolete index %s", index.name)
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 _LOGGER.warning(
                     "Could not drop obsolete index %s: %s", index.name, error
                 )
