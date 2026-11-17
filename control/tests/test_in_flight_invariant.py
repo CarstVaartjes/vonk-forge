@@ -41,7 +41,7 @@ class _Colour(Enum):
 
 
 def _snapshot(orphans: frozenset[str]) -> _Snapshot:
-    return _Snapshot({}, frozenset(), frozenset(), orphans)
+    return _Snapshot({}, frozenset(), frozenset(), dict.fromkeys(orphans, ORPHAN_GRACE))
 
 
 def test_in_flight_states_are_the_enum_minus_the_settled_ones() -> None:
@@ -83,17 +83,19 @@ def test_an_installing_row_is_an_orphan_only_when_no_live_operation_names_it(
     sessions, service, mapping_id, build_id = _setup(tmp_path)
     operation = _fresh_install(sessions, service, mapping_id, build_id)
     with sessions() as session:
-        assert _orphans(session) == frozenset()
+        assert _orphans(session) == {}
     _supersede(sessions, service, operation)
     with sessions() as session:
         assert _orphans(session) == {
-            f"installation {operation.owner_id} stays installing with no live operation"
+            f"installation {operation.owner_id} stays installing with no live operation": (
+                ORPHAN_GRACE
+            )
         }
     # The sweep that ends the row is what clears the invariant, and a fresh
     # request is admitted afterwards.
     _residues(sessions, service, SETTLED).tick()
     with sessions() as session:
-        assert _orphans(session) == frozenset()
+        assert _orphans(session) == {}
     _fresh_install(sessions, service, mapping_id, build_id)
 
 
@@ -112,3 +114,19 @@ def test_an_orphan_is_a_violation_only_beyond_the_grace_and_clears_when_healed()
     # Healed, then orphaned again: the clock starts over.
     assert monitor._orphans(_snapshot(frozenset()), start + 2 * ORPHAN_GRACE) == []
     assert monitor._orphans(_snapshot(orphan), start + 3 * ORPHAN_GRACE) == []
+
+
+def test_a_plan_awaiting_adoption_is_an_orphan_only_beyond_its_adoption_window() -> (
+    None
+):
+    monitor = Monitor(world=cast(Any, None), sparks=cast(Any, None))
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    (planned,) = (kind for kind in IN_FLIGHT_KINDS if kind.name == "installation")
+    grace = ORPHAN_GRACE + planned.held[InstallationState.PLANNED]
+    plan = _Snapshot(
+        {}, frozenset(), frozenset(), {"installation x stays planned": grace}
+    )
+    assert grace > ORPHAN_GRACE
+    assert monitor._orphans(plan, start) == []
+    assert monitor._orphans(plan, start + grace) == []
+    assert monitor._orphans(plan, start + grace + timedelta(seconds=1))
