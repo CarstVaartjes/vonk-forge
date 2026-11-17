@@ -296,7 +296,9 @@ owns installation cleanup, NAS model removal owns NAS bytes, and the Spark's
 store-retention collector owns exact object eviction. Shared file digests and
 local installation links or plans retain their objects.
 
-A complete fresh Spark inventory is required for acceptance. Remote removal is
+A complete fresh Spark inventory is required for acceptance from every Spark
+that may use the model (an installation of it lives there); an enrolled Spark
+that is offline but has no such installation does not block it. Remote removal is
 confirmed only by a subsequent complete model-store observation; an unavailable
 Spark is never reported as cleaned. The durable operation shows its dependency
 and next retry. Its 24-hour deadline survives restart; expiration keeps its

@@ -106,6 +106,12 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         assert targets[second].observation_available is True
         assert targets[second].reclaimable_bytes == 0
         assert targets[second].objects[0].object == obj
+        if fault != "manifest":
+            # A Spark without usable inventory that holds no installation of
+            # the model cannot reference it, so it does not block removal.
+            assert not wire.blockers and wire.fleet.nas_remove
+            assert path.read_bytes() == b"shared weights"
+            return
         assert wire.blockers and all(
             item.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
             for item in wire.blockers

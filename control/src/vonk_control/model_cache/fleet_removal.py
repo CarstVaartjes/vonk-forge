@@ -434,7 +434,10 @@ class FleetRemovalMixin:
                 ModelStoreObject(sha256=digest, bytes=size)
                 for digest, size in sorted((held or {}).items())
             ]
-            if not available:
+            # A Spark without a fresh inventory blocks only when it may still
+            # use the model: an installation of it lives there. Otherwise its
+            # references are known to exclude the model and removal proceeds.
+            if not available and node_id in installations:
                 issues.append(
                     _observation_issue(
                         retire_as_unknown(
@@ -492,8 +495,9 @@ class FleetRemovalMixin:
         elif protected:
             nas_reason, nas_detail = R.REFERENCED, keep_detail
         elif issues:
-            # Acceptance refuses while a Spark's inventory is stale, so the
-            # review answers the same: wait for that Spark's fresh scan.
+            # Acceptance refuses while a Spark that may use the model has a
+            # stale inventory, so the review answers the same: wait for its
+            # fresh scan.
             nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, issues[0].detail
         elif not sets and not kept_sets:
             nas_detail = "No NAS copy of this model is stored."
