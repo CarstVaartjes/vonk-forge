@@ -46,9 +46,11 @@ from vonk_control.models import (
     ControlProcessHeartbeat,
     FleetProfile,
     FleetProfileApplication,
+    InstallationNode,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
+    RecipeInstallation,
     RecipeLibrarySyncRun,
     RecipeRun,
     ResourceReservation,
@@ -228,6 +230,37 @@ def _run(session: Session, at: datetime) -> str:
     return run.id
 
 
+def _installation(session: Session, at: datetime, *, state: str = "uninstalled") -> str:
+    row = RecipeInstallation(
+        id=str(uuid.uuid4()),
+        recipe_revision_id=str(uuid.uuid4()),
+        mapping_id=str(uuid.uuid4()),
+        mapping_generation=1,
+        image_digest="sha256:" + "a" * 64,
+        plan_digest="a" * 64,
+        plan={},
+        state=state,
+        actor="operator",
+        created_at=at,
+        updated_at=at,
+    )
+    session.add(row)
+    session.flush()
+    session.add(
+        InstallationNode(
+            installation_id=row.id,
+            node_id=NODE,
+            rank=0,
+            role="main",
+            state=state,
+            required_bytes=1,
+            installed_bytes=0,
+            updated_at=at,
+        )
+    )
+    return row.id
+
+
 def _heartbeat(session: Session, at: datetime) -> str:
     row = ControlProcessHeartbeat(
         id=str(uuid.uuid4()),
@@ -323,6 +356,7 @@ SEEDS: dict[str, Callable[[Session, datetime], str]] = {
     "artifact_distribution_assignments": _assignment,
     "resource_reservations": _reservation,
     "recipe_runs": _run,
+    "recipe_installations": _installation,
     "control_process_heartbeats": _heartbeat,
     "model_cache_sets": _cache_set,
     "agent_certificates": _certificate,
@@ -354,6 +388,32 @@ def test_each_rule_removes_an_ended_row_past_its_window_and_keeps_a_recent_one(
     assert removed[table] >= 1
     assert not _present(sessions, table, old)
     assert _present(sessions, table, recent)
+
+
+def test_an_uninstalled_installation_goes_with_its_nodes_unless_a_run_or_live_job_names_it(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Catches uninstalled head-revision installations (and nodes) kept for ever."""
+    old = NOW - timedelta(hours=25)
+    with sessions.begin() as session:
+        free = _installation(session, old)
+        with_run = _installation(session, old)
+        named = _installation(session, old)
+        active = _installation(session, old, state="installed")
+        run = _stopped_run(NOW - timedelta(hours=1), NODE)
+        run.installation_id = with_run
+        session.add(run)
+        session.add(
+            _job(NOW, state="running", payload={"plan": {"installation_id": named}})
+        )
+    TerminalHistoryCollector(sessions, clock=lambda: NOW).collect()
+    assert not _present(sessions, "recipe_installations", free)
+    with sessions() as session:
+        assert not session.scalar(
+            select(InstallationNode.id).where(InstallationNode.installation_id == free)
+        )
+    for label, kept in (("run", with_run), ("job", named), ("active", active)):
+        assert _present(sessions, "recipe_installations", kept), label
 
 
 def test_every_mapped_table_has_a_rule_or_a_stated_reason() -> None:
