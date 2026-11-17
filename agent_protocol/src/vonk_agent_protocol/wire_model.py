@@ -23,6 +23,8 @@ from pydantic_core import CoreSchema, SchemaValidator, ValidationError, core_sch
 # agent carry that exact identity; their storage/argv representations must not
 # impose a smaller integer domain.
 MAX_RUN_GENERATION = 2**63 - 1
+#: Upper bound on any reported memory or disk capacity: 16 TiB.
+MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 
 
 def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:

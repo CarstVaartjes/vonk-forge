@@ -99,12 +99,14 @@ _WATERMARK_COMMANDS = [
     "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
     "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf",
 ]
-#: One command: edits only the GRUB files that set splash (/etc/default/grub or
-#: a /etc/default/grub.d drop-in), then regenerates the boot configuration.
+#: One command: edits only the GRUB files that set the exact word splash
+#: (/etc/default/grub or a /etc/default/grub.d drop-in; not splash=...), then
+#: regenerates the boot configuration.
 _SPLASH_COMMAND = (
-    "grep -lE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\\bsplash\\b' /etc/default/grub "
-    "/etc/default/grub.d/*.cfg 2>/dev/null | sudo xargs -r sed -i -E "
-    "'/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/s/ *\\bsplash\\b//' && sudo update-grub"
+    "grep -lZE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*[ \"]splash([ \"]|$)' /etc/default/grub "
+    "/etc/default/grub.d/*.cfg 2>/dev/null | sudo xargs -0 -r sed -i -E "
+    "'/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/{:a;s/([ \"])splash([ \"]|$)/\\1\\2/;ta}' "
+    "&& sudo update-grub"
 )
 _COMPACT_COMMAND = (
     "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; "
