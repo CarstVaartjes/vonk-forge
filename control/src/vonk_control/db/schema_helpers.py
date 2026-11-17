@@ -9,7 +9,7 @@ from sqlalchemy.exc import (
     SQLAlchemyError,
 )
 
-from .connections import _database_sqlstate
+from .connections import _database_sqlstate, _reraise_contention
 from .constants import _LOGGER
 
 # ``alembic_version`` cannot prove that a live database is the current schema.
@@ -149,7 +149,8 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
                 try:
                     with connection.begin_nested():
                         return normalized(expected_sql) == normalized(reflected_sql)
-                except SQLAlchemyError:
+                except SQLAlchemyError as error:
+                    _reraise_contention(error)
                     return False
 
             differences.extend(
@@ -278,6 +279,7 @@ def _repair_check_constraints(connection: Connection) -> None:
                     name,
                 )
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 if connection.dialect.name != "postgresql":
                     _LOGGER.warning(
                         "Could not create CHECK %s.%s: %s",
@@ -305,6 +307,7 @@ def _repair_check_constraints(connection: Connection) -> None:
                         error,
                     )
                 except SQLAlchemyError as deferred_error:
+                    _reraise_contention(deferred_error)
                     _LOGGER.warning(
                         "Could not create CHECK %s.%s: %s",
                         table_name,
@@ -332,6 +335,7 @@ def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> Non
                     ops.drop_constraint(name, table_name, type_="foreignkey")
                 _LOGGER.info("Dropped retired foreign key %s.%s", table_name, name)
             except SQLAlchemyError as error:
+                _reraise_contention(error)
                 _LOGGER.warning(
                     "Could not drop retired foreign key %s.%s: %s",
                     table_name,
@@ -434,8 +438,7 @@ def _install_foreign_keys(
             installed.add(key)
             continue
         except SQLAlchemyError as error:
-            if _database_sqlstate(error) == "55P03":
-                raise
+            _reraise_contention(error)
             if _database_sqlstate(error) != "23503":
                 _LOGGER.warning("Could not create foreign key %s: %s", label, error)
                 drift[SchemaDriftKind.MISSING_FOREIGN_KEY].append(label)
@@ -444,8 +447,7 @@ def _install_foreign_keys(
         try:
             _create_foreign_key(connection, ops, constraint, old_names, not_valid=True)
         except SQLAlchemyError as error:
-            if _database_sqlstate(error) == "55P03":
-                raise
+            _reraise_contention(error)
             _LOGGER.warning("Could not create foreign key %s: %s", label, error)
             drift[SchemaDriftKind.MISSING_FOREIGN_KEY].append(label)
             continue
