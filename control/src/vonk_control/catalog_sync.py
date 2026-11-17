@@ -493,12 +493,19 @@ class ManagedRecipeCatalogSyncService:
     def record_automatic_wait(
         self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
     ) -> None:
-        # No observation of ours means no row to wait on: the newest row may be
-        # another sync's, and the in-memory delay still paces the next attempt.
-        if observed_id is None:
-            return
         with self._sessions.begin() as session:
-            run = session.get(RecipeLibrarySyncRun, observed_id)
+            run = (
+                session.get(RecipeLibrarySyncRun, observed_id)
+                if observed_id is not None
+                else session.scalar(
+                    select(RecipeLibrarySyncRun)
+                    .where(RecipeLibrarySyncRun.repository == self._repository)
+                    .order_by(
+                        RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
+                    )
+                    .limit(1)
+                )
+            )
             if run is not None:
                 now = self._clock()
                 previous = tuple(

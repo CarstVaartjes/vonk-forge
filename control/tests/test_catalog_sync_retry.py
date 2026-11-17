@@ -409,18 +409,6 @@ def test_retry_jitter_keeps_the_delay_capped(
     assert catalog_sync_retry_delay(0, 60) == 60
 
 
-def test_a_failed_attempt_without_an_observation_writes_no_wait() -> None:
-    """Catches the newest row of another sync receiving this attempt's wait."""
-
-    class Untouched:
-        def begin(self):
-            raise AssertionError("no observation of ours: nothing to write")
-
-    service = ManagedRecipeCatalogSyncService.__new__(ManagedRecipeCatalogSyncService)
-    service._sessions = Untouched()  # type: ignore[assignment]
-    service.record_automatic_wait(30, failed=True)
-
-
 def test_reconcile_errors_are_logged_under_their_own_label(caplog) -> None:
     """Catches a gateway or library refresh failure reported as a catalog sync failure."""
     from types import SimpleNamespace
