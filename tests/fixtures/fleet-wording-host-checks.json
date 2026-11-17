@@ -1,5 +1,6 @@
 {
-  "comment": "A Spark's host checks as both clients show them: the Controller web Spark page and `vonkctl fleet detail`. The Controller owns every word (finding, explanation, commands); each client shows the finding and its explanation as one line, then each command on its own line, in order. The web test calls `hostCheckLines` and the vonkctl test calls `host_check_lines` for each case; both must equal `lines` exactly.",
+  "comment": "A Spark's host checks as both clients show them: the Controller web Spark page and `vonkctl fleet detail`. The Controller owns every word (note, finding, explanation, commands, undo). The note is shown once above the checks. Each client shows a check's finding and explanation as one line, then each command on its own line, then, when there is undo, the line `Undo:` and each undo command, in order. The web test calls `hostCheckLines` and the vonkctl test calls `host_check_lines` for each case; both must equal `lines` exactly.",
+  "note": "Run these on Alpha itself, in a terminal or over SSH, as a user with sudo; the Controller never changes a Spark. Advice clears on the Spark's next report (about 2 minutes). Reasons and undo steps: https://github.com/CarstVaartjes/vonk-forge/blob/main/docs/operations/spark-host-checks.md",
   "cases": [
     {
       "advice": {
@@ -8,11 +9,16 @@
         "explanation": "snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
         "commands": [
           "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
+        ],
+        "undo": [
+          "sudo systemctl enable --now snapd.service snapd.socket snapd.seeded.service"
         ]
       },
       "lines": [
         "Active: snapd.service, snapd.socket, snapd.seeded.service; 26 MiB in use now. snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
-        "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
+        "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service",
+        "Undo:",
+        "sudo systemctl enable --now snapd.service snapd.socket snapd.seeded.service"
       ]
     },
     {
@@ -23,12 +29,19 @@
         "commands": [
           "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
           "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf"
+        ],
+        "undo": [
+          "sudo rm /etc/sysctl.d/90-watermark-boost.conf",
+          "sudo sysctl -w vm.watermark_boost_factor=15000"
         ]
       },
       "lines": [
         "vm.watermark_boost_factor is 15000. After memory fragments, the kernel raises its free-memory watermarks by this factor and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts. 0 turns the boost off, now and at every boot.",
         "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
-        "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf"
+        "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf",
+        "Undo:",
+        "sudo rm /etc/sysctl.d/90-watermark-boost.conf",
+        "sudo sysctl -w vm.watermark_boost_factor=15000"
       ]
     },
     {
@@ -38,7 +51,8 @@
         "explanation": "The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",
         "commands": [
           "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; echo 1 | sudo tee /proc/sys/vm/compact_memory"
-        ]
+        ],
+        "undo": []
       },
       "lines": [
         "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%). The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",

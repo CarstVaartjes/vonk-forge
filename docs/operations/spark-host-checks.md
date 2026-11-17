@@ -4,14 +4,18 @@ A DGX Spark that only runs Vonk Forge workloads is headless, so some of what
 DGX OS starts for a desktop costs memory the recipes count on. The agent
 measures a small set of host settings with every inventory and the Controller
 explains each one in `vonkctl fleet detail <spark>` and on the web Spark page
-(**Host checks**), with the measured value and the commands to change it.
+(**Host checks**), with the measured value, the commands to change it and the
+commands to undo that (**Undo:**). One line above the checks says where to run
+them: on the Spark itself, in a terminal or over SSH, as a user with `sudo`;
+the Controller never changes a Spark. The web page has a copy button per command.
 
 The checks are informative. They never gate admission or a load, never mark a
 Spark as needing attention, and the platform never runs these commands: each
 `sudo` is the operator's decision. A reading the agent cannot take (an older
 agent, systemd not answering, a file missing) gives no advice rather than a
-guess. Advice disappears with the next inventory (about two minutes) after the
-change.
+guess. Advice disappears with the next inventory (about two minutes; the agent
+reports every 120 s) after the change. The Controller owns all of this text,
+including the line above the checks and each undo.
 
 The measurements come from `systemctl show` for the units below, `/snap`,
 `/proc/sys/vm/watermark_boost_factor`, `/proc/cmdline` and `/proc/buddyinfo`.

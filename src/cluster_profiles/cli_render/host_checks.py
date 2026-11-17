@@ -11,8 +11,13 @@ from .common import _text
 
 
 def host_check_lines(advice: HostCheckAdvice) -> list[str]:
-    """The finding and its explanation, then each command on its own line."""
+    """The finding and its explanation, each command, then Undo: and its commands."""
     return [
         f"{_text(advice.finding)} {_text(advice.explanation)}",
         *(_text(command) for command in advice.commands),
+        *(
+            ["Undo:", *(_text(command) for command in advice.undo)]
+            if advice.undo
+            else []
+        ),
     ]
