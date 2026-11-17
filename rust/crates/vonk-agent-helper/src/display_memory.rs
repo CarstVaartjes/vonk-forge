@@ -319,6 +319,7 @@ mod tests {
             display_memory: Some(observe(root.path(), None)),
             gpu_clock_support: None,
             swap: None,
+            tuning: None,
         };
         let vectors: Vec<HostSettings> = serde_json::from_str(include_str!(
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/display-memory.json"

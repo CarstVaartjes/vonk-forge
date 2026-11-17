@@ -12,6 +12,7 @@ from .contracts import canonical_message
 from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
+from .host_tuning import HostTuning
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -99,7 +100,8 @@ class HostSettings(WireModel):
     A Spark runs headless: a desktop costs about 1 GB of the memory recipes
     count on. Its GPU clock is capped so sustained load cannot power it off,
     and its swap is sized for the biggest loads' transient peaks. The
-    privileged helper corrects drift; this is what is left.
+    privileged helper corrects drift; this is what is left. ``tuning`` is
+    what the host checks explain and only an operator changes.
     """
 
     model_config = ConfigDict(
@@ -116,6 +118,8 @@ class HostSettings(WireModel):
     # None: the agent predates swap management; the Controller then sends it
     # no swap grant (its strict reader would refuse the field).
     swap: SwapObservation | None = None
+    # None: the agent predates the host checks.
+    tuning: HostTuning | None = None
 
 
 class ModelStoreObject(WireModel):

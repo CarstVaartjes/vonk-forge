@@ -1,0 +1,49 @@
+{
+  "comment": "A Spark's host checks as both clients show them: the Controller web Spark page and `vonkctl fleet detail`. The Controller owns every word (finding, explanation, commands); each client shows the finding and its explanation as one line, then each command on its own line, in order. The web test calls `hostCheckLines` and the vonkctl test calls `host_check_lines` for each case; both must equal `lines` exactly.",
+  "cases": [
+    {
+      "advice": {
+        "check": "snapd",
+        "finding": "Active: snapd.service, snapd.socket, snapd.seeded.service; 26 MiB in use now.",
+        "explanation": "snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
+        "commands": [
+          "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
+        ]
+      },
+      "lines": [
+        "Active: snapd.service, snapd.socket, snapd.seeded.service; 26 MiB in use now. snapd keeps the snap store running and refreshing. The installed snaps are desktop apps and their runtimes only: bare, core22, core24, firefox, firmware-updater, gnome-42-2204, gtk-common-themes, mesa-2404 and 4 more.",
+        "sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service"
+      ]
+    },
+    {
+      "advice": {
+        "check": "watermark-boost",
+        "finding": "vm.watermark_boost_factor is 15000.",
+        "explanation": "After memory fragments, the kernel raises its free-memory watermarks by this factor and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts. 0 turns the boost off, now and at every boot.",
+        "commands": [
+          "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
+          "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf"
+        ]
+      },
+      "lines": [
+        "vm.watermark_boost_factor is 15000. After memory fragments, the kernel raises its free-memory watermarks by this factor and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts. 0 turns the boost off, now and at every boot.",
+        "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
+        "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf"
+      ]
+    },
+    {
+      "advice": {
+        "check": "memory-fragmentation",
+        "finding": "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%).",
+        "explanation": "The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",
+        "commands": [
+          "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; echo 1 | sudo tee /proc/sys/vm/compact_memory"
+        ]
+      },
+      "lines": [
+        "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%). The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",
+        "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; echo 1 | sudo tee /proc/sys/vm/compact_memory"
+      ]
+    }
+  ]
+}

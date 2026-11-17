@@ -344,6 +344,7 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
         gpu_clock_support: None,
         display_memory: None,
         swap: None,
+        tuning: None,
     });
     request.installations = Some(vec![uuid::Uuid::nil()]);
     request.runs = Some(vec![uuid::Uuid::nil()]);

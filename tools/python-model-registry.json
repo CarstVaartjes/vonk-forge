@@ -51,6 +51,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/host_tuning.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/http_failure.py",
       "kind": "agent-protocol"
     },
@@ -297,6 +301,11 @@
       "module": "control/src/vonk_control/fleet_projection/common.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_projection/host_checks.py",
+      "kind": "declared",
+      "reason": "API model colocated with the one derivation that fills it (Spark host checks)"
     },
     {
       "module": "control/src/vonk_control/fleet_stream_contract.py",

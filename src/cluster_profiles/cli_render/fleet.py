@@ -22,6 +22,7 @@ from ..generated_control.models.gpu_clock_observation import GpuClockObservation
 from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
 from ..generated_control.models.gpu_clock_range import GpuClockRange
 from ..generated_control.models.gpu_clock_unavailable import GpuClockUnavailable
+from ..generated_control.models.host_check_advice import HostCheckAdvice
 from ..generated_control.models.run_presence import RunPresence
 from ..generated_control.models.swap_checkpoint import SwapCheckpoint
 from ..generated_control.models.swap_intent import SwapIntent
@@ -44,6 +45,7 @@ from .common import (
     _warn,
     _words,
 )
+from .host_checks import host_check_lines
 from .throttle import throttle_words
 
 NO_SPARKS = "No Sparks are enrolled."
@@ -121,6 +123,15 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     for issue in _projection_issues(node.get("projection_issues")):
         _warn(f"{_text(name)}: {_text(issue)}")
     _reasons(node.get("warnings"), subject=name)
+    # Informative advice, never attention; an older Controller sends none.
+    checks = node.get("host_checks")
+    for advice in checks if isinstance(checks, list) else []:
+        text, *commands = host_check_lines(
+            HostCheckAdvice.from_dict(dict(_object(advice, "host check")))
+        )
+        _field("Host check", text)
+        for command in commands:
+            print(f"  {command}")
 
 
 def _display_memory(observation: DisplayMemoryObservation | None) -> str:

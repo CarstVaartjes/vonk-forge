@@ -61,6 +61,7 @@ pub(crate) fn install_for_helper(socket: &Path, phases: &Arc<LoadPhases>) {
 
 fn unanswered(request_id: Uuid) -> PageCacheDropReport {
     PageCacheDropReport {
+        compaction: None,
         request_id,
         dropped_at: Utc::now().fixed_offset(),
         cached_before_bytes: None,
