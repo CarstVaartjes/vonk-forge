@@ -79,12 +79,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let seen = match seen {
             Ok(seen) => seen,
-            Err(error) if refused_before_effect(&error) => {
-                return OperationObservation::confirmed(runtime_failure(
-                    "runtime observation refused the exact identity",
-                    &error,
-                ));
-            }
             Err(error) => return pending(WaitReason::ObservationUnavailable, error.to_string()),
         };
         match (request, seen) {

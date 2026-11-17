@@ -81,7 +81,12 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
         (source / relative).write_text("shipped asset\n")
     calls = tmp_path / "exec-calls"
     sleeps = tmp_path / "sleeps"
-    environment = {**os.environ, "EXEC_CALLS": str(calls), "SLEEPS": str(sleeps)}
+    environment = {
+        **os.environ,
+        "EXEC_CALLS": str(calls),
+        "SLEEPS": str(sleeps),
+        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",  # the compose service's value
+    }
     # Virtualize only time: the production counter/test/exit stays untouched.
     # The external subprocess timeout catches the old unbounded implementation.
     virtual_sleep = 'sleep() { printf "%s\\n" "$1" >> "$SLEEPS"; }; '

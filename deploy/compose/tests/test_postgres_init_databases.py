@@ -529,6 +529,9 @@ def postgres_after_runtime_asset_restart(tmp_path_factory, postgres_image: str):
                             "POSTGRES_DB": "control",
                             "POSTGRES_USER": "control",
                             "POSTGRES_PASSWORD": "test-password",
+                            "VONK_RUNTIME_ASSET_WAIT_SECONDS": production[
+                                "environment"
+                            ]["VONK_RUNTIME_ASSET_WAIT_SECONDS"],
                         },
                         "volumes": [
                             f"{assets}:/run/vonk-runtime-assets:ro",

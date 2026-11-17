@@ -98,6 +98,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
                 &imported,
             ));
         }
+        // `--ignore`: a retried build finds its networks already created.
         // Neither network needs container-name discovery. Keeping Aardvark
         // out of these private bridges also avoids competing DNS lifecycles
         // between rootless Podman and Buildah's OCI network setup. The proxy
@@ -106,6 +107,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             vec![
                 "network".to_owned(),
                 "create".to_owned(),
+                "--ignore".to_owned(),
                 "--internal".to_owned(),
                 "--disable-dns".to_owned(),
                 result.internal_network.clone(),
@@ -113,6 +115,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             vec![
                 "network".to_owned(),
                 "create".to_owned(),
+                "--ignore".to_owned(),
                 "--disable-dns".to_owned(),
                 result.outbound_network.clone(),
             ],
