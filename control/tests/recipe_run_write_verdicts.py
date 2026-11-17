@@ -142,7 +142,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_activation.py": {
         "_activate_job_run_once": (
-            "df303f026c3847af285787fba50627945c3fc261c874654ede86d13ebb5b822a",
+            "c8bb67206138f396fe744dbe391207958b4d27688504f645a4d75c68967f744b",
             "retain: activation admission binds accepted run intent",
         ),
     },
