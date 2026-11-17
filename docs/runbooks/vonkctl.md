@@ -1202,8 +1202,9 @@ this boot, not a hardware readback: NVIDIA exposes no graphics-lock getter.
 Unknown readings stay unknown. A desired/applied mismatch remains a warning.
 
 `fleet detail` and the Spark overview also list the Spark's host checks after
-its warnings: each is the Controller's finding (with the measured value) and
-explanation on one line, then each command on its own line. They are advice,
+its warnings: one line says where to run them, then each check is the
+Controller's finding (with the measured value) and explanation on one line, each
+command on its own line, then `Undo:` and the commands that put it back. They are advice,
 never attention; see [Spark host checks](../operations/spark-host-checks.md).
 Both clients follow `tests/fixtures/fleet-wording-host-checks.json`.
 

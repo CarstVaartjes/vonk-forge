@@ -182,7 +182,8 @@ def test_host_checks_read_the_vector_lines(case):
 
 def test_fleet_detail_prints_every_host_check_after_the_warnings(printed):
     # Catches dropping a command or the checks of an older Controller (none).
-    cases = _vector("fleet-wording-host-checks.json")["cases"]
+    vector = _vector("fleet-wording-host-checks.json")
+    cases = vector["cases"]
     node = {
         "id": "spk_00000000000000000000000000000001",
         "display_name": "Alpha",
@@ -197,11 +198,15 @@ def test_fleet_detail_prints_every_host_check_after_the_warnings(printed):
     lines = printed(render_payload, node, "fleet", action="detail")
     shown = printed(
         render_payload,
-        node | {"host_checks": [case["advice"] for case in cases]},
+        node
+        | {
+            "host_checks": [case["advice"] for case in cases],
+            "host_checks_note": vector["note"],
+        },
         "fleet",
         action="detail",
     )
-    expected = [
+    expected = [f"Host checks: {vector['note']}"] + [
         line
         for case in cases
         for line in [f"Host check: {case['lines'][0]}"]

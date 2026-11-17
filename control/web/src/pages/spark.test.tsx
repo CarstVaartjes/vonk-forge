@@ -189,13 +189,26 @@ test("host checks list the Controller's advice with each command, and none hides
   // Break caught: a command dropped, or host advice raised as attention on the status line.
   const vectors = JSON.parse(
     readFileSync("../../tests/fixtures/fleet-wording-host-checks.json", "utf8"),
-  ) as { cases: { advice: HostCheckAdvice; lines: string[] }[] };
-  const first = show({ ...node, host_checks: vectors.cases.map((item) => item.advice) });
+  ) as { note: string; cases: { advice: HostCheckAdvice; lines: string[] }[] };
+  const write = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, { clipboard: { writeText: write } });
+  const first = show({
+    ...node,
+    host_checks: vectors.cases.map((item) => item.advice),
+    host_checks_note: vectors.note,
+  });
   const section = screen.getByRole("region", { name: "Host checks" });
+  const url = vectors.note.slice(vectors.note.lastIndexOf("http"));
+  expect(within(section).getByRole("link", { name: url })).toHaveAttribute("href", url);
+  expect(section).toHaveTextContent(vectors.note);
   for (const { lines } of vectors.cases) {
     expect(within(section).getByText(lines[0])).toBeVisible();
-    for (const command of lines.slice(1)) expect(within(section).getByText(command)).toBeVisible();
+    for (const command of lines.slice(1))
+      if (command !== "Undo:") expect(within(section).getByText(command)).toBeVisible();
   }
+  expect(within(section).getAllByText("Undo:")).toHaveLength(3);
+  fireEvent.click(within(section).getAllByRole("button", { name: "Copy command" })[0]);
+  expect(write).toHaveBeenCalledWith(vectors.cases[0].lines[1]);
   expect(screen.queryByText("needs attention")).toBeNull();
   first.unmount();
   show({ ...node, host_checks: [] });

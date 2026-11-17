@@ -53,7 +53,7 @@ from .common import (
     telemetry_point,
 )
 from .display_memory import display_memory_advice
-from .host_checks import host_checks
+from .host_checks import host_checks, host_checks_note
 
 if TYPE_CHECKING:
     from .service import FleetProjection
@@ -332,12 +332,18 @@ def _node(
             "Stored node labels are unreadable; labels are unknown."
         )
         warn_unreadable_once("Fleet node labels", node_id)
+    display_name = node_id if profile is None else profile.display_name
+    advice = host_checks(
+        None
+        if inventory_state is None or inventory_state.host_settings is None
+        else inventory_state.host_settings.tuning
+    )
     return FleetNode(
         agent_runtime=agent_runtime,
         gpu_clock_desired=gpu_clock_desired,
         swap_desired=swap_desired,
         id=node_id,
-        display_name=node_id if profile is None else profile.display_name,
+        display_name=display_name,
         hostname="" if items is None else items.hostname or "",
         ip_address=None if contact is None else contact.management_address,
         lifecycle="managed" if profile is None else profile.lifecycle,
@@ -356,11 +362,8 @@ def _node(
             port_count=reservations.get("port", (0, 0))[1],
         ),
         warnings=warnings,
-        host_checks=host_checks(
-            None
-            if inventory_state is None or inventory_state.host_settings is None
-            else inventory_state.host_settings.tuning
-        ),
+        host_checks=advice,
+        host_checks_note=host_checks_note(display_name) if advice else None,
     )
 
 
