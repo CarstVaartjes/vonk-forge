@@ -53,6 +53,7 @@ from .retirement import RetirementMixin
 from .retry import RetryMixin
 from .run_observation import RunObservationMixin
 from .start import StartMixin
+from .start_cleanup import StartCleanupDispatch
 from .stop import StopMixin
 from .stop_acceptance import StopAcceptanceMixin
 from .stop_dispatch import StopDispatchMixin
@@ -126,6 +127,7 @@ class RecipeOperationService(
         )
         self._build_cleanup_cursor: str | None = None
         self._run_health_maximum_age = timedelta(seconds=run_health_maximum_age_seconds)
+        StartCleanupDispatch.install(self)
 
     _storage_demands: StorageDemands | None = None
 

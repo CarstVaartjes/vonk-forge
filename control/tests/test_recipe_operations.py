@@ -2538,6 +2538,80 @@ def test_distributed_start_deadline_is_enforced_before_phase_advance(
         assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
+def test_failed_start_result_commits_when_cleanup_admission_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused admission never rolls the failed Start's result back: the run is
+    left ``stopping`` and the orphaned-run reaper queues its Stop after the grace."""
+    from vonk_control.admission_locking import AdmissionLockBusy as NodeLocksHeld
+    from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
+    from vonk_control.recipe_operations import start_cleanup
+
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=60,
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="x" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "refused-cleanup")
+    start = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="y" * 36
+    )
+    with sessions.begin() as session:
+        launches = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        launch = launches[0]
+        for order in launches:
+            order.current_attempt = 1  # claimed: the Start did launch
+        launch_payload = launch.payload
+        launch_node = launch.node_id
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+
+    def refused(*_args: object, **_kwargs: object) -> bool:
+        raise NodeLocksHeld("node locks are held")
+
+    monkeypatch.setattr(start_cleanup, "end_unfinished_run", refused)
+    service._clock = lambda: NOW + timedelta(seconds=60)
+    service.record_node_result(
+        start.id,
+        launch_node,
+        succeeded=True,
+        evidence=start_evidence(launch_payload),
+    )
+
+    def stops() -> list[Job]:
+        with sessions() as session:
+            return [
+                job
+                for job in session.scalars(select(Job).where(Job.kind == "recipe.stop"))
+                if job.payload.get("owner_id") == start.owner_id
+            ]
+
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
+    assert stops() == []
+
+    monkeypatch.undo()
+    DistributedRecoveryCoordinator(
+        sessions,
+        routes=routes,
+        agent_jobs=queue,
+        clock=lambda: (
+            NOW + timedelta(seconds=60) + OWNER_SETTLE_GRACE + timedelta(minutes=1)
+        ),
+        run_endings=service,
+    ).tick()
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
+    assert len(stops()) == 1
+
+
 def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
     tmp_path: Path,
 ) -> None:
