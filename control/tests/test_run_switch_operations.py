@@ -1938,7 +1938,11 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     revision = session.get(CatalogDocumentRevision, revision_id)
                     build = session.get(RecipeBuild, build_id)
                     assert revision is not None and build is not None
-                    entities = resolve_recipe_entities(session, revision.document)
+                    entities = resolve_recipe_entities(
+                        session,
+                        revision.document,
+                        content_digest=revision.content_digest,
+                    )
                     option_choices, settings = split_option_choices(
                         plan.mapping.parameters if plan.mapping is not None else None
                     )

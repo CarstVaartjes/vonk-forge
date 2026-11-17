@@ -308,7 +308,9 @@ def build_recipe_image_availability(
             try:
                 recipe = read_catalog_document(revision)
                 assert isinstance(recipe, RecipeDefinition)
-                entities = resolve_recipe_entities(session, revision.document)
+                entities = resolve_recipe_entities(
+                    session, revision.document, content_digest=revision.content_digest
+                )
             except SecurityRefusalError:
                 raise
             except (OSError, RuntimeError, TypeError, ValueError) as error:

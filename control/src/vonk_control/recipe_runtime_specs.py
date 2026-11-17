@@ -18,7 +18,6 @@ from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
     RecipeOptionError,
-    document_sha256,
     read_recipe,
 )
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
@@ -389,9 +388,13 @@ class ResolvedRecipe:
 
 
 def resolve_recipe_entities(
-    session: Session, document: Mapping[str, object]
+    session: Session, document: Mapping[str, object], *, content_digest: str
 ) -> ResolvedRecipe:
-    """Resolve a canonical recipe and its exact active Model revisions."""
+    """Resolve a canonical recipe and its exact active Model revisions.
+
+    ``content_digest`` is the stored revision's digest, verified at ingress; the
+    document is not hashed again.
+    """
     try:
         recipe = read_recipe(document)
     except (TypeError, ValueError) as error:
@@ -418,7 +421,7 @@ def resolve_recipe_entities(
         models.append(revision)
     return ResolvedRecipe(
         recipe=recipe,
-        recipe_digest=document_sha256(document),
+        recipe_digest=content_digest,
         model_revisions=tuple(models),
     )
 

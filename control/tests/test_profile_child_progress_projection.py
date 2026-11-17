@@ -122,7 +122,9 @@ class _PreparedImageExecutor(RecordingArtifactExecutor):
             revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
             build = session.get(RecipeBuild, plan.recipe_build_id)
             assert revision is not None and build is not None
-            resolved = resolve_recipe_entities(session, revision.document)
+            resolved = resolve_recipe_entities(
+                session, revision.document, content_digest=revision.content_digest
+            )
             document = revision.document
         # Managed storage preparation is outside the SQL read transaction.
         choices, settings = split_option_choices(

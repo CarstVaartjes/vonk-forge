@@ -91,7 +91,9 @@ class ResolutionMixin:
                 )
             )
         try:
-            resolved = resolve_recipe_entities(session, revision.document)
+            resolved = resolve_recipe_entities(
+                session, revision.document, content_digest=revision.content_digest
+            )
             resolved_model_items = resolved.model_revisions
             resolved_model = resolved_model_items[0] if resolved_model_items else None
             resolved_models = resolved.models

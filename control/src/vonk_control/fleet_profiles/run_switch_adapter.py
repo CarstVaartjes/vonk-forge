@@ -421,7 +421,11 @@ class RunSwitchFleetProfileAdapter(
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
                 f"recipe revision {revision.id} is unreadable: {definition.note}",
             )
-        resolved = resolve_recipe_entities(session, definition.model_dump(mode="json"))
+        resolved = resolve_recipe_entities(
+            session,
+            definition.model_dump(mode="json"),
+            content_digest=revision.content_digest,
+        )
         models = resolved.model_revisions
         model_digest = models[0].content_digest if models else None
         if not isinstance(model_digest, str):

@@ -583,7 +583,9 @@ class RunAdmissionService:
                     reason=InvalidRequestReason.NOT_FOUND,
                 )
             try:
-                resolved_entities = resolve_recipe_entities(session, revision.document)
+                resolved_entities = resolve_recipe_entities(
+                    session, revision.document, content_digest=revision.content_digest
+                )
                 # The tolerantly parsed Models, never the raw stored documents:
                 # a row an older contract wrote still carries a retired field.
                 parsed_models = resolved_entities.models
@@ -1133,7 +1135,9 @@ class RunAdmissionService:
                 RunAdmissionCode.PLAN_STALE, reason=InvalidRequestReason.SUPERSEDED
             )
         try:
-            resolve_recipe_entities(session, revision.document)
+            resolve_recipe_entities(
+                session, revision.document, content_digest=revision.content_digest
+            )
         except RecipeRuntimeSpecError as error:
             raise RunPlanInvalid(
                 RunAdmissionCode.DEPENDENCIES_STALE,
