@@ -2,164 +2,23 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
-from sqlalchemy import event, inspect, select, text
 from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import ControllerErrorCode, LifecycleState
-from vonk_control.db import initialize_database, node_facts
+from vonk_agent_protocol import ControllerErrorCode
 from vonk_control.evidence_repeats import (
     command_events,
     command_evidence_needed,
-    load_subject,
     note_repeat,
     note_success,
     owner_evidence,
     repeating_evidence,
 )
-from vonk_control.fleet_profile_contract import (
-    FleetProfileAssignmentInput,
-    FleetProfileInput,
-)
 from vonk_control.models import (
     AgentNodeContact,
     AgentOperation,
-    FleetProfileApplication,
 )
 from vonk_control.repeated_evidence_contract import RepeatedEvidenceSubject
 
-from .lifecycle_simulation.world import SOLO, build_world
 from .test_agent_api import NODE_A, STOP_PAYLOAD, make_agent_system, parent
-
-
-@pytest.mark.parametrize("orphan", [False, True])
-def test_repeat_adoption_restarts_and_preserves_classified_owners(
-    tmp_path, postgres_engine, monkeypatch, orphan
-):
-    """Catches putting command/profile summaries on contact or losing a copy on restart."""
-    world = build_world(tmp_path, postgres_engine)
-    try:
-        profiles = world.controller.profiles
-        profile = profiles.create(
-            FleetProfileInput(
-                name="Evidence owner",
-                assignments=[
-                    FleetProfileAssignmentInput(
-                        recipe_selector=f"vonk-forge/{world.recipes[SOLO]}",
-                        spark_ids=[world.nodes[0]],
-                        assignment_name="owner",
-                    ),
-                ],
-            ),
-            actor="admin",
-        )
-        application = profiles.apply(
-            profile.id,
-            request_key="00000000-0000-4000-8000-000000000789",
-            actor="admin",
-        )
-        with world.sessions.begin() as session:
-            operation = session.scalar(
-                select(AgentOperation)
-                .where(AgentOperation.node_id == world.nodes[0])
-                .order_by(AgentOperation.id)
-            )
-            assert operation is not None
-            operation.state = LifecycleState.FAILED
-            operation_id, operation_kind = operation.id, operation.kind
-        subjects = [
-            RepeatedEvidenceSubject.AGENT_RESULT,
-            operation_kind,
-            load_subject(application.id),
-        ]
-        if orphan:
-            subjects.append("detached legacy observation")
-        with postgres_engine.begin() as connection:
-            for table, column in (
-                ("agent_node_contacts", "contact_repeated_evidence"),
-                ("agent_operations", "repeated_evidence"),
-                ("fleet_profile_applications", "repeated_evidence"),
-            ):
-                connection.exec_driver_sql(f"ALTER TABLE {table} DROP COLUMN {column}")
-            connection.exec_driver_sql("""CREATE TABLE evidence_repeats (
-                node_id varchar(64), subject varchar(128), code varchar(128), repeats integer,
-                first_at timestamptz, last_at timestamptz, detail varchar(256), PRIMARY KEY(node_id,subject,code))""")
-            for subject in subjects:
-                connection.execute(
-                    text(
-                        "INSERT INTO evidence_repeats VALUES (:node,:subject,:code,7,:at,:at,NULL)"
-                    ),
-                    {
-                        "node": world.nodes[0],
-                        "subject": subject,
-                        "code": ControllerErrorCode.INVALID_REQUEST.value,
-                        "at": world.clock(),
-                    },
-                )
-        original = node_facts.move_repeated_evidence
-
-        def interrupted(connection):
-            copied_command = False
-
-            def stop(_conn, _cursor, statement, _parameters, _context, _many):
-                nonlocal copied_command
-                if statement.startswith(
-                    "UPDATE agent_operations SET repeated_evidence"
-                ):
-                    copied_command = True
-                if copied_command and statement.startswith(
-                    "DELETE FROM evidence_repeats WHERE"
-                ):
-                    raise InterruptedError("Controller stopped after owner copy")
-
-            event.listen(connection, "before_cursor_execute", stop)
-            try:
-                original(connection)
-            finally:
-                event.remove(connection, "before_cursor_execute", stop)
-
-        url = postgres_engine.url.render_as_string(hide_password=False)
-        with monkeypatch.context() as fault:
-            fault.setattr(node_facts, "move_repeated_evidence", interrupted)
-            with pytest.raises(InterruptedError):
-                initialize_database(url)
-        with postgres_engine.connect() as connection:
-            assert connection.exec_driver_sql(
-                "SELECT count(*) FROM evidence_repeats"
-            ).scalar_one() == len(subjects)
-        initialize_database(url)
-        initialize_database(url)
-        with world.sessions() as session:
-            node = session.get(AgentNodeContact, world.nodes[0])
-            operation = session.get(AgentOperation, operation_id)
-            application_owner = session.get(FleetProfileApplication, application.id)
-            assert (
-                node is not None
-                and operation is not None
-                and application_owner is not None
-            )
-            assert [
-                (item.subject, item.repeats) for item in owner_evidence(node) or []
-            ] == [(RepeatedEvidenceSubject.AGENT_RESULT, 7)]
-            assert [
-                (item.subject, item.repeats) for item in owner_evidence(operation) or []
-            ] == [(operation_kind, 7)]
-            assert [
-                (item.subject, item.repeats)
-                for item in owner_evidence(application_owner) or []
-            ] == [(load_subject(application.id), 7)]
-        with postgres_engine.connect() as connection:
-            assert (
-                "evidence_repeats" in inspect(connection).get_table_names()
-            ) is orphan
-            if orphan:
-                assert (
-                    connection.exec_driver_sql(
-                        "SELECT subject FROM evidence_repeats"
-                    ).scalar_one()
-                    == subjects[-1]
-                )
-    finally:
-        world.close()
 
 
 def test_concurrent_contact_notes_do_not_lose_counts(tmp_path, postgres_engine):

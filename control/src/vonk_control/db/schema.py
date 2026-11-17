@@ -504,16 +504,13 @@ def reconcile_schema(connection: Connection) -> None:
 
     from .node_facts import (
         move_contact_facts,
-        move_repeated_evidence,
         move_resource_facts,
         move_runtime_facts,
     )
 
-    # Contact first: the runtime move reads the contact clock from its owner,
-    # and repeated evidence adopts contact summaries onto contact rows.
+    # Contact first: the runtime move reads the contact clock from its owner.
     move_contact_facts(connection)
     move_runtime_facts(connection)
-    move_repeated_evidence(connection)
     move_resource_facts(connection)
 
     drift[SchemaDriftKind.DEFERRED_CHECK_CONSTRAINT].extend(
