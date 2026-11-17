@@ -187,6 +187,11 @@ class EnrollmentCore:
                                 "timeout": f"{DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms}ms"
                             },
                         )
+                        # The cluster commits asynchronously; certificate state
+                        # is acknowledged to agents, so it must survive a crash.
+                        session.execute(
+                            text("SELECT set_config('synchronous_commit', 'on', true)")
+                        )
                     yield session
             finally:
                 if local:
