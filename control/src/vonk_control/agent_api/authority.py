@@ -77,7 +77,6 @@ from .common import (
     _log_evidence_warnings,
     _require_enrollment,
     _require_services,
-    _scope_identity,
     _validated_authenticated_source,
     contract_verdict_or_wait,
     is_contract_verdict,
@@ -262,9 +261,8 @@ def install_authority_routes(
             )
 
     def helper_identity(request: Request) -> AgentIdentity:
-        _scope_identity(request)
-        required = _require_services(services)
-        return _authenticated_identity(request, required)
+        _require_services(services)
+        return _authenticated_identity(request)
 
     def host_runtime_service() -> HostRuntimeAuthorityService:
         required = services.host_runtime_authority if services is not None else None
@@ -403,9 +401,8 @@ def install_authority_routes(
     @agent.post("/heartbeat", response_model=AgentDirective)
     @operator_acceptance(ReceiptPolicy.AGENT_HEARTBEAT)
     def heartbeat(body: AgentProgress, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         message = body
         _log_evidence_warnings(body, endpoint="heartbeat", node_id=identity.node_id)
         source = _validated_authenticated_source(request, required, identity)
@@ -448,9 +445,8 @@ def install_authority_routes(
 
     @operator_acceptance(ReceiptPolicy.AGENT_RESULT)
     def result(body: AgentResult, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         message = body
         _log_evidence_warnings(body, endpoint="result", node_id=identity.node_id)
         source = _validated_authenticated_source(request, required, identity)
@@ -563,9 +559,8 @@ def install_authority_routes(
     )
     @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     def renew(body: RenewRequest, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
             issued = _require_enrollment(required).renew(
@@ -596,9 +591,8 @@ def install_authority_routes(
         Controller retires and CA-revokes the conflicting staged identity
         before issuing the durable pending CSR.
         """
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
             issued = _require_enrollment(required).recover_rotation(
@@ -623,9 +617,8 @@ def install_authority_routes(
     )
     @operator_acceptance(ReceiptPolicy.ENROLLMENT_ACTIVATE)
     def activate(body: ActivateRequest, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
             outcome = _require_enrollment(required).activate(

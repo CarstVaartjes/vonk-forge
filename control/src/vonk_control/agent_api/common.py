@@ -44,7 +44,7 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
-from vonk_agent_protocol.state_machines import EnrollmentPurpose
+from vonk_agent_protocol.state_machines import CertificateRecordState, EnrollmentPurpose
 
 from ..agent_jobs import AgentJobService
 from ..auth import (
@@ -463,13 +463,16 @@ def _scope_identity(request: Request) -> AgentIdentity:
 def active_agent_identity(
     services: AgentApiServices, identity: AgentIdentity | None
 ) -> bool:
-    return _agent_identity_state(services, identity) == "active"
+    return _agent_identity_state(services, identity) == CertificateRecordState.ACTIVE
 
 
 def activation_agent_identity(
     services: AgentApiServices, identity: AgentIdentity | None
 ) -> bool:
-    return _agent_identity_state(services, identity) in {"active", "staged"}
+    return _agent_identity_state(services, identity) in {
+        CertificateRecordState.ACTIVE,
+        CertificateRecordState.STAGED,
+    }
 
 
 def _agent_identity_state(
@@ -496,9 +499,7 @@ def _agent_identity_state(
     return valid
 
 
-def _authenticated_identity(
-    request: Request, services: AgentApiServices
-) -> AgentIdentity:
+def _authenticated_identity(request: Request) -> AgentIdentity:
     # The middleware is the one place that validates the certificate.
     identity = validated_agent_identity_from_scope(dict(request.scope))
     if identity is None:
