@@ -3589,6 +3589,50 @@ def test_duplicate_stop_replays_when_dispatch_wins_continuation_race(
     assert fresh.state == LifecycleState.RUNNING.value
 
 
+def test_stop_replay_lock_wait_returns_the_committed_undispatched_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A creation race whose replay hits the lock wait answers with the Stop that
+    committed, not a raw database error."""
+    from sqlalchemy.exc import OperationalError
+    from vonk_control.admission_locking import ConstraintReplay
+    from vonk_control.recipe_operations.interfaces import UndispatchedStopView
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id=str(uuid.uuid4())
+    )
+    plan = service.preview_stop(run.owner_id)
+    request_key = str(uuid.uuid4())
+    accept = service._accept_service_stop
+    calls = 0
+
+    def raced_accept(*args: object, **kwargs: object) -> Job:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            accept(*args, **kwargs)  # type: ignore[arg-type]  # commits the receipt
+            raise ConstraintReplay("uq_jobs_request", "23505")
+        lock_timeout = SimpleNamespace(sqlstate="55P03")
+        raise OperationalError("replay", {}, lock_timeout)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service, "_accept_service_stop", raced_accept)
+    view = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_key,
+    )
+    with sessions() as session:
+        (committed,) = session.scalars(select(Job).where(Job.request_id == request_key))
+        assert view == UndispatchedStopView.of(
+            service._view(committed, session=session)
+        )
+
+
 def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
     tmp_path: Path,
 ) -> None:

@@ -842,6 +842,7 @@ def scan_source(
                     # admission is stubbed, so no workload actually ends.
                     "test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted",
                     "test_retired_cleanup_that_is_busy_waits_instead_of_aborting_the_pass",
+                    "test_stop_replay_lock_wait_returns_the_committed_undispatched_stop",
                 }
                 shadowed = {
                     n.id
