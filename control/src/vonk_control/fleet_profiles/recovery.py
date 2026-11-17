@@ -346,8 +346,7 @@ class FleetProfileService:
                     ):
                         continue
                     if ending is not None:
-                        if row.state == LifecycleState.BACKOFF.value:
-                            ended.append(row.id)
+                        ended.append(row.id)
                         continue
                     if not self._recovery_possible(session, row, progress):
                         continue

@@ -179,8 +179,7 @@ def test_a_failed_load_is_never_relabelled_on_recovery_ticks(
 def test_a_failure_that_is_not_retried_keeps_its_recorded_end(
     tmp_path: Path,
 ) -> None:
-    """The adoption is for retried failures only: a definite one stays exactly
-    as it was recorded."""
+    """A definite failure stays exactly as it was recorded."""
 
     crash = "AssertionError: the attention heads do not divide the tensor size"
     sessions, lifecycle, service, _profile, _desired, ended, _child, _nodes = (
