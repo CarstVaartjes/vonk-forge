@@ -50,7 +50,6 @@ from ..agent_jobs import AgentJobService
 from ..auth import (
     AgentIdentity,
     AgentSource,
-    agent_identity_from_scope,
     agent_source_from_scope,
     validated_agent_identity_from_scope,
 )
@@ -449,15 +448,6 @@ def _require_enrollment(services: AgentApiServices) -> EnrollmentService:
     if services.enrollment is None:
         temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
     return services.enrollment
-
-
-def _scope_identity(request: Request) -> AgentIdentity:
-    identity = agent_identity_from_scope(dict(request.scope))
-    if identity is None:
-        raise SecurityHTTPError(
-            status_code=401, detail="verified agent identity required"
-        )
-    return identity
 
 
 def active_agent_identity(
