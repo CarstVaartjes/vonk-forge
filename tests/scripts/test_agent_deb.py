@@ -26,6 +26,7 @@ VERIFY = ROOT / "scripts/verify-agent-deb"
 PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
+POSTRM = ROOT / "packaging/debian/postrm"
 RECOVERY_LIFECYCLE = ROOT / "tests/nodes/test_agent_upgrade_recovery_systemd.sh"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = (
@@ -815,6 +816,45 @@ def test_postinst_rejects_exhausted_subid_space(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize("action", ("remove", "purge"))
+def test_postrm_forgets_unit_enablement_on_purge_only(
+    tmp_path: Path, action: str
+) -> None:
+    """Catches enablement state surviving a purge, or a plain remove purging it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls"
+    helper = bin_dir / "deb-systemd-helper"
+    helper.write_text(f'#!/bin/sh\necho "$@" >> {shlex.quote(str(log))}\n')
+    helper.chmod(0o755)
+    environment = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    result = subprocess.run(
+        ["/bin/sh", str(POSTRM), action],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text().splitlines() if log.exists() else []
+    if action == "remove":
+        assert calls == []
+    else:
+        assert "purge vonk-forge-package-rollback.service" in calls
+        assert "unmask vonk-forge-package-rollback.service" in calls
+
+
+def test_prerm_disables_every_unit_the_package_enables_on_removal() -> None:
+    prerm = PRERM.read_text()
+    postinst = POSTINST.read_text()
+    enabled = set(
+        re.findall(r"deb-systemd-helper enable (vonk-forge-[\w.-]+)", postinst)
+    )
+    assert enabled
+    for unit in enabled:
+        assert f"deb-systemd-helper disable {unit}" in prerm
 
 
 def test_package_manages_the_rootless_podman_user_manager() -> None:
@@ -1851,11 +1891,13 @@ def test_repair_evidence_omits_only_the_unbound_build_egress_binary() -> None:
 def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None:
     control = tmp_path / "control"
     control.mkdir()
-    for name in VERIFY_MODULE.REQUIRED_CONTROL:
+    for name in VERIFY_MODULE.REQUIRED_CONTROL | VERIFY_MODULE.ORDINARY_ONLY_CONTROL:
         source = ROOT / f"packaging/debian/{name}"
         path = control / name
         path.write_bytes(source.read_bytes() if source.is_file() else b"")
-        path.chmod(0o755 if name in {"preinst", "postinst", "prerm"} else 0o644)
+        path.chmod(
+            0o755 if name in {"preinst", "postinst", "postrm", "prerm"} else 0o644
+        )
 
     VERIFY_MODULE._verify_control(control)
 
