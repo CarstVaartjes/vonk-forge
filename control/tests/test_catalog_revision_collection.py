@@ -54,6 +54,7 @@ from vonk_control.models import (
     RunNode,
     SourceBundleArchive,
 )
+from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_execution_contract import (
     StoredInstallationPlan,
     StoredRunNodePlan,
@@ -702,20 +703,36 @@ def test_a_workload_that_only_just_moved_keeps_its_revision_through_the_grace_pe
     assert not catalog.exists(old)
 
 
-def test_an_unfinished_build_keeps_its_revision_and_a_finished_one_goes(
+def test_a_build_keeps_its_revision_only_while_a_live_job_owns_it(
     catalog: Catalog,
 ) -> None:
-    """Catches deleting a revision under a build that is still running."""
+    """Catches an orphaned unfinished build (no job) pinning its revision forever."""
 
-    building, _ = _refresh(catalog, "building")
+    owned, _ = _refresh(catalog, "owned")
+    orphan_building, _ = _refresh(catalog, "orphan-building")
+    orphan_planned, _ = _refresh(catalog, "orphan-planned")
     finished, finished_head = _refresh(catalog, "finished")
-    catalog.build(building, state="building")
+    owned_build = catalog.build(owned, state="building")
+    catalog.job(
+        RecipeStopParent(
+            schema_version=1,
+            owner_kind=OwnerKind.RECIPE_BUILD.value,
+            owner_id=owned_build,
+            plan_digest="0" * 64,
+        ).model_dump(mode="json"),
+        state=LifecycleState.RUNNING.value,
+        updated=NOW,
+    )
+    catalog.build(orphan_building, state="building")
+    catalog.build(orphan_planned, state="planned")
     catalog.build(finished)
     catalog.build(finished_head, updated=OLD + timedelta(hours=1))
 
     catalog.collector().collect()
 
-    assert catalog.exists(building)
+    assert catalog.exists(owned)
+    assert not catalog.exists(orphan_building)
+    assert not catalog.exists(orphan_planned)
     assert not catalog.exists(finished)
     assert catalog.count(RecipeBuild) == 2
 
