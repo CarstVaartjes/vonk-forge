@@ -181,6 +181,15 @@ the recipe's `reserve_bytes` is informational and is never added to the peak.
 retain a positive floor when the installed plan has one; an older, larger
 installed floor may be reduced to the current accepted floor.
 
+When the signed catalog publishes a hardware-measured steady peak for a role of
+this exact content (`measured_memory`, recorded on the revision's projection by
+catalog sync), that measured `peak_bytes` is the steady demand instead of the
+declared one; the declared load peak stays an absolute level, so its rise above
+the steady peak is re-based on the measured one. A measurement above the
+admission maximum keeps the declared peak and adds a warning. Admission reads
+it when planning, so work already running keeps the reservation it was admitted
+with: a delivered measurement never re-plans or stops a run.
+
 The declared peak must fit observed available memory minus the platform floor,
 including on an idle Spark. A shortfall is a typed capacity refusal through the
 existing wait/recovery path; fresh capacity can make a later attempt admissible.

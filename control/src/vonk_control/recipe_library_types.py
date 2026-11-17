@@ -13,7 +13,10 @@ from vonk_forge_contracts import (
     RecipeApi,
     RecipeDisplay,
 )
-from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedQualificationStatusView,
+)
 
 if TYPE_CHECKING:
     from .catalog_revision_contract import PublishedDocument
@@ -71,6 +74,9 @@ class RecipeLibraryItem:
     prebuilt_image: PrebuiltImage | None = None
     # The hardware qualification the signed index derived for this revision.
     qualification: PublishedQualificationStatusView | None = None
+    # What each role of this exact content measured on hardware; admission's
+    # steady peak. None when the signed index carries none.
+    measured_memory: PublishedMeasuredMemory | None = None
     # The gateway API facts the signed index carries beside this revision, read
     # once at ingress; none when absent or unreadable (the route then publishes
     # no model_info).

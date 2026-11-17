@@ -185,3 +185,77 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_blocks(
     for shown in (listed.qualification, detail.qualification):
         assert shown is not None
         assert shown.status == QualificationStatus.NOT_YET_VERIFIED
+
+
+def test_sync_records_the_published_measured_memory_for_admission_only():
+    """Catches the measured steady peak being dropped between index and admission.
+
+    It is recorded on the revision's projection for admission and never shown in
+    the Library's ``projected`` block; a complete view without it withdraws it.
+    """
+    from sqlalchemy import select
+    from vonk_control.catalog_revision_contract import published_steady_peaks
+    from vonk_control.models import CatalogDocumentRevision
+    from vonk_forge_contracts.qualification_status import (
+        PublishedMeasuredMemory,
+        PublishedRoleMemory,
+    )
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=CursorCodec(b"c" * 32)
+    )
+    item = replace(_item(_recipe(_model())), dependencies=(_model(),))
+    measured = PublishedMeasuredMemory(
+        roles=(
+            PublishedRoleMemory(role="entrypoint", peak_bytes=7, measured_peak_bytes=7),
+        )
+    )
+
+    class Reader:
+        snapshot = RecipeLibrarySnapshot(
+            "c" * 40, (replace(item, measured_memory=measured),)
+        )
+
+        def list(self):
+            return self.snapshot
+
+        def fetch(self, uri):
+            return self.snapshot.items[0]
+
+    reader = Reader()
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=catalog, reader=reader, clock=lambda: now
+    )
+
+    def synced_peaks():
+        sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+            )
+        )
+        with sessions() as session:
+            revision = session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe"
+                )
+            ).one()
+            return published_steady_peaks(revision)
+
+    peaks = synced_peaks()
+    assert {role: value.peak_bytes for role, value in peaks.items()} == {
+        "entrypoint": 7
+    }
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"p" * 32).cursor_codec(), clock=lambda: now
+    )
+    (recipe,) = projection.recipe_library(limit=10).recipes
+    assert recipe.projected.measured_memory is None
+
+    reader.snapshot = replace(reader.snapshot, items=(item,))
+    assert synced_peaks() == {}
