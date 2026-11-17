@@ -169,6 +169,8 @@ publication artifact provide evidence inputs, not the installed image policy.
 
 ## Database backups
 
+PostgreSQL runs with `synchronous_commit=off` (fsync and full_page_writes stay on): model downloads share the NAS pool and made every commit wait on WAL fsync, slowing the API to 4-7 s. A NAS crash or power cut can lose the last fraction of a second of commits, never corrupt data; the platform self-heals.
+
 PostgreSQL writes automatic dumps to `./backups/` in the project folder. See
 [backup settings and restoration](../../docs/postgres-backups.md).
 

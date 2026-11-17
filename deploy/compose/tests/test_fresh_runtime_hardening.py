@@ -37,7 +37,8 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
     assert (
         "/run/vonk-runtime-assets/postgres/entrypoint.sh" in postgres["entrypoint"][2]
     )
-    assert postgres["command"] == ["postgres"]
+    # Async commit: model downloads share the NAS pool and stall WAL fsync.
+    assert postgres["command"] == ["postgres", "-c", "synchronous_commit=off"]
     assert "runtime-assets:/run/vonk-runtime-assets:ro" in postgres["volumes"]
     api_root = _final_stage("api-root")
     assert "COPY deploy/compose/postgres/ " in api_root
