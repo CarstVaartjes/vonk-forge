@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import RunSwitchCode
 
 from ..admission_locking import AdmissionLockBusy
@@ -30,7 +29,7 @@ from ..run_admission import (
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
 from .awaited_children import awaited_jobs
-from .constants import _FINAL_VERIFICATION_MAX_SECONDS
+from .constants import _FINAL_VERIFICATION_MAX_SECONDS, _START_CHILD_KINDS
 from .errors import RunSwitchPostStopEvidencePending
 from .planning_helpers import _aware, _stored_job_plan
 
@@ -69,7 +68,7 @@ def observation_owners(
     if awaited.start_request_key is not None:
         start = session.scalar(
             select(Job.id).where(
-                Job.kind == WireAgentOperation.RECIPE_START.value,
+                Job.kind.in_(_START_CHILD_KINDS),
                 Job.request_id == awaited.start_request_key,
             )
         )

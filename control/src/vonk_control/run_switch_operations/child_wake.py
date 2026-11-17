@@ -26,7 +26,6 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason
 
 from .. import job_states, model_cache_states
@@ -36,7 +35,7 @@ from ..persisted_waits import read_wait, schedule_wait
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stored_json import read_row_column
 from .awaited_children import awaited_jobs, child_job_ids, start_request_key
-from .constants import _OPERATION_KINDS
+from .constants import _OPERATION_KINDS, _START_CHILD_KINDS
 from .planning_helpers import _aware, _stored_job_plan
 from .result_helpers import _read_progress
 
@@ -152,7 +151,7 @@ def _owners_awaiting(session: Session, child_ids: frozenset[str]) -> frozenset[s
         session.scalars(
             select(Job.request_id).where(
                 Job.id.in_(child_ids),
-                Job.kind == WireAgentOperation.RECIPE_START.value,
+                Job.kind.in_(_START_CHILD_KINDS),
             )
         )
     )

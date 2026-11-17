@@ -55,6 +55,7 @@ from .errors import (
     retry_later_unless_deterministic,
 )
 from .evidence_waits import RunSwitchPostStopInventoryPending
+from .executor_phases import _replans_when_superseded
 from .identity_helpers import _started_operation_id, _string_or_none
 from .interfaces import PhaseExecution
 from .ownership import _lock_current_build_parent
@@ -348,20 +349,26 @@ class ExecutorPreflightMixin:
                     agent_payload=dict(stored_plan),
                 )
             except (TypeError, ValueError) as error:
-                raise RunSwitchRetryLater(
+                raise retry_later_unless_deterministic(
                     f"{RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID}: {error}",
+                    error,
                     reason=WaitReason.STALE_PLAN,
                 ) from error
         child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
         try:
-            value = start_build(
-                build_plan,
-                build_input_sha256=build_input_sha256,
-                actor=actor,
-                request_id=child_key,
-                admission_guard=admission_guard,
-            )
-        except (RecipeBuildAdmissionBusy, _RunSwitchBuildParentChanged):
+            with _replans_when_superseded():
+                value = start_build(
+                    build_plan,
+                    build_input_sha256=build_input_sha256,
+                    actor=actor,
+                    request_id=child_key,
+                    admission_guard=admission_guard,
+                )
+        except (
+            RecipeBuildAdmissionBusy,
+            _RunSwitchBuildParentChanged,
+            RunSwitchRetryLater,
+        ):
             raise
         except (
             KeyError,

@@ -3944,6 +3944,28 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     assert execution.result.subphase == "container-build"
     assert _phase_result(execution.result, phase=phase) == execution.result
 
+    # A build preview superseded in place re-plans; it does not end the load.
+    from vonk_agent_protocol import InvalidRequestReason, WaitReason
+    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+
+    def superseded_build(*_args, **_kwargs) -> RecipeOperationView:
+        raise RecipeRequestInvalid(
+            "recipe build preview is stale", reason=InvalidRequestReason.SUPERSEDED
+        )
+
+    lifecycle_stub.build = superseded_build
+    with pytest.raises(RunSwitchRetryLater) as replan:
+        executor.execute(
+            plan,
+            phase,
+            item_index=0,
+            actor="admin",
+            request_key=request_key,
+            progress=progress,
+        )
+    assert replan.value.typed_reason is WaitReason.SCOPE_CHANGED
+
     # A durable plan mutation is rejected before dispatch; execution never
     # re-plans around the changed identity.
     with sessions.begin() as session:
