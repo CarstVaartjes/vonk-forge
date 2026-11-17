@@ -3,11 +3,11 @@
 import copy
 from typing import Any
 
-from psycopg.errors import DeadlockDetected, LockNotAvailable
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
+from .connections import _reraise_contention
 from .constants import _LOGGER
 from .schema_helpers import (
     _REPLACED_CONSTRAINT_NAMES,
@@ -28,14 +28,6 @@ from .schema_helpers import (
     _schema_difference_key,
     _unhandled_differences,
 )
-
-
-def _reraise_contention(error: SQLAlchemyError) -> None:
-    """Lock timeouts and deadlocks are not schema verdicts: startup retries."""
-    if isinstance(error, DBAPIError) and isinstance(
-        error.orig, (LockNotAvailable, DeadlockDetected)
-    ):
-        raise error
 
 
 def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
