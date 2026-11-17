@@ -834,7 +834,8 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     caddy_environment = rendered_caddy["environment"]
     # The entrypoint derives the other SNI names from this one hostname.
     assert caddy_environment == {
-        "VONK_CONTROL_HOSTNAME": environment["VONK_CONTROL_HOSTNAME"]
+        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",
+        "VONK_CONTROL_HOSTNAME": environment["VONK_CONTROL_HOSTNAME"],
     }
     adapted = _adapted_caddy(
         caddy_environment | {"VONK_AGENT_PROXY_AUTH": "test-proxy-secret"}

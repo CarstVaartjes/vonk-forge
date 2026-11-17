@@ -1186,6 +1186,26 @@ def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
     assert document["id"] == JOB_ID
 
 
+@pytest.mark.parametrize(("status", "attempts"), [(409, 1), (429, 3), (503, 3)])
+def test_pure_read_repeats_only_after_a_transient_fault(
+    artifact_clock, vonkctl_json, status, attempts
+):
+    """Catches a final 4xx verdict on a read being replayed with sleeps."""
+    client = ArtifactJobClient()
+    original = client.request
+    calls = []
+
+    def request(method, path, payload=None, **kwargs):
+        calls.append(path)
+        raise ControlHTTPError(status, "refused")
+
+    client.request = request
+    arguments = ("recipe", "job", "list", "--run", RUN_ID)
+    assert vonkctl_json(*arguments, control_client=client)[0] == 2
+    assert len(calls) == attempts
+    client.request = original
+
+
 def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(tmp_path):
     """Catches an old capacity projection vetoing create before the owner sees it."""
     binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
