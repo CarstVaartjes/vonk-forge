@@ -400,7 +400,7 @@ async fn refused_reobservation_stays_unconfirmed_instead_of_failing_the_start() 
     };
 
     let observed = executor.observe_runtime(&accepted).await;
-    peer.join().unwrap();
+    drop(peer);
 
     assert!(matches!(
         observed,
