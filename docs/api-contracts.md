@@ -945,8 +945,10 @@ never proves a running workload stopped or releases its resource claims.
 ### Subprocess failure evidence
 
 `FailureDiagnostics.process_exit_code` retains an observed numeric subprocess
-exit status alongside its stdout/stderr tails, each bounded to 2048 bytes after
-redaction. The helper keeps a native abort report (`terminate called ...` and
+exit status alongside its stdout/stderr tails, each bounded to `FailureLogPolicy.log_tail_bytes` (16384) bytes after
+redaction; the protocol owns that number and the Controller, agent and helper read it
+(Rust through the generated `FAILURE_LOG_POLICY`). A new bound reaches the Controller
+first (its reader accepts larger tails), then agents and helpers. The helper keeps a native abort report (`terminate called ...` and
 its `what()` message) ahead of the tail, marks the omitted middle, and stays
 within that bound. The status is omitted when no
 numeric status was observed (including spawn failure or signal termination).

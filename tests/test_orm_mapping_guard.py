@@ -7,6 +7,7 @@ Metadata cannot infer the producer of a scalar on agent_nodes or detect
 arbitrary runtime dictionaries; those still require ownership review.
 """
 
+import ast
 from collections.abc import Mapping
 from importlib import import_module
 from inspect import getmembers, isclass
@@ -503,3 +504,53 @@ def test_guard_rejects_restoring_duplicate_resource_columns(field: str) -> None:
         f"node_telemetry_samples.{field}:" in problem
         for problem in node_fact_violations(metadata, {})
     )
+
+
+def _table_declaring_modules_outside_models(
+    source: Path, loaded: set[str]
+) -> list[str]:
+    """Modules that assign ``__tablename__`` but that ``models`` never imports.
+
+    Startup drops every table the metadata does not declare, so a table-declaring
+    module that ``models/__init__.py`` does not import would lose live data.
+    """
+
+    missing = []
+    for path in sorted(source.rglob("*.py")):
+        relative = path.relative_to(source)
+        if relative.parts[0] == "models" or relative.stem in loaded:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            targets = (
+                node.targets
+                if isinstance(node, ast.Assign)
+                else [node.target]
+                if isinstance(node, ast.AnnAssign)
+                else []
+            )
+            if any(
+                isinstance(t, ast.Name) and t.id == "__tablename__" for t in targets
+            ):
+                missing.append(str(relative))
+                break
+    return missing
+
+
+def _modules_imported_by_models(source: Path) -> set[str]:
+    tree = ast.parse((source / "models/__init__.py").read_text())
+    return {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level == 2 and node.module
+    }
+
+
+def test_every_table_declaring_module_is_loaded_by_models() -> None:
+    source = Path(models.__file__).resolve().parents[1]
+    loaded = _modules_imported_by_models(source)
+    assert "journal_models" in loaded
+    assert _table_declaring_modules_outside_models(source, loaded) == []
+    # Fails when such a module is not imported.
+    assert _table_declaring_modules_outside_models(source, set()) == [
+        "journal_models.py"
+    ]

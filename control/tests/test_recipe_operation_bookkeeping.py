@@ -224,7 +224,7 @@ def test_a_damaged_installation_plan_is_skipped_and_prepared_afresh(tmp_path) ->
     with sessions() as session:
         assert (
             recipe_operations.RecipeOperationService._prepared_installation_id(
-                session, plan
+                session, plan, adopt_at=NOW
             )
             == second
         )

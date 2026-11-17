@@ -1,9 +1,11 @@
 """The one edge that ends an unfinished run: an exact Stop, else lost.
 
 A run whose Start ended unfinished holds claims and may hold launched effects.
-This edge queues the exact relational Stop under the given workload intent
-(the run becomes ``stopping``); with no exact Stop authority nothing is
-invented and the run is ended as ``lost`` (or ``failed`` once its Sparks are
+The edge first withdraws the route and records the run as ``stopping``
+(``withdraw_for_cleanup``, also written alone by a result transaction that
+leaves the Stop to be queued after its commit). It then queues the exact
+relational Stop under the given workload intent; with no exact Stop authority
+nothing is invented and the run is ended as ``lost`` (or ``failed`` once its Sparks are
 proven to have it gone), claims held until their next report settles it.
 """
 
@@ -36,6 +38,20 @@ if TYPE_CHECKING:
     from .service import RecipeOperationService
 
 
+def withdraw_for_cleanup(run: RecipeRun, now: datetime, *, note: str) -> None:
+    """Withdraw the route and record the run as ``stopping`` with ``note``.
+
+    The head of ``end_unfinished_run``. A result transaction may write it alone
+    and leave the Stop to be queued after its commit; it names no queued Stop,
+    which only ``end_unfinished_run`` does once it finds or queues one.
+    """
+
+    run.route_state = RouteState.WITHDRAWN
+    run.state = RunState.STOPPING
+    run.route_error = note
+    run.updated_at = now
+
+
 def end_unfinished_run(
     service: RecipeOperationService,
     session: Session,
@@ -59,15 +75,13 @@ def end_unfinished_run(
     call queued the Stop.
     """
 
-    run.route_state = RouteState.WITHDRAWN
-    run.updated_at = now
+    withdraw_for_cleanup(run, now, note=note)
     if ordinal is None:
         run.state = RunState.LOST
         run.route_error = f"{note}; cleanup awaits the owning intent"
         return False
-    run.route_error = f"{note}; cleanup queued"
     if session.scalar(select(Job.id).where(Job.request_id == request_id)):
-        run.state = RunState.STOPPING
+        run.route_error = f"{note}; cleanup queued"
         return False
 
     stop_nodes = tuple(
@@ -115,7 +129,6 @@ def end_unfinished_run(
             "claims held until its Sparks report it gone"
         )
         return False
-    run.state = RunState.STOPPING
     stop_node_payloads = tuple(
         (
             run_node.node_id,
@@ -144,4 +157,5 @@ def end_unfinished_run(
         now=now,
         workload_intent_ordinal=ordinal,
     )
+    run.route_error = f"{note}; cleanup queued"
     return True

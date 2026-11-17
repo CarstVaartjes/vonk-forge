@@ -13,15 +13,14 @@ use std::{
 };
 use vonk_agent_protocol::generated::AgentOperation;
 
-const LOG_BYTES: usize = 2048;
 const LOG_LINES: usize = 32;
 const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
-use vonk_agent_protocol::failure_evidence::is_omission_marker;
 pub use vonk_agent_protocol::failure_evidence::{
     EXIT_CAUSE_FIELD, EXIT_SUMMARY_EXCEPTION_FIELD, ExitCause, FailureCategory, FailureDiagnostics,
     FailureLogTail, FailureProperty,
 };
+use vonk_agent_protocol::failure_evidence::{LOG_TAIL_BYTES as LOG_BYTES, is_omission_marker};
 
 pub use vonk_agent_protocol::generated::HostHelperProcessLogs as FailureProcessLogs;
 
@@ -914,6 +913,9 @@ fn refusal_property(bound: &RefusalBound) -> Option<FailureProperty> {
 mod tests {
     use super::*;
 
+    /// Scales the fixtures that are sized against the retained bound.
+    const SCALE: usize = LOG_BYTES / 2048;
+
     #[test]
     fn a_retained_tail_is_bounded_as_the_shared_clamp_vector_says() {
         // The Controller's bound of the same text is held to this vector too.
@@ -1030,7 +1032,7 @@ mod tests {
         // Wrong implementation this catches: the byte bound popped characters
         // off the end, so the text ended in a half-written word and the line
         // that reported the failure was the first thing discarded.
-        let text = "noise\n".repeat(2000) + "the engine exited here\n";
+        let text = "noise\n".repeat(2000 * SCALE) + "the engine exited here\n";
         let (kept, dropped) = clamp_tail(text.clone(), LOG_BYTES);
         assert!(kept.ends_with("the engine exited here\n"), "{kept}");
         assert!(kept.len() <= LOG_BYTES);
@@ -1045,7 +1047,7 @@ mod tests {
         // empty tail when its only newline is at the end.
         let text = format!(
             "{}permission denied while building image\n",
-            "STEP echo ".repeat(500)
+            "STEP echo ".repeat(500 * SCALE)
         );
         let tail = log_tail(text.as_bytes());
         assert!(tail.truncated);
@@ -1081,7 +1083,7 @@ mod tests {
     fn an_oversized_credential_line_is_redacted_before_the_tail_is_clipped() {
         // Wrong implementation this catches: clipping before redaction drops
         // the Authorization marker and could expose a credential-bearing suffix.
-        let credential = "sensitive-credential-value".repeat(150);
+        let credential = "sensitive-credential-value".repeat(150 * SCALE);
         let text = format!("Authorization: Bearer {credential} permission denied\n");
         let tail = log_tail(text.as_bytes());
         assert!(tail.truncated);
@@ -1093,7 +1095,7 @@ mod tests {
     fn an_oversized_utf8_line_keeps_a_valid_bounded_tail() {
         // The byte bound must not split a multibyte code point while keeping
         // the final diagnostic from a long line.
-        let text = format!("{}permission denied", "🧱".repeat(700));
+        let text = format!("{}permission denied", "🧱".repeat(700 * SCALE));
         let tail = log_tail(text.as_bytes());
         assert!(tail.truncated);
         assert!(tail.text.ends_with("permission denied"));
@@ -1104,8 +1106,8 @@ mod tests {
     fn byte_drop_count_includes_clipped_earlier_lines() {
         // The per-line clips happen before the joined tail is bounded. Both
         // losses must be reflected, even when a later short line survives.
-        let first = format!("{}first failure\n", "x ".repeat(1100));
-        let second = format!("{}second failure\n", "y ".repeat(1100));
+        let first = format!("{}first failure\n", "x ".repeat(1100 * SCALE));
+        let second = format!("{}second failure\n", "y ".repeat(1100 * SCALE));
         let text = format!("{first}{second}last status");
         let tail = log_tail(text.as_bytes());
         assert_eq!(tail.text, "last status");
@@ -1177,7 +1179,7 @@ mod tests {
         // physical count; reporting zero or u64::MAX would invent evidence.
         for prior in [None, Some(u64::MAX)] {
             let tail = FailureLogTail {
-                text: "token=x\n".repeat(200),
+                text: "token=x\n".repeat(200 * SCALE),
                 truncated: false,
                 dropped_bytes: prior,
                 dropped_lines: None,
@@ -1257,7 +1259,7 @@ mod tests {
         let tail = format!(
             "{}(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above.\n",
             "(APIServer pid=55)   File \"/usr/lib/vllm/engine.py\", line 9, in wait\ntoken: v\n"
-                .repeat(21)
+                .repeat(21 * SCALE)
         );
         let retained = helper_retained(causes, &tail);
         assert!(retained.text.len() <= LOG_BYTES);

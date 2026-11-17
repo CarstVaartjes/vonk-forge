@@ -97,7 +97,7 @@ from .models import (
     RoutePublicationOwner,
     RunNode,
 )
-from .owner_liveness import builds_in_flight
+from .owner_liveness import builds_in_flight, installations_named_by_live_jobs
 from .run_states import ENDED_RUN_STATES
 from .step_ca import CERTIFICATE_LIFETIME
 from .stored_json import binding_for, read_row_column
@@ -217,16 +217,6 @@ RETAINED: dict[str, tuple[Retained, str]] = {
         Retained.OWNED_ELSEWHERE,
         "catalog_revision_collection.CatalogRevisionCollector",
     ),
-    # With their catalog revision. Measured peaks live in measured_role_peaks,
-    # so no rule needs to keep an installation for them.
-    "recipe_installations": (
-        Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
-    ),
-    "installation_nodes": (
-        Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
-    ),
     "recipe_builds": (
         Retained.OWNED_ELSEWHERE,
         "catalog_revision_collection.CatalogRevisionCollector",
@@ -299,6 +289,10 @@ def _command_evidence(session: Session, row: Any, _protected: frozenset[str]) ->
     from .evidence_repeats import command_evidence_needed
 
     return command_evidence_needed(session, row)
+
+
+def _installation_named(session: Session, row: Any, _protected: frozenset[str]) -> bool:
+    return bool(installations_named_by_live_jobs(session, (row.id,)))
 
 
 def _assignment_named(session: Session, row: Any, protected: frozenset[str]) -> bool:
@@ -477,6 +471,24 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
                 _stop_unproven(),
             ),
             children=(RunNode.run_id,),
+        ),
+        RetentionRule(
+            # An uninstalled installation (the revision collector removes the
+            # ones of retired revisions sooner). A run of any state keeps it
+            # through its RESTRICT key; a recent or live operation naming it
+            # is in ``protected``, and a live one recording it is checked here.
+            RecipeInstallation,
+            RecipeInstallation.id,
+            RecipeInstallation.updated_at,
+            lambda _cutoff: (
+                RecipeInstallation.state == InstallationState.UNINSTALLED.value
+            ),
+            held=(
+                _reserved(RecipeInstallation.id),
+                exists().where(RecipeRun.installation_id == RecipeInstallation.id),
+            ),
+            keep_row=(_installation_named,),
+            children=(InstallationNode.installation_id,),
         ),
         RetentionRule(
             ControlProcessHeartbeat,

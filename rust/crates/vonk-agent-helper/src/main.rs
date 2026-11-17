@@ -997,7 +997,7 @@ mod tests {
             OperationError::RuntimeProcessExited {
                 logs: Some(Box::new(vonk_agent_helper::runtime_logs::retain_container(
                     b"worker rank 1 is starting\n",
-                    &b"startup failed\n".repeat(2000),
+                    &b"startup failed\n".repeat(2000 * 8),
                 ))),
                 capture_error: None,
                 exit_summary: "exit_code=1 exit_cause=unclassified".to_owned(),
@@ -1010,7 +1010,10 @@ mod tests {
         assert_eq!(logs.stdout.text, "worker rank 1 is starting\n");
         assert!(logs.stderr.text.contains("startup failed"));
         assert!(logs.stderr.truncated);
-        assert!(logs.stderr.text.chars().count() <= 2048);
+        assert!(
+            logs.stderr.text.chars().count()
+                <= vonk_agent_protocol::failure_evidence::LOG_TAIL_BYTES
+        );
         assert_eq!(
             response.diagnostic.as_deref(),
             Some("exit_code=1 exit_cause=unclassified")

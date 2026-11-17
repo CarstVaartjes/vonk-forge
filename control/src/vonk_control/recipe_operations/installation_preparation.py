@@ -161,9 +161,9 @@ class InstallationPreparationMixin:
             # The exact plan an earlier attempt already persisted holds its own
             # disk claim; counting that claim against itself must not stop
             # this attempt adopting it.
-            with service._sessions() as session:
+            with service._sessions.begin() as session:
                 adopted = service._prepared_installation_id(
-                    session, plan, planned_only=True
+                    session, plan, planned_only=True, adopt_at=service._clock()
                 )
             if adopted is not None:
                 return adopted
@@ -172,8 +172,8 @@ class InstallationPreparationMixin:
             require_install_admissible(plan)
         require_same_install_execution(reviewed, plan)
         now = service._clock()
-        with service._sessions() as session:
-            existing_id = service._prepared_installation_id(session, plan)
+        with service._sessions.begin() as session:
+            existing_id = service._prepared_installation_id(session, plan, adopt_at=now)
         if existing_id is not None:
             return existing_id
         try:
@@ -187,7 +187,7 @@ class InstallationPreparationMixin:
                 "install receipt refresh", error
             ) from error
         with service._sessions.begin() as session:
-            existing_id = service._prepared_installation_id(session, plan)
+            existing_id = service._prepared_installation_id(session, plan, adopt_at=now)
             if existing_id is not None:
                 return existing_id
             try:
@@ -224,9 +224,18 @@ class InstallationPreparationMixin:
 
     @staticmethod
     def _prepared_installation_id(
-        session: Session, plan: InstallPlan, *, planned_only: bool = False
+        session: Session,
+        plan: InstallPlan,
+        *,
+        planned_only: bool = False,
+        adopt_at: datetime,
     ) -> str | None:
         """The newest installation already prepared for this exact plan.
+
+        Adopting a still-planned row locks it and stamps ``adopt_at`` as its
+        last touch, so the residue sweep's release (which refuses a row touched
+        within the adoption window, under the same lock) cannot abandon a plan
+        a retry has just taken.
 
         An installation whose stored plan cannot be read is no preparation: it is
         retired as unknown and skipped, so the next acceptance prepares a fresh,
@@ -269,6 +278,18 @@ class InstallationPreparationMixin:
                 )
                 is True
             ):
+                locked = session.scalar(
+                    select(RecipeInstallation)
+                    .where(
+                        RecipeInstallation.id == existing.id,
+                        RecipeInstallation.state == existing.state,
+                    )
+                    .with_for_update(of=RecipeInstallation)
+                )
+                if locked is None:
+                    continue  # released or advanced meanwhile: not this preparation
+                if locked.state == InstallationState.PLANNED:
+                    locked.updated_at = adopt_at
                 return existing.id
         return None
 

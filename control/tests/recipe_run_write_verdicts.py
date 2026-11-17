@@ -160,13 +160,17 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "cad56079288887fa60baff7b099b157a020ced1e8cbc3c73c29067eb57d21bb7",
+            "f067db709a4c69906d40d11c627b251c241a1b9d881b52640b04c4e3a5846275",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },
     "recipe_operations/run_transitions.py": {
+        "withdraw_for_cleanup": (
+            "1cf34ed3a34aadec456f405c16821ad3a030118063f2e8ceef40d6ea9719ab9b",
+            "caller-owned: the head of end_unfinished_run; the failed-start terminal projection (queue result transaction) writes it alone and the Stop is queued after commit, with the run reaper as backstop",
+        ),
         "end_unfinished_run": (
-            "e905decb4ddd15367323ab9e4dc9f4134deb598dd4c1cae089e886c2d7469338",
+            "b9d8748c4afd41ccc54c21ab4b966f2205f1768c794496eca1782f7d6eb83590",
             "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },

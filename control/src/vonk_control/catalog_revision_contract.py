@@ -25,7 +25,11 @@ from vonk_forge_contracts.model import (
     ModelFormat,
     ModelIdentity,
 )
-from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedQualificationStatusView,
+    PublishedRoleMemory,
+)
 from vonk_forge_contracts.recipe import (
     ModelReference,
     RecipeIdentity,
@@ -148,6 +152,9 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     prebuilt_image: PrebuiltImage | None = None
     # The signed catalog's qualification status for this revision; informative.
     qualification: PublishedQualificationStatusView | None = None
+    # What each role of this exact content measured on hardware (the steady peak
+    # admission reads); none when the signed catalog publishes none.
+    measured_memory: PublishedMeasuredMemory | None = None
     # The signed catalog's gateway API facts for this revision (a sibling of the
     # recipe, never part of its content identity); none when it publishes none.
     api: RecipeApi | None = None
@@ -237,6 +244,25 @@ def rederive_projection(
             continue  # the next sync records it again from the signed catalog
         projected[key] = recorded[key]
     return projection_type.model_validate_json(canonical_message(projected))
+
+
+def published_steady_peaks(
+    revision: CatalogDocumentRevision,
+) -> dict[str, PublishedRoleMemory]:
+    """The measured steady peak of each role of ``revision``, by role name.
+
+    Empty when the catalog published none or the projection is unreadable: the
+    recipe's declared peak then admits, as before the measurement existed.
+    """
+    try:
+        projected = read_catalog_projection(revision)
+    except CatalogRevisionContractError:
+        return {}
+    if not isinstance(projected, RecipeRevisionProjection) or (
+        projected.measured_memory is None
+    ):
+        return {}
+    return {item.role: item for item in projected.measured_memory.roles}
 
 
 def read_recipe_projection(

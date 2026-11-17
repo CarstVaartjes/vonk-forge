@@ -461,16 +461,6 @@ def test_cancelled_stop_intent_check_leaves_admission_free(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=NodeLockHeld,
-    reason=(
-        "lock plan step 6: the failed start enqueues its cleanup Stop under "
-        "admission's node lock: terminal_projection.py:369 -> "
-        "persistence.py:432/245 _admit_workload_intent -> lock_admission_rows, "
-        "and persistence.py:536 -> orchestration.py:101 -> scope.py:90"
-    ),
-)
 def test_failed_start_cleanup_enqueue_leaves_admission_free(
     recipe_world, postgres_engine
 ):

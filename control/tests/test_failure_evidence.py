@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.reason_codes import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
@@ -305,8 +305,8 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail(
     failure that ended the stream -- the opposite of what a tail field means.
     """
 
-    text = "token: v\n" * 150 + "the container exited here\n"
-    assert len(text.encode()) <= 2048
+    text = "token: v\n" * 1200 + "the container exited here\n"
+    assert len(text.encode()) <= LOG_TAIL_BYTES
     diagnostics = FailureDiagnostics.model_validate(
         {
             "schema_version": 1,
@@ -334,7 +334,7 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail(
     )
     cleaned = sanitize_diagnostics(diagnostics)
     assert cleaned.stderr.text.endswith("the container exited here\n")
-    assert len(cleaned.stderr.text.encode()) <= 2048
+    assert len(cleaned.stderr.text.encode()) <= LOG_TAIL_BYTES
     assert cleaned.stderr.truncated
     if prior_count == 0:
         assert (cleaned.stderr.dropped_bytes or 0) > 0
@@ -359,10 +359,10 @@ def test_sanitize_diagnostics_keeps_the_cause_ahead_of_the_omission_marker() -> 
         "terminate called after throwing an instance of 'c10::Error'\n"
         "  what():  CUDA error: an illegal memory access was encountered\n"
     )
-    window = "mytoken=5\n" * 110 + "the container exited here\n"
+    window = "mytoken=5\n" * 880 + "the container exited here\n"
     text = cause + "[7943 bytes omitted]\n" + window
-    assert len(text.encode()) <= 2048
-    assert len(safe_text(text).encode()) > 2048
+    assert len(text.encode()) <= LOG_TAIL_BYTES
+    assert len(safe_text(text).encode()) > LOG_TAIL_BYTES
     diagnostics = FailureDiagnostics.model_validate(
         {
             "schema_version": 1,
@@ -391,7 +391,7 @@ def test_sanitize_diagnostics_keeps_the_cause_ahead_of_the_omission_marker() -> 
     cleaned = sanitize_diagnostics(diagnostics).stderr
     assert cleaned.text.startswith(cause + "[7943 bytes omitted]\n")
     assert cleaned.text.endswith("the container exited here\n")
-    assert len(cleaned.text.encode()) <= 2048
+    assert len(cleaned.text.encode()) <= LOG_TAIL_BYTES
     assert (cleaned.dropped_bytes or 0) > 7943
 
 
@@ -430,7 +430,7 @@ def test_ring_buffer_preserves_last_lines_and_reports_loss():
     dropped_lines = tail.dropped_lines
     assert isinstance(dropped_bytes, int) and isinstance(dropped_lines, int)
     assert tail.truncated and dropped_bytes > 0 and dropped_lines > 0
-    assert len(tail.text.encode()) <= 2048
+    assert len(tail.text.encode()) <= LOG_TAIL_BYTES
     assert len(tail.text.splitlines()) <= 32
 
 

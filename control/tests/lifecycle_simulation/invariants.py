@@ -10,7 +10,7 @@ and refusal-loop clocks only run while every Spark is healthy.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -35,6 +35,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.owner_liveness import (
+    ADOPTION_WINDOW,
     installations_named_by_live_jobs,
     runs_named_by_live_work,
 )
@@ -79,6 +80,8 @@ class InFlightKind:
     The in-flight states are every state of the enum except the ``settled`` ones,
     so a state added to the enum is checked until someone names it settled.
     ``named`` is the production predicate for "a live operation names these".
+    ``held`` is how long its release path deliberately keeps an unowned row in
+    a state before releasing it (a plan waits for a retry to adopt it).
     """
 
     name: str
@@ -86,6 +89,7 @@ class InFlightKind:
     states: type[Enum]
     settled: frozenset[Enum]
     named: Callable[[Session, Collection[str]], frozenset[str]]
+    held: Mapping[Enum, timedelta] = field(default_factory=dict)
 
     @property
     def in_flight(self) -> tuple[str, ...]:
@@ -99,11 +103,8 @@ IN_FLIGHT_KINDS = (
         "installation",
         RecipeInstallation,
         InstallationState,
-        # ``planned`` is unowned until an attempt adopts it: it joins when its
-        # own release path (per installation, not per Spark) lands.
         frozenset(
             {
-                InstallationState.PLANNED,
                 InstallationState.INSTALLED,
                 InstallationState.PARTIAL,
                 InstallationState.FAILED,
@@ -111,6 +112,7 @@ IN_FLIGHT_KINDS = (
             }
         ),
         installations_named_by_live_jobs,
+        {InstallationState.PLANNED: ADOPTION_WINDOW},
     ),
     InFlightKind(
         "run",
@@ -152,7 +154,8 @@ class _Snapshot:
     requests: dict[str, _Request]
     core: frozenset[tuple[str, ...]]
     dead_claims: frozenset[str]
-    orphans: frozenset[str]
+    #: Each orphaned row and how long it may stay so before it is a violation.
+    orphans: Mapping[str, timedelta]
 
 
 def typed_refusal(error: BaseException) -> bool:
@@ -240,11 +243,12 @@ def _snapshot(world: World) -> _Snapshot:
     return _Snapshot(requests, frozenset(core), frozenset(dead), orphans)
 
 
-def _orphans(session: Session) -> frozenset[str]:
-    """Rows in an in-flight state that no live operation names."""
+def _orphans(session: Session) -> dict[str, timedelta]:
+    """Rows in an in-flight state that no live operation names, with their grace."""
 
-    orphans: set[str] = set()
+    orphans: dict[str, timedelta] = {}
     for kind in IN_FLIGHT_KINDS:
+        held = {str(state.value): window for state, window in kind.held.items()}
         states = {
             row.id: row.state
             for row in session.execute(
@@ -255,11 +259,14 @@ def _orphans(session: Session) -> frozenset[str]:
         }
         named = kind.named(session, states)
         orphans.update(
-            f"{kind.name} {row_id} stays {state} with no live operation"
+            (
+                f"{kind.name} {row_id} stays {state} with no live operation",
+                ORPHAN_GRACE + held.get(state, timedelta()),
+            )
             for row_id, state in states.items()
             if row_id not in named
         )
-    return frozenset(orphans)
+    return orphans
 
 
 @dataclass
@@ -447,5 +454,5 @@ class Monitor:
         return [
             Violation("no in-flight row outlives its owner", row)
             for row, since in sorted(self._orphaned_since.items())
-            if now - since > ORPHAN_GRACE
+            if now - since > current.orphans[row]
         ]

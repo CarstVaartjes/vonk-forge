@@ -34,7 +34,10 @@ from vonk_forge_contracts import (
     read_recipe,
     require_display_of,
 )
-from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedQualificationStatusView,
+)
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .admission_locking import ConstraintReplay, admitting
@@ -73,6 +76,7 @@ class PublishedFacts(TypedDict, total=False):
 
     prebuilt_image: PrebuiltImage | None
     qualification: PublishedQualificationStatusView | None
+    measured_memory: PublishedMeasuredMemory | None
     api: RecipeApi | None
 
 
@@ -304,12 +308,15 @@ class CatalogEntityService:
         images: Mapping[RevisionKey, PrebuiltImage | None],
         qualifications: Mapping[RevisionKey, PublishedQualificationStatusView | None],
         apis: Mapping[RevisionKey, RecipeApi | None] = MappingProxyType({}),
+        measured_memories: Mapping[
+            RevisionKey, PublishedMeasuredMemory | None
+        ] = MappingProxyType({}),
     ) -> None:
         """Record what the signed catalog publishes beside each active revision.
 
         Every map is keyed by ``(publisher, slug, content digest)``: a
-        prebuilt image, a qualification status and the API facts belong to one
-        exact revision. In each map, omitted keys are unknown and keep their last
+        prebuilt image, a qualification status, the API facts and the measured
+        memory belong to one exact revision. In each map, omitted keys are unknown and keep their last
         recorded value; an observed key with None explicitly withdraws it.
 
         As in ``refresh_build_policy``, only a revision whose recorded facts
@@ -327,6 +334,8 @@ class CatalogEntityService:
                 facts["qualification"] = qualifications[key]
             if key in apis:
                 facts["api"] = apis[key]
+            if key in measured_memories:
+                facts["measured_memory"] = measured_memories[key]
             if not facts or _published_facts_current(revision, facts):
                 continue
             with self._write() as session:

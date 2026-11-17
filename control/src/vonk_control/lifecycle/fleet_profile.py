@@ -837,42 +837,6 @@ class FleetProfileAdapter:
         assert scheduled is not None  # ongoing intent never exhausts
         return scheduled
 
-    def adopt_backoff(
-        self,
-        application: FleetProfileApplication,
-        now: datetime,
-        *,
-        session: Session | None = None,
-    ) -> bool:
-        """Adopt a legacy ``failed`` load that an older Controller kept retrying.
-
-        An older Controller stored a failure it retried by itself as ``failed``
-        and showed it as queued: the old spelling of ``backoff``.  The caller has
-        decided the Controller still retries it, so the row is relabelled once,
-        keeping its reason and evidence and
-        naming its next attempt.  Nothing is issued or stopped.  A ``failed`` row
-        this Controller wrote is not a candidate: it is only written when nothing
-        will try the load again.
-        """
-
-        progress = _progress(application)
-        if application.state != State.FAILED.value or progress is None:
-            return False
-        now = aware(now)
-        before = self.lifecycle(application, progress, now)
-        due = (
-            aware(application.next_action_at)
-            if application.next_action_at is not None
-            else self.next_retry(
-                application.id, progress.attempt, aware(application.updated_at)
-            )
-        )
-        schedule_wait(application, due)
-        application.progress = progress.model_dump(mode="json")
-        after = replace(before, state=State.BACKOFF, next_action_at=due)
-        self.apply(application, before, after, now, visible=BACKOFF, session=session)
-        return True
-
 
 def _recorded(identity: str, stored: str) -> Lifecycle:
     """A child that finished (or whose state was recorded): its stored state."""

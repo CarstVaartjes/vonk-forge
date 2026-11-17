@@ -31,6 +31,7 @@ from ..admission_locking import (
     admission_wait_exhausted,
     admitting,
     is_admission_contention,
+    set_admission_timeout,
 )
 from ..bounded_json import require_mapping
 from ..failure_classification import disposition
@@ -220,11 +221,13 @@ class StopMixin:
             profile_application_id=profile_application_id,
         )
         try:
-            with admitting():
-                accepted = accept()
-        except ConstraintReplay as duplicate:
-            # Replay a creation race after its transaction has rolled back.
-            accepted = duplicate.replay(accept)
+            try:
+                with admitting():
+                    accepted = accept()
+            except ConstraintReplay as duplicate:
+                # Replay a creation race after its transaction has rolled back;
+                # the replay's own lock wait is bounded and handled below.
+                accepted = duplicate.replay(accept)
         except (AdmissionLockBusy, OperationalError) as error:
             if isinstance(error, OperationalError) and not is_admission_contention(
                 error
@@ -327,6 +330,7 @@ class StopMixin:
         now = service._clock()
         try:
             with service._sessions.begin() as session:
+                set_admission_timeout(session)
                 parent = session.get(Job, parent_id, with_for_update=True)
                 if parent is None:
                     raise RecipeRetryLater("accepted Stop disappeared")

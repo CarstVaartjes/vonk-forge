@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
+from sqlalchemy import inspect as sa_inspect
 from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
@@ -453,3 +454,131 @@ def test_a_fresh_sample_after_a_non_positive_one_is_still_attributed(
         assert [
             row.peak_bytes for row in session.scalars(select(MeasuredRolePeak))
         ] == [120]
+
+
+def _publish_measured(
+    sessions, installation, now, peak, *, exceeds=False, declared=225
+):
+    """The signed catalog's measured steady peak for the installation's one role."""
+    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.models import CatalogDocumentRevision
+    from vonk_forge_contracts.qualification_status import (
+        PublishedMeasuredMemory,
+        PublishedRoleMemory,
+    )
+
+    with sessions() as session:
+        revision = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).one()
+        key = (revision.publisher, revision.slug, revision.content_digest)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=_FLOOR
+    )
+    role = service.plan_run(installation, alias="qwen", now=now).nodes[0].role
+    CatalogEntityService(sessions, clock=lambda: now).record_published_facts(
+        {},
+        {},
+        {},
+        {
+            key: PublishedMeasuredMemory(
+                roles=(
+                    PublishedRoleMemory(
+                        role=role,
+                        peak_bytes=declared if exceeds else peak,
+                        measured_peak_bytes=peak,
+                        exceeds_admission_maximum=exceeds,
+                    ),
+                )
+            )
+        },
+    )
+    return service
+
+
+@pytest.mark.parametrize(
+    ("measured", "allowed", "required"), [(280, False, 280), (100, True, 100)]
+)
+def test_admission_uses_the_published_measured_steady_peak(
+    tmp_path, measured, allowed, required
+) -> None:
+    """Catches admission ignoring the hardware measurement the catalog publishes.
+
+    With a neighbour's 20 bytes claimed, the declared 225 plus the 50-byte
+    floor fits the 300 free bytes; a measured steady peak of 280 does not
+    (stricter), and 100 leaves room (looser).
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="unified-memory",
+                resource_key="neighbour",
+                amount_bytes=20,
+                owner_kind="recipe-build",
+                owner_id=str(uuid4()),
+                state="active",
+                plan_digest="f" * 64,
+                created_at=now,
+            )
+        )
+    service = _publish_measured(sessions, installation, now, measured)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert plan.allowed is allowed
+    assert plan.nodes[0].required_memory_bytes == required
+    if not allowed:
+        assert RunAdmissionCode.INSUFFICIENT_MEMORY in _codes(plan)
+
+
+def test_a_measurement_over_the_admission_maximum_keeps_the_declared_peak(
+    tmp_path,
+) -> None:
+    """Catches admission trusting a measurement the catalog says it cannot admit."""
+    sessions, now, _, installation = setup(tmp_path, free_memory=_FREE)
+    service = _publish_measured(sessions, installation, now, 900, exceeds=True)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    warning = next(
+        item
+        for item in plan.nodes[0].warnings
+        if "more than can be admitted" in item.detail
+    )
+    assert "admitting on the declared 225 bytes" in warning.detail
+
+
+def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> None:
+    """Catches a sync-delivered measurement re-planning or stopping live work.
+
+    After the measurement is recorded, a planning review of the same recipe runs
+    (the path that reads it); the running run's rows, reservations and Jobs are
+    exactly as admitted.
+    """
+    from vonk_control.models import Job
+
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    _admit_run(sessions, now, node, installation)
+
+    def rows(model):
+        with sessions() as session:
+            return sorted(
+                repr(
+                    {
+                        attribute.key: getattr(item, attribute.key)
+                        for attribute in sa_inspect(model).column_attrs
+                    }
+                )
+                for item in session.scalars(select(model))
+            )
+
+    def state():
+        return [rows(model) for model in (RecipeRun, RunNode, ResourceReservation, Job)]
+
+    before = state()
+    assert before[0] and before[2]
+    service = _publish_measured(sessions, installation, now, 280)
+    review = service.plan_run(installation, alias="another", now=now)
+    assert review.nodes[0].required_memory_bytes == 280
+    assert state() == before

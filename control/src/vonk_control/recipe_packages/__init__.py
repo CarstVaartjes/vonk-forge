@@ -715,6 +715,7 @@ class RecipePackageClient:
                     source_bundle_sha256=entry.source_bundle_sha256,
                     prebuilt_image=entry.prebuilt_image,
                     qualification=entry.qualification,
+                    measured_memory=entry.measured_memory,
                     api=entry.api,
                 )
             )

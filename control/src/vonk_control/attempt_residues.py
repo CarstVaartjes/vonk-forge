@@ -30,10 +30,9 @@ runs, or an owner that no longer exists) it is released by owner state, see
 ``reservation_owners``. The installation row and the files it wrote stay for
 the cleanup path; what is on the Spark is what its next inventory reports.
 
-Ownership is decided conservatively and without owner columns: a plan is
-owned while any active operation targets one of its Sparks, a grant while an
-active operation names its plan, and a leftover incomplete installation only
-while a live operation names it (its owner fields, its plan's installation, or
+Ownership is decided conservatively and without owner columns: a plan, a
+grant's plan and a leftover incomplete installation are owned only while a live
+operation names the installation (its owner fields, its plan's installation, or
 its recorded progress, see ``owner_liveness``); other work on its Sparks does
 not hold it.
 
@@ -41,7 +40,7 @@ An unowned installation plan is first **adoptable**: the next attempt of the
 same recipe on the same Sparks reuses it (same plan digest), and its admission
 does not count the plan's disk claim as capacity to wait for, so adoption is
 never gated behind a cleanup wait for the very record it adopts. Only a plan
-that stays unowned for the adoption window, because no retry came, is
+that stays unowned and untouched for the adoption window, because no retry came, is
 released. A plan a later installation of the same recipe on the same Sparks
 has **superseded** is released without that wait: the next attempt already
 planned differently (another revision, image or choice, so another digest),
@@ -119,20 +118,6 @@ _OWNER_JOB_KINDS = (
 )
 
 
-def _owned_nodes(session: Session) -> set[str]:
-    return {
-        node_id
-        for targets in session.scalars(
-            select(Job.targets).where(
-                Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(job_states.LIVE)
-            )
-        )
-        if isinstance(targets, list)
-        for node_id in targets
-        if isinstance(node_id, str)
-    }
-
-
 def unowned_never_installed(
     session: Session,
     *,
@@ -154,10 +139,13 @@ def unowned_never_installed(
         statement = statement.where(
             RecipeInstallation.recipe_revision_id == recipe_revision_id
         )
-    owned = _owned_nodes(session)
     wanted = frozenset(node_ids) if node_ids is not None else None
+    planned = list(session.scalars(statement))
+    named = installations_named_by_live_jobs(session, [row.id for row in planned])
     found: list[str] = []
-    for installation in session.scalars(statement):
+    for installation in planned:
+        if installation.id in named:
+            continue
         members = tuple(
             session.scalars(
                 select(InstallationNode).where(
@@ -168,7 +156,6 @@ def unowned_never_installed(
         member_nodes = {member.node_id for member in members}
         if (
             members
-            and not owned.intersection(member_nodes)
             and (wanted is None or member_nodes == wanted)
             and all(
                 member.state == InstallationNodeState.PLANNED
@@ -303,7 +290,7 @@ class AttemptResidueReconciler:
         self,
         sessions: sessionmaker[Session],
         *,
-        abandon_never_installed: Callable[[str], object],
+        abandon_never_installed: Callable[..., object],
         removal: LeftoverRemoval | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -385,15 +372,11 @@ class AttemptResidueReconciler:
             for installation_id in unowned:
                 if only_id is not None and installation_id != only_id:
                     continue
-                nodes = set(
-                    session.scalars(
-                        select(InstallationNode.node_id).where(
-                            InstallationNode.installation_id == installation_id
-                        )
-                    )
-                )
-                if installation_id not in superseded and not self._quiet_since(
-                    session, nodes, now - ADOPTION_WINDOW
+                row = session.get(RecipeInstallation, installation_id)
+                if (
+                    installation_id not in superseded
+                    and row is not None
+                    and _aware(row.updated_at) > now - ADOPTION_WINDOW
                 ):
                     continue  # a retry may still adopt it
                 candidates.append(installation_id)
@@ -404,7 +387,14 @@ class AttemptResidueReconciler:
             try:
                 # The lifecycle re-derives "never reached a node" under the
                 # installation row lock, so a concurrent install refuses this.
-                self._abandon(installation_id)
+                # An unsuperseded plan is refused under that lock when a retry
+                # adopted it (touching the row) after this sweep's snapshot.
+                self._abandon(
+                    installation_id,
+                    untouched_since=None
+                    if installation_id in superseded
+                    else now - ADOPTION_WINDOW,
+                )
                 self._cleanup_settled(installation_id)
             except UnknownOutcomeError as error:
                 self._defer(installation_id, error)
@@ -575,19 +565,6 @@ class AttemptResidueReconciler:
             error,
             next_attempt_at=due.isoformat(),
         )
-
-    @staticmethod
-    def _quiet_since(session: Session, nodes: set[str], since: datetime) -> bool:
-        """Whether no operation on these Sparks changed since ``since``."""
-
-        for targets in session.scalars(
-            select(Job.targets).where(
-                Job.kind.in_(_OWNER_JOB_KINDS), Job.updated_at >= since
-            )
-        ):
-            if isinstance(targets, list) and nodes.intersection(targets):
-                return False
-        return True
 
     def _dead_owner_claims(self) -> bool:
         """Release disk, port and memory claims whose owner can no longer use them.

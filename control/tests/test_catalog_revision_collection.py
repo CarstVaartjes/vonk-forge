@@ -19,7 +19,16 @@ from typing import get_args
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import create_engine, delete, event, func, insert, select, text, update
+from sqlalchemy import (
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeBuildRequest, canonical_message
@@ -34,7 +43,6 @@ from vonk_control.catalog_revision_collection import (
     CatalogRevisionCollector,
 )
 from vonk_control.catalog_revision_contract import ModelRevisionProjection
-from vonk_control.db import verify_schema_is_current
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.models import (
     AgentNode,
@@ -54,6 +62,7 @@ from vonk_control.models import (
     RunNode,
     SourceBundleArchive,
 )
+from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_execution_contract import (
     StoredInstallationPlan,
     StoredRunNodePlan,
@@ -702,20 +711,36 @@ def test_a_workload_that_only_just_moved_keeps_its_revision_through_the_grace_pe
     assert not catalog.exists(old)
 
 
-def test_an_unfinished_build_keeps_its_revision_and_a_finished_one_goes(
+def test_a_build_keeps_its_revision_only_while_a_live_job_owns_it(
     catalog: Catalog,
 ) -> None:
-    """Catches deleting a revision under a build that is still running."""
+    """Catches an orphaned unfinished build (no job) pinning its revision forever."""
 
-    building, _ = _refresh(catalog, "building")
+    owned, _ = _refresh(catalog, "owned")
+    orphan_building, _ = _refresh(catalog, "orphan-building")
+    orphan_planned, _ = _refresh(catalog, "orphan-planned")
     finished, finished_head = _refresh(catalog, "finished")
-    catalog.build(building, state="building")
+    owned_build = catalog.build(owned, state="building")
+    catalog.job(
+        RecipeStopParent(
+            schema_version=1,
+            owner_kind=OwnerKind.RECIPE_BUILD.value,
+            owner_id=owned_build,
+            plan_digest="0" * 64,
+        ).model_dump(mode="json"),
+        state=LifecycleState.RUNNING.value,
+        updated=NOW,
+    )
+    catalog.build(orphan_building, state="building")
+    catalog.build(orphan_planned, state="planned")
     catalog.build(finished)
     catalog.build(finished_head, updated=OLD + timedelta(hours=1))
 
     catalog.collector().collect()
 
-    assert catalog.exists(building)
+    assert catalog.exists(owned)
+    assert not catalog.exists(orphan_building)
+    assert not catalog.exists(orphan_planned)
     assert not catalog.exists(finished)
     assert catalog.count(RecipeBuild) == 2
 
@@ -1367,56 +1392,6 @@ def test_a_rescinded_slow_batch_skips_no_untried_row_on_postgres(
     assert collector._cursor is None
     assert catalog.exists(named)
     assert not any(catalog.exists(revision) for revision in (first, third, fourth))
-
-
-def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
-    postgres_engine: Engine,
-) -> None:
-    """Catches a retired table whose RESTRICT keys refuse the revision delete.
-
-    Controllers before the image-identity change wrote ``runtime_image_authorizations``
-    rows naming a revision and a build. The table is no longer defined, read or
-    written, and an upgraded database keeps it with its rows; startup releases its
-    keys so the rows can neither block nor be needed by the collector.
-    """
-
-    Base.metadata.create_all(postgres_engine)
-    catalog = Catalog(postgres_engine)
-    old, head = _refresh(catalog, "glm")
-    build = catalog.build(old)
-    catalog.build(head, updated=OLD + timedelta(hours=1))
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "CREATE TABLE runtime_image_authorizations ("
-                "id VARCHAR(36) PRIMARY KEY, "
-                "recipe_revision_id VARCHAR(36) NOT NULL, "
-                "build_id VARCHAR(36) NOT NULL, "
-                "CONSTRAINT fk_runtime_image_authorizations_recipe_revision "
-                "FOREIGN KEY (recipe_revision_id) "
-                "REFERENCES catalog_document_revisions (id) ON DELETE RESTRICT, "
-                "CONSTRAINT fk_runtime_image_authorizations_build "
-                "FOREIGN KEY (build_id) REFERENCES recipe_builds (id) "
-                "ON DELETE RESTRICT)"
-            )
-        )
-        connection.execute(
-            text(
-                "INSERT INTO runtime_image_authorizations "
-                "VALUES ('retained', :revision, :build)"
-            ),
-            {"revision": old, "build": build},
-        )
-        verify_schema_is_current(connection)
-
-    catalog.collector().collect()
-
-    assert not catalog.exists(old)
-    with postgres_engine.connect() as connection:
-        retained = connection.execute(
-            text("SELECT count(*) FROM runtime_image_authorizations")
-        ).scalar_one()
-    assert retained == 1
 
 
 def _model_depending_on(*digests: str) -> dict[str, object]:

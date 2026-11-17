@@ -27,7 +27,7 @@ A revision is **kept** while anything still points at it:
   head or candidate recipe document names its digest.
 
 Everything else is removed together with the dead rows only it owned: its
-uninstalled installations, stopped runs, mappings, finished builds and model
+uninstalled installations, stopped runs, mappings, builds no live work owns and model
 bindings. Audit history of those is not kept.
 
 A source bundle (archive bytes stored in PostgreSQL) is removed once no
@@ -144,7 +144,6 @@ _BATCH = 50
 # A row a writer holds is skipped after this wait, never queued for: the writer
 # wins and the row is retried at the next sweep.
 _LOCK_TIMEOUT_MS = 250
-_FINISHED_BUILDS = ("succeeded", "failed")
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
 _TOKEN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64}"
@@ -771,7 +770,6 @@ class CatalogRevisionCollector:
         session.execute(
             delete(RecipeBuild).where(
                 RecipeBuild.recipe_revision_id == revision.id,
-                RecipeBuild.state.in_(_FINISHED_BUILDS),
                 ~exists().where(RecipeInstallation.recipe_build_id == RecipeBuild.id),
             )
         )

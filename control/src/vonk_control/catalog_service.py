@@ -31,7 +31,10 @@ from vonk_forge_contracts import (
     read_model,
     read_recipe,
 )
-from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
+from vonk_forge_contracts.qualification_status import (
+    PublishedMeasuredMemory,
+    PublishedQualificationStatusView,
+)
 
 from .admission_locking import ConstraintReplay, admitting
 from .auth import CursorCodec
@@ -454,9 +457,12 @@ class CatalogService:
             tuple[str, str, str], PublishedQualificationStatusView | None
         ],
         apis: Mapping[tuple[str, str, str], RecipeApi | None] = MappingProxyType({}),
+        measured_memories: Mapping[
+            tuple[str, str, str], PublishedMeasuredMemory | None
+        ] = MappingProxyType({}),
     ) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
-            images, qualifications, apis
+            images, qualifications, apis, measured_memories
         )
 
     def import_recipe_library(

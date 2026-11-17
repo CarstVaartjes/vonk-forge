@@ -314,18 +314,12 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
         assert owner_id == 1
 
 
-def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
+def test_postgres_reconciliation_preserves_unknown_column_data(
     postgres_engine,
 ) -> None:
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     _upgrade(database_url)
     with postgres_engine.begin() as connection:
-        connection.execute(
-            text("CREATE TABLE operator_extension (id integer PRIMARY KEY, value text)")
-        )
-        connection.execute(
-            text("INSERT INTO operator_extension VALUES (7, 'retained')")
-        )
         connection.execute(
             text(
                 "INSERT INTO fleet_stream_events "
@@ -349,12 +343,6 @@ def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
     with postgres_engine.connect() as connection:
         assert (
             connection.execute(
-                text("SELECT value FROM operator_extension WHERE id=7")
-            ).scalar_one()
-            == "retained"
-        )
-        assert (
-            connection.execute(
                 text("SELECT operator_note FROM fleet_stream_events")
             ).scalar_one()
             == "retained"
@@ -367,39 +355,35 @@ def test_postgres_reconciliation_preserves_unknown_table_and_column_data(
         assert nullable is True
 
 
-def test_postgres_reconciliation_releases_the_keys_of_a_retired_table(
+def test_postgres_reconciliation_drops_every_undeclared_table(
     postgres_engine,
 ) -> None:
-    """A retired table keeps its rows but its RESTRICT keys cannot block deletes.
+    """A table the model does not declare is dropped, whatever it references.
 
-    ``runtime_image_authorizations`` recorded who first used an image and is no
-    longer read or written. An upgraded database still has it, with keys to the
-    revision and build rows a collector deletes.
+    An upgraded or rolled-back database may hold tables no code reads. Their
+    RESTRICT keys would block deletes, so startup drops them; declared tables and
+    ``alembic_version`` stay.
     """
 
     _upgrade(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.begin() as connection:
+        declared = set(inspect(connection).get_table_names())
         connection.execute(
             text(
-                "CREATE TABLE runtime_image_authorizations ("
+                "CREATE TABLE some_retired_table ("
                 "id VARCHAR(36) PRIMARY KEY, "
-                "recipe_revision_id VARCHAR(36) NOT NULL, "
-                "build_id VARCHAR(36) NOT NULL, "
-                "CONSTRAINT fk_runtime_image_authorizations_recipe_revision "
-                "FOREIGN KEY (recipe_revision_id) "
-                "REFERENCES catalog_document_revisions (id) ON DELETE RESTRICT, "
-                "CONSTRAINT fk_runtime_image_authorizations_build "
-                "FOREIGN KEY (build_id) REFERENCES recipe_builds (id) "
+                "node_id VARCHAR(36) NOT NULL, "
+                "CONSTRAINT fk_some_retired_table_node "
+                "FOREIGN KEY (node_id) REFERENCES agent_nodes (node_id) "
                 "ON DELETE RESTRICT)"
             )
         )
-        assert inspect(connection).get_foreign_keys("runtime_image_authorizations")
+        assert inspect(connection).get_foreign_keys("some_retired_table")
     with postgres_engine.begin() as connection:
         verify_schema_is_current(connection)
     with postgres_engine.connect() as connection:
-        inspector = inspect(connection)
-        assert "runtime_image_authorizations" in inspector.get_table_names()
-        assert inspector.get_foreign_keys("runtime_image_authorizations") == []
+        assert set(inspect(connection).get_table_names()) == declared
+        assert "alembic_version" in declared
 
 
 def test_schema_reconciliation_preserves_unexpected_column(
@@ -966,3 +950,17 @@ def test_missing_column_left_after_reconciliation_fails_startup(
             verify_schema_is_current(connection)
     finally:
         engine.dispose()
+
+
+def test_postgres_reconciliation_recreates_a_missing_repeated_evidence_sequence(
+    postgres_engine,
+) -> None:
+    """Reconcile creates the standalone ordering sequence an old database lacks."""
+
+    _upgrade(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.execute(text("DROP SEQUENCE IF EXISTS repeated_evidence_sequence"))
+    with postgres_engine.begin() as connection:
+        verify_schema_is_current(connection)
+    with postgres_engine.connect() as connection:
+        assert connection.scalar(text("SELECT nextval('repeated_evidence_sequence')"))

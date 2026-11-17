@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_control.catalog_sync import _empty_result
 from vonk_control.catalog_sync_contract import ManagedCatalogSyncResult
 from vonk_control.fleet_profile_contract import (
@@ -279,7 +279,7 @@ def corpus() -> dict:
         elif mutation == "bad-enum":
             document["category"] = "made-up"
         elif mutation == "oversize-text":
-            document["stdout"]["text"] = "x" * 2049
+            document["stdout"]["text"] = "x" * (LOG_TAIL_BYTES + 1)
         else:
             for key, count in (
                 ("versions", 8),
@@ -290,7 +290,10 @@ def corpus() -> dict:
                 document[key] = [
                     {"name": "x" * 64, "value": "y" * 256} for _ in range(count)
                 ]
-            document["stdout"]["text"] = document["stderr"]["text"] = "z" * 2048
+            # Four-byte characters: full tails then exceed the document bound.
+            document["stdout"]["text"] = document["stderr"]["text"] = (
+                "😀" * LOG_TAIL_BYTES
+            )
             document["collector_errors"] = ["e" * 256] * 8
         add(
             "diagnostics-" + mutation,
