@@ -16,11 +16,15 @@ from pathlib import Path
 
 import pytest
 
-PHASES = (
-    Path(__file__).resolve().parents[1]
-    / "src/vonk_control/run_switch_operations/executor_phases.py"
+_OPERATIONS = (
+    Path(__file__).resolve().parents[1] / "src/vonk_control/run_switch_operations"
 )
-_RETIRE_OR_OBSERVE = {"reconcile_superseded_unissued", "_observe_older_issued"}
+PHASES = (_OPERATIONS / "executor_phases.py", _OPERATIONS / "executor_preflight.py")
+_RETIRE_OR_OBSERVE = {
+    "reconcile_superseded_unissued",
+    "_observe_older_issued",
+    "start_build",
+}
 
 
 def _binds_intent(call: ast.Call) -> bool:
@@ -63,7 +67,8 @@ def unwrapped_intent_calls(source: str) -> list[int]:
 
 
 def test_every_intent_binding_phase_call_replans_when_superseded() -> None:
-    assert unwrapped_intent_calls(PHASES.read_text()) == []
+    for path in PHASES:
+        assert unwrapped_intent_calls(path.read_text()) == [], path.name
 
 
 _WRAPPED = """
@@ -71,6 +76,7 @@ def phase(service, ordinal, job):
     with _replans_when_superseded():
         service._lifecycle.reconcile_superseded_unissued("recipe.install", "i", ordinal)
         service._observe_older_issued("recipe.install", "i", ordinal)
+        start_build(None)
     try:
         with service._sessions() as session, _replans_when_superseded():
             value = (service.start if job else service.activate)(
@@ -87,6 +93,7 @@ def phase(service, ordinal, job):
     [
         'service._lifecycle.reconcile_superseded_unissued("recipe.stop", "r", ordinal)',
         'service._observe_older_issued("recipe.stop", "r", ordinal)',
+        "start_build(build_plan, build_input_sha256='a')",
         "start_installation('i', workload_intent_ordinal=ordinal)",
         "(service.start if job else service.activate)(workload_intent_ordinal=ordinal)",
     ],
