@@ -472,7 +472,7 @@ def test_source_build_without_builder_queues_provisional_parent(
     monkeypatch.setattr(
         availability_production,
         "resolve_recipe_entities",
-        lambda _session, _document: {},
+        lambda _session, _revision: {},
     )
     monkeypatch.setattr(
         availability_production,
@@ -597,7 +597,7 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
     monkeypatch.setattr(
         availability_production,
         "resolve_recipe_entities",
-        lambda _session, _document: {},
+        lambda _session, _revision: {},
     )
 
     class Settings:
@@ -696,7 +696,7 @@ def test_authority_resolves_builds_without_an_open_transaction(
     monkeypatch.setattr(
         availability_production,
         "resolve_recipe_entities",
-        lambda _session, _document: {},
+        lambda _session, _revision: {},
     )
     monkeypatch.setattr(
         availability_production,
@@ -1542,7 +1542,7 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     monkeypatch.setattr(
         availability_production,
         "resolve_recipe_entities",
-        lambda _session, _document: {},
+        lambda _session, _revision: {},
     )
     monkeypatch.setattr(
         availability_production,
@@ -1919,7 +1919,7 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     monkeypatch.setattr(
         availability_production,
         "resolve_recipe_entities",
-        lambda _session, _document: {},
+        lambda _session, _revision: {},
     )
     monkeypatch.setattr(
         availability_production,
