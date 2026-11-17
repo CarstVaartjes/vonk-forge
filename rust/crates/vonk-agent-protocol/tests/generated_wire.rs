@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use vonk_agent_protocol::failure_evidence::LOG_TAIL_BYTES;
 use vonk_agent_protocol::generated::{
     FailureDiagnostics, FailureLogTail, OperationProgress, RuntimePreflightRequest,
 };
@@ -22,7 +23,7 @@ fn direct_deserialization_validates_bounds_and_unknown_fields() {
     unknown["unrecognized"] = json!(true);
     assert!(serde_json::from_value::<FailureLogTail>(unknown).is_err());
     let mut oversized = value;
-    oversized["text"] = json!("x".repeat(2049));
+    oversized["text"] = json!("x".repeat(LOG_TAIL_BYTES + 1));
     assert!(serde_json::from_value::<FailureLogTail>(oversized).is_err());
 }
 

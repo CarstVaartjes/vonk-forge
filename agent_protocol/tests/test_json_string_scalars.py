@@ -22,7 +22,7 @@ import pytest
 import vonk_agent_protocol
 from pydantic import BaseModel
 from vonk_agent_protocol import AgentFailureResult, AgentResult
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.failure_evidence import FAILURE_LOG_POLICY, FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.page_cache import PageCacheDropProblem, PageCacheDropReport
 from vonk_agent_protocol.reason_codes import AgentEvidenceCode
@@ -218,19 +218,20 @@ def test_diagnostics_over_their_size_bound_lose_only_the_page_cache() -> None:
         diagnostics[name] = [
             {"name": f"{n:02}" + "n" * 62, "value": "x" * 256} for n in range(count)
         ]
-    for stream in ("stdout", "stderr"):
-        diagnostics[stream]["text"] = "y" * 2048
+    # Four-byte characters let tails within their character bound fill the
+    # document bound.
+    diagnostics["stdout"]["text"] = ""
+    diagnostics["stderr"]["text"] = "😀" * (FAILURE_LOG_POLICY.log_tail_bytes // 2)
 
     def size_without_page_cache() -> int:
         kept = {k: v for k, v in diagnostics.items() if k != "page_cache"}
         return len(FailureDiagnostics.model_validate(kept).model_dump_json().encode())
 
-    # The diagnostics fit their 16 KiB bound exactly without the page cache, so
-    # the page cache alone pushes them over: trim stdout to the exact size.
-    diagnostics["stdout"]["text"] = ""
-    room = 16 * 1024 - size_without_page_cache()
-    diagnostics["stdout"]["text"] = "y" * room
-    assert size_without_page_cache() == 16 * 1024
+    # The diagnostics fit their document bound exactly without the page cache,
+    # so the page cache alone pushes them over: size stdout to the exact room.
+    room = FAILURE_LOG_POLICY.document_bytes - size_without_page_cache()
+    diagnostics["stdout"]["text"] = "😀" * (room // 4) + "y" * (room % 4)
+    assert size_without_page_cache() == FAILURE_LOG_POLICY.document_bytes
 
     accepted = AgentResult.model_validate(document)
 

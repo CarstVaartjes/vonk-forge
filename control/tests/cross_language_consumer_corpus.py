@@ -279,7 +279,7 @@ def corpus() -> dict:
         elif mutation == "bad-enum":
             document["category"] = "made-up"
         elif mutation == "oversize-text":
-            document["stdout"]["text"] = "x" * 2049
+            document["stdout"]["text"] = "x" * (LOG_TAIL_BYTES + 1)
         else:
             for key, count in (
                 ("versions", 8),
@@ -290,8 +290,9 @@ def corpus() -> dict:
                 document[key] = [
                     {"name": "x" * 64, "value": "y" * 256} for _ in range(count)
                 ]
+            # Four-byte characters: full tails then exceed the document bound.
             document["stdout"]["text"] = document["stderr"]["text"] = (
-                "z" * LOG_TAIL_BYTES
+                "😀" * LOG_TAIL_BYTES
             )
             document["collector_errors"] = ["e" * 256] * 8
         add(
