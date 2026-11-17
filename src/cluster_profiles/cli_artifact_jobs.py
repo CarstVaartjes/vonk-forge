@@ -219,7 +219,9 @@ def run_artifact_job(
                 raise ControlMalformedResponse("artifact job list is invalid")
             return {"jobs": [_job(item, expected_run=args.run) for item in jobs]}
 
-        return dict(_recover(client, read, lambda timeout: read(timeout)))
+        return dict(
+            _recover(client, read, lambda timeout: None, retry_if=_transient_failure)
+        )
     if action == "contract":
         return _contract(args, client, quote)
     if action == "create":
@@ -237,6 +239,7 @@ def run_artifact_job(
                 expected_id=args.job_id,
             ),
             lambda timeout: None,
+            retry_if=_transient_failure,
         )
         if not args.follow:
             return result
@@ -1020,7 +1023,7 @@ def _capabilities(client: ArtifactJobClient) -> dict[str, object]:
         )
         return validate_control_document("ArtifactJobCapabilitiesResponse", value)
 
-    return _recover(client, read, lambda timeout: read(timeout))
+    return _recover(client, read, lambda timeout: None, retry_if=_transient_failure)
 
 
 def _job(
@@ -1165,6 +1168,13 @@ def _stable_request_key(
     return value
 
 
+def _transient_failure(error: BaseException) -> bool:
+    """A pure read repeats only after a fault the next try can differ on."""
+    if isinstance(error, ControlHTTPError):
+        return error.status_code >= 500 or error.status_code in {408, 429}
+    return _may_have_completed(error)
+
+
 def _may_have_completed(error: BaseException) -> bool:
     if isinstance(error, ControlHTTPError):
         return error.status_code not in {401, 403}
@@ -1178,6 +1188,8 @@ def _recover[T](
     client: ArtifactJobClient,
     send: Callable[[float], T],
     observe: Callable[[float], T | None],
+    *,
+    retry_if: Callable[[BaseException], bool] = _may_have_completed,
 ) -> T:
     """Reconcile an unknown effect, then replay only identical authorized intent.
 
@@ -1202,7 +1214,7 @@ def _recover[T](
         try:
             return send(remaining())
         except (ControlClientError, OSError) as error:
-            if not _may_have_completed(error):
+            if not retry_if(error):
                 raise
             last = error
         for _ in range(2):
@@ -1214,7 +1226,7 @@ def _recover[T](
             except ControlNotFound:
                 break
             except (ControlClientError, OSError) as error:
-                if not _may_have_completed(error):
+                if not retry_if(error):
                     raise
                 last = error
         delay = min(0.1 * 2**attempt, max(0.0, deadline - time.monotonic()))
