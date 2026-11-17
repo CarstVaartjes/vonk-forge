@@ -29,8 +29,6 @@ from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireModel
 
 # Authenticated transport memory safeguard.
 MAX_TELEMETRY_REPORT_BYTES = 1024 * 1024
-# The byte-capacity bound shared by telemetry, inventory totals, display-memory
-# and swap evidence; Rust reads it from the exported schema (build.rs).
 
 
 def _rfc3339_datetime(value: object) -> object:
