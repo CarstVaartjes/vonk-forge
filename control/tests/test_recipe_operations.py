@@ -2538,6 +2538,67 @@ def test_distributed_start_deadline_is_enforced_before_phase_advance(
         assert all(stop.cancel_pending_start for stop in stop_payloads)
 
 
+def test_failed_start_result_commits_when_cleanup_admission_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused admission never rolls the failed Start's result back: the run is
+    left ``stopping`` and the same cleanup request queues its Stop later."""
+    from vonk_control.recipe_operations import start_cleanup
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        nodes=2,
+        distributed_lifecycle=True,
+        distributed_start_timeout_seconds=60,
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="x" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "refused-cleanup")
+    start = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="y" * 36
+    )
+    with sessions() as session:
+        launch = session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        ).first()
+        assert launch is not None
+
+    staged: list[start_cleanup.StartCleanup] = []
+    real_run = start_cleanup.StartCleanupDispatch.run
+
+    def refuse(self: object, cleanup: start_cleanup.StartCleanup) -> None:
+        staged.append(cleanup)
+        monkeypatch.setattr(
+            start_cleanup,
+            "end_unfinished_run",
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                RuntimeError("node locks are held")
+            ),
+        )
+        real_run(self, cleanup)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(start_cleanup.StartCleanupDispatch, "run", refuse)
+    service._clock = lambda: NOW + timedelta(seconds=60)
+    service.record_node_result(
+        start.id,
+        launch.node_id,
+        succeeded=True,
+        evidence=start_evidence(launch.payload),
+    )
+
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, start.owner_id)).state == "stopping"
+        assert session.scalar(select(Job).where(Job.kind == "recipe.stop")) is None
+    (cleanup,) = staged
+    monkeypatch.undo()
+    start_cleanup.StartCleanupDispatch(service).run(cleanup)
+    with sessions() as session:
+        stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
+        assert stop is not None
+        assert stop.request_id == cleanup.request_id
+
+
 def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
     tmp_path: Path,
 ) -> None:

@@ -36,6 +36,20 @@ if TYPE_CHECKING:
     from .service import RecipeOperationService
 
 
+def withdraw_for_cleanup(run: RecipeRun, now: datetime, *, note: str) -> None:
+    """Record a failed Start's run as ``stopping``; its Stop is queued after commit.
+
+    The write is the first half of ``end_unfinished_run`` for a run with an owning
+    intent, so a later ``end_unfinished_run`` finds the same state and queues the
+    Stop once.
+    """
+
+    run.route_state = RouteState.WITHDRAWN
+    run.state = RunState.STOPPING
+    run.route_error = f"{note}; cleanup queued"
+    run.updated_at = now
+
+
 def end_unfinished_run(
     service: RecipeOperationService,
     session: Session,

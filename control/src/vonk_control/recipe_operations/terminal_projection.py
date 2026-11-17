@@ -75,7 +75,8 @@ from .intent import _intent_is_current, _job_workload_intent, _shared_workload_i
 from .observation_helpers import _active_recipe_revision
 from .rank_authority import _profile_jobrun_parent
 from .results import _recorded_result, _recorded_result_document, _validated_result
-from .run_transitions import end_unfinished_run
+from .run_transitions import end_unfinished_run, withdraw_for_cleanup
+from .start_cleanup import StartCleanup, stage
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -279,17 +280,36 @@ class TerminalProjectionMixin:
                     note = str(recovery_error)
                 else:
                     note = "one or more ranks failed to start"
-                if end_unfinished_run(
-                    service,
-                    session,
-                    run,
-                    now,
-                    actor=job.actor,
-                    request_id=cleanup_request_id,
-                    ordinal=cleanup_ordinal,
-                    note=note,
-                ):
-                    cleanup_queued = True
+                if cleanup_ordinal is None:
+                    # No owning intent: the run is only marked lost, which
+                    # takes no admission lock.
+                    end_unfinished_run(
+                        service,
+                        session,
+                        run,
+                        now,
+                        actor=job.actor,
+                        request_id=cleanup_request_id,
+                        ordinal=None,
+                        note=note,
+                    )
+                else:
+                    # Queueing the Stop takes admission's node locks, so it runs
+                    # after this result commits (a busy admission must never roll
+                    # the agent's result back); the reaper backstops a lost one.
+                    withdraw_for_cleanup(run, now, note=note)
+                    session.flush()
+                    stage(
+                        session,
+                        StartCleanup(
+                            run_id=run.id,
+                            version=run.version,
+                            actor=job.actor,
+                            request_id=cleanup_request_id,
+                            ordinal=cleanup_ordinal,
+                            note=note,
+                        ),
+                    )
             else:
                 run.state = RunState.RUNNING
                 run.route_state = RouteState.PENDING
