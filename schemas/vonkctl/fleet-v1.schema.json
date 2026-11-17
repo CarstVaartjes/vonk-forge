@@ -255,6 +255,20 @@
           "title": "Host Checks",
           "type": "array"
         },
+        "host_checks_note": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host Checks Note"
+        },
         "hostname": {
           "maxLength": 255,
           "title": "Hostname",
@@ -839,6 +853,17 @@
           "minLength": 1,
           "title": "Finding",
           "type": "string"
+        },
+        "undo": {
+          "default": [],
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Undo",
+          "type": "array"
         }
       },
       "required": [

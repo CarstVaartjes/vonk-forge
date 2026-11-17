@@ -25,13 +25,10 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .reason_codes import AgentEvidenceCode
-from .wire_model import WireModel
+from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireModel
 
 # Authenticated transport memory safeguard.
 MAX_TELEMETRY_REPORT_BYTES = 1024 * 1024
-# The byte-capacity bound shared by telemetry, inventory totals, display-memory
-# and swap evidence; Rust reads it from the exported schema (build.rs).
-MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 
 
 def _rfc3339_datetime(value: object) -> object:

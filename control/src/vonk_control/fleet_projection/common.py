@@ -34,6 +34,7 @@ from vonk_forge_contracts import (
 )
 
 from ..catalog_revision_contract import read_catalog_document
+from ..installation_transitions import IN_FLIGHT
 from ..machine_states import (
     CertificateStateField,
     InstallationStateField,
@@ -53,7 +54,7 @@ from ..models import (
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..strict_json import StrictModel
 from ..telemetry import TelemetrySampleView
-from .host_checks import HostCheck, HostCheckAdvice
+from .host_checks import HostCheck, HostCheckAdvice, Text1024
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""
 
@@ -171,10 +172,25 @@ def _install_partial_warnings(
     Each names the installation, the rank this Spark holds and the reason, as
     typed evidence and in the text, so the owner sees which one to act on. A
     flood of leftovers is capped and summarized, keeping the warning list
-    bounded.
+    bounded. An install still in flight (``planned`` or ``installing``) is
+    progress, not a fault: its owning operation finishes it, or the residue
+    sweep ends it as ``partial`` and it warns then, the same rule as
+    ``attempt_residues.incomplete_installation_ids``. A structural reason
+    (wrong or missing ranks) and unreadable evidence still warn while in
+    flight.
     """
 
-    incomplete = [value for value in installed if not value.complete]
+    incomplete = [
+        value
+        for value in installed
+        if not value.complete
+        and not (
+            value.group_state in IN_FLIGHT
+            and value.degraded_reason
+            == InstallDegradedReason.INSTALLATION_NOT_INSTALLED
+            and value.projection_issue is None
+        )
+    ]
     named = incomplete[:_INSTALL_PARTIAL_MAX_NAMED]
     warnings: list[ProjectionReason] = []
     for value in named:
@@ -516,6 +532,8 @@ class FleetNode(StrictModel):
     warnings: list[ProjectionReason] = Field(max_length=128)
     # Informative host advice from the agent's host tuning; never attention.
     host_checks: list[HostCheckAdvice] = Field(default=[], max_length=len(HostCheck))
+    # Shown once above the checks; absent when there are none.
+    host_checks_note: Text1024 | None = None
 
 
 class FleetSnapshot(StrictModel):

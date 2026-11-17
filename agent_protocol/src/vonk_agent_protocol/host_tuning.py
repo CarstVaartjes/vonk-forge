@@ -12,11 +12,10 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
-from .wire_model import WireEnum, WireModel
+from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
 
-# Memory in bytes, at most 16 TiB (telemetry's capacity bound, which this leaf
-# module cannot import: contracts imports page_cache, which imports this).
-MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=16 * 1024**4)]
+# Memory in bytes, at most telemetry's capacity bound (16 TiB).
+MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]
 
 
 class HostUnit(WireEnum):

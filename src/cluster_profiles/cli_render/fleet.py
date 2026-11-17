@@ -125,7 +125,10 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     _reasons(node.get("warnings"), subject=name)
     # Informative advice, never attention; an older Controller sends none.
     checks = node.get("host_checks")
-    for advice in checks if isinstance(checks, list) else []:
+    checks = checks if isinstance(checks, list) else []
+    if checks and isinstance(note := node.get("host_checks_note"), str):
+        _field("Host checks", note)
+    for advice in checks:
         text, *commands = host_check_lines(
             HostCheckAdvice.from_dict(dict(_object(advice, "host check")))
         )

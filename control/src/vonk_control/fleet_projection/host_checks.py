@@ -21,6 +21,7 @@ from ..strict_json import StrictModel
 
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Text512 = Annotated[str, StringConstraints(min_length=1, max_length=512)]
+Text1024 = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
 MIB = 1024**2
 GIB = 1024**3
 
@@ -46,6 +47,25 @@ class HostCheckAdvice(StrictModel):
     explanation: Text512
     #: Run in order on the Spark; each ``sudo`` is the operator's.
     commands: list[Text256] = Field(max_length=4)
+    #: Run in order to put the Spark back as it was; empty when nothing changed.
+    undo: list[Text256] = Field(default=[], max_length=4)
+
+
+DOCS_URL = (
+    "https://github.com/CarstVaartjes/vonk-forge/blob/main/docs/operations/"
+    "spark-host-checks.md"
+)
+
+
+def host_checks_note(spark: str) -> Text1024:
+    """The one line above a Spark's checks: where to run them and when they clear."""
+    return (
+        f"Run these on {spark} itself, in a terminal or over SSH, as a user with "
+        "sudo; the Controller never changes a Spark. A check clears on the Spark's "
+        "next report (about 2-3 minutes) once its change has taken effect: boot "
+        "splash after a reboot; memory fragmentation is a reading and stays. "
+        f"Reasons and undo steps: {DOCS_URL}"
+    )
 
 
 #: Each service check and the units it covers; the command disables all of them.
@@ -95,16 +115,24 @@ _DESKTOP_SNAP = re.compile(
 )
 _SHOWN_SNAPS = 8
 
+#: Puts splash back on the stock Ubuntu line of /etc/default/grub.
+_SPLASH_UNDO = (
+    'sudo sed -i -E \'/^GRUB_CMDLINE_LINUX_DEFAULT="/{/[ "]splash[ "]/!'
+    "s/^(GRUB_CMDLINE_LINUX_DEFAULT=\")/\\1splash /}' /etc/default/grub "
+    "&& sudo update-grub"
+)
 _WATERMARK_COMMANDS = [
     "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
     "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf",
 ]
-#: One command: edits only the GRUB files that set splash (/etc/default/grub or
-#: a /etc/default/grub.d drop-in), then regenerates the boot configuration.
+#: One command: edits only the GRUB files that set the exact word splash
+#: (/etc/default/grub or a /etc/default/grub.d drop-in; not splash=...), then
+#: regenerates the boot configuration.
 _SPLASH_COMMAND = (
-    "grep -lE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\\bsplash\\b' /etc/default/grub "
-    "/etc/default/grub.d/*.cfg 2>/dev/null | sudo xargs -r sed -i -E "
-    "'/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/s/ *\\bsplash\\b//' && sudo update-grub"
+    "grep -lZE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*[ \"]splash([ \"]|$)' /etc/default/grub "
+    "/etc/default/grub.d/*.cfg 2>/dev/null | sudo xargs -0 -r sed -i -E "
+    "'/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/{:a;s/([ \"])splash([ \"]|$)/\\1\\2/;ta}' "
+    "&& sudo update-grub"
 )
 _COMPACT_COMMAND = (
     "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; "
@@ -135,6 +163,10 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                     "boost off, now and at every boot."
                 ),
                 commands=_WATERMARK_COMMANDS,
+                undo=[
+                    "sudo rm -f /etc/sysctl.d/90-watermark-boost.conf",
+                    f"sudo sysctl -w vm.watermark_boost_factor={factor}",
+                ],
             )
         )
     if tuning.kernel_splash:
@@ -147,6 +179,7 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                     "of a headless Spark. Low impact; the change applies at the next boot."
                 ),
                 commands=[_SPLASH_COMMAND],
+                undo=[_SPLASH_UNDO],
             )
         )
     if (free := tuning.free_memory) is not None and free.free_bytes > 0:
@@ -166,6 +199,7 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                     "now, run this while no workload is loading."
                 ),
                 commands=[_COMPACT_COMMAND],
+                undo=[],
             )
         )
     return advice
@@ -184,6 +218,7 @@ def _service(
     finding = f"Active: {names}" + (
         f"; {_mib(sum(memory))} in use now." if memory else "."
     )
+    units = " ".join(item.unit.value for item in present)
     explanation = _SERVICE_EXPLANATIONS[check]
     if check is HostCheck.SNAPD:
         explanation += " " + _snaps(snaps)
@@ -191,10 +226,8 @@ def _service(
         check=check,
         finding=finding,
         explanation=explanation,
-        commands=[
-            "sudo systemctl disable --now "
-            + " ".join(item.unit.value for item in present)
-        ],
+        commands=[f"sudo systemctl disable --now {units}"],
+        undo=[f"sudo systemctl enable --now {units}"],
     )
 
 

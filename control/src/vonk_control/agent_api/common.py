@@ -52,6 +52,7 @@ from ..auth import (
     AgentSource,
     agent_identity_from_scope,
     agent_source_from_scope,
+    validated_agent_identity_from_scope,
 )
 from ..distribution import DistributionService
 from ..enrollment import EnrollmentService
@@ -498,21 +499,11 @@ def _agent_identity_state(
 def _authenticated_identity(
     request: Request, services: AgentApiServices
 ) -> AgentIdentity:
-    identity = _scope_identity(request)
-    if not active_agent_identity(services, identity):
+    # The middleware is the one place that validates the certificate.
+    identity = validated_agent_identity_from_scope(dict(request.scope))
+    if identity is None:
         raise SecurityHTTPError(
             status_code=401, detail="agent certificate is not active"
-        )
-    return identity
-
-
-def _authenticated_activation_identity(
-    request: Request, services: AgentApiServices
-) -> AgentIdentity:
-    identity = _scope_identity(request)
-    if not activation_agent_identity(services, identity):
-        raise SecurityHTTPError(
-            status_code=401, detail="agent certificate cannot activate"
         )
     return identity
 

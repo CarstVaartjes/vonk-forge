@@ -11,7 +11,11 @@ from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    InstallationState,
+    InstallDegradedReason,
+    canonical_message,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -27,6 +31,7 @@ from vonk_control.fleet_projection import (
     NodeConnection,
     RecipePresence,
     TelemetryPoint,
+    _install_partial_warnings,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.inventory_repository import (
@@ -2413,6 +2418,13 @@ def _set(installation_state=None, rank_state=None, role=None, installed_bytes=No
         (_set(rank_state="failed"), "rank-not-installed", "installed", "failed", [0]),
         (_set(role="worker"), "rank-membership-mismatch", "installed", "installed", []),
         (
+            _set(installation_state="planned", role="worker"),
+            "rank-membership-mismatch",
+            "planned",
+            "installed",
+            [],
+        ),
+        (
             _set(installed_bytes=40),
             "rank-incomplete-bytes",
             "installed",
@@ -2442,9 +2454,43 @@ def test_install_partial_names_the_installation_the_rank_and_the_reason(
     assert evidence.required_bytes == 100
 
 
-def test_a_complete_installation_raises_no_install_partial_warning() -> None:
-    _installation_id, snapshot = _mutated_group(_set())
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        _set(),
+        # In flight: its operation finishes it or the residue sweep ends it as
+        # partial, which warns then.
+        _set(installation_state="planned", rank_state="planned"),
+        _set(installation_state="installing", rank_state="planned"),
+    ],
+)
+def test_a_complete_or_in_flight_installation_raises_no_install_partial_warning(
+    mutation,
+) -> None:
+    _installation_id, snapshot = _mutated_group(mutation)
     assert not [w for w in snapshot.nodes[0].warnings if w.code == "install.partial"]
+
+
+def test_an_in_flight_installation_with_unreadable_evidence_still_warns() -> None:
+    presence = RecipePresence(
+        installation_id="00000000-0000-4000-8000-000000000001",
+        recipe_id="00000000-0000-4000-8000-000000000002",
+        recipe_revision_id="00000000-0000-4000-8000-000000000003",
+        title="Recipe",
+        topology_name="pair",
+        expected_rank_count=2,
+        present_ranks=[0, 1],
+        member_node_ids=[NODE_A],
+        rank=0,
+        role="entrypoint",
+        group_state=InstallationState.PLANNED,
+        rank_state=InstallationState.PLANNED,
+        complete=None,
+        projection_issue="Stored recipe revision is unreadable.",
+        degraded_reason=InstallDegradedReason.INSTALLATION_NOT_INSTALLED,
+    )
+    (warning,) = _install_partial_warnings([presence])
+    assert warning.code == "install.partial"
 
 
 def test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation() -> (
@@ -2999,9 +3045,31 @@ def test_host_tuning_reaches_the_fleet_node_as_advice_never_attention() -> None:
     }
     node = _host_node(headless | {"tuning": _shared_tuning()})
     assert [advice.check for advice in node.host_checks] == list(HostCheck)
+    # Every change can be undone, except the reading that changes nothing.
+    assert [a.check for a in node.host_checks if not a.undo] == [
+        HostCheck.MEMORY_FRAGMENTATION
+    ]
+    assert f"Run these on {node.display_name} itself" in (node.host_checks_note or "")
     assert [w.code for w in node.warnings if w.code.startswith("host.")] == []
     # An older agent reports no tuning: no advice, nothing guessed.
     assert _host_node(headless).host_checks == []
+    assert _host_node(headless).host_checks_note is None
+
+
+def test_shared_host_check_fixture_is_the_controller_output() -> None:
+    # Catches the clients' vector drifting from the words the Controller sends.
+    from vonk_agent_protocol.host_tuning import HostTuning
+    from vonk_control.fleet_projection.host_checks import host_checks, host_checks_note
+
+    path = Path(__file__).parents[2] / "tests/fixtures/fleet-wording-host-checks.json"
+    fixture = json.loads(path.read_text(encoding="utf-8"))
+    sent = {
+        advice.check.value: advice.model_dump(mode="json")
+        for advice in host_checks(HostTuning.model_validate(_shared_tuning()))
+    }
+    assert fixture["note"] == host_checks_note("Alpha")
+    for case in fixture["cases"]:
+        assert case["advice"] == sent[case["advice"]["check"]]
 
 
 def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> None:

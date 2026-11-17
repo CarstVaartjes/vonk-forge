@@ -4,14 +4,20 @@ A DGX Spark that only runs Vonk Forge workloads is headless, so some of what
 DGX OS starts for a desktop costs memory the recipes count on. The agent
 measures a small set of host settings with every inventory and the Controller
 explains each one in `vonkctl fleet detail <spark>` and on the web Spark page
-(**Host checks**), with the measured value and the commands to change it.
+(**Host checks**), with the measured value, the commands to change it and the
+commands to undo that (**Undo:**). One line above the checks says where to run
+them: on the Spark itself, in a terminal or over SSH, as a user with `sudo`;
+the Controller never changes a Spark. The web page has a copy button per command.
 
 The checks are informative. They never gate admission or a load, never mark a
 Spark as needing attention, and the platform never runs these commands: each
 `sudo` is the operator's decision. A reading the agent cannot take (an older
 agent, systemd not answering, a file missing) gives no advice rather than a
-guess. Advice disappears with the next inventory (about two minutes) after the
-change.
+guess. Advice disappears with the next inventory (about 2-3 minutes: the agent
+reports after 120 s, checked every minute at most) once the change has taken
+effect: the boot splash only after a reboot, and the memory fragmentation
+reading never goes. The Controller owns all of this text,
+including the line above the checks and each undo.
 
 The measurements come from `systemctl show` for the units below, `/snap`,
 `/proc/sys/vm/watermark_boost_factor`, `/proc/cmdline` and `/proc/buddyinfo`.
@@ -34,8 +40,8 @@ not installed is never named. The table lists every unit a check covers.
 | snapd | any of `snapd.service`, `snapd.socket`, `snapd.seeded.service`, `snapd.snap-repair.timer` is active | the snap store keeps running and refreshing; on a stock Spark the snaps are desktop apps (Firefox, Thunderbird, Snap Store, Firmware Updater) and their runtimes. The advice lists the installed snaps and names any it does not know as desktop apps: check `snap list` first | `sudo systemctl disable --now snapd.service snapd.socket snapd.seeded.service snapd.snap-repair.timer` | `sudo systemctl enable --now snapd.service snapd.socket snapd.seeded.service snapd.snap-repair.timer` |
 | DGX Dashboard | `dgx-dashboard.service` or `dgx-dashboard-admin.service` is active | its periodic update check also wakes fwupd and PackageKit and takes more memory while it runs; install updates with apt | `sudo systemctl disable --now dgx-dashboard.service dgx-dashboard-admin.service` | `sudo systemctl enable --now dgx-dashboard.service dgx-dashboard-admin.service` |
 | Firmware refresh | `fwupd-refresh.timer` is active | it wakes fwupd in the background. Keep fwupd installed: it delivers the EC, UEFI, ConnectX-7 and NVMe firmware; check by hand with `fwupdmgr refresh && fwupdmgr get-updates` | `sudo systemctl disable --now fwupd-refresh.timer` | `sudo systemctl enable --now fwupd-refresh.timer` |
-| Watermark boost | `vm.watermark_boost_factor` is above 0 (Ubuntu's default is 15000) | after memory fragments the kernel raises its free-memory watermarks and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts | `echo vm.watermark_boost_factor=0 \| sudo tee /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf` | `sudo rm /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -w vm.watermark_boost_factor=15000` |
-| Boot splash (info) | the kernel command line has `splash` | cosmetic: it hides kernel messages on the console; applies at the next boot | `grep -lE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\bsplash\b' /etc/default/grub /etc/default/grub.d/*.cfg 2>/dev/null \| sudo xargs -r sed -i -E '/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/s/ *\bsplash\b//' && sudo update-grub` (edits only the files that set `splash`: `/etc/default/grub` or a `grub.d` drop-in) | add `splash` back to the `GRUB_CMDLINE_LINUX_DEFAULT` line it was removed from, then `sudo update-grub` |
+| Watermark boost | `vm.watermark_boost_factor` is above 0 (Ubuntu's default is 15000) | after memory fragments the kernel raises its free-memory watermarks and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts | `echo vm.watermark_boost_factor=0 \| sudo tee /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf` | `sudo rm -f /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -w vm.watermark_boost_factor=<the measured value>` (the advice fills in the value it measured) |
+| Boot splash (info) | the kernel command line has `splash` | cosmetic: it hides kernel messages on the console; applies after a reboot | `grep -lZE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*[ "]splash([ "]\|$)' /etc/default/grub /etc/default/grub.d/*.cfg 2>/dev/null \| sudo xargs -0 -r sed -i -E '/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/{:a;s/([ "])splash([ "]\|$)/\1\2/;ta}' && sudo update-grub` (removes only the exact word `splash` from the `GRUB_CMDLINE_LINUX` and `GRUB_CMDLINE_LINUX_DEFAULT` lines of `/etc/default/grub` and its `grub.d` drop-ins; `splash=...` stays) | `sudo sed -i -E '/^GRUB_CMDLINE_LINUX_DEFAULT="/{/[ "]splash[ "]/!s/^(GRUB_CMDLINE_LINUX_DEFAULT=")/\1splash /}' /etc/default/grub && sudo update-grub` (adds `splash` to the `GRUB_CMDLINE_LINUX_DEFAULT` line of `/etc/default/grub` unless it is there; drop-ins that extend `$GRUB_CMDLINE_LINUX_DEFAULT`, as on DGX OS, pick it up from there, so do not also add it back to the drop-in); takes effect after a reboot |
 | Memory fragmentation (info) | always, as a reading | the GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. The reading is free memory against the part of it in blocks of at least 2 MiB (from `/proc/buddyinfo`, at the kernel's page size). The helper compacts once whenever loading starts (below) | to compact now, while no workload is loading: `sync; echo 1 \| sudo tee /proc/sys/vm/drop_caches; echo 1 \| sudo tee /proc/sys/vm/compact_memory` | nothing to undo |
 
 Measured on both Sparks on 2026-11-17 after 3.5 weeks of uptime: every unit

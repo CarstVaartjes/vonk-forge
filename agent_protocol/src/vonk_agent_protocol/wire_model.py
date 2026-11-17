@@ -23,6 +23,10 @@ from pydantic_core import CoreSchema, SchemaValidator, ValidationError, core_sch
 # agent carry that exact identity; their storage/argv representations must not
 # impose a smaller integer domain.
 MAX_RUN_GENERATION = 2**63 - 1
+# The byte-capacity bound (16 TiB) shared by telemetry, inventory totals,
+# display-memory, swap and host-tuning evidence; Rust reads it from the exported
+# schema (build.rs).
+MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 
 
 def _check_literal_type(value: object, expected: tuple[Any, ...]) -> object:
