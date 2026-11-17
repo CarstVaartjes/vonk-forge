@@ -65,6 +65,7 @@ from ..models import (
 )
 from ..own_cleanup import CLEANUP_KINDS
 from ..recipe_lifecycle_contract import (
+    START_CHILD_KINDS,
     validate_recipe_lifecycle_terminal,
 )
 from ..recipe_progress import (
@@ -176,8 +177,7 @@ class PersistenceMixin:
             )
         if installation_id is not None:
             if (
-                existing.kind
-                not in {WireAgentOperation.RECIPE_START.value, "recipe.job.activate.v1"}
+                existing.kind not in START_CHILD_KINDS
                 or _parent_identity(existing, "owner_kind") != "run"
             ):
                 raise RecipeRequestInvalid(

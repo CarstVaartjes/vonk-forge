@@ -43,6 +43,7 @@ from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
+from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,
@@ -61,7 +62,7 @@ from ..run_switch_contract import (
     RunSwitchStopResult,
 )
 from .artifact_validation import _validate_artifact_execution
-from .constants import _JOB_ACTIVATION, _is_artifact_phase
+from .constants import _is_artifact_phase
 from .errors import (
     RunSwitchInstallPreflightExpired,
     RunSwitchIssuedWorkloadPending,
@@ -499,7 +500,7 @@ class ExecutorPhasesMixin:
                 installation_id,
                 request_id=start_request_id,
                 kind=(
-                    _JOB_ACTIVATION
+                    JOB_ACTIVATION
                     if job_recipe
                     else WireAgentOperation.RECIPE_START.value
                 ),

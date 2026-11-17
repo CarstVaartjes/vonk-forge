@@ -7,7 +7,6 @@ import logging
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     LifecycleState,
@@ -105,9 +104,6 @@ _OPERATION_KINDS = frozenset(
 
 
 #: The child that activates a job recipe's run instead of starting a service.
-_JOB_ACTIVATION = "recipe.job.activate.v1"
-#: The jobs that start a run's workload; every observer of a start matches all.
-_START_CHILD_KINDS = (WireAgentOperation.RECIPE_START.value, _JOB_ACTIVATION)
 
 
 _MEMORY_CAPACITY_REFUSALS = frozenset(

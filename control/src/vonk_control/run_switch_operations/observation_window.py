@@ -20,6 +20,7 @@ from ..admission_locking import AdmissionLockBusy
 from ..install_admission import InstallAdmissionBusy
 from ..models import Job
 from ..recipe_builds import RecipeBuildAdmissionBusy
+from ..recipe_lifecycle_contract import START_CHILD_KINDS
 from ..reservation_owners import Owner, OwnerKind, OwnerRef, owner
 from ..run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
@@ -29,7 +30,7 @@ from ..run_admission import (
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
 from .awaited_children import awaited_jobs
-from .constants import _FINAL_VERIFICATION_MAX_SECONDS, _START_CHILD_KINDS
+from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchPostStopEvidencePending
 from .planning_helpers import _aware, _stored_job_plan
 
@@ -68,7 +69,7 @@ def observation_owners(
     if awaited.start_request_key is not None:
         start = session.scalar(
             select(Job.id).where(
-                Job.kind.in_(_START_CHILD_KINDS),
+                Job.kind.in_(START_CHILD_KINDS),
                 Job.request_id == awaited.start_request_key,
             )
         )
