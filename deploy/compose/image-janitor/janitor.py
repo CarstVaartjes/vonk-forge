@@ -31,6 +31,8 @@ from urllib.parse import quote
 
 INTERVAL = 3600
 NETWORK_INTERVAL = 30
+# A repair held back longer would leave a recovered gateway unrepaired for an hour.
+MAX_REPAIR_BACKOFF = 300
 PROJECT_LABEL = "com.docker.compose.project"
 SERVICE_LABEL = "com.docker.compose.service"
 ONEOFF_LABEL = "com.docker.compose.oneoff"
@@ -481,7 +483,7 @@ class Backoff:
         for key in keys:
             failures = self.failures.get(key, 0) + 1
             self.failures[key] = failures
-            delay = min(INTERVAL, NETWORK_INTERVAL * 2 ** (failures - 1))
+            delay = min(MAX_REPAIR_BACKOFF, NETWORK_INTERVAL * 2 ** (failures - 1))
             self.until[key] = now + delay / 2 + self.jitter() * delay / 2
         return self.held_until(keys)
 

@@ -375,19 +375,14 @@ def test_key_receipts_replay_without_repeating_external_effects(
         == revoke_key
     )
     assert not peer.keys
+    # Revoking a key that is already gone is idempotent success: a fresh
+    # request gets its own receipt and repeats no external effect.
     fresh_revoke = str(uuid4())
-    refused = restarted.post(
+    again = restarted.post(
         f"/api/key/receipt/revoke?request_id={fresh_revoke}", headers=headers
     )
-    assert refused.status_code == 409, refused.text
-    assert (
-        restarted.get(
-            "/api/key/receipt/requests",
-            params={"request_id": fresh_revoke},
-            headers=headers,
-        ).status_code
-        == 404
-    )
+    assert _receipt(restarted, again, headers)["request_id"] == fresh_revoke
+    assert not peer.keys
 
 
 def test_unknown_key_mutation_is_retryable_without_success(postgres_engine):

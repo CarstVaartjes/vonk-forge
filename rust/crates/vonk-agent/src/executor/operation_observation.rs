@@ -375,9 +375,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 HostRuntimeError::HelperRejected {
                     code: HelperErrorCode::RuntimeImageIdentityInvalid
                         | HelperErrorCode::OperationInvalid
-                        | HelperErrorCode::OperationInvalidArtifact
-                        | HelperErrorCode::PeerIdentityInvalid
-                        | HelperErrorCode::GrantUnauthorized,
+                        | HelperErrorCode::OperationInvalidArtifact,
                     ..
                 }
             ) {

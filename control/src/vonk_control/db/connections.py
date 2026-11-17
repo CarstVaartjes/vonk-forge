@@ -13,6 +13,7 @@ from sqlalchemy.exc import (
     DBAPIError,
     InterfaceError,
     OperationalError,
+    SQLAlchemyError,
     TimeoutError,
 )
 from sqlalchemy.orm import Session, sessionmaker
@@ -35,6 +36,17 @@ def _database_sqlstate(error: BaseException) -> str | None:
         return None
     code = getattr(error.orig, "sqlstate", None)
     return code if isinstance(code, str) else None
+
+
+# Lock timeout and deadlock victim: the transaction rolled back, nothing is wrong
+# with the schema, and the same attempt can succeed on the next try.
+_CONTENTION_SQLSTATES = frozenset({"55P03", "40P01"})
+
+
+def _reraise_contention(error: SQLAlchemyError) -> None:
+    """Let contention propagate so startup retries; every other error is the caller's."""
+    if _database_sqlstate(error) in _CONTENTION_SQLSTATES:
+        raise error
 
 
 def _driver_detail(error: BaseException) -> str:

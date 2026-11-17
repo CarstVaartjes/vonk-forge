@@ -351,3 +351,59 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
         }
     }
 }
+
+/// A helper that refuses the probe says nothing about an earlier Start: the
+/// observation stays unconfirmed and is asked again, never a confirmed failure.
+#[tokio::test]
+async fn refused_reobservation_stays_unconfirmed_instead_of_failing_the_start() {
+    let accepted = runtime_claims().remove(0);
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let socket = root.join("helper.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let peer = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let frame: vonk_agent_protocol::RecipeRunInspectionRequest =
+            vonk_agent_protocol::parse_strict(&body).unwrap();
+        let response = HostHelperResponse {
+            schema_version: 1,
+            request_id: Some(frame.request_id),
+            status: HostHelperResponseStatus::Rejected,
+            error_code: Some(HelperErrorCode::PeerIdentityInvalid),
+            process_running: None,
+            exit_code: None,
+            installation_intent_nonce: None,
+            job_progress_at: None,
+            diagnostic: None,
+            process_logs: None,
+            container_labels: None,
+        };
+        let body = canonical_json(&response).unwrap();
+        stream
+            .write_all(&(body.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&body).unwrap();
+    });
+    let http = AgentHttpClient::for_http_test("http://127.0.0.1:1/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &http,
+        helper_socket: &socket,
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: root,
+        },
+        runtime_root: root,
+    };
+
+    let observed = executor.observe_runtime(&accepted).await;
+    drop(peer);
+
+    assert!(matches!(
+        observed,
+        operation_observation::OperationObservation::Unknown(_)
+    ));
+}

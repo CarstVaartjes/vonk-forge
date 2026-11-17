@@ -518,13 +518,22 @@ def test_repair_that_never_converges_backs_off_exponentially(tmp_path: Path) -> 
     daemon.endpoint_rebuilt = False  # Start does not bring the endpoint back.
     ticks(reconciler, clock, 64)
     stops = [index for index, call in enumerate(daemon.mutations) if call[0] == "stop"]
-    # Delays 30, 60, 120, ... seconds: 64 ticks of 30 s hold about six repairs.
-    assert 4 <= len(stops) <= 7
+    # Delays 30, 60, 120, 240, then 300 s: 64 ticks of 30 s hold about ten repairs.
+    assert 4 <= len(stops) <= 11
     assert daemon.running(caddy)
     daemon.endpoint_rebuilt = True
     clock.now += janitor.INTERVAL
     ticks(reconciler, clock, 2)
     assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+
+
+def test_repair_backoff_stays_short_after_a_long_outage() -> None:
+    """Catches a recovered gateway waiting most of an hour for its next repair."""
+    backoff = janitor.Backoff(lambda: 1.0)
+    key = [("vonk-forge-caddy-1", "vonk-forge_ingress")]
+    for _ in range(20):
+        held = backoff.attempted(key, 0.0)
+    assert held == janitor.MAX_REPAIR_BACKOFF
 
 
 def test_failed_reattach_never_leaves_the_container_stopped(
