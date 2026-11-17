@@ -55,13 +55,7 @@ impl AgentClaim {
     }
 }
 
-/// Agent command to consume one Controller assignment. The destination is
-/// selected by the agent configuration, so claims cannot choose a filesystem
-/// path; the accepted plan and immutable assignment cross the wire.
-/// The most installation directories one inventory names (the wire limit).
-pub const MAX_REPORTED_INSTALLATIONS: usize = 4096;
-/// The most run scopes one inventory names (the wire limit).
-pub const MAX_REPORTED_RUNS: usize = 4096;
+include!(concat!(env!("OUT_DIR"), "/reported_limits.rs"));
 
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
 impl InventoryRequest {
