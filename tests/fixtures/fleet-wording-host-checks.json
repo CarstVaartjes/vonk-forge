@@ -35,13 +35,13 @@
       "advice": {
         "check": "memory-fragmentation",
         "finding": "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%).",
-        "explanation": "The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory; run it while no workload is loading.",
+        "explanation": "The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",
         "commands": [
           "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; echo 1 | sudo tee /proc/sys/vm/compact_memory"
         ]
       },
       "lines": [
-        "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%). The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory; run it while no workload is loading.",
+        "78.7 GiB of 116.7 GiB free is in blocks of 2 MiB or more (67%). The GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. Compaction regroups free memory: the helper compacts once whenever loading starts on this Spark; to compact now, run this while no workload is loading.",
         "sync; echo 1 | sudo tee /proc/sys/vm/drop_caches; echo 1 | sudo tee /proc/sys/vm/compact_memory"
       ]
     }

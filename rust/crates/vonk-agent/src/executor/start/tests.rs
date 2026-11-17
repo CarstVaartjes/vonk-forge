@@ -389,6 +389,7 @@ fn counting_dropper(
         counted.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             vonk_agent_protocol::generated::PageCacheDropReport {
+                compaction: None,
                 request_id: Uuid::new_v4(),
                 dropped_at: Utc::now().fixed_offset(),
                 cached_before_bytes: problem.is_none().then_some(8 << 30),

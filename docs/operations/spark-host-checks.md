@@ -36,12 +36,43 @@ not installed is never named. The table lists every unit a check covers.
 | Firmware refresh | `fwupd-refresh.timer` is active | it wakes fwupd in the background. Keep fwupd installed: it delivers the EC, UEFI, ConnectX-7 and NVMe firmware; check by hand with `fwupdmgr refresh && fwupdmgr get-updates` | `sudo systemctl disable --now fwupd-refresh.timer` | `sudo systemctl enable --now fwupd-refresh.timer` |
 | Watermark boost | `vm.watermark_boost_factor` is above 0 (Ubuntu's default is 15000) | after memory fragments the kernel raises its free-memory watermarks and reclaims ahead of need; that memory is missing from MemAvailable while the boost lasts | `echo vm.watermark_boost_factor=0 \| sudo tee /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf` | `sudo rm /etc/sysctl.d/90-watermark-boost.conf` then `sudo sysctl -w vm.watermark_boost_factor=15000` |
 | Boot splash (info) | the kernel command line has `splash` | cosmetic: it hides kernel messages on the console; applies at the next boot | `grep -lE '^GRUB_CMDLINE_LINUX(_DEFAULT)?=.*\bsplash\b' /etc/default/grub /etc/default/grub.d/*.cfg 2>/dev/null \| sudo xargs -r sed -i -E '/^GRUB_CMDLINE_LINUX(_DEFAULT)?=/s/ *\bsplash\b//' && sudo update-grub` (edits only the files that set `splash`: `/etc/default/grub` or a `grub.d` drop-in) | add `splash` back to the `GRUB_CMDLINE_LINUX_DEFAULT` line it was removed from, then `sudo update-grub` |
-| Memory fragmentation (info) | always, as a reading | the GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. The reading is free memory against the part of it in blocks of at least 2 MiB (from `/proc/buddyinfo`, at the kernel's page size) | while no workload is loading: `sync; echo 1 \| sudo tee /proc/sys/vm/drop_caches; echo 1 \| sudo tee /proc/sys/vm/compact_memory` | nothing to undo |
+| Memory fragmentation (info) | always, as a reading | the GPU driver takes unified memory in physically contiguous blocks of 2 MiB or more, so a load can run short while smaller free blocks remain. The reading is free memory against the part of it in blocks of at least 2 MiB (from `/proc/buddyinfo`, at the kernel's page size). The helper compacts once whenever loading starts (below) | to compact now, while no workload is loading: `sync; echo 1 \| sudo tee /proc/sys/vm/drop_caches; echo 1 \| sudo tee /proc/sys/vm/compact_memory` | nothing to undo |
 
 Measured on both Sparks on 2026-11-17 after 3.5 weeks of uptime: every unit
 above was active, the watermark boost was 15000, `splash` was set, and of
 118 GiB and 117 GiB free only 77 GiB (66%) and 71 GiB (60%) were in blocks of
 2 MiB or more.
+
+## Compaction when loading starts
+
+The privileged helper compacts memory itself, without an operator: the first
+page-cache drop ask of a load phase (no workload asked in the last
+`LOADING_PHASE_WINDOW`, 25 s) syncs, drops the page cache and then writes `1`
+to `/proc/sys/vm/compact_memory`. Every later ask in that phase, such as the
+other workloads of a profile load or the five-second drop cadence while they
+load, answers from that one result; an ask while that compaction still runs gets
+none, never an earlier phase's. The drop runs first, so compaction regroups
+the freed cache pages too and never migrates pages about to be dropped. Every
+load path (profile load, single
+recipe, job re-activation, sweep) asks the helper before its container starts,
+so each gets it.
+
+It is bounded and never refuses a start. The helper waits at most
+`MEMORY_COMPACTION_TIMEOUT` (5 s). The budget of a phase's first ask is the 2 s
+sync plus 5 s compaction, leaving 8 s of the agent's 15 s reply bound for the
+drop write and the `/proc` reads, which have no bound of their own. A longer
+compaction is reported `timed-out`, the kernel finishes it, and no second one
+starts while it runs. A host whose sandbox refuses the write reports
+`not-permitted`. The result (outcome, duration, free memory and free memory in
+2 MiB blocks before and after) rides the page-cache drop report into the
+start's preload or failure diagnostics, and the helper journal logs it as
+`memory compaction outcome=... duration_ms=... free_2mib_bytes/free_bytes
+before=... after=...`.
+
+Compaction moves movable pages, so workloads already serving on the Spark can
+stall briefly while it runs. It is not skipped for them yet: measure the
+reported duration on a Spark that serves while another workload starts
+before adding a rule.
 
 ## Related choices that are not host checks
 

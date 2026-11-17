@@ -12,8 +12,11 @@ from typing import Annotated
 
 from pydantic import Field, model_validator
 
-from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from .wire_model import WireEnum, WireModel
+
+# Memory in bytes, at most 16 TiB (telemetry's capacity bound, which this leaf
+# module cannot import: contracts imports page_cache, which imports this).
+MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=16 * 1024**4)]
 
 
 class HostUnit(WireEnum):
@@ -40,9 +43,7 @@ class InstalledUnit(WireModel):
     active: bool
     # systemd's MemoryCurrent for the unit's cgroup; None when systemd does not
     # account it (a timer, a socket, accounting off).
-    memory_bytes: int | None = Field(
-        default=None, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES
-    )
+    memory_bytes: MemoryBytes | None = None
 
 
 #: A snap's name (snapd: lowercase letters, digits and hyphens, at most 40).
@@ -54,8 +55,8 @@ class FreeMemory(WireModel):
     """Free memory from /proc/buddyinfo: all of it, and the part in blocks of
     at least 2 MiB, the physically contiguous size the GPU driver wants."""
 
-    free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
-    free_2mib_block_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    free_bytes: MemoryBytes
+    free_2mib_block_bytes: MemoryBytes
 
     @model_validator(mode="after")
     def _within_free(self) -> FreeMemory:

@@ -5,6 +5,10 @@ reclaimable page cache as used, so a load that read its weights through the
 cache can fail an allocation with memory still reclaimable. The agent asks;
 the helper syncs (bounded) and drops the clean page cache. A drop that fails is
 reported, never a refusal of the start.
+
+At the start of a load phase the helper also compacts memory once: the GPU
+driver takes unified memory in physically contiguous blocks of 2 MiB or more,
+and compaction regroups the free memory a long-running host has fragmented.
 """
 
 from __future__ import annotations
@@ -14,9 +18,8 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, Field
 
+from .host_tuning import FreeMemory, MemoryBytes
 from .wire_model import WireEnum, WireModel
-
-MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=16 * 1024**4)]
 
 
 class PageCacheDropKind(WireEnum):
@@ -53,6 +56,28 @@ class PageCacheDropProblem(WireEnum):
     HELPER_UNAVAILABLE = "helper-unavailable"
 
 
+class MemoryCompactionOutcome(WireEnum):
+    """How the load phase's compaction ended; a note, never a refusal."""
+
+    COMPLETED = "completed"
+    # Still running at its bound: the start proceeds and the kernel finishes it.
+    TIMED_OUT = "timed-out"
+    NOT_PERMITTED = "not-permitted"
+    FAILED = "failed"
+
+
+class MemoryCompaction(WireModel):
+    """One ``compact_memory`` write with free memory in 2 MiB blocks around it."""
+
+    started_at: AwareDatetime
+    outcome: MemoryCompactionOutcome
+    # Until it completed, or the bound it outlived.
+    duration_ms: Annotated[int, Field(strict=True, ge=0, le=2**32 - 1)]
+    free_before: FreeMemory | None = None
+    # None while it still runs, or when buddyinfo could not be read.
+    free_after: FreeMemory | None = None
+
+
 class PageCacheDropReport(WireModel):
     """One drop: ``Cached`` from /proc/meminfo before and after it."""
 
@@ -63,6 +88,11 @@ class PageCacheDropReport(WireModel):
     mem_available_after_bytes: MemoryBytes | None = None
     sync: PageCacheSync | None = None
     problem: PageCacheDropProblem | None = None
+    # The compaction of this load phase: made by this ask, or the earlier one
+    # every later ask in the phase answers from. None while the phase has no
+    # result yet (its compaction still runs, or an earlier phase's does);
+    # never an earlier phase's compaction.
+    compaction: MemoryCompaction | None = None
 
 
 class PageCacheDropEvidence(WireModel):

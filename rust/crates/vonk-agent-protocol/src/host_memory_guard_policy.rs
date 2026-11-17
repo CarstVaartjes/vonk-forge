@@ -129,5 +129,11 @@ pub const PAGE_CACHE_DROP_INTERVAL: Duration = Duration::from_secs(5);
 // A slow disk never stalls a start: the drop proceeds after this bound and
 // reclaims only clean pages.
 pub const PAGE_CACHE_SYNC_TIMEOUT: Duration = Duration::from_secs(2);
-// One drop answers within the sync bound plus the drop itself.
+// One drop answers within the sync bound, the drop itself and, at the start
+// of a load phase, the compaction bound.
 pub const PAGE_CACHE_DROP_REPLY_TIMEOUT: Duration = Duration::from_secs(15);
+// The once-per-load-phase memory compaction answers within this bound; a
+// longer one is reported timed-out and the kernel finishes it. Budget of a
+// phase's first ask: sync 2 s + compaction 5 s = 7 s, leaving 8 s of the 15 s
+// reply bound for the drop write and the /proc reads, which have no bound.
+pub const MEMORY_COMPACTION_TIMEOUT: Duration = Duration::from_secs(5);

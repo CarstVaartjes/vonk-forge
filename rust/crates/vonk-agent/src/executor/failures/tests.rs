@@ -1290,13 +1290,15 @@ fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire
     // ingress tests read the same vector. The clock- and host-dependent
     // diagnostics are compared by shape, the drops exactly.
     use vonk_agent_protocol::generated::{
-        PageCacheDropEvidence, PageCacheDropProblem, PageCacheDropReport, PageCacheSync,
+        FreeMemory, MemoryCompaction, MemoryCompactionOutcome, PageCacheDropEvidence,
+        PageCacheDropProblem, PageCacheDropReport, PageCacheSync,
     };
     let vector: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-start-page-cache-v1.json"
     ))
     .unwrap();
     let report = |id: &str, at: &str| PageCacheDropReport {
+        compaction: None,
         request_id: uuid::Uuid::parse_str(id).unwrap(),
         dropped_at: chrono::DateTime::parse_from_rfc3339(at).unwrap(),
         cached_before_bytes: None,
@@ -1312,7 +1314,22 @@ fn a_start_failure_carries_its_page_cache_drops_as_the_shared_vector_on_the_wire
             "2026-10-27T23:11:00.512345Z",
         )
     };
+    // The load phase's compaction rides the drop that answered from it.
     let dropped = PageCacheDropReport {
+        compaction: Some(MemoryCompaction {
+            started_at: chrono::DateTime::parse_from_rfc3339("2026-10-27T23:11:00.600000Z")
+                .unwrap(),
+            outcome: MemoryCompactionOutcome::Completed,
+            duration_ms: 1840,
+            free_before: Some(FreeMemory {
+                free_bytes: 126_701_535_232,
+                free_2mib_block_bytes: 82_678_120_448,
+            }),
+            free_after: Some(FreeMemory {
+                free_bytes: 126_835_752_960,
+                free_2mib_block_bytes: 118_111_600_640,
+            }),
+        }),
         cached_before_bytes: Some(75_787_431_936),
         cached_after_bytes: Some(207_085_568),
         mem_available_after_bytes: Some(128_297_287_680),

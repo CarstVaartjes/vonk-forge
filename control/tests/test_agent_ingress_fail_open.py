@@ -90,6 +90,11 @@ REVIEWED_CORE_DEFAULTS = {
     "PageCacheDropReport.mem_available_after_bytes",
     "PageCacheDropReport.sync",
     "PageCacheDropReport.problem",
+    # The load phase's memory compaction (helper): absent from older helpers,
+    # and before/after free memory when buddyinfo could not be read.
+    "PageCacheDropReport.compaction",
+    "MemoryCompaction.free_before",
+    "MemoryCompaction.free_after",
     # Written by the Controller from what its own ingress dropped; an agent's
     # report carries no such field.
     "AgentFailureResult.dropped_evidence",
