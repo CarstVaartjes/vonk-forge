@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 from uuid import NAMESPACE_OID, uuid5
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from vonk_agent_protocol import InvalidRequestReason
 
 from .. import fleet_profile_states
@@ -22,7 +22,6 @@ from ..models import (
     FleetProfileRecipe,
     FleetProfileSelection,
 )
-from ..persisted_waits import schedule_wait
 from .contracts import FleetProfileInvalid
 
 if TYPE_CHECKING:
@@ -111,17 +110,20 @@ class FleetProfileService:
             if unfinished is not None:
                 return FleetProfileDeletion(number=number, outcome="cancelling")
             # The selection row owns the generation Sparks fence clock and swap
-            # on: it is kept and only its pointer clears (no profile loaded).
-            selection = session.scalar(
-                select(FleetProfileSelection).where(
-                    FleetProfileSelection.profile_id == profile_id
+            # on: it is kept, its pointer clears and the generation advances so
+            # Sparks adopt the default policy. One conditional statement: a
+            # selection that already moved to another profile is left alone.
+            session.execute(
+                update(FleetProfileSelection)
+                .where(FleetProfileSelection.profile_id == profile_id)
+                .values(
+                    profile_id=None,
+                    application_id=None,
+                    generation=FleetProfileSelection.generation + 1,
+                    wait_evidence=None,  # what clear_wait sets
+                    next_action_at=None,
                 )
             )
-            if selection is not None:
-                selection.profile_id = None
-                selection.application_id = None
-                schedule_wait(selection, None)
-                session.flush()
             # Explicit, in order: no database cascade is relied on.
             session.execute(
                 delete(FleetProfileApplication).where(

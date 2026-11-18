@@ -7,8 +7,10 @@ from datetime import datetime
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
+from vonk_control.gpu_clock import selected_gpu_clocks
 from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
@@ -22,6 +24,7 @@ from .test_fleet_profiles import (
     _database,
     _follow_profile_retry,
     _input,
+    _node_id,
     _seed,
     _SwitchAdapter,
     _uuid,
@@ -134,11 +137,11 @@ def test_deleting_the_loaded_profile_touches_no_running_workload() -> None:
     stops = list(adapter.cancellations)
 
     assert service.delete_number(profile.number, actor="admin").outcome == "deleted"
-    # Nothing was cancelled or stopped; the pointer cleared, the counter stayed.
+    # Nothing was cancelled or stopped; the pointer cleared, the generation advanced.
     assert adapter.cancellations == stops and not adapter.cancellation_requests
     after = _selection(sessions)
     assert after.profile_id is None and after.application_id is None
-    assert after.generation == before.generation
+    assert after.generation > before.generation
     assert _count(sessions, FleetProfileApplication) == 0
 
 
@@ -177,3 +180,38 @@ def test_delete_route_is_administrator_only_and_idempotent() -> None:
         assert response.status_code == 200
         assert response.json() == {"number": 1, "outcome": outcome}
     assert client.get("/api/profile", headers=admin).json()["profiles"] == []
+
+
+def test_delete_returns_sparks_to_the_default_clock_under_a_higher_generation() -> None:
+    now = [NOW]
+    service, sessions, _adapter, revision_id = _service(now)
+    slow = _input(revision_id)
+    slow.assignments[0].gpu_clock = GpuClockRange(min_mhz=300, max_mhz=1800)
+    profile = service.create(slow, actor="admin")
+    loaded = service.load(profile.number, actor="admin", request_key=_uuid(905))
+    _run_to_success(service, loaded.id, now)
+    with sessions() as session:
+        before = selected_gpu_clocks(session, [_node_id(1)])[_node_id(1)]
+
+    service.delete_number(profile.number, actor="admin")
+    with sessions() as session:
+        after = selected_gpu_clocks(session, [_node_id(1)])[_node_id(1)]
+    assert before.range == GpuClockRange(min_mhz=300, max_mhz=1800)
+    assert after.generation > before.generation
+    assert after.range == default_gpu_clock()
+
+
+def test_delete_leaves_a_selection_that_names_another_profile() -> None:
+    now = [NOW]
+    service, sessions, _adapter, revision_id = _service(now)
+    first = service.create(_input(revision_id), actor="admin")
+    second = service.create(_input(revision_id, name="Other"), actor="admin")
+    loaded = service.load(first.number, actor="admin", request_key=_uuid(906))
+    _run_to_success(service, loaded.id, now)
+    with sessions.begin() as session:  # a newer load switched the selection
+        session.get_one(FleetProfileSelection, 1).profile_id = second.id
+    before = _selection(sessions)
+
+    service.delete_number(first.number, actor="admin")
+    after = _selection(sessions)
+    assert after.profile_id == second.id and after.generation == before.generation

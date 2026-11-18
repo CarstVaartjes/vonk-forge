@@ -347,6 +347,10 @@ class FleetProfileSelection(Base):
             name="ck_fleet_profile_selection_generation_positive",
         ),
         CheckConstraint(
+            "(profile_id IS NULL) = (application_id IS NULL)",
+            name="ck_fleet_profile_selection_pointer_pair",
+        ),
+        CheckConstraint(
             "profile_revision >= 1",
             name="ck_fleet_profile_selection_revision_positive",
         ),

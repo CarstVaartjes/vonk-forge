@@ -30,7 +30,8 @@ def selected_gpu_clocks(
             for node_id in node_ids
         }
     if selection.application_id is None:
-        # Deleted pointer: the counter stays so Sparks keep accepting intent.
+        # Deleted pointer: delete advanced the generation, so Sparks adopt the
+        # default range under it.
         return {
             node_id: GpuClockIntent(
                 generation=selection.generation, range=default_gpu_clock()
