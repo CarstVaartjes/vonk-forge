@@ -68,7 +68,13 @@ prompt tokens in the window, not lifetime), `spec_decode_acceptance` and
 `preemption_rate`. Ratios divide rates summed by alias, so a quiet window is
 `None` ("No requests"), never 0. Only engines with verified metric names report
 today (TensorFold); the others show Not reported and keep their gateway
-estimates. A Spark view shows the aliases that Spark serves; a dual run shows the
+estimates. The platform switches the engine metrics endpoint on for every
+recipe where the engine has it off by default: `LLAMA_ARG_ENDPOINT_METRICS=1`
+for llama.cpp (telemetry environment, platform-owned like `DO_NOT_TRACK`) and
+`--enable-metrics` for SGLang (added to the compiled argv once, skipped when the
+recipe already passes it). Recipes cannot override either. This changes the
+compiled launch only, never the recipe document, so qualification status and
+the catalog execution key do not move. A Spark view shows the aliases that Spark serves; a dual run shows the
 same alias on both Sparks. There is no `kv_pool_memory`: no agent reports the
 pool size yet.
 

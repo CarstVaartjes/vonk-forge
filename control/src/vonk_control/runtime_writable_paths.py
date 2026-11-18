@@ -13,6 +13,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from vonk_agent_protocol.telemetry import EngineFormat
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeWritablePath:
@@ -127,7 +129,11 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
         (("HF_HUB_DISABLE_TELEMETRY", "1"), ("SGLANG_DISABLE_USAGE_REPORT", "1")),
     ),
     "tensorrt-llm": EngineTelemetryContract("unsupported", None),
-    "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
+    # llama.cpp serves /metrics only when asked; the platform always asks and a
+    # recipe cannot override it. SGLang's switch is an argument (_metrics_args).
+    EngineFormat.LLAMA_CPP: EngineTelemetryContract(
+        EngineFormat.LLAMA_CPP, "/metrics", (("LLAMA_ARG_ENDPOINT_METRICS", "1"),)
+    ),
     "ds4": EngineTelemetryContract(
         "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
