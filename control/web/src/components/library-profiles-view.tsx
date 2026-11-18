@@ -489,7 +489,9 @@ export function LibraryProfilesView({
     .find((profile) => sameNumber(profile.number, selectedNumber));
   // The list is the cheap overview without cache truth; the selected profile's
   // detail is read on its own and replaces the list entry once it arrives.
-  const [detail, setDetail] = useState<FleetProfile>();
+  // The detail is kept with the list entry it was read for, so a refreshed
+  // entry (status changes without a revision bump) is never hidden by it.
+  const [detail, setDetail] = useState<{ source: FleetProfile; view: FleetProfile }>();
   useEffect(() => {
     if (listedProfile === undefined) {
       setDetail(undefined);
@@ -498,19 +500,14 @@ export function LibraryProfilesView({
     const controller = new AbortController();
     api.profile(listedProfile.number, controller.signal).then(
       (result) => {
-        if (!controller.signal.aborted && readableProfile(result)) setDetail(result);
+        if (!controller.signal.aborted && readableProfile(result))
+          setDetail({ source: listedProfile, view: result });
       },
       () => undefined,
     );
     return () => controller.abort();
   }, [api, listedProfile]);
-  const selectedProfile =
-    detail !== undefined &&
-    listedProfile !== undefined &&
-    sameNumber(detail.number, listedProfile.number) &&
-    detail.revision === listedProfile.revision
-      ? detail
-      : listedProfile;
+  const selectedProfile = detail?.source === listedProfile ? detail?.view : listedProfile;
   const availableFleet = useMemo(
     () => fleetEntries(selectedProfile, fleet),
     [fleet, selectedProfile],
