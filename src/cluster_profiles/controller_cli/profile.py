@@ -73,7 +73,6 @@ def _profile(
             fetch_initial=True,
             fetch=listing,
             terminal=lambda _: True,
-            publish=False,
         )
     if action is None:
         return _poll_path(

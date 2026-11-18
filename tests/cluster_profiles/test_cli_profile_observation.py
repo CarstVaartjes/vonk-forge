@@ -474,6 +474,18 @@ def test_profile_list_publishes_no_progress_snapshot():
     assert snapshots == []
 
 
+def test_a_one_shot_profile_read_publishes_no_progress_snapshot():
+    class Reading:
+        def request(self, *_args, **_kwargs):
+            return {"id": "1", "number": 1, "status": "draft"}
+
+    args = cli._parser().parse_args(("profile",))
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
+    _profile(args, cast(ControllerClient, Reading()), lambda: "fresh")
+    assert snapshots == []
+
+
 def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     monkeypatch,
 ):
