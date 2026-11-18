@@ -29,3 +29,11 @@ class RecipeBuildState(WireEnum):
     BUILDING = "building"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class LibrarySyncRunState(WireEnum):
+    """The standing of one recipe library synchronization run."""
+
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

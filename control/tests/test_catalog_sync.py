@@ -13,6 +13,7 @@ import vonk_control.catalog_service as catalog_service_module
 import vonk_control.catalog_sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
@@ -213,6 +214,34 @@ def _sync(sessions, service, reader) -> ManagedRecipeCatalogSyncService:
         reader=reader,
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
+
+
+def test_sync_run_state_admits_only_its_enum_words(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'state.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 9, 5, tzinfo=UTC)
+
+    def insert(state: str) -> None:
+        with sessions.begin() as session:
+            session.add(
+                RecipeLibrarySyncRun(
+                    request_key=str(uuid.uuid4()),
+                    trigger="automatic",
+                    state=state,
+                    active_slot=None,
+                    repository="repo",
+                    result={},
+                    actor="test",
+                    created_at=now,
+                    started_at=now,
+                    completed_at=now,
+                )
+            )
+
+    insert("failed")
+    with pytest.raises(IntegrityError, match="ck_recipe_library_sync_runs_state"):
+        insert("waiting")
 
 
 def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -> None:

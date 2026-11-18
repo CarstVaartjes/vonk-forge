@@ -6,7 +6,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
@@ -38,7 +37,7 @@ from ..models import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored_states import CatalogRevisionState, LibrarySyncRunState
 from .common import (
     DocumentText,
     _document_text,
@@ -57,7 +56,7 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
         run = session.scalar(
             select(RecipeLibrarySyncRun)
             .where(
-                RecipeLibrarySyncRun.state == "succeeded",
+                RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED,
                 RecipeLibrarySyncRun.library_version.is_not(None),
             )
             .order_by(RecipeLibrarySyncRun.completed_at.desc())
@@ -87,7 +86,7 @@ def library_vocabulary(self: LibraryProjection) -> CatalogVocabulary | None:
     with self._sessions() as session:
         stored = session.scalar(
             select(RecipeLibrarySyncRun.vocabulary)
-            .where(RecipeLibrarySyncRun.state == LifecycleState.SUCCEEDED.value)
+            .where(RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED.value)
             .order_by(RecipeLibrarySyncRun.completed_at.desc())
             .limit(1)
         )
