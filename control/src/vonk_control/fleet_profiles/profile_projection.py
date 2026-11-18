@@ -37,6 +37,7 @@ from ..models import (
     FleetProfile,
 )
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
+from ..stored_states import CatalogRevisionState
 from .assignment_assessment import _AssignmentRows
 from .contracts import _SelectedProfileSnapshot
 from .dependencies import (
@@ -550,7 +551,7 @@ class FleetProfileService:
             )
             .where(
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.content_digest.in_(
                     [item[2] for item in references]
                 ),

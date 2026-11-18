@@ -52,6 +52,7 @@ from ..recipe_image_removal_contract import (
 )
 from ..revision_images import revision_images
 from ..stored_json import Residue, read_row_column
+from ..stored_states import CatalogRevisionState
 from .contracts import (
     _ACTIVE,
     _SHA256,
@@ -125,7 +126,7 @@ def _recipe_removal_selection_in_session(
     if (
         revision is None
         or revision.kind != "recipe"
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
         or not isinstance(revision.content_digest, str)
     ):
         raise RecipeImageAvailabilityInvalid(
@@ -195,7 +196,7 @@ def _resolve_recipe_selector_in_session(session: Session, selector: str) -> str:
             session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     CatalogDocumentRevision.content_digest == selector,
                 )
             )
@@ -208,7 +209,7 @@ def _resolve_recipe_selector_in_session(session: Session, selector: str) -> str:
             session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     (CatalogDocumentRevision.id == selector)
                     | (
                         (CatalogDocumentRevision.document_id == selector)
@@ -222,14 +223,14 @@ def _resolve_recipe_selector_in_session(session: Session, selector: str) -> str:
             publisher, slug = selector.split("/", 1)
             query = select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.publisher == publisher,
                 CatalogDocumentRevision.slug == slug,
             )
         else:
             query = select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.slug == selector,
             )
         rows = list(session.scalars(query.where(active_head_revision())))

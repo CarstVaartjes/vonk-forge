@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
 from ..models import (
     CatalogDocumentRevision,
 )
+from ..stored_states import CatalogRevisionState
 from .contracts import (
     _REFRESHABLE_PREFLIGHT_BLOCKERS,
     _RETRYABLE_INSTALL_BLOCKERS,
@@ -73,7 +74,7 @@ def _active_recipe_revision(
     statement = select(CatalogDocumentRevision).where(
         CatalogDocumentRevision.id == revision_id,
         CatalogDocumentRevision.kind == "recipe",
-        CatalogDocumentRevision.state == "active",
+        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
     )
     return session.scalar(statement)
 

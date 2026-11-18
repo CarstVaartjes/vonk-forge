@@ -31,6 +31,7 @@ from ..run_switch_contract import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
+from ..stored_states import CatalogRevisionState
 
 _ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
 
@@ -82,7 +83,7 @@ def _active_recipe_revision(
         select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.id == revision_id,
             CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.state == "active",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
         )
     )
 

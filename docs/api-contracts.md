@@ -530,6 +530,16 @@ and projections validate through `vonk_control.machine_states` (which adopts an
 old spelling through `MACHINE_ALIASES`, empty until a word is renamed), and the
 added-line vocabulary guard rejects new hand-spelled contract words.
 
+A stored record that never crosses the wire (a catalog document revision, a
+library sync run, a cluster mapping) has its closed state words in
+`control/src/vonk_control/stored_states.py`: a `WireEnum` per column, not in
+`MACHINES` and not in `LifecycleVocabulary`, so no wire output changes. Recipe
+build states do cross the wire (`RunSwitchContainerBuildResult.state`, built by
+`run_switch_contract/vocabulary.py` into `control/openapi.json`); that Literal is
+a second spelling of the same words, to be built from the enum later. Each model
+generates its column CHECK with `machine_check` and its code uses the members;
+the added-line vocabulary guard knows these words too.
+
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:
 

@@ -23,6 +23,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
+from vonk_agent_protocol import machine_check
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
@@ -32,6 +33,7 @@ from vonk_forge_contracts import (
 
 from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
 from ..model_primitives import Base, _lower_hex
+from ..stored_states import CatalogRevisionState
 from ..unreadable_rows import note_unreadable
 
 
@@ -186,7 +188,7 @@ class CatalogDocumentRevision(Base):
             "schema_version = 2", name="ck_catalog_document_revision_schema"
         ),
         CheckConstraint(
-            "state IN ('candidate','active','failed')",
+            machine_check(CatalogRevisionState),
             name="ck_catalog_document_revision_state",
         ),
         CheckConstraint(
@@ -219,7 +221,9 @@ class CatalogDocumentRevision(Base):
     slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    state: Mapped[str] = mapped_column(String(16), nullable=False, default="candidate")
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=CatalogRevisionState.CANDIDATE
+    )
     document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     artifact_key: Mapped[str | None] = mapped_column(String(64), index=True)
@@ -346,9 +350,9 @@ def _catalog_document_revision_is_immutable(
         attribute.key for attribute in state.attrs if attribute.history.has_changes()
     }
     previous_state = state.attrs.state.history.deleted
-    if previous_state and previous_state[0] == "active":
+    if previous_state and previous_state[0] == CatalogRevisionState.ACTIVE:
         raise ValueError("active catalog document revisions are immutable")
-    if target.state == "active" and (
+    if target.state == CatalogRevisionState.ACTIVE and (
         not previous_state
         or changed - {"state", "artifact_key", "execution_key", "projected"}
     ):
@@ -359,7 +363,7 @@ def _catalog_document_revision_is_immutable(
 def _active_catalog_document_revision_cannot_be_deleted(
     _mapper, _connection, target: CatalogDocumentRevision
 ) -> None:
-    if target.state == "active":
+    if target.state == CatalogRevisionState.ACTIVE:
         raise ValueError("active catalog document revisions are immutable")
 
 
@@ -407,7 +411,10 @@ def _catalog_document_written(
 @event.listens_for(Session, "before_commit")
 def _active_catalog_document_json_is_immutable(session: Session) -> None:
     for value in session.identity_map.values():
-        if isinstance(value, CatalogDocumentRevision) and value.state == "active":
+        if (
+            isinstance(value, CatalogDocumentRevision)
+            and value.state == CatalogRevisionState.ACTIVE
+        ):
             state = inspect(value)
             if (
                 "document" in state.dict

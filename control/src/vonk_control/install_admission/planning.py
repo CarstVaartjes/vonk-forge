@@ -58,6 +58,7 @@ from ..runtime_preflight import (
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
+from ..stored_states import CatalogRevisionState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -125,7 +126,7 @@ class InstallPlanningService:
             revision = _active_recipe_revision(session, mapping.recipe_revision_id)
             if (
                 revision is None
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
                 or revision.content_digest is None
             ):
                 raise InvalidValue(

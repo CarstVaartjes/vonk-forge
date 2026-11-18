@@ -13,7 +13,6 @@ from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
 from vonk_agent_protocol.agent_words import (
-    ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -35,6 +34,7 @@ from ..model_cache_contract import (
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..revision_images import RevisionImage, revision_images
+from ..stored_states import CatalogRevisionState
 from .artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,
@@ -330,7 +330,7 @@ class ResolutionMixin:
                 session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         CatalogDocumentRevision.content_digest == selector,
                     )
                 )
@@ -342,14 +342,14 @@ class ResolutionMixin:
         elif re.fullmatch(UUID_PATTERN, selector):
             fallback = [
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.document_id == selector,
             ]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         (CatalogDocumentRevision.id == selector)
                         | (
                             (CatalogDocumentRevision.document_id == selector)
@@ -364,7 +364,7 @@ class ResolutionMixin:
                 publisher, slug = selector.split("/", 1)
             conditions = [
                 CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             ]
             if publisher is not None:
                 conditions.append(CatalogDocumentRevision.publisher == publisher)
@@ -553,7 +553,7 @@ class ResolutionMixin:
                     .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.document_id == seed.document_id,
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         active_head_revision(),
                     )
                 )
@@ -600,7 +600,10 @@ class ResolutionMixin:
                             CatalogDocumentRevision.content_digest == digest,
                         )
                         .order_by(
-                            (CatalogDocumentRevision.state == "active").desc(),
+                            (
+                                CatalogDocumentRevision.state
+                                == CatalogRevisionState.ACTIVE
+                            ).desc(),
                             CatalogDocumentRevision.revision_number.desc(),
                             CatalogDocumentRevision.id.desc(),
                         )

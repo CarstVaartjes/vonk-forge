@@ -34,6 +34,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     split_option_choices,
 )
+from .stored_states import CatalogRevisionState
 from .strict_json import StrictModel
 from .topology import Placement, TopologyError, validate_topology
 
@@ -76,7 +77,7 @@ def _active_recipe_revision(
     statement = select(CatalogDocumentRevision).where(
         CatalogDocumentRevision.id == revision_id,
         CatalogDocumentRevision.kind == "recipe",
-        CatalogDocumentRevision.state == "active",
+        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
     )
     if for_update:
         statement = statement.with_for_update(of=CatalogDocumentRevision)
@@ -140,7 +141,10 @@ class ClusterMappingService:
             revision = _active_recipe_revision(session, recipe_revision_id)
             if revision is None:
                 raise KeyError(recipe_revision_id)
-            if revision.state != "active" or revision.content_digest is None:
+            if (
+                revision.state != CatalogRevisionState.ACTIVE
+                or revision.content_digest is None
+            ):
                 raise ClusterMappingError(
                     ClusterMappingCode.RECIPE_UNRESOLVED,
                     "only a resolved recipe can be mapped",
@@ -204,7 +208,7 @@ class ClusterMappingService:
             )
             if (
                 revision is None
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
                 or revision.content_digest != plan.recipe_content_sha256
             ):
                 raise ClusterMappingError(

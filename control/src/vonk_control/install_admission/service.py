@@ -51,6 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
+from ..stored_states import CatalogRevisionState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,
@@ -269,7 +270,7 @@ class InstallAdmissionService(InstallPlanningService):
         plan = fresh
         if (
             revision is None
-            or revision.state != "active"
+            or revision.state != CatalogRevisionState.ACTIVE
             or revision.content_digest != plan.recipe_content_sha256
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
