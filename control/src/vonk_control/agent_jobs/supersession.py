@@ -201,8 +201,17 @@ def _cancel_order(
     children: Sequence[StoredOperation],
     ordinal: int,
     now: datetime,
+    *,
+    request_id: str | None = None,
+    reason: str = SupersedeCode.SUPERSEDED_BY_INTENT,
 ) -> None:
     """Cancel one live order under the workload intent ``ordinal``.
+
+    ``request_id`` names a cancellation no workload intent owns: a rank of a
+    multi-rank job ended, so its siblings are cancelled (``job_ranks``), and
+    ``reason`` is then that rank's own reason, or the typed reason the job's
+    scope ended with its owner. Its running siblings are asked to stop through
+    the parent's cancellation, and the job's own outcome stays its own.
 
     The one cancellation both the Spark-wide supersession and a run's own
     Stop (``request_run_job_cancellation_in_session``) apply: the request is
@@ -219,7 +228,7 @@ def _cancel_order(
                 child,
                 None,
                 parent,
-                CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
+                CancelRequested(reason=reason),
                 now,
             )
     if any(
@@ -234,12 +243,11 @@ def _cancel_order(
             parent.result = {
                 **previous,
                 "cancel_requested": True,
-                "cancel_request_id": str(
-                    uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")
-                ),
+                "cancel_request_id": request_id
+                or str(uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")),
                 "cancel_actor": "controller",
                 "cancel_requested_at": _aware(now).isoformat(),
-                "reason": SupersedeCode.SUPERSEDED_BY_INTENT.value,
+                "reason": str(reason),
             }
         elif superseded_cancellation_deadline(previous) is None:
             # A repeated cancellation path must repair a result that
@@ -268,7 +276,7 @@ def _cancel_order(
         )
     else:
         state = parent.state
-    set_parent_state(parent, state, SupersedeCode.SUPERSEDED_BY_INTENT, now)
+    set_parent_state(parent, state, reason, now)
 
 
 def request_run_job_cancellation_in_session(

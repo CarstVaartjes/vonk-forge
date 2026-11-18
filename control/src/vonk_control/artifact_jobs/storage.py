@@ -41,6 +41,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
+from ..lifecycle.job_ranks import order_is_owner
 from ..models import (
     AgentOperation,
     ArtifactJob,
@@ -65,6 +66,7 @@ from ..strict_json import read_stored_model
 from .contracts import (
     ArtifactFileDeclaration,
     ArtifactJobError,
+    ArtifactJobInvalid,
     ArtifactJobRefused,
     ArtifactJobResponse,
     ArtifactJobTransferClosedError,
@@ -77,6 +79,7 @@ from .contracts import (
     _canonical_declared_parameters,
     _compile_contract,
     _JobLaunch,
+    _JobRank,
     _read_input_manifest,
     _record_unservable_run,
 )
@@ -132,7 +135,13 @@ class ArtifactJobService:
         )
 
     def _authorized_agent_job(
-        self, session: Session, job_id: str, node_id: str, *, lock: bool = False
+        self,
+        session: Session,
+        job_id: str,
+        node_id: str,
+        *,
+        lock: bool = False,
+        owner_only: bool = False,
     ) -> ArtifactJob:
         statement = select(ArtifactJob).where(ArtifactJob.id == job_id)
         if lock:
@@ -151,11 +160,27 @@ class ArtifactJobService:
                 "agent is not authorized for this artifact job",
                 reason=SecurityRefusalReason.FORBIDDEN,
             )
-        order = session.scalar(
-            select(AgentOperation.state).where(
-                AgentOperation.parent_job_id == job.operation_id
+        # A rank is judged by its own order.  Only the owner's order delivers
+        # the job's outputs; every rank may read the inputs.
+        own = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id,
+                AgentOperation.node_id == node_id,
             )
         )
+        order = None if own is None else own.state
+        if owner_only and own is not None:
+            owns = order_is_owner(own)
+            if owns is None:
+                raise ArtifactJobUnavailableError(
+                    "artifact order observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            if not owns:
+                raise ArtifactJobInvalid(
+                    "only the job's owner rank delivers its outputs",
+                    reason=InvalidRequestReason.UNSUPPORTED,
+                )
         if order is None:
             raise ArtifactJobUnavailableError(
                 "artifact order observation is unavailable",
@@ -217,6 +242,64 @@ class ArtifactJobService:
             contract=contract,
             parameters=parameters,
             input_files=list(manifest.files),
+        )
+
+    @staticmethod
+    def _job_ranks_in_session(
+        session: Session, run: RecipeRun
+    ) -> tuple[tuple[_JobRank, ...], str | None, int | None]:
+        """Every rank of the run (rank order) and the rendezvous it shares.
+
+        A single-node run is the owner alone with no rendezvous.  A multi-node
+        run takes every rank's fabric address and the rendezvous from the
+        stored run plan (a fact the Controller already holds); a job runs on
+        all ranks at once, so each must be RUNNING.  Anything unread is an
+        observation to retry, never a refusal.
+        """
+
+        owner_node = ArtifactJobService._job_node_in_session(session, run)
+        nodes = tuple(
+            session.scalars(
+                select(RunNode).where(RunNode.run_id == run.id).order_by(RunNode.rank)
+            )
+        )
+        if len(nodes) == 1:
+            return (_JobRank(owner_node, None, "unified"),), None, None
+        unavailable = ArtifactJobUnavailableError(
+            "artifact job rank observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+        if any(node.state != RunState.RUNNING for node in nodes):
+            raise unavailable
+        try:
+            planned = {
+                node.node_id: node for node in parse_stored_run_plan(run.plan).nodes
+            }
+        except RecipeExecutionContractError as error:
+            raise unavailable from error
+        master = planned.get(owner_node.node_id)
+        if (
+            master is None
+            or master.fabric_address is None
+            or master.rendezvous_port is None
+            or any(
+                node.node_id not in planned
+                or planned[node.node_id].fabric_address is None
+                for node in nodes
+            )
+        ):
+            raise unavailable
+        return (
+            tuple(
+                _JobRank(
+                    node,
+                    planned[node.node_id].fabric_address,
+                    planned[node.node_id].memory_kind,
+                )
+                for node in nodes
+            ),
+            master.fabric_address,
+            master.rendezvous_port,
         )
 
     @staticmethod

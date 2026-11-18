@@ -471,15 +471,22 @@ pub(super) fn validate_docker_run_with_archive(
         else {
             return Err(OperationError::InvalidOperation);
         };
-        if !detach
-            || !gpu
+        // A service is detached and its rank 0 owns the endpoint. A job rank
+        // (not detached) never serves one: rank 0 owns the job's inputs and
+        // outputs, the other ranks only compute.
+        let owner_rule = if detach {
+            endpoint_workload != (local == master)
+        } else {
+            endpoint_workload
+        };
+        if !gpu
             || !infiniband
             || !memlock
             || !stack
             || world_size < 2
             || rank >= world_size
             || caller_fabric_environment
-            || endpoint_workload != (local == master)
+            || owner_rule
             || peer_addresses.as_ref().is_some_and(|peers| {
                 world_size != peers.len() as u64
                     || rank

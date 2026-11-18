@@ -92,9 +92,18 @@ pub fn same_job_workload(
     let mut identity = invocation.clone();
     identity.runtime.argv = installed.runtime.argv.clone();
     identity.job.as_mut().unwrap().timeout_seconds = installed_job.timeout_seconds;
+    // Addresses, peers, rendezvous and network are bound by the signed start; the
+    // installed placement has none, so compare everything else.
+    let mut bound = invocation.runtime.placement.clone();
+    bound.local_address = installed.runtime.placement.local_address;
+    bound.master_address = installed.runtime.placement.master_address;
+    bound.master_port = installed.runtime.placement.master_port;
+    bound.peer_addresses = installed.runtime.placement.peer_addresses.clone();
     same_installed_workload(installed, &identity)
-        && installed.runtime.placement == invocation.runtime.placement
-        && installed.security.network_mode == invocation.security.network_mode
+        && installed.runtime.placement == bound
+        && (installed.security.network_mode == invocation.security.network_mode
+            || (invocation.security.network_mode == "host"
+                && invocation.runtime.placement.world_size > 1))
 }
 
 impl CompiledExecutionPlan {
@@ -171,7 +180,6 @@ impl CompiledExecutionPlan {
             && (self.topology.node_count < 2
                 || placement.local_address.is_none()
                 || placement.master_address.is_none()
-                || self.endpoint.is_none()
                 || !self.security.gpu)
         {
             return Err(WorkloadError::Invalid(
@@ -503,6 +511,14 @@ fn valid_mount_policy(mount: &MountSpec) -> bool {
 
 impl CompiledRuntimePlacement {
     /// Validate placement after Controller assignment has resolved execution addresses.
+    /// Whether this rank owns the endpoint (a service) or the inputs, outputs
+    /// and result (a job): every single-node rank, and the distributed rank
+    /// whose fabric address is the rendezvous address.
+    pub fn is_endpoint_owner(&self) -> bool {
+        self.world_size == 1
+            || (self.local_address.is_some() && self.local_address == self.master_address)
+    }
+
     pub fn validate_bound(&self) -> Result<(), WorkloadError> {
         crate::validate_generated("CompiledPlacement", self)
             .map_err(|_| WorkloadError::Invalid("placement"))?;

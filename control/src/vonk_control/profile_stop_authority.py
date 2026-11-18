@@ -29,6 +29,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from . import job_states
 from .categorized_errors import BookkeepingUnknown
 from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
+from .lifecycle.job_ranks import fan_in_cancellation_key
 from .models import (
     AgentNode,
     AgentOperation,
@@ -130,14 +131,15 @@ class JobRunStopScope(RunStopScope):
 
     @model_validator(mode="after")
     def targets_are_exact(self) -> JobRunStopScope:
-        target_ids = [target.artifact_job_id for target in self.targets]
-        source_jobs = [target.source_job_id for target in self.targets]
+        # A job on several Sparks has one target per issued rank: its Spark and
+        # container name the Stop (``key``), and each rank is its own order.
+        keys = [target.key for target in self.targets]
         source_operations = [target.source_operation_id for target in self.targets]
         if (
-            len(target_ids) != len(set(target_ids))
-            or len(source_jobs) != len(set(source_jobs))
+            len(keys) != len(set(keys))
             or len(source_operations) != len(set(source_operations))
-            or set(target_ids) & set(self.unissued_artifact_job_ids)
+            or {target.artifact_job_id for target in self.targets}
+            & set(self.unissued_artifact_job_ids)
             or any(
                 target.node_id not in self.reachable_node_ids for target in self.targets
             )
@@ -773,7 +775,10 @@ def validate_profile_jobrun_stop_target(
     ) and (
         not isinstance(source_job.result, Mapping)
         or source_job.result.get("cancel_requested") is not True
-        or source_job.result.get("cancel_request_id") != source_cancel_request_id
+        # A rank that ended asked its siblings to stop (``fan_in``): that
+        # cancellation is the job's own and also owns the exact Stop.
+        or source_job.result.get("cancel_request_id")
+        not in {source_cancel_request_id, fan_in_cancellation_key(source_job.id)}
         or source_job.result.get("cancel_actor") != "controller"
     ):
         raise ProfileStopAuthorityError("source JobRun cancellation owner changed")

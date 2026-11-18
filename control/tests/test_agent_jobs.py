@@ -74,7 +74,7 @@ from vonk_control.models import (
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
-    _bind_compiled_execution_plan,
+    bind_compiled_execution_plan,
 )
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -140,7 +140,7 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
         )
     )
     plan["topology"].update(name="dual", node_count=2)
-    compiled = _bind_compiled_execution_plan(
+    compiled = bind_compiled_execution_plan(
         plan,
         placement=RecipeStartPlacement(
             node_id=NODE_A,

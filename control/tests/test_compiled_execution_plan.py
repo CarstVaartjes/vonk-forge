@@ -48,7 +48,7 @@ from vonk_control.models import (
 from vonk_control.recipe_runtime_specs import ResolvedRecipe
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
-    _bind_compiled_execution_plan,
+    bind_compiled_execution_plan,
 )
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -392,6 +392,56 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
     assert wire.runtime.placement.port is None
 
 
+@pytest.mark.parametrize("rank", [0, 1])
+def test_every_rank_of_a_job_binds_fabric_and_host_network_without_an_endpoint(
+    rank: int,
+) -> None:
+    payload = _launch(
+        _compile(_job_spec()),
+        _job_spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": rank,
+            "role": "entrypoint" if rank == 0 else "worker",
+            "world_size": 2,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": None,
+            "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+        },
+    )
+    _mapping(payload["topology"]).update(name="dual", node_count=2)
+    started = bind_compiled_execution_plan(
+        WireCompiledExecutionPlan.model_validate(payload),
+        placement=RecipeStartPlacement(
+            node_id="spk_" + "a" * 32,
+            rank=rank,
+            role="entrypoint" if rank == 0 else "worker",
+            port=None,
+            reserved_memory_bytes=4096,
+            memory_floor_bytes=2048,
+            memory_kind="unified",
+            fabric_address=f"192.168.100.{10 + rank}",
+        ),
+        endpoint_address=None,
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+        peer_addresses=("192.168.100.10", "192.168.100.11"),
+    )
+    wire = WireCompiledExecutionPlan.parse(started)
+    assert wire.job is not None and wire.endpoint is None
+    assert wire.security.network_mode == "host"
+    assert wire.runtime.placement.port is None
+    placement = wire.runtime.placement
+    assert placement.local_address == f"192.168.100.{10 + rank}"
+    # Only rank 0 is the rendezvous master; a worker rank differs from it.
+    assert (placement.local_address == placement.master_address) is (rank == 0)
+    assert placement.peer_addresses == ["192.168.100.10", "192.168.100.11"]
+
+
 def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
     spec = _spec()
     payload = _launch(
@@ -631,7 +681,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "memory_floor_bytes": 0,
         },
     )
-    started = _bind_compiled_execution_plan(
+    started = bind_compiled_execution_plan(
         WireCompiledExecutionPlan.model_validate(payload),
         placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,
@@ -676,7 +726,7 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
     )
     _mapping(payload["topology"]).update(name="dual", node_count=2)
     _mapping(_mapping(payload["runtime"])["placement"]).update(world_size=2)
-    started = _bind_compiled_execution_plan(
+    started = bind_compiled_execution_plan(
         WireCompiledExecutionPlan.model_validate(payload),
         placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,
@@ -1273,3 +1323,35 @@ def test_execution_identity_covers_compiled_launch_facts_and_ignores_notes() -> 
 
     assert all(value != baseline for value in changes)
     assert len(set(changes)) == len(changes)
+
+
+def test_binder_produces_the_shared_rank_one_job_claim_vector() -> None:
+    """The vector the agent suites read is exactly what this binder emits."""
+
+    vectors = (
+        Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
+    )
+    single = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())
+    shared = json.loads((vectors / "recipe-job-run-claim-rank1-v1.json").read_text())
+    plan = single["payload"]["compiled_execution_plan"]
+    plan["runtime"]["placement"].update(rank=1, world_size=2, role="worker")
+    plan["topology"]["node_count"] = 2
+    bound = bind_compiled_execution_plan(
+        WireCompiledExecutionPlan.model_validate(plan),
+        placement=RecipeStartPlacement(
+            "spk_" + "a" * 32,
+            1,
+            "worker",
+            None,
+            34359738368,
+            2147483648,
+            "unified",
+            "192.168.100.11",
+        ),
+        endpoint_address=None,
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+        peer_addresses=("192.168.100.10", "192.168.100.11"),
+    )
+    assert bound == shared["payload"]["compiled_execution_plan"]

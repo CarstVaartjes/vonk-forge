@@ -20,8 +20,12 @@ from vonk_agent_protocol import (
     WaitReason,
     recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledExecutionPlan as WireCompiledExecutionPlan,
+)
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
+from .. import agent_operation_states as aos
 from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
@@ -37,6 +41,7 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
 from ..logging import log_event
 from ..models import (
+    AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
@@ -52,6 +57,12 @@ from ..recipe_operations import (
     RecipeRetryLater,
 )
 from ..recipe_operations.observation_helpers import run_takes_jobs
+from ..recipe_runtime_specs import recipe_engine
+from ..recipe_start_payloads import (
+    RecipeStartPlacement,
+    bind_compiled_execution_plan,
+    start_peer_addresses,
+)
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -592,16 +603,32 @@ class ArtifactJobService(OutputService):
                     ArtifactJob.id != artifact_job.id,
                 )
             ):
-                parent, operation, attempt = adapter.order_of(session, prior)
-                if operation is not None and operation.current_attempt == 0:
-                    # New intent fences an unissued old order in this transaction.
-                    AgentOperationAdapter(session).record_outcome(
-                        operation,
-                        attempt,
-                        parent,
-                        Outcome.CANCELLED,
-                        now,
-                    )
+                if prior.operation_id is None:
+                    continue
+                orders = select(AgentOperation).where(
+                    AgentOperation.parent_job_id == prior.operation_id
+                )
+                unissued = tuple(
+                    session.scalars(orders.where(AgentOperation.current_attempt == 0))
+                )
+                some_issued = session.scalar(
+                    orders.where(AgentOperation.current_attempt > 0).limit(1)
+                )
+                if unissued and some_issued is None:
+                    # New intent fences a prior job none of whose ranks was
+                    # handed to a Spark, in this transaction: every unissued
+                    # order of it, not only its owner's.
+                    parent = session.get(Job, prior.operation_id)
+                    operations = AgentOperationAdapter(session)
+                    for order in unissued:
+                        if order.state in aos.LIVE:
+                            operations.record_outcome(
+                                order,
+                                AgentOperationAdapter.attempt_of(session, order),
+                                parent,
+                                Outcome.CANCELLED,
+                                now,
+                            )
                     if parent is not None:
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
@@ -619,9 +646,14 @@ class ArtifactJobService(OutputService):
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             revision, _recipe = resolved
-            node = self._job_node_in_session(session, run)
-            launch = self._job_launch(session, artifact_job, run, installation, node)
-            if launch is None:
+            ranks, master_address, master_port = self._job_ranks_in_session(
+                session, run
+            )
+            launches = tuple(
+                self._job_launch(session, artifact_job, run, installation, rank.node)
+                for rank in ranks
+            )
+            if any(launch is None for launch in launches):
                 # Repairable launch projections are rebuilt by _job_launch;
                 # unavailable authority is observed within this request's bound.
                 raise ArtifactJobUnavailableError(
@@ -633,10 +665,9 @@ class ArtifactJobService(OutputService):
                     "artifact input bytes are unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            contract = launch.contract
-            floor = launch.memory_floor_bytes
-            parameters = launch.parameters
-            installed_plan = launch.installed_plan
+            first = launches[0]
+            assert first is not None
+            contract = first.contract
             mapping = (
                 session.get(ClusterMapping, run.mapping_id)
                 if run.mapping_id is not None
@@ -649,38 +680,78 @@ class ArtifactJobService(OutputService):
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
-                invocation = compile_job_invocation(
-                    session,
-                    revision=revision,
-                    installed=installed_plan,
-                    build=(
-                        session.get(RecipeBuild, installation.recipe_build_id)
-                        if installation.recipe_build_id is not None
-                        else None
-                    ),
-                    parameters=parameters,
-                    timeout_seconds=artifact_job.timeout_seconds,
-                    memory_floor_bytes=floor,
-                    reserved_memory_bytes=node.reserved_memory_bytes,
-                    option_choices=mapping_option_choices(
-                        mapping.parameters if mapping is not None else {}
-                    ),
+                peer_addresses = start_peer_addresses(
+                    recipe_engine(revision.document),
+                    len(ranks),
+                    {rank.node.rank: rank.fabric_address for rank in ranks},
                 )
-                payload = RecipeJobRunRequest(
-                    job_id=artifact_job.id,
-                    run_id=run.id,
-                    installation_id=installation.id,
-                    recipe_revision_id=revision.id,
-                    plan_digest=run.plan_digest,
-                    mapping_id=run.mapping_id,
-                    input_manifest_sha256=artifact_job.input_manifest_sha256,
-                    input_total_bytes=artifact_job.input_total_bytes,
-                    inputs=tuple(launch.input_files),
-                    compiled_execution_plan=invocation,
-                    run_generation=run.run_generation,
-                    output_mappings=tuple(_output_mappings(contract)),
-                    output_limits=limits,
-                )
+                payloads: list[tuple[str, object]] = []
+                # Sequential on purpose: one session and transaction, and a job
+                # has a handful of ranks (the run's Sparks), so nothing to fan out.
+                for rank, launch in zip(ranks, launches, strict=True):
+                    assert launch is not None
+                    node = rank.node
+                    invocation = compile_job_invocation(
+                        session,
+                        revision=revision,
+                        installed=launch.installed_plan,
+                        build=(
+                            session.get(RecipeBuild, installation.recipe_build_id)
+                            if installation.recipe_build_id is not None
+                            else None
+                        ),
+                        parameters=launch.parameters,
+                        timeout_seconds=artifact_job.timeout_seconds,
+                        memory_floor_bytes=launch.memory_floor_bytes,
+                        reserved_memory_bytes=node.reserved_memory_bytes,
+                        option_choices=mapping_option_choices(
+                            mapping.parameters if mapping is not None else {}
+                        ),
+                    )
+                    if master_port is not None:
+                        # One rank of a multi-rank job: the service start's own
+                        # binder gives it its fabric address, the rendezvous and
+                        # the host network. A job serves no endpoint or port.
+                        invocation = WireCompiledExecutionPlan.model_validate(
+                            bind_compiled_execution_plan(
+                                invocation,
+                                placement=RecipeStartPlacement(
+                                    node.node_id,
+                                    node.rank,
+                                    node.role,
+                                    None,
+                                    node.reserved_memory_bytes,
+                                    launch.memory_floor_bytes,
+                                    rank.memory_kind,
+                                    rank.fabric_address,
+                                ),
+                                endpoint_address=None,
+                                master_address=master_address,
+                                master_port=master_port,
+                                world_size=len(ranks),
+                                peer_addresses=peer_addresses,
+                            )
+                        )
+                    payloads.append(
+                        (
+                            node.node_id,
+                            RecipeJobRunRequest(
+                                job_id=artifact_job.id,
+                                run_id=run.id,
+                                installation_id=installation.id,
+                                recipe_revision_id=revision.id,
+                                plan_digest=run.plan_digest,
+                                mapping_id=run.mapping_id,
+                                input_manifest_sha256=artifact_job.input_manifest_sha256,
+                                input_total_bytes=artifact_job.input_total_bytes,
+                                inputs=tuple(launch.input_files),
+                                compiled_execution_plan=invocation,
+                                run_generation=run.run_generation,
+                                output_mappings=tuple(_output_mappings(contract)),
+                                output_limits=limits,
+                            ).model_dump(mode="json"),
+                        )
+                    )
             except (RecipeExecutionContractError, TypeError, ValueError) as error:
                 raise ArtifactJobUnavailableError(
                     "artifact invocation observation is unavailable",
@@ -690,8 +761,7 @@ class ArtifactJobService(OutputService):
                 session,
                 artifact_job_id=artifact_job.id,
                 run_id=run.id,
-                node_id=node.node_id,
-                payload=payload.model_dump(mode="json"),
+                payloads=tuple(payloads),
                 actor=actor,
                 request_id=request_id,
                 authority_digest=revision.content_digest,

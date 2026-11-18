@@ -20,6 +20,7 @@ from ..lifecycle.agent_operation import (
     set_parent_state,
 )
 from ..lifecycle.artifact_job import ArtifactJobAdapter
+from ..lifecycle.job_ranks import job_run_verdict
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -61,6 +62,8 @@ def _aggregate_parent(
         adapter = ArtifactJobAdapter(session, clock=self._clock)
         for order in orders:
             adapter.project_for_order(order, self._clock())
+        # The parent's end follows the artifact job just projected.
+        self._aggregate_parent_state(session, parent_job_id)
 
 
 def _aggregate_parent_state(
@@ -115,6 +118,7 @@ def _aggregate_parent_state(
         [(operation.state, operation in retrying) for operation in operations],
         cancel_requested=cancel_requested,
     )
+    verdict, owned_reason = job_run_verdict(session, job, operations, verdict)
     if verdict == "queued":
         set_parent_state(job, "queued", retrying[0].status_reason, self._clock())
         return
@@ -130,7 +134,9 @@ def _aggregate_parent_state(
         LifecycleState.CANCELLED,
     )
     state = verdict
-    set_parent_state(job, state, None, self._clock(), keep_reason=True)
+    set_parent_state(
+        job, state, owned_reason, self._clock(), keep_reason=owned_reason is None
+    )
     if state == "succeeded":
         if not has_deferred and not ended:
             job.status_reason = None
@@ -144,7 +150,7 @@ def _aggregate_parent_state(
                 and operation.kind in _ABANDONABLE_OPERATIONS
             ):
                 _abandon_operation(operation, job.id, job.updated_at)
-    if ended:
+    if ended or owned_reason is not None:
         return
     for operation in operations:
         # The parent's stored state: the verdict, or the end it already recorded.

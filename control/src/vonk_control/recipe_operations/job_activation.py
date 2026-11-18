@@ -138,8 +138,6 @@ class JobActivationMixin:
                 raise RecipeRetryLater("artifact recipe observation is unavailable")
             if len(adapters) != 1 or adapters[0] not in artifact_adapters:
                 raise RecipeRetryLater("artifact adapter observation is unavailable")
-            if recipe.topology.node_count != 1:
-                raise RecipeRetryLater("artifact topology observation is unavailable")
             try:
                 run_id = service._run_admission.accept_run_in_session(
                     session,

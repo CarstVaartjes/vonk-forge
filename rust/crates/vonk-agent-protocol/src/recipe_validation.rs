@@ -63,7 +63,6 @@ pub(super) fn validate_recipe_job(value: &RecipeJobRunRequest) -> bool {
         && (1..=i64::MAX as u64).contains(&value.run_generation)
         && lower_hex(&value.plan_digest, 64)
         && plan.job.is_some()
-        && plan.runtime.placement.world_size == 1
         && inputs_valid
         && manifest_valid
         && mappings_valid
@@ -162,6 +161,15 @@ pub(super) fn validate_recipe_start(value: &RecipeStartRequest) -> bool {
 }
 
 impl RecipeJobRunRequest {
+    /// Whether this rank owns the job's inputs, outputs and result. The other
+    /// ranks of a multi-rank job only compute.
+    pub fn is_endpoint_owner(&self) -> bool {
+        self.compiled_execution_plan
+            .runtime
+            .placement
+            .is_endpoint_owner()
+    }
+
     /// The job's single-rank placement as compiled into the plan.
     pub fn placement(&self) -> &compiled_execution_plan::CompiledRuntimePlacement {
         &self.compiled_execution_plan.runtime.placement
@@ -193,10 +201,7 @@ impl RecipeStartRequest {
     /// Whether this rank owns the endpoint: every single-node rank, and the
     /// distributed rank whose fabric address is the rendezvous address.
     pub fn is_endpoint_owner(&self) -> bool {
-        let placement = self.placement();
-        placement.world_size == 1
-            || (placement.local_address.is_some()
-                && placement.local_address == placement.master_address)
+        self.placement().is_endpoint_owner()
     }
 
     /// The pinned runtime image digest (`sha256:<hex>`).

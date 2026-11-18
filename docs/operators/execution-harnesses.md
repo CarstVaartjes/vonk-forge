@@ -67,6 +67,14 @@ Artifact-producing interfaces are jobs rather than OpenAI model routes. Their
 submission, progress, cancellation, and result artifacts use the declared
 controller/job interface directly; a result location is not placed in LiteLLM.
 Health and cleanup still use the same harness lifecycle and exact node evidence.
+The `diffusers` harness also supports a job on two or more Sparks (a `distributed`
+topology): one order per rank, started together on the fabric with the host
+network; its wrapper reads `VONK_RANK`, `VONK_WORLD_SIZE`, `VONK_LOCAL_ADDR`,
+`VONK_MASTER_ADDR` and `VONK_MASTER_PORT` from the platform. Only the rendezvous
+owner owns the job's inputs, outputs and result; a rank that fails ends the job and
+the others are stopped. A multi-rank job's wrappers must print a heartbeat line
+well inside the job inactivity timeout (at most 3600 s), because only log lines
+reset it.
 
 ## Acceptance evidence
 

@@ -58,7 +58,11 @@ $helper --config "$config" check-endpoint-port 8888 >/dev/null 2>&1 || status=$?
 test "$status" = 3
 test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.10 29500 8888)" = vonk-fabric
 test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.11 29500 none)" = vonk-fabric
+# A multi-rank job's rendezvous owner serves no endpoint port and passes 0.
+test "$($helper --config "$config" check-fabric-run 192.168.100.10 192.168.100.10 29500 0)" = vonk-fabric
 for invalid in \
+    '192.168.100.10 192.168.100.10 29500 none' \
+    '192.168.100.10 192.168.100.11 29500 0' \
     '192.168.1.211 192.168.100.10 29500 8888' \
     '192.168.100.10 192.168.1.231 29500 none' \
     '192.168.100.10 192.168.100.10 29501 8888' \

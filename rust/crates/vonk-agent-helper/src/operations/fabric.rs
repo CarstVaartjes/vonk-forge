@@ -55,6 +55,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
+/// The firewall's endpoint argument for a rendezvous owner that serves no
+/// endpoint port. Validation admits no such owner but a job rank 0, so `0`
+/// (never a port) tells the firewall it is a job; a worker passes `none`.
+const JOB_OWNER_ENDPOINT: &str = "0";
+
+fn job_owner_endpoint(host_endpoint: String, port: Option<u16>, fabric: &NativeFabric) -> String {
+    if port.is_none() && fabric.local == fabric.master {
+        JOB_OWNER_ENDPOINT.to_owned()
+    } else {
+        host_endpoint
+    }
+}
+
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn bind_native_fabric(
         &self,
@@ -84,6 +97,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let host_endpoint = run
             .host_endpoint_port
             .map_or_else(|| "none".to_owned(), |port| port.to_string());
+        let host_endpoint = job_owner_endpoint(host_endpoint, run.host_endpoint_port, fabric);
         let arguments = [
             "--config".to_owned(),
             DOCKER_FIREWALL_CONFIG.to_owned(),

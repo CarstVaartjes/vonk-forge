@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 
-from .. import artifact_job_states
+from .. import agent_operation_states, artifact_job_states
 from ..agent_jobs import (
     superseded_cancellation_deadline,
 )
@@ -97,6 +97,21 @@ def _jobrun_effect_may_remain(
     issued = _issued_orders_off_link(adapter.session, artifact)
     if len(issued) > 1:
         return True
+    # A job on several Sparks has one order per rank: any rank still live may
+    # hold its Spark, whichever rank owns the job.
+    if artifact.operation_id is not None and (
+        adapter.session.scalar(
+            select(AgentOperation.id)
+            .where(
+                AgentOperation.parent_job_id == artifact.operation_id,
+                AgentOperation.current_attempt > 0,
+                AgentOperation.state.in_(agent_operation_states.LIVE),
+            )
+            .limit(1)
+        )
+        is not None
+    ):
+        return True
     if issued:
         session = adapter.session
         effect = adapter.lifecycle(
@@ -147,20 +162,23 @@ def _issued_orders_off_link(
     )
 
 
-def _exact_jobrun_source(
+def _exact_jobrun_sources(
     session: Session,
     artifact: ArtifactJob,
-    frozen: ProfileJobRunStopTarget | None,
+    frozen: Sequence[ProfileJobRunStopTarget],
     target_node_ids: Collection[str],
-) -> AgentOperation | None:
-    """The order an exact Stop of this job is built from, by its own identity.
+) -> list[AgentOperation] | None:
+    """The orders an exact Stop of this job is built from, by their own identity.
 
-    A Stop accepted earlier keeps the order it froze; otherwise it is the job's
-    one order, or its one issued order beside siblings no Spark was handed. A
-    job whose link names no issued order is read through the orders issued for
-    it. ``None`` retires the job as unknown: nothing of it was issued, so
-    nothing can remain, and a re-plan reads the same rows. An issued order that
-    no exact Stop can reach holds the Stop: nothing is stopped on a guess.
+    A Stop accepted earlier keeps the orders it froze; otherwise they are the
+    job's one order, or its issued orders beside siblings no Spark was handed
+    (a job on several Sparks has one per rank). A job whose link names no
+    issued order is read through the orders issued for it. ``None`` retires
+    the job as unknown: nothing of it was issued, so nothing can remain, and a
+    re-plan reads the same rows. Issued orders that no exact Stop can reach
+    hold the Stop: nothing is stopped on a guess. A rank on a Spark outside
+    the Stop's scope (a missing node) never holds the others: its Spark's own
+    reconcile removes what it left.
     """
     off_link = _issued_orders_off_link(session, artifact)
     if artifact.operation_id is None or off_link:
@@ -171,19 +189,26 @@ def _exact_jobrun_source(
             session.scalars(
                 select(AgentOperation)
                 .where(AgentOperation.parent_job_id == artifact.operation_id)
+                .order_by(AgentOperation.id)
                 .with_for_update(of=AgentOperation)
             )
         )
         issued = [child for child in children if child.current_attempt > 0]
         candidates = list(children) if len(children) == 1 else issued
-    if frozen is not None:
-        held = session.get(
-            AgentOperation, frozen.source_operation_id, with_for_update=True
-        )
-        candidates = [] if held is None else [held]
+    if frozen:
+        held = [
+            session.get(
+                AgentOperation, target.source_operation_id, with_for_update=True
+            )
+            for target in frozen
+        ]
+        candidates = [order for order in held if order is not None]
         issued += [child for child in candidates if child.current_attempt > 0]
-    if len(candidates) == 1 and candidates[0].node_id in target_node_ids:
-        return candidates[0]
+    reachable = [child for child in candidates if child.node_id in target_node_ids]
+    # One order per Spark: two on the same Spark do not say which container is
+    # the job's, and nothing is stopped on a guess.
+    if reachable and len({child.node_id for child in reachable}) == len(reachable):
+        return reachable
     if issued:
         raise RecipeRetryLater("unknown JobRun exact target is not reachable")
     # A Spark that holds a fence for a missing order loses it on its next
@@ -366,33 +391,34 @@ class ProfileJobRunStopMixin:
             if not _jobrun_effect_may_remain(adapter, artifact):
                 # An ended job left nothing on its Spark for this Stop to reach.
                 continue
-            source_operation = _exact_jobrun_source(
-                session, artifact, None, run_node_by_id
+            source_operations = _exact_jobrun_sources(
+                session, artifact, (), run_node_by_id
             )
-            if source_operation is None:
+            if source_operations is None:
                 # None of its orders was issued: it is superseded unissued.
                 unissued_artifacts.append(artifact)
                 continue
-            if source_operation.node_id not in reachable_node_ids:
-                continue
-            try:
-                request = read_stored_model(
-                    RecipeJobRunRequest,
-                    canonical_message(read_row_column(source_operation, "payload")),
-                    from_json=True,
-                )
-                stop = stop_payload_from_job_run(
-                    request,
-                    cancel_pending_start=True,
-                )
-            except (TypeError, ValueError) as error:
-                raise RecipeRequestInvalid(
-                    "artifact JobRun request cannot authorize exact Stop",
-                    reason=InvalidRequestReason.MALFORMED,
-                ) from error
-            # Its identity (job, run, installation, generation ceiling, the
-            # container named) is proven with the target below.
-            target_rows.append((artifact, source_operation, stop))
+            for source_operation in source_operations:
+                if source_operation.node_id not in reachable_node_ids:
+                    continue
+                try:
+                    request = read_stored_model(
+                        RecipeJobRunRequest,
+                        canonical_message(read_row_column(source_operation, "payload")),
+                        from_json=True,
+                    )
+                    stop = stop_payload_from_job_run(
+                        request,
+                        cancel_pending_start=True,
+                    )
+                except (TypeError, ValueError) as error:
+                    raise RecipeRequestInvalid(
+                        "artifact JobRun request cannot authorize exact Stop",
+                        reason=InvalidRequestReason.MALFORMED,
+                    ) from error
+                # Its identity (job, run, installation, generation ceiling, the
+                # container named) is proven with the target below.
+                target_rows.append((artifact, source_operation, stop))
 
         targets = [
             ProfileJobRunStopTarget(

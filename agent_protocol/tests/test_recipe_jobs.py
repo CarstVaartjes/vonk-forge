@@ -144,6 +144,25 @@ def test_recipe_job_request_accepts_unambiguous_longest_suffix_mapping() -> None
     assert [item.slot for item in parsed.output_mappings] == ["binary", "detailed"]
 
 
+def test_bound_rank_one_job_claim_is_a_companion_and_the_single_rank_owns_outputs() -> (
+    None
+):
+    """The Controller's own binder produced this vector (checked in its suite)."""
+
+    claim_document, _ = documents()
+    bound = AgentClaim.parse(
+        json.loads((VECTORS / "recipe-job-run-claim-rank1-v1.json").read_text())
+    )
+    companion = RecipeJobRunRequest.parse(bound.payload)
+    placement = companion.compiled_execution_plan.runtime.placement
+    assert (placement.rank, placement.world_size) == (1, 2)
+    assert placement.local_address != placement.master_address
+    assert placement.port is None
+    assert companion.compiled_execution_plan.security.network_mode == "host"
+    assert not companion.endpoint_owner
+    assert RecipeJobRunRequest.parse(claim_document["payload"]).endpoint_owner
+
+
 def test_recipe_job_result_rejects_manifest_drift() -> None:
     _claim_document, result_document = documents()
     result = result_document["result"]

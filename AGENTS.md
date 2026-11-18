@@ -192,7 +192,24 @@ writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `control/tests/intent_ordinal_writers.py`. A one-shot JobRun is never fenced
 by a Spark's intent: it belongs to its run (run and RunNode RUNNING, run
 generation), and only the run's own Stop cancels it
-(`request_run_job_cancellation_in_session`). Decide an intent fence by kind
+(`request_run_job_cancellation_in_session`). A job plan may be one rank of a
+multi-rank job (protocol 4.5): every rank is its own order on host network;
+only the rendezvous owner (`is_endpoint_owner` / `RecipeJobRunRequest.endpoint_owner`)
+owns `/inputs`, `/outputs` and the result, and a companion rank reports an empty
+output manifest. Job recipes may be `distributed` on the `diffusers` engine only;
+run admission reserves the rendezvous port on the owner of a multi-node job. A job submitted to a multi-node run is one order per rank in one
+phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
+own binder); `lifecycle/job_ranks.py` names the owner's order, the job's
+lifecycle is the owner's (`ArtifactJobAdapter.order_of`), and `fan_in` ends the job
+with the first failed companion's reason and cancels every live sibling (and
+all companions when the owner ends) through the supersession cancellation. A
+run's Stop and a cancelled job's cleanup build one exact Stop per issued rank
+(`_exact_jobrun_sources`; target key `(node_id, artifact_job_id)`); a rank on a
+Spark outside the Stop's scope never holds the others, two orders on one Spark
+still hold (nothing is stopped on a guess), and the job and its parent are
+confirmed stopped only when every rank's Stop is proven. The
+host firewall is told the owner of a job serves no endpoint
+port by passing `0` instead of one. Decide an intent fence by kind
 (`fencing_intent`), never by a stored ordinal alone. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never

@@ -49,7 +49,7 @@ unknown (core rule 3).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -60,6 +60,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureResult,
+    Disposition,
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
@@ -101,6 +102,7 @@ from .agent_operation import (
     set_parent_state,
 )
 from .core import transition
+from .job_ranks import fan_in_cancellation_key, resolve_owner
 from .reconciler import settle
 from .types import (
     Effect,
@@ -238,13 +240,18 @@ class ArtifactJobAdapter:
         if job.operation_id is None:
             return None, None, None
         parent = session.get(Job, job.operation_id)
-        operation = session.scalar(
-            select(StoredOperation)
-            .where(StoredOperation.parent_job_id == job.operation_id)
-            # Beside siblings no Spark was handed, the issued order is its own.
-            .order_by(StoredOperation.current_attempt.desc(), StoredOperation.id)
-            .limit(1)
+        orders = tuple(
+            session.scalars(
+                select(StoredOperation)
+                .where(StoredOperation.parent_job_id == job.operation_id)
+                # Beside siblings no Spark was handed, the issued order is its own.
+                .order_by(StoredOperation.current_attempt.desc(), StoredOperation.id)
+            )
         )
+        # A multi-rank job's lifecycle is its owner's order; the companions
+        # only end it early (``fan_in``). An owner that cannot be resolved yet
+        # is no order: the job waits and is observed again, never guessed.
+        operation = resolve_owner(orders).owner
         attempt = (
             None
             if operation is None
@@ -784,8 +791,9 @@ class ArtifactJobAdapter:
         now = aware(now)
         session = self._session
         assert session is not None
+        ranks_changed = self.fan_in(job, now)
         if ajs.is_ended(job) or job.operation_id is None:
-            return False
+            return ranks_changed
         parent, operation, attempt = self.order_of(session, job)
         if operation is None:
             # Losing the local order is no proof of an absent remote scope.
@@ -883,6 +891,90 @@ class ArtifactJobAdapter:
             evidence=evidence,
             agent_reported=report is not None or measured is not None,
         )
+
+    def fan_in(self, job: ArtifactJob, now: datetime) -> bool:
+        """One order per rank: a rank that ended ends the job, and no rank outlives it.
+
+        The owner's order decides the job (``order_of``).  A companion that
+        failed, or was cancelled without anyone asking, ends a live job failed
+        with that order's reason.  Whenever the job or its owner has ended, or a
+        companion has failed, every still-live order is cancelled through the
+        one cancellation of the supersession path.  Idempotent: it only acts on
+        live orders, and a single-rank job returns at once.
+        """
+
+        session = self.session
+        if job.operation_id is None:
+            return False
+        orders = tuple(
+            session.scalars(
+                select(StoredOperation)
+                .where(StoredOperation.parent_job_id == job.operation_id)
+                .order_by(StoredOperation.created_at, StoredOperation.id)
+            )
+        )
+        parent = session.get(Job, job.operation_id)
+        if parent is None or len(orders) < 2:
+            return False
+        resolved = resolve_owner(orders)
+        owner, request = resolved.owner, resolved.request
+        if (
+            request is None
+            or request.compiled_execution_plan.runtime.placement.world_size < 2
+        ):
+            # Not a multi-rank job with a resolved owner: nothing to fan in.
+            return False
+        asked = isinstance(parent.result, Mapping) and (
+            parent.result.get("cancel_requested") is True
+        )
+        broken = next(
+            (
+                order
+                for order in orders
+                if order is not owner
+                and order.state not in aos.LIVE
+                and order.state != LifecycleState.SUCCEEDED
+            ),
+            None,
+        )
+        changed = False
+        if broken is not None and not asked and not ajs.is_ended(job):
+            self.settle(
+                job,
+                Reported.failed(Disposition.FAIL, effect=Effect.UNKNOWN),
+                now,
+                reason=broken.status_reason or FailureCode.RECIPE_JOB_RUN_FAILED,
+                evidence=ArtifactJobResultEvidence(
+                    active_scope_may_remain=True, failure_kind=None
+                ),
+            )
+            changed = True
+        settled = ajs.is_ended(job) or broken is not None
+        owner_ended = owner is not None and owner.state not in aos.LIVE
+        if (owner_ended or settled) and any(
+            order.state in aos.LIVE for order in orders
+        ):
+            # imported here: agent_jobs reads this package's lifecycle.
+            from ..agent_jobs.supersession import _cancel_order
+
+            _cancel_order(
+                AgentOperationAdapter(session),
+                parent,
+                orders,
+                0,
+                now,
+                request_id=fan_in_cancellation_key(parent.id),
+                # The siblings stop for the broken rank's own reason, or because
+                # the job's scope ended with its owner: never "superseded", so a
+                # succeeded job keeps its outcome.
+                reason=(
+                    WaitReason.SCOPE_CHANGED
+                    if broken is None
+                    else broken.status_reason or FailureCode.RECIPE_JOB_RUN_FAILED
+                ),
+            )
+            changed = True
+        return changed
 
     @staticmethod
     def _ended_effect(
