@@ -176,7 +176,6 @@ def _poll_path(
     fetch_initial: bool = False,
     fetch: Callable[[float], object] | None = None,
     attempts: int | None = None,
-    publish: bool = True,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
@@ -190,8 +189,6 @@ def _poll_path(
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
-    if fetch_initial and not publish:
-        callback = None
     if validate is not None and not fetch_initial:
         try:
             validate(current)
@@ -215,10 +212,16 @@ def _poll_path(
     deadline = started + timeout if deadline is None else deadline
     interval = _bounded_interval(args)
     wait_before_request = not fetch_initial
+    # A one-shot read whose first answer is already final has no progress
+    # to show; only snapshots that are still changing are published.
+    first_answer = fetch_initial
     remaining_attempts = attempts
     failures = 0
     while True:
-        if callback is not None and publish and not fetch_initial:
+        quiet = first_answer and not fetch_initial and is_terminal(current)
+        if not fetch_initial:
+            first_answer = False
+        if callback is not None and not fetch_initial and not quiet:
             try:
                 callback(current)
             except BrokenPipeError:
