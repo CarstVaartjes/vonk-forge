@@ -36,6 +36,7 @@ from vonk_control.compiled_execution_plan import (
 from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placement
 from vonk_control.models import ClusterMappingNode
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.recipe_start_payloads import start_peer_addresses
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -228,6 +229,13 @@ def compile_launch_plan(
     if world_size > 1:
         simulated["local_address"] = f"100.100.20.{rank + 2}"
         simulated["master_address"] = "100.100.20.2"
+        peers = start_peer_addresses(
+            recipe.runtime.engine,
+            world_size,
+            {item: f"100.100.20.{item + 2}" for item in range(world_size)},
+        )
+        if peers:
+            simulated["peer_addresses"] = list(peers)
     return plan.to_compiled_launch_payload(
         runtime, placement=CompiledPlacement.model_validate(simulated)
     )

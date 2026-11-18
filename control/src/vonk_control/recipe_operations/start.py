@@ -48,11 +48,12 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _topology_order as _topology_order,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_runtime_specs import recipe_topology
+from ..recipe_runtime_specs import recipe_engine, recipe_topology
 from ..recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
+    start_peer_addresses,
 )
 from ..run_admission import (
     RunAdmissionBusy,
@@ -224,6 +225,8 @@ class StartMixin:
             run.updated_at = now
             recipe_digest = revision.content_digest
             assert recipe_digest is not None
+            engine = recipe_engine(read_row_column(revision, "document"))
+            fabric_by_rank = {item.rank: item.fabric_address for item in plan.nodes}
 
             def start_payload(node: RunNodePlan) -> tuple[str, RecipeStartPayload]:
                 endpoint_owner = node.endpoint_owner
@@ -236,6 +239,9 @@ class StartMixin:
                         raise RecipeRetryLater(
                             f"recipe start endpoint address is unavailable for {node_id}"
                         )
+                    peer_addresses = start_peer_addresses(
+                        engine, world_size, fabric_by_rank
+                    )
                     payload = build_recipe_start_payload(
                         run_id=run_id,
                         installation_id=plan.installation_id,
@@ -260,6 +266,7 @@ class StartMixin:
                         compiled_execution_plan=compiled_plans[node_id],
                         master_address=master_address,
                         master_port=master_port,
+                        peer_addresses=peer_addresses,
                         phase="rank-launch" if start_deadline is not None else None,
                         start_deadline=start_deadline,
                     )

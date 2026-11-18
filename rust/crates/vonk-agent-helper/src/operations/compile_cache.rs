@@ -307,6 +307,7 @@ fn compilation_environment(value: &str) -> bool {
         "VONK_LOCAL_ADDR=",
         "VONK_MASTER_ADDR=",
         "VONK_MASTER_PORT=",
+        "VONK_PEER_ADDRS=",
         "VONK_LISTEN_HOST=",
         "VONK_LISTEN_PORT=",
         "VONK_JOB_TIMEOUT_SECONDS=",

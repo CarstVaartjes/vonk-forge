@@ -74,8 +74,10 @@ from vonk_control.recipe_execution_contract import (
 )
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 from vonk_control.recipe_start_payloads import (
+    RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
+    start_peer_addresses,
 )
 from vonk_control.recipe_stop_payloads import (
     stop_payload_from_start,
@@ -454,6 +456,7 @@ def runtime_service(
                 compiled_execution_plan=fixture,
                 master_address="192.0.2.10" if distributed else None,
                 master_port=29500 if distributed else None,
+                peer_addresses=(),
                 phase=phase,
                 start_deadline=deadline if phase is not None else None,
             )
@@ -1809,3 +1812,46 @@ def test_live_grant_waits_for_lease_renewal_then_succeeds(
         request_grant(
             service, body, node_id="spk_" + "2" * 32, certificate_serial="certificate-1"
         )
+
+
+def _dual_start_placement(
+    peer_addresses: tuple[str, ...],
+) -> dict[str, object]:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures/compiled_workload_v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    fixture["topology"].update(name="dual", node_count=2)
+    document = build_recipe_start_payload(
+        run_id=RUNTIME_RUN_ID,
+        installation_id=RUNTIME_INSTALLATION_ID,
+        recipe_revision_id=RUNTIME_INSTALLATION_ID,
+        mapping_id=RUNTIME_INSTALLATION_ID,
+        run_generation=1,
+        plan_digest="c" * 64,
+        placement=RecipeStartPlacement(
+            "node", 1, "worker", 8000, 80_000_000, 0, "unified", "192.0.2.11"
+        ),
+        compiled_endpoint_address=None,
+        world_size=2,
+        compiled_execution_plan=fixture,
+        master_address="192.0.2.10",
+        master_port=29500,
+        peer_addresses=peer_addresses,
+    )
+    return document["compiled_execution_plan"]["runtime"]["placement"]  # type: ignore[index,return-value]
+
+
+def test_a_dual_start_carries_every_rank_fabric_address_only_for_engines_that_read_it():
+    addresses = {0: "192.0.2.10", 1: "192.0.2.11"}
+    peers = start_peer_addresses("gr8", 2, addresses)
+    assert peers == ("192.0.2.10", "192.0.2.11")
+    assert _dual_start_placement(peers)["peer_addresses"] == [
+        "192.0.2.10",
+        "192.0.2.11",
+    ]
+    assert start_peer_addresses("vllm", 2, addresses) == ()
+    assert "peer_addresses" not in _dual_start_placement(())
+    with pytest.raises(RecipeStartPayloadError):
+        start_peer_addresses("gr8", 2, {0: "192.0.2.10", 1: None})
