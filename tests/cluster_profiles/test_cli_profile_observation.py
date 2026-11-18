@@ -461,6 +461,19 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     assert result["id"] == "1" and observation.status == "complete"
 
 
+def test_profile_list_publishes_no_progress_snapshot():
+    class Listing:
+        def request(self, *_args, **_kwargs):
+            return {"profiles": [], "next_after": None}
+
+    args = cli._parser().parse_args(("profile", "list"))
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
+    result = _profile(args, cast(ControllerClient, Listing()), lambda: "fresh")
+    assert result["profiles"] == []
+    assert snapshots == []
+
+
 def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     monkeypatch,
 ):
