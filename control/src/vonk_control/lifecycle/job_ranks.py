@@ -12,7 +12,8 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from vonk_agent_protocol import RecipeJobRunRequest
+from vonk_agent_protocol import AgentOperation as WireOperation
+from vonk_agent_protocol import LifecycleState, RecipeJobRunRequest
 
 from ..models import AgentOperation
 from ..stored_json import read_row_column
@@ -72,6 +73,27 @@ def order_is_owner(order: AgentOperation) -> bool | None:
 
 def owner_order(orders: Sequence[AgentOperation]) -> AgentOperation | None:
     return resolve_owner(orders).owner
+
+
+def job_run_verdict(
+    orders: Sequence[AgentOperation], verdict: str | None
+) -> str | None:
+    """The parent's aggregate verdict, with a job on several Sparks its owner's.
+
+    A companion stopped after the owner succeeded does not turn the job's
+    outcome into cancelled (the aggregate is worst-wins over every order).
+    """
+
+    if verdict != LifecycleState.CANCELLED.value:
+        return verdict
+    owner = resolve_owner(orders).owner
+    if (
+        owner is not None
+        and owner.state == LifecycleState.SUCCEEDED.value
+        and all(order.kind == WireOperation.RECIPE_JOB_RUN.value for order in orders)
+    ):
+        return LifecycleState.SUCCEEDED.value
+    return verdict
 
 
 def fan_in_cancellation_key(parent_id: str) -> str:
