@@ -105,7 +105,7 @@ def _reject_ready_mapping_node_mutation(
     state = connection.execute(
         select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
     ).scalar_one_or_none()
-    if state == "ready":
+    if state == ClusterMappingState.READY:
         raise ValueError(ClusterMappingCode.READY_IMMUTABLE)
 
 
