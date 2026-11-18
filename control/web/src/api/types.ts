@@ -190,6 +190,7 @@ export function readableProfile(profile: FleetProfileRead): profile is FleetProf
 }
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
+export type FleetProfileDeletion = components["schemas"]["FleetProfileDeletion"];
 export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
 export type FleetProfileEndpoints = components["schemas"]["FleetProfileEndpointsView"];
 export type FleetProfileApplicationView = components["schemas"]["FleetProfileApplicationView"];
@@ -317,6 +318,11 @@ export interface ControlApi extends LibraryApi {
     input: FleetProfileInput,
     signal?: AbortSignal,
   ): Promise<FleetProfile>;
+  deleteProfile(
+    number: FleetProfileNumber,
+    expectedRevision?: FleetProfile["revision"],
+    signal?: AbortSignal,
+  ): Promise<FleetProfileDeletion>;
   previewProfile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfilePreview>;
   loadProfile(
     number: FleetProfileNumber,

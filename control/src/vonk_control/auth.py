@@ -74,6 +74,7 @@ MUTATION_ROLES = {
     ("POST", "/api/jobs/{job_id}/resume"): frozenset({"administrator", "operator"}),
     ("PUT", "/api/profile/{number}"): frozenset({"administrator"}),
     ("POST", "/api/profile/{number}/preview"): frozenset({"administrator"}),
+    ("POST", "/api/profile/{number}/delete"): frozenset({"administrator"}),
     ("POST", "/api/profile/{number}/load"): frozenset({"administrator"}),
     (
         "POST",

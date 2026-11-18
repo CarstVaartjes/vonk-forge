@@ -511,6 +511,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--file", required=True, help="JSON file or - for stdin"
     )
     _profile_edit_flags(profile_import, require_revision=True)
+    profile_delete = profile_actions.add_parser(
+        "delete", help="Delete a saved profile; running workloads are not stopped"
+    )
+    _profile_edit_flags(profile_delete)
     profile_load = profile_actions.add_parser(
         "load", help="Apply the entire profile to the fleet"
     )

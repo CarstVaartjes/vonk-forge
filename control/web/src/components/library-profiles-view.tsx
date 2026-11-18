@@ -479,6 +479,8 @@ export function LibraryProfilesView({
   const [error, setError] = useState("");
   const [optionsBySelector, setOptionsBySelector] = useState<Record<string, RecipeOption[]>>({});
   const [confirmingReload, setConfirmingReload] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const toast = useToast();
   const setNotice = (message: string) => {
     if (message) toast.info(message);
@@ -823,6 +825,38 @@ export function LibraryProfilesView({
   async function reload() {
     await load();
     setConfirmingReload(false);
+  }
+
+  async function deleteSelected() {
+    if (!selectedProfile || deleting) return;
+    const { number, revision } = selectedProfile;
+    setDeleting(true);
+    try {
+      const result = await api.deleteProfile(number, revision);
+      setConfirmingDelete(false);
+      if (result.outcome === "cancelling") {
+        toast.info(
+          "The profile's running load is being cancelled. Delete the profile again once it has ended.",
+        );
+        return;
+      }
+      unsavedDrafts.delete(formatWire(number));
+      observer.reset();
+      setPendingLoad(undefined);
+      setPreview(undefined);
+      const remaining = (await refreshProfiles())?.profiles.find(readableProfile);
+      if (remaining) selectProfile(remaining);
+      else {
+        setSelectedNumber(undefined);
+        setDraft(undefined);
+        setEditing(false);
+      }
+      toast.success(`Profile ${formatWire(number)} deleted. Running workloads were not changed.`);
+    } catch (value) {
+      toast.error(value instanceof Error ? value.message : "The profile could not be deleted.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const names = Object.fromEntries(availableFleet.map((item) => [item.id, item.name]));
@@ -1214,6 +1248,17 @@ export function LibraryProfilesView({
             onCancel={() => setConfirmingReload(false)}
           />
         )}
+        {confirmingDelete && selectedProfile && (
+          <ConfirmDialog
+            title="Delete this profile?"
+            consequence="Removes the saved profile and its load history. Running workloads are not stopped or changed. The number can be reused."
+            confirmLabel="Delete profile"
+            command={`vonkctl --profile ${formatWire(selectedProfile.number)} profile delete`}
+            busy={deleting}
+            onConfirm={() => void deleteSelected()}
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
         {selectedProfile && !editing && (
           <section
             className="library-profile-saved"
@@ -1226,6 +1271,13 @@ export function LibraryProfilesView({
               </div>
               <div>
                 <ProfileExport api={api} number={selectedProfile.number} />
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  Delete profile
+                </button>
                 <button type="button" className="button secondary" onClick={() => setEditing(true)}>
                   Edit profile
                 </button>

@@ -51,7 +51,8 @@ def test_profile_mutation_damage_matrix_covers_installed_routes():
         and route.path.startswith("/api/profile/")
         and set(route.methods or ()) & {"PUT", "POST", "PATCH", "DELETE"}
     }
-    assert mutations == set(_PROFILE_MUTATIONS)
+    # Delete never reads the saved definition; its damaged-row case is below.
+    assert mutations == set(_PROFILE_MUTATIONS) | {"deleteProfile"}
 
 
 def _sessions():
@@ -146,6 +147,25 @@ def test_profile_mutation_routes_isolate_damaged_saved_definition(
             assert service.definition_number(profile.number).definition == replacement
         else:
             assert row.revision == profile.revision and getattr(row, field) == value
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_profile_with_a_damaged_definition_can_still_be_deleted():
+    sessions = _sessions()
+    client, codec = _client(sessions)
+    headers = _headers(codec, "administrator")
+    client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "Damaged", "expected_revision": 0},
+    )
+    with sessions.begin() as session:
+        session.execute(
+            update(FleetProfile).values({"assignments": [{"invalid": "x"}]})
+        )
+    deleted = client.post("/api/profile/1/delete", headers=headers, json={})
+    assert deleted.json() == {"number": 1, "outcome": "deleted"}
+    assert client.get("/api/profile", headers=headers).json()["profiles"] == []
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
