@@ -716,11 +716,10 @@ def test_sglang_wrapper_receives_root_for_target_mount() -> None:
     spec = _compile(recipe, model, role="entrypoint", rank=0)
 
     argv = _argv(spec)
-    assert argv[:4] == [
+    assert argv[:3] == [
         "/opt/vonk/bin/sglang-serve",
         "--model-path",
         "/models",
-        "--host",
     ]
     assert {
         mount["target"]
