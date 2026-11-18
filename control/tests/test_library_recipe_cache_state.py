@@ -671,3 +671,49 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
         _projection(sessions, archive=service._runtime_archive_available)
     )
     assert recipes["vonk-forge/resolver-dual"].local.controller == "unknown"
+
+
+def test_cache_resolution_loads_documents_only_where_it_reads_them(
+    cache,  # noqa: F811
+    monkeypatch,
+):
+    """Row lookups select revision columns; only content checks load a document."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+    readable = type(service)._readable_content_revision
+    checks: list[str] = []
+
+    def counted(session, revision):
+        checks.append(revision.kind)
+        return readable(session, revision)
+
+    monkeypatch.setattr(
+        type(service), "_readable_content_revision", staticmethod(counted)
+    )
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        resolution = service.resolve_latest_cached(
+            recipe_identity=world.recipe_revision_id, model_variant="fp16"
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert resolution.recipe.cached and resolution.model.cached
+    document_reads = [
+        item
+        for item in statements
+        if re.search(r"catalog_document_revisions\.document\b(?!_id)", item)
+    ]
+    assert checks
+    assert len(document_reads) == len(checks)

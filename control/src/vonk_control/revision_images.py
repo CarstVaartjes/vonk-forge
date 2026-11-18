@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState
 
+from .catalog_queries import WITHOUT_DOCUMENT
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
@@ -65,7 +66,9 @@ def revision_images(
     revisions = {
         row.id: row
         for row in session.scalars(
-            select(CatalogDocumentRevision).where(
+            select(CatalogDocumentRevision)
+            .options(WITHOUT_DOCUMENT)
+            .where(
                 CatalogDocumentRevision.id.in_(sorted(revision_ids)),
                 CatalogDocumentRevision.kind == "recipe",
             )
