@@ -201,8 +201,13 @@ def _cancel_order(
     children: Sequence[StoredOperation],
     ordinal: int,
     now: datetime,
+    *,
+    request_id: str | None = None,
 ) -> None:
     """Cancel one live order under the workload intent ``ordinal``.
+
+    ``request_id`` names a cancellation no workload intent owns: a rank of a
+    multi-rank job ended, so its siblings are cancelled (``job_ranks``).
 
     The one cancellation both the Spark-wide supersession and a run's own
     Stop (``request_run_job_cancellation_in_session``) apply: the request is
@@ -234,9 +239,8 @@ def _cancel_order(
             parent.result = {
                 **previous,
                 "cancel_requested": True,
-                "cancel_request_id": str(
-                    uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")
-                ),
+                "cancel_request_id": request_id
+                or str(uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")),
                 "cancel_actor": "controller",
                 "cancel_requested_at": _aware(now).isoformat(),
                 "reason": SupersedeCode.SUPERSEDED_BY_INTENT.value,

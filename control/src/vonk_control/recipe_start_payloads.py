@@ -36,7 +36,7 @@ class RecipeStartPlacement:
     node_id: str
     rank: int
     role: str
-    port: int
+    port: int | None
     reserved_memory_bytes: int
     memory_floor_bytes: int
     memory_kind: MemoryKind
@@ -69,7 +69,7 @@ def build_recipe_start_payload(
             "recipe_revision_id": recipe_revision_id,
             "mapping_id": mapping_id,
             "plan_digest": plan_digest,
-            "compiled_execution_plan": _bind_compiled_execution_plan(
+            "compiled_execution_plan": bind_compiled_execution_plan(
                 compiled_execution_plan,
                 placement=placement,
                 endpoint_address=compiled_endpoint_address,
@@ -94,7 +94,7 @@ def build_recipe_start_payload(
     return payload
 
 
-def _bind_compiled_execution_plan(
+def bind_compiled_execution_plan(
     value: WireCompiledExecutionPlan,
     *,
     placement: RecipeStartPlacement,
@@ -103,6 +103,13 @@ def _bind_compiled_execution_plan(
     master_port: int | None,
     world_size: int,
 ) -> dict[str, object]:
+    """Bind one rank's placement and network into a compiled plan.
+
+    The one rule for a service start and for a job rank: a job passes no
+    endpoint address and no port, and the plan runs on the host network exactly
+    when it is a multi-rank plan with a rendezvous.
+    """
+
     payload = json.loads(canonical_message(value))
     runtime = payload.get("runtime")
     compiled_placement = (

@@ -11,6 +11,8 @@ middle of a cancel is harmless.
 
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import datetime
 
 import pytest
@@ -31,6 +33,7 @@ from vonk_control.artifact_jobs import (
 from vonk_control.distributed_recovery import _settle_unrecoverable
 from vonk_control.lifecycle import Effect, Lifecycle, State
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.lifecycle.job_ranks import fan_in_cancellation_key
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
@@ -755,3 +758,96 @@ def test_a_job_whose_run_ended_ends_failed_and_is_never_run_again(tmp_path):
         )
         assert order.state == "failed"
     assert claim_agent(agent_jobs, order.node_id, "serial-0") is None
+
+
+# ----------------------------------------------------- one order per rank
+
+
+def _two_rank_job(sessions, job_id: str) -> tuple[str, str]:
+    """Make the job's issued order the owner of a two-rank job; add its companion.
+
+    Returns ``(owner_order_id, companion_order_id)``.  The companion's higher
+    attempt count proves the owner is named by its rank, not by recency.
+    """
+
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, job_id)
+        assert job is not None
+        owner = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        assert owner is not None
+
+        def ranked(rank: int, local: str) -> dict[str, object]:
+            payload = json.loads(json.dumps(owner.payload))
+            plan = payload["compiled_execution_plan"]
+            plan["topology"]["node_count"] = 2
+            plan["security"].update(gpu=True, network_mode="host")
+            placement = plan["runtime"]["placement"]
+            placement.update(
+                rank=rank,
+                world_size=2,
+                local_address=local,
+                master_address="192.168.100.10",
+                master_port=29500,
+            )
+            return payload
+
+        companion = AgentOperation(
+            **{
+                column.name: getattr(owner, column.name)
+                for column in AgentOperation.__table__.columns
+            }
+        )
+        companion.id = str(uuid.uuid4())
+        companion.node_id = "spk_" + "f" * 32
+        companion.current_attempt = 3
+        companion.state = LifecycleState.RUNNING
+        companion.payload = ranked(1, "192.168.100.11")
+        owner.payload = ranked(0, "192.168.100.10")
+        session.add(companion)
+        return owner.id, companion.id
+
+
+def test_a_job_follows_its_owner_rank_and_a_failed_rank_ends_it_cancelling_the_rest(
+    tmp_path,
+) -> None:
+    sessions, _ops, service, _agent_jobs, clock, submitted, _claim, _run = _issued_job(
+        tmp_path, 380
+    )
+    owner_id, companion_id = _two_rank_job(sessions, submitted.id)
+    adapter = ArtifactJobAdapter(sessions=sessions, clock=clock)
+    with sessions() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        _parent, order, _attempt = ArtifactJobAdapter(session, clock=clock).order_of(
+            session, job
+        )
+        assert order is not None and order.id == owner_id
+
+    # A companion that finished leaves the job to its owner.
+    with sessions.begin() as session:
+        done = session.get(AgentOperation, companion_id)
+        assert done is not None
+        done.state = LifecycleState.SUCCEEDED
+    adapter.redrive(submitted.id)
+    assert service.get(submitted.id).state == LifecycleState.RUNNING
+
+    # A companion that failed ends the job with its reason and asks the
+    # still-live owner to stop; the job is never left waiting on the owner.
+    with sessions.begin() as session:
+        failed = session.get(AgentOperation, companion_id)
+        assert failed is not None
+        failed.state = LifecycleState.FAILED
+        failed.status_reason = "rank 1 exited"
+    adapter.redrive(submitted.id)
+    ended = service.get(submitted.id)
+    assert ended.state == LifecycleState.FAILED
+    assert ended.status_reason == "rank 1 exited"
+    with sessions() as session:
+        parent = session.get(Job, ended.operation_id)
+        assert parent is not None and parent.result is not None
+        assert parent.result["cancel_requested"] is True
+        assert parent.result["cancel_request_id"] == fan_in_cancellation_key(parent.id)

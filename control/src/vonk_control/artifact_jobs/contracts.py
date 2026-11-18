@@ -56,7 +56,8 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import ArtifactJob, CatalogDocumentRevision, Job
+from ..models import ArtifactJob, CatalogDocumentRevision, Job, RunNode
+from ..run_switch_contract import MemoryKind
 from ..stored_json import read_row_column
 from ..strict_json import StrictJSONModel, read_stored_model
 
@@ -297,6 +298,15 @@ class StorageReconciliation(BlobReconciliation):
 class ArtifactJobCapabilitiesResponse(ArtifactJobContractModel):
     transport: ArtifactJobTransportCapabilities
     storage: ArtifactJobStorageCapabilities
+
+
+@dataclass(frozen=True, slots=True)
+class _JobRank:
+    """One rank of the run a job fans out to, with its fabric facts."""
+
+    node: RunNode
+    fabric_address: str | None
+    memory_kind: MemoryKind
 
 
 @dataclass(frozen=True, slots=True)
