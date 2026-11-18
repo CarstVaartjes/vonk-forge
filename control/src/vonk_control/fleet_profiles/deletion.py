@@ -90,12 +90,12 @@ class FleetProfileService:
                 session,
                 (
                     AdmissionRowLock(
-                        "profile",
+                        "deleted-profile",
                         FleetProfile,
                         select(FleetProfile).where(FleetProfile.id == profile_id),
                     ),
                 ),
-            )["profile"]
+            )["deleted-profile"]
             if not found:
                 return FleetProfileDeletion(number=number, outcome="already-gone")
             row = found[0]
