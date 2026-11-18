@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
@@ -114,7 +114,9 @@ class FleetProfileService:
         )
         builds = tuple(
             session.scalars(
+                # A state reads a build's image columns, never its plan or policy.
                 select(RecipeBuild)
+                .options(defer(RecipeBuild.plan), defer(RecipeBuild.policy_report))
                 .where(
                     catalog_reference_membership(
                         RecipeBuild.recipe_revision_id, revisions

@@ -717,3 +717,47 @@ def test_cache_resolution_loads_documents_only_where_it_reads_them(
     ]
     assert checks
     assert len(document_reads) == len(checks)
+
+
+def test_a_loaded_assignment_reads_build_image_columns_not_build_documents(
+    cache,  # noqa: F811
+):
+    """A loaded profile's assignment state needs the image, not the build plan."""
+
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from vonk_control.fleet_profiles.assignment_assessment import (
+        FleetProfileService as AssignmentAssessment,
+    )
+
+    _, sessions = cache
+    world = _World(sessions, count=1)
+    build = world.build()
+    with sessions.begin() as session:
+        session.add(build)
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with sessions() as session:
+            assignment = SimpleNamespace(recipe_revision_id=world.recipe_revision_id)
+            rows = AssignmentAssessment._assignment_rows(
+                session, [cast(Any, assignment)]
+            )
+            [read] = rows.builds[world.recipe_revision_id]
+            assert read.oci_layout_sha256 == build.oci_layout_sha256
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    build_reads = [item for item in statements if "FROM recipe_builds" in item]
+    assert build_reads
+    assert not [
+        item
+        for item in build_reads
+        if re.search(r'recipe_builds\."?(plan|policy_report)\b', item)
+    ]
