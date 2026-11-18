@@ -405,6 +405,10 @@ def _distributed_args(
         if not has("master-port"):
             command.extend(("--master-port", "VONK_MASTER_PORT"))
         return command
+    if recipe.runtime.engine == "diffusers":
+        # A job's rank wrapper reads its rank, world size, master and peers from
+        # the platform's placement environment, so no argument is added.
+        return command
     raise HarnessCompileError(
         f"distributed topology is not supported by the {recipe.runtime.engine} harness"
     )

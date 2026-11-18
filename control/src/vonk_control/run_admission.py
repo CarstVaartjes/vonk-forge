@@ -169,9 +169,11 @@ def run_port_demand(
         in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
     ]
     if interface is None and len(artifact_interfaces) == 1:
-        if node_count != 1:
-            raise InvalidType("artifact job recipes currently require one node")
-        return RunPortDemand((), None)
+        # A job on several Sparks rendezvous like a service does; it serves no
+        # endpoint, so only the owner reserves the rendezvous port.
+        return RunPortDemand(
+            (), RENDEZVOUS_PORT if node_count > 1 and endpoint_owner else None
+        )
     port = interface.get("port") if interface is not None else None
     if type(port) is not int or not 1 <= port <= 65535:
         raise InvalidType("recipe interface port is invalid")
