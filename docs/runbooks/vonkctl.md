@@ -772,6 +772,7 @@ vonkctl --profile 2 profile progress --follow
 vonkctl --profile 2 profile progress --application APPLICATION_UUID --follow
 vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
 vonkctl --profile 2 profile cancel APPLICATION_UUID --yes --request-key CANCEL_UUID
+vonkctl --profile 2 profile delete --yes
 vonkctl --profile 2 profile endpoint
 vonkctl --profile 2 profile endpoint coding
 vonkctl --profile 2 run "Qwen Code" --spark Atlas
@@ -997,6 +998,17 @@ for piped JSON, within the 1 MiB control-document budget. It validates the
 definition and requires an explicit `--expected-revision`: use `0` to create
 an unused profile number, or the current saved revision to replace it.
 Exported files carry no revision precondition; importing never loads a profile.
+
+Delete a saved profile with `profile delete --profile N`. It removes the saved
+definition and its load history, frees the number for a later profile, and
+never stops or changes what runs on the fleet: if the profile was the loaded
+one, the loaded marker simply clears and the running workloads stay adoptable.
+A load still in progress is cancelled through the ordinary cancel path first;
+the command repeats the request until that cancel has ended. Deleting a
+missing profile succeeds (`already-gone`). `--expected-revision N` refuses the
+delete unless the saved profile is at revision N; omitted, the newest request
+wins. Profile 1 can be deleted like any other; commands without `--profile`
+then report a missing profile and name `vonkctl profile list`.
 
 Cancel a profile application by its exact application ID and explicit Profile
 number. Cancellation retains resource claims while already issued effects are

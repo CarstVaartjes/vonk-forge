@@ -29,6 +29,7 @@ import type {
   FleetProfileInput,
   FleetProfileList,
   FleetProfileEndpoints,
+  FleetProfileDeletion,
   FleetProfilePreview,
   FleetProfile,
   FleetProfileNumber,
@@ -609,6 +610,20 @@ export class ApiClient implements ControlApi {
       await this.generated.PUT("/api/profile/{number}", {
         params: { path: { number } },
         body: input,
+        signal,
+      }),
+    );
+  }
+
+  async deleteProfile(
+    number: FleetProfileNumber,
+    expectedRevision?: FleetProfile["revision"],
+    signal?: AbortSignal,
+  ): Promise<FleetProfileDeletion> {
+    return resultData(
+      await this.generated.POST("/api/profile/{number}/delete", {
+        params: { path: { number } },
+        body: expectedRevision === undefined ? {} : { expected_revision: expectedRevision },
         signal,
       }),
     );

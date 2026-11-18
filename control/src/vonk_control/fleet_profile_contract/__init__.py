@@ -114,6 +114,8 @@ from .definitions import FleetProfileAssignmentInput as FleetProfileAssignmentIn
 from .definitions import FleetProfileAssignmentView as FleetProfileAssignmentView
 from .definitions import FleetProfileDefinition as FleetProfileDefinition
 from .definitions import FleetProfileDefinitionView as FleetProfileDefinitionView
+from .definitions import FleetProfileDeleteRequest as FleetProfileDeleteRequest
+from .definitions import FleetProfileDeletion as FleetProfileDeletion
 from .definitions import FleetProfileInput as FleetProfileInput
 from .definitions import FleetProfileList as FleetProfileList
 from .definitions import FleetProfileNode as FleetProfileNode
@@ -223,6 +225,8 @@ __all__ = [
     "FleetProfileChildProgress",
     "FleetProfileChildResult",
     "FleetProfileCompatibilityDecision",
+    "FleetProfileDeleteRequest",
+    "FleetProfileDeletion",
     "FleetProfileEffectProgress",
     "FleetProfileEffects",
     "FleetProfileInput",

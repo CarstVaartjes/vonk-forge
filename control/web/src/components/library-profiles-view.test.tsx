@@ -425,6 +425,30 @@ test("a profile running an older recipe revision shows an update badge and reloa
   });
 });
 
+test("deleting a profile asks first, then removes it from the page without stopping anything", async () => {
+  const user = userEvent.setup();
+  const profiles = vi
+    .fn()
+    .mockResolvedValueOnce({ generated_at: "2026-09-10T00:00:00Z", profiles: [profile] })
+    .mockResolvedValue({ generated_at: "2026-09-10T00:01:00Z", profiles: [] });
+  const deleteProfile = vi.fn(async () => ({ number: 2, outcome: "deleted" }));
+  const api = apiFor({ profiles, deleteProfile } as Partial<ControlApi>);
+  render(
+    <ToastProvider>
+      <LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />
+    </ToastProvider>,
+  );
+
+  await user.click(await screen.findByRole("button", { name: "Delete profile" }));
+  expect(deleteProfile).not.toHaveBeenCalled();
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(within(dialog).getByRole("button", { name: "Delete profile" }));
+  expect(deleteProfile).toHaveBeenCalledWith(2, 4);
+  expect(api.loadProfile).not.toHaveBeenCalled();
+  expect(await screen.findByText(/Profile 2 deleted/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Apply profile" })).toBeNull();
+});
+
 test("a current profile shows no update notice", async () => {
   render(<LibraryProfilesView api={apiFor()} entries={[]} onNavigate={vi.fn()} />);
   await screen.findAllByText("Profile 2 · Coding");

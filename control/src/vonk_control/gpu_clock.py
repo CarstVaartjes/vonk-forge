@@ -29,6 +29,15 @@ def selected_gpu_clocks(
             node_id: GpuClockIntent(generation=0, range=default_gpu_clock())
             for node_id in node_ids
         }
+    if selection.application_id is None:
+        # Deleted pointer: delete advanced the generation, so Sparks adopt the
+        # default range under it.
+        return {
+            node_id: GpuClockIntent(
+                generation=selection.generation, range=default_gpu_clock()
+            )
+            for node_id in node_ids
+        }
     application = session.get(FleetProfileApplication, selection.application_id)
     if application is None or application.selection_generation != selection.generation:
         raise ValueError("selected profile GPU clock intent is unavailable")
