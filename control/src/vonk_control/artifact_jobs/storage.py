@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     RecipeJobRunRequest,
     RecipeJobRunResult,
     RunAdmissionCode,
+    RunState,
     SecurityRefusalReason,
     WaitReason,
     canonical_message,
@@ -257,7 +258,7 @@ class ArtifactJobService:
         candidates = [node for node in nodes if node.node_id in endpoint_ids]
         if not candidates and len(nodes) == 1:
             candidates = list(nodes)
-        if len(candidates) != 1 or candidates[0].state != "running":
+        if len(candidates) != 1 or candidates[0].state != RunState.RUNNING:
             # The run's endpoint owner is not running (yet, or any more): the
             # run is not accepting jobs, which is the requester's to retry.
             raise ArtifactJobUnavailableError(

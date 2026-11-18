@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalReason,
     canonical_message,
 )
@@ -48,6 +49,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeUninstallPayload,
 )
+from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from . import agent_operation_states
 from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
@@ -137,10 +139,10 @@ def _node_certificate_live(
     return (
         node is not None
         and certificate is not None
-        and node.state == "active"
+        and node.state == NodeIdentityState.ACTIVE
         and node.revoked_at is None
         and certificate.node_id == node_id
-        and certificate.state == "active"
+        and certificate.state == CertificateRecordState.ACTIVE
         and certificate.revoked_at is None
         and certificate.ca_revoked_at is None
         and _aware(certificate.not_before) <= _aware(now)
@@ -542,9 +544,9 @@ class HostRuntimeAuthorityService:
                 or operation.kind != "agent.upgrade.v1"
                 or operation.payload.get("package_sha256") != package_sha256
                 or operation.payload.get("package_signature") != package_signature
-                or operation.state != "running"
+                or operation.state != LifecycleState.RUNNING
                 or operation.current_attempt != current.attempt
-                or current.state != "running"
+                or current.state != LifecycleState.RUNNING
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
@@ -588,7 +590,7 @@ class HostRuntimeAuthorityService:
             certificate = session.get(AgentCertificate, certificate_serial)
             if (
                 node is None
-                or node.state != "active"
+                or node.state != NodeIdentityState.ACTIVE
                 or node.revoked_at is not None
                 or certificate is None
                 or certificate.node_id != node_id
@@ -696,9 +698,9 @@ class HostRuntimeAuthorityService:
                 or operation.node_id != node_id
                 or operation.authority_revision != parent.authority_revision
                 or operation.kind not in self._ACTION_KINDS[action]
-                or operation.state != "running"
+                or operation.state != LifecycleState.RUNNING
                 or operation.current_attempt != current.attempt
-                or current.state != "running"
+                or current.state != LifecycleState.RUNNING
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now

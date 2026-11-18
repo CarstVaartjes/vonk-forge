@@ -682,7 +682,7 @@ class PrebuiltImageImporter:
                 .where(
                     Job.kind == PREBUILT_BUILD_KIND,
                     Job.id == job_id if job_id is not None else true(),
-                    Job.state == "running",
+                    Job.state == LifecycleState.RUNNING,
                     # Only Controller pulls; Spark builds are never touched.
                     Job.payload["prebuilt_image"].as_string().is_not(None),
                 )
@@ -715,7 +715,7 @@ class PrebuiltImageImporter:
                 job = session.get(Job, job_id, with_for_update=True)
                 if (
                     job is None
-                    or job.state != "running"
+                    or job.state != LifecycleState.RUNNING
                     or job.payload.get("prebuilt_claim_owner") != self._owner
                 ):
                     return
@@ -823,7 +823,7 @@ class PrebuiltImageImporter:
             if (
                 job is None
                 or build is None
-                or job.state != "running"
+                or job.state != LifecycleState.RUNNING
                 or job.payload.get("prebuilt_claim_owner") != self._owner
             ):
                 return

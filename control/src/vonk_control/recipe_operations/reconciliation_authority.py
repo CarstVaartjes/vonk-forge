@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import job_states
 from ..admission_locking import (
@@ -531,7 +532,7 @@ class ReconciliationAuthorityMixin:
             agent_node = agent_node_by_id.get(node.node_id)
             if (
                 agent_node is None
-                or agent_node.state != "active"
+                or agent_node.state != NodeIdentityState.ACTIVE
                 or agent_node.revoked_at is not None
             ):
                 blocked(

@@ -134,7 +134,7 @@ class ExecutionMixin:
             )
         document = service._document(job)
         if (
-            job.state != "running"
+            job.state != LifecycleState.RUNNING
             or document.claim_owner != claim.owner
             or document.claim_until is None
             or document.claim_until <= _now(service.owner._clock())

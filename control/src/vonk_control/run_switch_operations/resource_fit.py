@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import ModelDefinition
 
 from ..attempt_residues import unowned_never_installed
@@ -225,7 +226,11 @@ class ResourceFitMixin:
                     )
                 )
             agent = session.get(AgentNode, item.node_id)
-            if agent is None or agent.state != "active" or agent.revoked_at is not None:
+            if (
+                agent is None
+                or agent.state != NodeIdentityState.ACTIVE
+                or agent.revoked_at is not None
+            ):
                 node_blockers.append(
                     _as_reason(
                         RunSwitchCode.SPARK_UNAVAILABLE,

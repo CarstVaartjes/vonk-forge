@@ -9,6 +9,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestReason, SupersedeCode
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
@@ -203,7 +204,7 @@ class SupersessionMixin:
             )
             if tuple(node.node_id for node in nodes) != intent_scope or any(
                 node.workload_intent_ordinal != workload_intent_ordinal
-                or node.state != "active"
+                or node.state != NodeIdentityState.ACTIVE
                 or node.revoked_at is not None
                 for node in nodes
             ):

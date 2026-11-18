@@ -225,7 +225,7 @@ class DeliveryMixin:
                             ArtifactDistributionAssignment.plan_digest == plan_digest,
                         )
                     )
-                elif row.state != "active":
+                elif row.state != DistributionAssignmentState.ACTIVE:
                     raise DistributionRefused(
                         SecurityRefusalReason.DISTRIBUTION_REVOKED.value,
                         "assignment is no longer active",

@@ -78,7 +78,7 @@ def note_waiting_for_worker(self: RecipeImageAvailabilityService, busy: int) -> 
             select(Job)
             .where(
                 Job.kind == OPERATION_KIND,
-                Job.state == "queued",
+                Job.state == LifecycleState.QUEUED,
                 Job.current_attempt == 0,
             )
             .order_by(Job.created_at, Job.id)

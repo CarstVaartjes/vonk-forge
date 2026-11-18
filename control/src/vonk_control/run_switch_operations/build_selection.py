@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..inventory_items import runtime_value
 from ..models import (
@@ -216,7 +217,7 @@ class BuildSelectionMixin:
             session.scalars(
                 select(AgentNode)
                 .where(
-                    AgentNode.state == "active",
+                    AgentNode.state == NodeIdentityState.ACTIVE,
                     AgentNode.revoked_at.is_(None),
                 )
                 .order_by(AgentNode.node_id)
@@ -249,7 +250,7 @@ class BuildSelectionMixin:
             return None, False
         snapshot, freshness = inventory.read(node.node_id)
         if (
-            node.state != "active"
+            node.state != NodeIdentityState.ACTIVE
             or node.revoked_at is not None
             or runtime_value(node, lambda identity: identity.architecture)
             != "linux-arm64"

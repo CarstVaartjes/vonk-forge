@@ -14,6 +14,7 @@ from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, sessionmaker
 from vonk_agent_protocol import ClusterMappingCode
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
@@ -305,7 +306,7 @@ def _active_nodes(
             ClusterMappingCode.NODE_UNKNOWN, "a selected GPU node is unknown"
         )
     if any(
-        row.state != "active"
+        row.state != NodeIdentityState.ACTIVE
         or row.revoked_at is not None
         or runtime_value(row, lambda identity: identity.architecture) != "linux-arm64"
         for row in rows

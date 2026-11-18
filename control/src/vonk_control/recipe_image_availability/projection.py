@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from vonk_agent_protocol import (
     InvalidRequestReason,
+    LifecycleState,
     RecipeImageCode,
     WaitReason,
     canonical_message,
@@ -243,7 +244,7 @@ def retry(
         previous = session.get(Job, operation_id)
         if previous is None or previous.kind != OPERATION_KIND:
             raise MissingRecord(operation_id)
-        if previous.state != "failed":
+        if previous.state != LifecycleState.FAILED:
             raise RecipeImageAvailabilityInvalid(
                 RecipeImageCode.NOT_RETRYABLE, "operation is not failed"
             )

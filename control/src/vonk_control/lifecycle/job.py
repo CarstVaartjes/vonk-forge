@@ -314,7 +314,7 @@ class JobAdapter:
             fence=fence,
             worker_id=worker_id,
             lease_deadline=lease_deadline,
-            state="running",
+            state=LifecycleState.RUNNING,
         )
         session.add(fresh)
         return fresh
@@ -380,7 +380,11 @@ class JobAdapter:
             guard=WAITING,
             reason="",
         )
-        return not settled.stale and settled.changed > 0 and job.state == "queued"
+        return (
+            not settled.stale
+            and settled.changed > 0
+            and job.state == LifecycleState.QUEUED
+        )
 
 
 __all__ = ["KIND", "WAITING", "JobAdapter"]

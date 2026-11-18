@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.build_import import RecipeBuildOptions
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
@@ -612,7 +613,7 @@ def rederive_source_bundle_from_closure(
 def _validate_builder(node: AgentNode) -> None:
     identity = inventory_items(node).runtime_identity
     if (
-        node.state != "active"
+        node.state != NodeIdentityState.ACTIVE
         or node.revoked_at is not None
         or identity is None
         or identity.architecture != "linux-arm64"

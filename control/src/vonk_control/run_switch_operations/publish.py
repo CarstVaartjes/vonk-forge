@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     LifecycleState,
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
@@ -155,7 +156,8 @@ def _persist_run_switch_runtime_image_reference(
                 retryable=True,
             ) from error
         if len(nodes) != len(target_nodes) or any(
-            node.state != "active" and node.revoked_at is None for node in nodes
+            node.state != NodeIdentityState.ACTIVE and node.revoked_at is None
+            for node in nodes
         ):
             raise _RuntimeImageIdentityUnknown(
                 "RunSwitch target observation is unavailable"

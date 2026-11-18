@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import LifecycleState
 
 from .. import agent_operation_states
 from ..agent_upgrade_contract import AgentUpgradePackage
@@ -106,7 +107,9 @@ def _agent_upgrade_diagnostics(
         # after _contact_proves_target accepts authenticated contact plus the
         # complete runtime and result evidence. Matching digests alone is not
         # the success gate and must never be projected as proof here.
-        target_proven = bool(operation is not None and operation.state == "succeeded")
+        target_proven = bool(
+            operation is not None and operation.state == LifecycleState.SUCCEEDED
+        )
         unresolved_generic = bool(
             not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
