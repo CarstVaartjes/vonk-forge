@@ -10,6 +10,7 @@ deriving them from the central writable-path contract.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import replace
 
 import pytest
@@ -44,7 +45,10 @@ def test_every_builtin_engine_resolves_its_own_adapter() -> None:
             foreign = CANONICAL_HARNESS_BY_SLUG[other].wrapper
             if other == engine or foreign == wrapper:
                 continue
-            assert foreign not in adapter.containerfile
+            # Whole paths only: /opt/vonk/bin/vllm is a prefix of vllm-omni-job.
+            assert not re.search(
+                re.escape(foreign) + r"(?![\w-])", adapter.containerfile
+            )
 
 
 def test_adapter_resolution_fails_closed() -> None:
