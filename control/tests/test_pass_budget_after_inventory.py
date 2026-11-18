@@ -90,6 +90,7 @@ CLASSIFIED = {
     "vonk_control.library_assessment": "probe budget, not a collector",
     "vonk_control.library_image_presence": "probe budget, not a collector",
     "vonk_control.profile_read_observation": "read budget, not a collector",
+    "vonk_control.model_cache.observation": "checkpoint cadence, not a deadline",
 }
 
 
