@@ -64,6 +64,7 @@ fn each_reading_that_fails_is_unknown_on_its_own() {
     assert_eq!(observed.units, None);
     assert_eq!(observed.snaps, None);
     assert_eq!(observed.watermark_boost_factor, None);
+    assert_eq!(observed.compaction_proactiveness, None);
     assert_eq!(observed.kernel_splash, None);
     assert_eq!(observed.free_memory, None);
     // An answer that names none of the units is no answer either.

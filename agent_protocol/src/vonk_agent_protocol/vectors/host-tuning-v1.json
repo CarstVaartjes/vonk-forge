@@ -6,6 +6,7 @@
     "files": {
       "proc/buddyinfo": "Node 0, zone      DMA     12      9      7      5      4      3      2      2      1      1    120\nNode 0, zone   Normal 1048576 655360 327680 131072  65536  32768  16384   8192   4096   2048  19000\n",
       "proc/cmdline": "BOOT_IMAGE=/boot/vmlinuz-6.11.0-1016-nvidia root=UUID=0b1c ro quiet splash vt.handoff=7\n",
+      "proc/sys/vm/compaction_proactiveness": "20\n",
       "proc/sys/vm/watermark_boost_factor": "15000\n"
     },
     "snap_directories": [
@@ -92,6 +93,7 @@
       "thunderbird"
     ],
     "watermark_boost_factor": 15000,
+    "compaction_proactiveness": 20,
     "kernel_splash": true,
     "free_memory": {
       "free_bytes": 125298024448,
