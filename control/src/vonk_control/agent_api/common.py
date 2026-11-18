@@ -44,7 +44,11 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
-from vonk_agent_protocol.state_machines import CertificateRecordState, EnrollmentPurpose
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
+    EnrollmentPurpose,
+    NodeIdentityState,
+)
 
 from ..agent_jobs import AgentJobService
 from ..auth import (
@@ -482,7 +486,7 @@ def _agent_identity_state(
                 AgentCertificate.revoked_at.is_(None),
                 AgentCertificate.not_before <= now,
                 AgentCertificate.not_after > now,
-                AgentNode.state == "active",
+                AgentNode.state == NodeIdentityState.ACTIVE,
                 AgentNode.revoked_at.is_(None),
             )
         )

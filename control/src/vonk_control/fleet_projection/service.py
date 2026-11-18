@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     InstallDegradedReason,
     ReservationState,
 )
+from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
@@ -266,7 +267,7 @@ class FleetProjection:
         session: Session, node_ids: Sequence[str], current: datetime
     ) -> dict[str, AgentCertificate]:
         valid = (
-            (AgentCertificate.state == "active")
+            (AgentCertificate.state == CertificateRecordState.ACTIVE)
             & (AgentCertificate.revoked_at.is_(None))
             & (AgentCertificate.ca_revoked_at.is_(None))
             & (AgentCertificate.not_before <= current)

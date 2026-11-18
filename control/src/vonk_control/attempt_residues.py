@@ -72,6 +72,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
 from . import job_states
 from .agent_operation_facts import aware as _aware
@@ -611,7 +612,7 @@ class AttemptResidueReconciler:
                     continue
                 # A later transfer of the same plan re-registers (and so
                 # reclaims) a revoked grant; nothing serves this one meanwhile.
-                grant.state = "revoked"
+                grant.state = DistributionAssignmentState.REVOKED
                 grant.revoked_at = now
                 grant.updated_at = now
                 revoked.append(grant.id)
