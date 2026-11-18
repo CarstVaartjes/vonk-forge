@@ -214,7 +214,7 @@ def _cancel_order(
         # order that never ran ends now; one that did stays until its
         # cancellation receipt arrives or the cancellation window closes.
         adapter.withdraw_retry(child)
-        if child.state == "queued" and child.current_attempt == 0:
+        if child.state == LifecycleState.QUEUED and child.current_attempt == 0:
             adapter.settle(
                 child,
                 None,
@@ -265,7 +265,7 @@ def _cancel_order(
         # receipt that can no longer arrive.
         state = (
             "failed"
-            if any(child.state == "failed" for child in children)
+            if any(child.state == LifecycleState.FAILED for child in children)
             else "cancelled"
         )
     else:

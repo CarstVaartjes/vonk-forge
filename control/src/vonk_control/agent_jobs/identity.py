@@ -14,10 +14,12 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalReason,
     canonical_message,
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
@@ -146,7 +148,7 @@ def _active(
                 and column_field(parent, "result", "cancel_requested") is True
             )
         )
-        or node.state != "active"
+        or node.state != NodeIdentityState.ACTIVE
         or node.revoked_at is not None
         or not cancellation_stop_current(session, parent, operation)
     ):
@@ -165,10 +167,10 @@ def _active(
     )
     if (
         attempt is None
-        or operation.state != "running"
+        or operation.state != LifecycleState.RUNNING
         or attempt.operation_id != operation.id
         or operation.current_attempt != attempt.attempt
-        or attempt.state != "running"
+        or attempt.state != LifecycleState.RUNNING
         or (
             _aware(attempt.lease_deadline) <= _aware(now)
             and not (
@@ -328,9 +330,9 @@ def _identity_is_active(
     now: datetime,
 ) -> bool:
     return (
-        node.state == "active"
+        node.state == NodeIdentityState.ACTIVE
         and node.revoked_at is None
-        and certificate.state == "active"
+        and certificate.state == CertificateRecordState.ACTIVE
         and certificate.revoked_at is None
         and _aware(certificate.not_before) <= _aware(now)
         and _aware(certificate.not_after) > _aware(now)

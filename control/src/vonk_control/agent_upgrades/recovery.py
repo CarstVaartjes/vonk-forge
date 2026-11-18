@@ -31,6 +31,8 @@ from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job, JobA
 if TYPE_CHECKING:
     from .service import AgentUpgradeService
 
+from vonk_agent_protocol.state_machines import NodeIdentityState
+
 from .constants import _ACTIVE_ROLLOUT_STATES
 from .helpers import _aware, _failure_detail
 from .stored import _stored_package, _stored_result
@@ -74,7 +76,11 @@ class RecoveryMixin:
         # later authenticated contact that proves the target completes the
         # order first; the retry is dispatched only while the Spark still runs
         # the exact rollback source.  Meanwhile the rollout moves on.
-        if node is None or node.state != "active" or node.revoked_at is not None:
+        if (
+            node is None
+            or node.state != NodeIdentityState.ACTIVE
+            or node.revoked_at is not None
+        ):
             AgentOperationAdapter(session).settle(
                 operation,
                 attempt,
@@ -115,7 +121,7 @@ class RecoveryMixin:
                         or_(
                             Job.state.in_(job_states.LIVE),
                             and_(
-                                Job.state == "failed",
+                                Job.state == LifecycleState.FAILED,
                                 Job.status_reason == UNSUPPORTED_DISPATCH,
                             ),
                         ),
@@ -203,7 +209,7 @@ class RecoveryMixin:
         )
         return (
             attempt is not None
-            and attempt.state == "running"
+            and attempt.state == LifecycleState.RUNNING
             and _aware(attempt.lease_deadline) > _aware(now)
         )
 
@@ -285,7 +291,11 @@ class RecoveryMixin:
             .with_for_update(of=AgentOperation)
         ):
             node = session.get(AgentNode, operation.node_id)
-            if node is None or node.state != "active" or node.revoked_at is not None:
+            if (
+                node is None
+                or node.state != NodeIdentityState.ACTIVE
+                or node.revoked_at is not None
+            ):
                 AgentOperationAdapter(session).settle(
                     operation,
                     None,

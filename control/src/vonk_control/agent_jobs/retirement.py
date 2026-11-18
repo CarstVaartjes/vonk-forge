@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states, job_states
 from ..agent_operation_facts import (
@@ -120,7 +121,7 @@ def operator_resume_candidates_in_session(
     # A topology-wide request cannot resume only its still-current subset.
     # The mutation locks this complete target scope before this shared decision.
     if set(nodes) != set(scope) or any(
-        node.state != "active"
+        node.state != NodeIdentityState.ACTIVE
         or node.revoked_at is not None
         or (
             fenced
@@ -259,9 +260,9 @@ def retire_exhausted_operations_in_session(
             .where(
                 StoredOperation.parent_job_id == job_id,
                 or_(
-                    StoredOperation.state == "running",
+                    StoredOperation.state == LifecycleState.RUNNING,
                     and_(
-                        StoredOperation.state == "queued",
+                        StoredOperation.state == LifecycleState.QUEUED,
                         StoredOperation.current_attempt > 0,
                     ),
                 ),
@@ -300,7 +301,7 @@ def retire_exhausted_operations_in_session(
         )
         if (
             attempt is not None
-            and attempt.state == "running"
+            and attempt.state == LifecycleState.RUNNING
             and _aware(attempt.lease_deadline) > _aware(now)
         ):
             raise OperatorRetirementRefused(
@@ -424,7 +425,7 @@ def _release_retired_owner_in_session(
     for child in session.scalars(
         select(StoredOperation).where(
             StoredOperation.parent_job_id == job.id,
-            StoredOperation.state == "queued",
+            StoredOperation.state == LifecycleState.QUEUED,
             StoredOperation.current_attempt == 0,
         )
     ):

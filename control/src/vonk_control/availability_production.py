@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
@@ -664,7 +665,7 @@ def build_recipe_image_availability(
                         candidate
                         for candidate in session.scalars(
                             select(AgentNode)
-                            .where(AgentNode.state == "active")
+                            .where(AgentNode.state == NodeIdentityState.ACTIVE)
                             .order_by(AgentNode.node_id)
                         )
                         if runtime_value(

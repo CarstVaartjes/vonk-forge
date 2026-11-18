@@ -323,7 +323,7 @@ class RetryMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is None or operation.state == "cancelled":
+            if operation is None or operation.state == LifecycleState.CANCELLED:
                 return  # gone or cancelled: nothing left to record (rule 5)
             payload = cache._payload_or_none(operation)
             if payload is None or payload.cancellation is not None:
@@ -358,7 +358,7 @@ class RetryMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is None or operation.state == "cancelled":
+            if operation is None or operation.state == LifecycleState.CANCELLED:
                 return  # gone or cancelled: nothing left to record (rule 5)
             payload = cache._transfer_or_none(operation)
             if payload is not None and payload.cancellation is not None:
@@ -411,7 +411,7 @@ class RetryMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is None or operation.state == "cancelled":
+            if operation is None or operation.state == LifecycleState.CANCELLED:
                 return  # gone or cancelled: nothing left to record (rule 5)
             payload = cache._transfer_or_none(operation)
             if payload is None:

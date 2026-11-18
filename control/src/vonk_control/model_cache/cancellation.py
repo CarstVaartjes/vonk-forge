@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -102,7 +102,7 @@ class CancellationMixin:
             )
             if operation is None:
                 return True  # gone: there is nothing left to cancel
-            if operation.state == "cancelled":
+            if operation.state == LifecycleState.CANCELLED:
                 return True
             cancellation = _operation_cancellation(operation)
             if cancellation is None:

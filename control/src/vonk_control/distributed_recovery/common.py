@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
     InvalidRequestReason,
+    LifecycleState,
     RecipeStartPayload,
     RecipeStopPayload,
     ReservationState,
@@ -338,7 +339,7 @@ def _proves_fresh_absence(run: RecipeRun, node: RunNode, now: datetime) -> bool:
     """Require a current-generation observation that reports no process."""
 
     if (
-        node.state != "failed"
+        node.state != RunState.FAILED
         or node.observed_run_generation != run.run_generation
         or node.observation_process_running is not False
         or node.observation_observed_at is None
@@ -399,7 +400,7 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
                 Job.kind == "recipe.start",
                 Job.owner_kind == "run",
                 Job.owner_id == run.id,
-                Job.state == "succeeded",
+                Job.state == LifecycleState.SUCCEEDED,
             )
         )
         if ordinal is not None

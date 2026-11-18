@@ -12,9 +12,11 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProgress,
     InvalidRequestReason,
+    LifecycleState,
     OperationProgress,
     WaitReason,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
@@ -234,10 +236,10 @@ def known_superseded_cancellation(
             return False
         node, _certificate = identity
         return bool(
-            node.state == "active"
+            node.state == NodeIdentityState.ACTIVE
             and node.revoked_at is None
             and (
-                operation.state == "cancelled"
+                operation.state == LifecycleState.CANCELLED
                 or (
                     operation.workload_intent_ordinal is not None
                     and operation.workload_intent_ordinal < node.workload_intent_ordinal

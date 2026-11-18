@@ -314,7 +314,7 @@ def validate_profile_stop_owner(
         raise ProfileStopAuthorityError("profile Stop run generation changed")
 
     if require_current and (
-        application.state != "running"
+        application.state != LifecycleState.RUNNING
         or profile_operation.state not in job_states.LIVE
         or (
             run.state not in {RunState.RUNNING, RunState.STARTING, RunState.STOPPING}

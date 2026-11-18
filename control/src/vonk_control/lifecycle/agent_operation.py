@@ -333,7 +333,7 @@ class AgentOperationAdapter:
             state = State.QUEUED
         elif stored == "running":
             state = State.RUNNING
-            if attempt is not None and attempt.state == "running":
+            if attempt is not None and attempt.state == LifecycleState.RUNNING:
                 lease = aware(attempt.lease_deadline)
                 deadline = start_deadline(operation, attempt, now)
                 if attempt_holds_open_launch_budget(operation, attempt, now):
@@ -542,7 +542,7 @@ class AgentOperationAdapter:
             before.state is State.RUNNING
             and after.state not in {State.RUNNING, State.SUCCEEDED, State.FAILED}
             and attempt is not None
-            and attempt.state == "running"
+            and attempt.state == LifecycleState.RUNNING
         ):
             aos.lapse(attempt)
             changed = True
@@ -681,10 +681,12 @@ class AgentOperationAdapter:
         if operation.kind != AgentOperation.AGENT_UPGRADE.value or not_before is None:
             return False
         changed = False
-        if attempt.state == "running":
+        if attempt.state == LifecycleState.RUNNING:
             aos.lapse(attempt)
             changed = True
-        elif not (attempt.state == "failed" or aos.attempt_is_observing(attempt)):
+        elif not (
+            attempt.state == LifecycleState.FAILED or aos.attempt_is_observing(attempt)
+        ):
             aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
             changed = True
         if aware(attempt.lease_deadline) < not_before:
@@ -799,7 +801,7 @@ class AgentOperationAdapter:
         if claimed.state is not State.RUNNING:
             return None
         operation.current_attempt += 1
-        operation.state = "running"
+        operation.state = LifecycleState.RUNNING
         schedule_wait(operation, None)
         operation.observe_count = 0
         operation.retry_due_at = None
@@ -813,7 +815,7 @@ class AgentOperationAdapter:
             fence=fence,
             lease_deadline=deadline,
             agent_certificate_serial=certificate_serial,
-            state="running",
+            state=LifecycleState.RUNNING,
             progress=None if progress is None else progress_document(progress),
         )
         session = self._session
@@ -842,7 +844,7 @@ class AgentOperationAdapter:
 
         now = aware(now)
         operation.current_attempt += 1
-        operation.state = "failed"
+        operation.state = LifecycleState.FAILED
         schedule_wait(operation, None)
         operation.updated_at = now
         attempt = AgentOperationAttempt(
@@ -851,7 +853,7 @@ class AgentOperationAdapter:
             fence=fence,
             lease_deadline=now,
             agent_certificate_serial=certificate_serial,
-            state="failed",
+            state=LifecycleState.FAILED,
             result=json.loads(canonical_message(result)),
         )
         session = self._session
@@ -952,7 +954,9 @@ class AgentOperationAdapter:
     def expire_attempt(attempt: AgentOperationAttempt) -> None:
         """An attempt that can no longer report is ``expired``; its fence stays."""
 
-        if attempt.state == "running" or aos.attempt_reported_unknown(attempt):
+        if attempt.state == LifecycleState.RUNNING or aos.attempt_reported_unknown(
+            attempt
+        ):
             aos.lapse(attempt)
 
     @staticmethod
@@ -1088,12 +1092,12 @@ def lapsed_running_orders(now: datetime):
         .where(
             AgentOperationAttempt.operation_id == StoredOperation.id,
             AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-            AgentOperationAttempt.state == "running",
+            AgentOperationAttempt.state == LifecycleState.RUNNING,
             AgentOperationAttempt.lease_deadline > now,
         )
         .exists()
     )
-    return and_(StoredOperation.state == "running", ~live)
+    return and_(StoredOperation.state == LifecycleState.RUNNING, ~live)
 
 
 def parked_orders(now: datetime):

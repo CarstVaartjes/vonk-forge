@@ -10,7 +10,7 @@ import hashlib
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
-            "c53cdd168ced1ab26b9b1db93d8d01cf617b76d3d620df315fde650d5a8e85df",
+            "05708e19afca85e6e68fd656076b225b3804e2cf51e46d82a3891f7f81ea7360",
             "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
@@ -20,7 +20,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "agent_jobs/claim_reconcile.py": {
         "_fail_spent_start_budgets": (
-            "f4c2e990417a6f824df4dc14c5c72936d2b986c5a8d825696ad4186683e55f38",
+            "a75f18b205dab540bc0431e7546f2331e61075d042352bf72045b50ddcc471f2",
             "HTTP wait: plain claim transaction rolls back; next poll re-observes spent starts",
         ),
     },

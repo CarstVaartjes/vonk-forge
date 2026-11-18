@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     Disposition,
     InvalidRequestReason,
+    LifecycleState,
     RecipeBuildRequest,
     WaitReason,
 )
@@ -373,7 +374,7 @@ def _claim_once(
                     )
                 ):
                     continue
-                if old.state == "running":
+                if old.state == LifecycleState.RUNNING:
                     attempt = session.scalar(
                         select(AgentOperationAttempt)
                         .where(
@@ -528,10 +529,10 @@ def _claim_once(
             ):
                 resumable_progress = stored_progress(previous)
             if previous is not None and (
-                previous.state == "running"
+                previous.state == LifecycleState.RUNNING
                 or agent_operation_states.attempt_reported_unknown(previous)
             ):
-                if operation.state == "running" and (
+                if operation.state == LifecycleState.RUNNING and (
                     _attempt_holds_open_launch_budget(operation, previous, now)
                 ):
                     # The attempt is the launch its own immutable budget
@@ -541,7 +542,7 @@ def _claim_once(
                     # budget elapses.
                     return None
                 AgentOperationAdapter.expire_attempt(previous)
-        if operation.state == "running":
+        if operation.state == LifecycleState.RUNNING:
             # An expiry decides the operation without an attempt result, so
             # record why it stopped and the last facts describing the
             # interruption.  Without this an uncertain operation carries no

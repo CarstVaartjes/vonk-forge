@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentClaim, AgentOperation, InvalidRequestReason
 from vonk_agent_protocol.contracts import canonical_payload
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import acquire_admission_keys, node_admission_key
 from ..categorized_errors import InvalidValue, MissingRecord
@@ -112,7 +113,7 @@ def enqueue_in_session(
     node = session.scalar(select(AgentNode).where(AgentNode.node_id == node_id))
     if node is None:
         raise MissingRecord(node_id, reason=InvalidRequestReason.NOT_FOUND)
-    if node.state != "active" or node.revoked_at is not None:
+    if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
         raise InvalidValue(
             "agent operation node must be active",
             reason=InvalidRequestReason.NOT_READY,

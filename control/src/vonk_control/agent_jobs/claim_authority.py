@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states, job_states
 from ..disk_reservations import outstanding_disk_charges
@@ -223,7 +224,7 @@ def _reconcile_agent_upgrade(
     # Preserve explicit helper failures as truthful attempt audit. Exact
     # contact reconciles the operation projection, not the historical fact
     # that the signed helper attempt returned failure.
-    if attempt.state != "failed":
+    if attempt.state != LifecycleState.FAILED:
         AgentOperationAdapter.record_report(attempt, "succeeded", message.result)
     AgentOperationAdapter(session).settle(
         operation, attempt, None, Reported(Outcome.DONE), now
@@ -387,7 +388,7 @@ def _claim_has_authority(
             note="inherited cancellation Stop owner changed",
         )
         return False
-    if node.state != "active" or node.revoked_at is not None:
+    if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
         self._record_claim_refusal(
             session,
             operation=current_operation,

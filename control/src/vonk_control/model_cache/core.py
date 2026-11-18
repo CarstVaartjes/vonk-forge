@@ -23,6 +23,7 @@ from ..model_cache_contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
     ModelCacheRemovalPayload,
+    ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
@@ -122,7 +123,7 @@ class CoreMixin:
             return False
         with cache._session() as session:
             row = session.get(ModelCacheSet, set_digest)
-            return row is not None and row.state == "cached"
+            return row is not None and row.state == ModelCacheSetState.CACHED
 
     def signal_stop(self, operation_id: str) -> None:
         """Signal local transfers without acquiring storage or database locks."""
@@ -367,7 +368,11 @@ class CoreMixin:
         )
         row = session.get(ModelCacheSet, set_digest)
         if row is not None and not sibling_work:
-            row.state = "cached" if coverage_complete else "incomplete"
+            row.state = (
+                ModelCacheSetState.CACHED
+                if coverage_complete
+                else ModelCacheSetState.INCOMPLETE
+            )
             row.verified_bytes = verified_bytes
             row.updated_at = now
             if coverage_complete:

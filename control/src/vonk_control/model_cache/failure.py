@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
+    LifecycleState,
     ModelCacheCode,
     SecurityRefusalReason,
     WaitReason,
@@ -22,6 +23,7 @@ from ..lifecycle import Reported, State
 from ..logging import redact_text
 from ..model_cache_contract import (
     ModelCacheMissingSourceObservation,
+    ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
@@ -109,7 +111,7 @@ class FailureMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is not None and operation.state == "cancelled":
+            if operation is not None and operation.state == LifecycleState.CANCELLED:
                 return
             if transfer_attempt is not None and (
                 source_status in _SOURCE_GONE_STATUSES or digest_mismatch
@@ -136,7 +138,11 @@ class FailureMixin:
             )
             if row is not None:
                 row.verified_bytes = verified_bytes
-                row.state = "cached" if all_valid else "needs-repair"
+                row.state = (
+                    ModelCacheSetState.CACHED
+                    if all_valid
+                    else ModelCacheSetState.NEEDS_REPAIR
+                )
                 row.updated_at = now
                 row.last_error = detail[:512]
             operation = (
@@ -239,7 +245,7 @@ class FailureMixin:
                     if payload_before is None
                     else payload_before.retry.operator_retries
                 )
-                if operation.state == "failed":
+                if operation.state == LifecycleState.FAILED:
                     # A recheck that finds the failure transient: withdraw the
                     # end, and let the core decide again (retry, with backoff).
                     cache._lifecycle.reopen(operation, now)

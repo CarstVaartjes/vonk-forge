@@ -14,7 +14,12 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
-from vonk_agent_protocol import AgentOperation, WaitReason, canonical_message
+from vonk_agent_protocol import (
+    AgentOperation,
+    LifecycleState,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
@@ -230,7 +235,7 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
         .where(
             AgentOperationAttempt.operation_id == StoredOperation.id,
             AgentOperationAttempt.attempt == StoredOperation.current_attempt,
-            AgentOperationAttempt.state == "running",
+            AgentOperationAttempt.state == LifecycleState.RUNNING,
         )
         .exists()
     )

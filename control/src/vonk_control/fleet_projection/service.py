@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     CertificateState,
     InstallationState,
     InstallDegradedReason,
+    LifecycleState,
     ReservationState,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState
@@ -503,7 +504,7 @@ class FleetProjection:
         known = frozenset(node_ids)
         for progress in session.scalars(
             select(FleetProfileApplication.progress)
-            .where(FleetProfileApplication.state == "running")
+            .where(FleetProfileApplication.state == LifecycleState.RUNNING)
             .order_by(FleetProfileApplication.id)
         ):
             raw = progress.get("blockers") if isinstance(progress, Mapping) else None

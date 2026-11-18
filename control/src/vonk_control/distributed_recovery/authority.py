@@ -8,7 +8,12 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RecipeStartPayload, WaitReason, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    RecipeStartPayload,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
 from ..distributed_lifecycle import canonical_distributed_readiness
@@ -77,7 +82,7 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
         else None
     )
     return (
-        start.state == "succeeded"
+        start.state == LifecycleState.SUCCEEDED
         and revision is not None
         and start.authority_revision == revision.content_digest
         and isinstance((parent := _parent(start)), RecipeStartParent)
@@ -138,7 +143,7 @@ def _accepted_start_child(
         or child.parent_job_id != start.id
         or child.node_id != node_id
         or child.kind != "recipe.start"
-        or child.state != "succeeded"
+        or child.state != LifecycleState.SUCCEEDED
         or not isinstance(payload, RecipeStartPayload)
         or canonical_message(child.payload) != canonical_message(item.payload)
         or child.payload_digest
@@ -468,7 +473,7 @@ def _enqueue_recovery_stop(
     parent = parent.model_copy(update={"workload_intent_ordinal": start_ordinal})
     job_payload = controller_recipe_document(parent)
     job = JobAdapter.new_job(
-        state="running",
+        state=LifecycleState.RUNNING,
         id=job_id,
         request_id=request_id,
         kind="recipe.stop",
@@ -513,7 +518,7 @@ def _original_start_authority(session: Session, run: RecipeRun) -> Job | Residue
     starts = tuple(
         start
         for start in starts
-        if start.state == "succeeded"
+        if start.state == LifecycleState.SUCCEEDED
         and _start_binds_current_run_plan(session, start, run)
     )
     if not starts:

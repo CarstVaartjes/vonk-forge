@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     RunSwitchCode,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import job_states
 from ..bounded_json import require_integer
@@ -81,7 +82,7 @@ class RetryHoldsMixin:
             return "invalid"
         if len(current) != len(job.targets):
             return "missing-target"
-        if any(node.state != "active" for node in current):
+        if any(node.state != NodeIdentityState.ACTIVE for node in current):
             return "waiting"
         if any(node.workload_intent_ordinal != ordinal for node in current):
             return "superseded"

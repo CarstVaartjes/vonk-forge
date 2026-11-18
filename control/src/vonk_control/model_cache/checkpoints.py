@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol import (
     Disposition,
+    LifecycleState,
     ModelCacheCode,
     ModelFileState,
 )
@@ -158,7 +159,7 @@ class CheckpointsMixin:
                     ModelCacheOperation, operation_id, with_for_update=True
                 )
                 if operation is not None and (
-                    operation.state == "cancelled"
+                    operation.state == LifecycleState.CANCELLED
                     or _operation_cancellation(operation) is not None
                 ):
                     cache._transfer_stop(operation_id).set()
@@ -333,7 +334,7 @@ class CheckpointsMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is not None and operation.state == "cancelled":
+            if operation is not None and operation.state == LifecycleState.CANCELLED:
                 return
             cancellation_pending = (
                 operation is not None and _operation_cancellation(operation) is not None
@@ -341,7 +342,7 @@ class CheckpointsMixin:
             if not cancellation_pending:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
-                    row.state = "incomplete"
+                    row.state = ModelCacheSetState.INCOMPLETE
                     row.verified_bytes = verified_bytes
                     row.updated_at = now
                     row.last_error = detail[:512]
@@ -410,7 +411,7 @@ class CheckpointsMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update={"nowait": True}
             )
-            if operation is None or operation.state != "running":
+            if operation is None or operation.state != LifecycleState.RUNNING:
                 return
             payload = cache._payload_or_none(operation)
             if payload is None:

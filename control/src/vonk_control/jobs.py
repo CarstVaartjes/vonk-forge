@@ -16,6 +16,7 @@ from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
@@ -324,10 +325,10 @@ class JobService:
                     or_(Job.next_action_at.is_(None), Job.next_action_at <= now),
                     without_agent_operation(),
                     or_(
-                        Job.state == "queued",
+                        Job.state == LifecycleState.QUEUED,
                         Job.id.in_(
                             select(JobAttempt.job_id).where(
-                                JobAttempt.state == "running",
+                                JobAttempt.state == LifecycleState.RUNNING,
                                 JobAttempt.lease_deadline < now,
                             )
                         ),
@@ -374,7 +375,7 @@ class JobService:
             job is None
             or attempt is None
             or job.current_attempt != fence.attempt
-            or attempt.state != "running"
+            or attempt.state != LifecycleState.RUNNING
             or attempt.worker_id != fence.worker_id
             or _aware(attempt.lease_deadline) <= _aware(self._clock())
         ):

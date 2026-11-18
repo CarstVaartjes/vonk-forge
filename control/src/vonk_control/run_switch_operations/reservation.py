@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import job_states
 from ..admission_locking import ConstraintReplay, admitting
@@ -160,7 +161,8 @@ class ReservationMixin:
                 if len(nodes) != len(target_node_ids) or (
                     plan.profile_stop_scope is not None
                     and any(
-                        node.revoked_at is not None or node.state != "active"
+                        node.revoked_at is not None
+                        or node.state != NodeIdentityState.ACTIVE
                         for node in nodes
                     )
                 ):
