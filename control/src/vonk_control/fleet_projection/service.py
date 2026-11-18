@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     InstallDegradedReason,
     ReservationState,
 )
+from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
@@ -103,7 +104,7 @@ class FleetProjection:
 
         with self._sessions.begin() as session:
             node = session.get(AgentNode, node_id)
-            if node is None or node.state == "revoked" or node.revoked_at is not None:
+            if node is None or node.revoked_at is not None:
                 raise KeyError(node_id)
             profile = session.get(AgentNodeProfile, node_id)
             if profile is None:
@@ -242,7 +243,6 @@ class FleetProjection:
             session.scalars(
                 select(AgentNode)
                 .where(
-                    AgentNode.state != "revoked",
                     AgentNode.revoked_at.is_(None),
                 )
                 .order_by(AgentNode.enrolled_at.asc().nulls_first(), AgentNode.node_id)
@@ -266,7 +266,7 @@ class FleetProjection:
         session: Session, node_ids: Sequence[str], current: datetime
     ) -> dict[str, AgentCertificate]:
         valid = (
-            (AgentCertificate.state == "active")
+            (AgentCertificate.state == CertificateRecordState.ACTIVE)
             & (AgentCertificate.revoked_at.is_(None))
             & (AgentCertificate.ca_revoked_at.is_(None))
             & (AgentCertificate.not_before <= current)
@@ -522,12 +522,12 @@ class FleetProjection:
         if value is None:
             return CertificateState.MISSING
         if (
-            value.state == "revoked"
+            value.state == CertificateRecordState.REVOKED
             or value.revoked_at is not None
             or value.ca_revoked_at is not None
         ):
             return CertificateState.REVOKED
-        if value.state != "active":
+        if value.state != CertificateRecordState.ACTIVE:
             return CertificateState.INACTIVE
         if _utc(value.not_before) > current:
             return CertificateState.NOT_YET_VALID

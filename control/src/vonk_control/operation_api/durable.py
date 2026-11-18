@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     UnknownError,
 )
 from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from .. import job_states
 from ..agent_jobs import (
@@ -321,7 +322,7 @@ class _DurableOperationProjection:
                 session.scalars(
                     select(AgentCertificate)
                     .where(
-                        AgentCertificate.state == "active",
+                        AgentCertificate.state == CertificateRecordState.ACTIVE,
                         AgentCertificate.revoked_at.is_(None),
                     )
                     .order_by(

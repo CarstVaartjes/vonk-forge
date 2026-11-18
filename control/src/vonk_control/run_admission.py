@@ -1257,7 +1257,7 @@ class RunAdmissionService:
                 inherited.owner_id = run.id
                 inherited.resource_key = plan.plan_digest
                 inherited.plan_digest = plan.plan_digest
-                inherited.state = "active"
+                inherited.state = ReservationState.ACTIVE
             else:
                 session.add(
                     ResourceReservation(
@@ -1278,7 +1278,7 @@ class RunAdmissionService:
                     inherited.owner_kind = "run"
                     inherited.owner_id = run.id
                     inherited.plan_digest = plan.plan_digest
-                    inherited.state = "active"
+                    inherited.state = ReservationState.ACTIVE
                     continue
                 session.add(
                     ResourceReservation(

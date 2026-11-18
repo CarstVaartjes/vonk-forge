@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentClaim, InvalidRequestReason, WaitReason
+from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from .. import agent_operation_states
 from ..agent_job_contract import ClaimFacts
@@ -119,7 +120,7 @@ def claim_next_operation(
                     select(AgentCertificate.serial)
                     .where(
                         AgentCertificate.node_id == node_id,
-                        AgentCertificate.state == "staged",
+                        AgentCertificate.state == CertificateRecordState.STAGED,
                         AgentCertificate.revoked_at.is_(None),
                         AgentCertificate.ca_revoked_at.is_(None),
                         AgentCertificate.not_before <= now,
