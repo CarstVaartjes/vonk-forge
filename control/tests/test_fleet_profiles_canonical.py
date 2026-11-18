@@ -532,6 +532,42 @@ def _resolution(
     )
 
 
+def test_a_profile_read_parses_its_saved_definition_once(monkeypatch) -> None:
+    """The choices, the profile digest and the view share one parsed definition."""
+
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(
+        FleetProfileInput(
+            name="Once",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+    parses: list[str] = []
+    parse = FleetProfileDefinition.model_validate_json.__func__
+
+    def counted(cls, *args, **kwargs):
+        parses.append(cls.__name__)
+        return parse(cls, *args, **kwargs)
+
+    monkeypatch.setattr(
+        FleetProfileDefinition, "model_validate_json", classmethod(counted)
+    )
+    view = service.read_number(created.number)
+    assert isinstance(view, FleetProfileView)
+    assert [item.recipe_selector for item in view.assignments] == [
+        "vonk-forge/synthetic-tiny-build"
+    ]
+    assert parses.count("FleetProfileDefinition") == 1
+
+
 def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     sessions = _sessions()
     _seed(sessions)

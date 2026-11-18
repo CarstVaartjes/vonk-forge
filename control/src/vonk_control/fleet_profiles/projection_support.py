@@ -576,8 +576,11 @@ def _profile_definition(row: FleetProfile) -> FleetProfileDefinition:
     )
 
 
-def _profile_document(row: FleetProfile) -> SavedProfileDocument:
-    definition = _profile_definition(row)
+def _profile_document(
+    row: FleetProfile, definition: FleetProfileDefinition | None = None
+) -> SavedProfileDocument:
+    if definition is None:
+        definition = _profile_definition(row)
     return SavedProfileDocument.model_validate_json(
         canonical_message(
             {
