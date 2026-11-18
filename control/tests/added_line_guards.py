@@ -33,6 +33,7 @@ from . import (
     scratch_names,
     shell_trap_waits,
     sync_io_in_async,
+    typed_string_lengths,
     whole_collection_readers,
 )
 from . import claim_registry as claims
@@ -106,6 +107,7 @@ MODES = (
     "future-workers",
     "locked-io",
     "scratch-names",
+    "typed-string-lengths",
     "capacity-refusals",
     "agent-422",
     "docker-listings",
@@ -2542,6 +2544,15 @@ def check_source(
     ):
         hits.extend(
             (line, bare_savepoints.KIND) for line in bare_savepoints.scan_source(source)
+        )
+    if (
+        python
+        and "typed-string-lengths" in modes
+        and typed_string_lengths.in_scope(path)
+    ):
+        hits.extend(
+            (line, typed_string_lengths.KIND)
+            for line in typed_string_lengths.scan_source(source)
         )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(

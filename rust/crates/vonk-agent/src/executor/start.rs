@@ -41,10 +41,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         request: vonk_agent_protocol::RecipeStartRequest,
         load: &mut Option<crate::page_cache::LoadPhase>,
     ) -> ExecutionResult {
-        let preload_diagnostics = self.runtime.report_preload_memory(
-            request.placement().reserved_memory_bytes,
-            Path::new("/proc/meminfo"),
-        );
         self.report_phase(claim, ProgressPhase::Starting).await;
         let installation_id = request.installation_id.to_string();
         let collective_readiness =
@@ -429,9 +425,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     evidence,
                 );
             }
-            let mut result = recipe_start_result(&request);
-            result.preload_diagnostics = Some(preload_diagnostics.clone());
-            let success = ExecutionResult::done(result);
+            let success = ExecutionResult::done(recipe_start_result(&request));
             if *cancellation.borrow() {
                 return self.cancel_start_run(claim, &run_id).await;
             }
@@ -507,9 +501,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
             return failed_with_evidence(reason, evidence);
         }
-        let mut result = recipe_start_result(&request);
-        result.preload_diagnostics = Some(preload_diagnostics.clone());
-        let success = ExecutionResult::done(result);
+        let success = ExecutionResult::done(recipe_start_result(&request));
         if *cancellation.borrow() {
             return self.cancel_start_run(claim, &run_id).await;
         }
@@ -533,9 +525,9 @@ impl<R> RecipeExecutor<'_, R> {
     }
 }
 
-/// `result` with the page-cache drops of its load: a failure's diagnostics or
-/// a started workload's preload diagnostics. An unconfirmed start reports
-/// none; its drops stay in the journal.
+/// `result` with the page-cache drops of its load, on a failure's diagnostics.
+/// A started workload and an unconfirmed start report none; their drops stay in
+/// the journal.
 fn with_page_cache(
     result: ExecutionResult,
     evidence: Option<vonk_agent_protocol::generated::PageCacheDropEvidence>,
@@ -547,16 +539,6 @@ fn with_page_cache(
         ExecutionResult::Failed(mut failure) => {
             failure.page_cache = Some(evidence);
             ExecutionResult::Failed(failure)
-        }
-        ExecutionResult::Done(
-            vonk_agent_protocol::generated::OutcomeDoneResult::RecipeStartResult(mut started),
-        ) => {
-            if let Some(diagnostics) = started.preload_diagnostics.as_mut() {
-                diagnostics.page_cache = Some(evidence);
-            }
-            ExecutionResult::Done(
-                vonk_agent_protocol::generated::OutcomeDoneResult::RecipeStartResult(started),
-            )
         }
         other => other,
     }

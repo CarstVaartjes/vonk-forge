@@ -403,47 +403,26 @@ fn counting_dropper(
     (dropper, drops)
 }
 
-fn start_page_cache(
-    result: &ExecutionResult,
-) -> vonk_agent_protocol::generated::PageCacheDropEvidence {
-    let ExecutionResult::Done(OutcomeDoneResult::RecipeStartResult(started)) = result else {
-        panic!("the workload starts: {result:?}");
-    };
-    started
-        .preload_diagnostics
-        .as_ref()
-        .and_then(|diagnostics| diagnostics.page_cache.clone())
-        .expect("the start reports its drops")
-}
-
 #[tokio::test]
-async fn a_loading_workload_is_dropped_until_it_is_ready_and_its_start_reports_the_drops() {
+async fn a_loading_workload_is_dropped_until_it_is_ready() {
     let (dropper, drops) = counting_dropper(None);
     let result = collective_start_with_drops(dropper, 2).await;
-    let evidence = start_page_cache(&result);
+    assert!(matches!(result, ExecutionResult::Done(_)), "{result:?}");
     let made = drops.load(Ordering::SeqCst);
     assert!(made >= 2, "drops while loading: {made}");
-    assert_eq!(evidence.drops as usize, made);
-    assert_eq!(evidence.reclaimed_bytes, made as u64 * (7 << 30));
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(drops.load(Ordering::SeqCst), made, "no drop after ready");
 }
 
 #[tokio::test]
-async fn a_host_that_refuses_the_drop_still_starts_its_workload_with_a_note() {
+async fn a_host_that_refuses_the_drop_still_starts_its_workload() {
     // Fault: the helper's sandbox refuses /proc/sys/vm/drop_caches.
     let (dropper, drops) = counting_dropper(Some(
         vonk_agent_protocol::generated::PageCacheDropProblem::NotPermitted,
     ));
     let result = collective_start_with_drops(dropper, 2).await;
-    let evidence = start_page_cache(&result);
+    assert!(matches!(result, ExecutionResult::Done(_)), "{result:?}");
     assert!(drops.load(Ordering::SeqCst) >= 2);
-    assert_eq!(evidence.drops, 0);
-    assert!(evidence.problems >= 2);
-    assert_eq!(
-        evidence.last_problem.and_then(|report| report.problem),
-        Some(vonk_agent_protocol::generated::PageCacheDropProblem::NotPermitted)
-    );
 }
 
 #[test]

@@ -841,6 +841,65 @@ def test_a_failure_whose_diagnostics_were_dropped_says_what_was_lost(
     )
 
 
+def test_a_long_traceback_tail_is_kept_and_still_redacted(durable_evidence):
+    """A tail longer than 2048 characters with paths survives ingress, redacted.
+
+    Wrong implementation caught: a stale copy of the tail bound in the ingress
+    path rule dropped every failure's diagnostics once tails grew past 2048
+    characters (the 2026-11-18 GLM KeyError with empty stdout and stderr).
+    """
+
+    jobs, sessions, clock, evidence = durable_evidence
+    operation = _enqueue_distribution(jobs, sessions, clock)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    key_error = "KeyError: 'layers.0.self_attn.conv1d.weight'"
+    tail = (
+        ("Loading safetensors checkpoint shards:   0% | 0/48 [00:08<?, ?it/s]\r" * 60)
+        + '  File "/usr/local/lib/python3.12/dist-packages/vllm/glm4_moe.py", line 512\n'
+        + "HF_TOKEN=hunter2\n"
+        + key_error
+    )
+    assert 2048 < len(tail) <= LOG_TAIL_BYTES
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(item()), now=NOW
+    ).diagnostics.model_dump(mode="json")
+    diagnostics["stderr"]["text"] = tail
+    report = AgentResult.model_validate(
+        {
+            **_claim_envelope(claim),
+            "state": "failed",
+            "result": {
+                "status": "failed",
+                "error_code": "artifact_distribution_failed",
+                "reason": "transfer refused",
+                "failure_kind": "temporary-dependency",
+                "diagnostics": diagnostics,
+            },
+        }
+    )
+    assert report.evidence_drops == ()
+    jobs.record_result(report)
+
+    with sessions() as session:
+        stored = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None and stored.result is not None
+        assert "dropped_evidence" not in stored.result
+    bundle = evidence.read(operation.id, 1)
+    assert not any(
+        AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED.value in e
+        for e in bundle.collector_errors
+    )
+    text = bundle.diagnostics.stderr.text
+    assert key_error in text
+    assert "[redacted diagnostic line]" in text
+    assert "hunter2" not in text
+
+
 def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):
     """A lapse that left no receipt stays honestly unavailable.
 

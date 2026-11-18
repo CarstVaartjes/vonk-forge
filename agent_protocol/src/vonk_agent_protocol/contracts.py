@@ -197,7 +197,6 @@ class RecipeStartResult(WireModel):
     """The serving rank reports its endpoint; every other rank reports ``{}``."""
 
     endpoint: str | None = None
-    preload_diagnostics: FailureDiagnostics | None = None
 
 
 class ArtifactDistributionResult(WireModel):
@@ -510,13 +509,13 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
         and isinstance(path[2], int)
         and path[3] in {"name", "value"}
     ):
-        return len(value) <= 1024 and "\x00" not in value
+        return "\x00" not in value
     if (
         len(path) == 3
         and path[:2] == ("options", "unset_labels")
         and isinstance(path[2], int)
     ):
-        return len(value) <= 128 and "\x00" not in value
+        return "\x00" not in value
     if (
         len(path) == 3
         and path[0] == "base_images"
@@ -529,7 +528,6 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
         and path[0] == "arguments"
         and isinstance(path[1], int)
         and path[2] == "value"
-        and len(value) <= 1024
         and "\x00" not in value
     )
 
@@ -571,9 +569,10 @@ def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
             return False
         return True
     # These declared leaves are inert captured observations, never authority.
-    # Their enclosing Pydantic model enforces the complete diagnostic byte bound.
+    # FailureDiagnostics owns their bounds (FailureLogPolicy, FailureProperty);
+    # this rule only exempts the leaves from the path-value ban.
     if path in {("diagnostics", "stdout", "text"), ("diagnostics", "stderr", "text")}:
-        return len(value) <= 2048 and "\x00" not in value
+        return "\x00" not in value
     if (
         len(path) == 4
         and path[0] == "diagnostics"
@@ -581,7 +580,7 @@ def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
         and isinstance(path[2], int)
         and path[3] == "value"
     ):
-        return len(value) <= 256 and "\x00" not in value
+        return "\x00" not in value
     if path == ("endpoint",):
         return _recipe_endpoint(value)
     if (
@@ -1155,7 +1154,9 @@ class AgentDirective(_ProtocolEnvelopeModel):
             raise AgentProtocolError(str(error)) from error
 
 
-# Where a started workload's diagnostics ride: the diagnostics groups' paths.
+# Agents before the removal of ``RecipeStartResult.preload_diagnostics`` still send
+# it; it is not a model field, so the groups drop it and the start result is kept
+# (the model forbids extra fields). Delete once every agent is past that release.
 _PRELOAD_DIAGNOSTICS: tuple[tuple[str, ...], ...] = (
     ("result", "preload_diagnostics"),
     ("result", "result", "preload_diagnostics"),
