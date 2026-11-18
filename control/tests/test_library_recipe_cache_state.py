@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, select, update
+from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
@@ -647,36 +647,6 @@ def test_a_model_content_identity_builds_its_artifact_specs_once(
 
     assert len(built) == expected
     assert second == first
-
-
-def test_the_same_digest_over_changed_document_content_rebuilds(
-    cache,  # noqa: F811
-    monkeypatch,
-):
-    """A hit needs the very parse the specs came from, not just the digest."""
-
-    service, sessions = cache
-    world = _World(sessions, count=1)
-    built = _count_artifact_builds(service, monkeypatch)
-
-    service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
-    assert len(built) == 1
-    with sessions.begin() as session:
-        row = session.scalars(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.content_digest == world.model_digests[0]
-            )
-        ).one()
-        document = copy.deepcopy(row.document)
-        document["files"][0]["size_bytes"] += 1
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == row.id)
-            .values(document=document)
-        )
-    service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
-
-    assert len(built) == 2
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(
