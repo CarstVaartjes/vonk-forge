@@ -80,7 +80,6 @@ from .common import (
     _log_evidence_warnings,
     _now,
     _require_services,
-    _scope_identity,
     _validated_authenticated_source,
     contract_verdict_or_wait,
 )
@@ -123,9 +122,8 @@ def install_observations_routes(
     agent: APIRouter, services: AgentApiServices | None
 ) -> None:
     def helper_identity(request: Request) -> AgentIdentity:
-        _scope_identity(request)
-        required = _require_services(services)
-        return _authenticated_identity(request, required)
+        _require_services(services)
+        return _authenticated_identity(request)
 
     @agent.post(
         "/claim",
@@ -138,9 +136,8 @@ def install_observations_routes(
         body: ClaimRequest,
         request_id: Annotated[UuidId | None, Header(alias="X-Request-ID")] = None,
     ) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         source = _validated_authenticated_source(request, required, identity)
         _log_evidence_warnings(body, endpoint="claim", node_id=identity.node_id)
         try:
@@ -179,9 +176,8 @@ def install_observations_routes(
     )
     @operator_acceptance(ReceiptPolicy.AGENT_INVENTORY)
     def inventory(body: InventoryRequest, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         if body.observed_at.tzinfo is None or body.observed_at.utcoffset() is None:
             raise HTTPException(
                 status_code=422, detail="inventory time must be timezone-aware"
@@ -284,9 +280,8 @@ def install_observations_routes(
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)
     @operator_acceptance(ReceiptPolicy.AGENT_TELEMETRY)
     def telemetry(body: TelemetryRequest, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         for sample in body.samples:
             _log_evidence_warnings(
                 sample, endpoint="telemetry", node_id=identity.node_id
@@ -305,9 +300,8 @@ def install_observations_routes(
     def recipe_run_observations(
         body: RecipeRunObservationsWire, request: Request
     ) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
         # Old content may be a durable replay after a lost acknowledgement.
@@ -622,9 +616,8 @@ def install_observations_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def source_bundle(source_sha256: str, request: Request) -> Response:
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         if _DIGEST.fullmatch(source_sha256) is None:
             raise HTTPException(status_code=404, detail="source bundle does not exist")
         with required.sessions() as session:

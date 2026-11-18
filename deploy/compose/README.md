@@ -172,6 +172,16 @@ publication artifact provide evidence inputs, not the installed image policy.
 PostgreSQL writes automatic dumps to `./backups/` in the project folder. See
 [backup settings and restoration](../../docs/postgres-backups.md).
 
+Controller connections commit with `synchronous_commit=off`, set per connection
+in `postgresql_connect_args`: model downloads share the NAS pool and made every
+commit wait on the WAL fsync. LiteLLM's database in the same cluster stays
+synchronous. Acknowledged enrollment/certificate state and browser logout commit
+synchronously (`require_durable_commit`); local CA revocation rows commit
+asynchronously but are flushed by the durable confirm that follows. Any unclean
+PostgreSQL stop may lose the Controller's other commits of the last moments:
+about 0.6 s, longer while the disk is stalled. Data is never corrupted; the
+platform self-heals.
+
 ### Runtime asset startup observation
 
 The Controller pre-exec stages public runtime assets before opening PostgreSQL.

@@ -141,7 +141,7 @@ def test_security_refusal(client: TestClient, condition: str, status: int) -> No
 
     def refusal(request: Request) -> None:
         if condition == "identity_missing":
-            common._scope_identity(Request({"type": "http"}))
+            common._authenticated_identity(Request({"type": "http"}))
         else:
             identity = AgentIdentity("spk_" + "a" * 32, "serial", "fingerprint", True)
             common._body_node_matches("another-node", identity)

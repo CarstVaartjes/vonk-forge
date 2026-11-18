@@ -112,7 +112,6 @@ from .common import _range as _range
 from .common import _references_digest as _references_digest
 from .common import _require_enrollment as _require_enrollment
 from .common import _require_services as _require_services
-from .common import _scope_identity as _scope_identity
 from .common import _served_from_edge as _served_from_edge
 from .common import _sha256_path as _sha256_path
 from .common import _strict_json_datetime as _strict_json_datetime
@@ -121,7 +120,6 @@ from .common import _validated_authenticated_source as _validated_authenticated_
 from .common import _wire as _wire
 from .common import activation_agent_identity as activation_agent_identity
 from .common import active_agent_identity as active_agent_identity
-from .common import agent_identity_from_scope as agent_identity_from_scope
 from .common import agent_source_from_scope as agent_source_from_scope
 from .common import dataclass as dataclass
 from .common import datetime as datetime

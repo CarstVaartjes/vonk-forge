@@ -47,7 +47,7 @@ from vonk_control.pki import IssuedCertificate
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.step_ca import StepCertificateAuthority
 
-from .test_enrollment import OTHER_NODE_ID, csr, evidence
+from .test_enrollment import OTHER_NODE_ID, RecordingAuthority, csr, evidence
 from .test_step_ca import NODE_ID, NOW, _leaf, _write_material
 
 
@@ -558,3 +558,22 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
             assert all(count == 1 for count in counts.values())
         finally:
             engine.dispose()
+
+
+def test_enrollment_transactions_commit_durably_on_async_controller_connections(
+    postgres_engine,
+):
+    from vonk_control import db
+
+    engine = db.build_engine(postgres_engine.url.render_as_string(hide_password=False))
+    try:
+        with engine.connect() as connection:
+            assert (
+                connection.exec_driver_sql("SHOW synchronous_commit").scalar() == "off"
+            )
+        sessions = sessionmaker(engine, expire_on_commit=False)
+        service = EnrollmentService(sessions, RecordingAuthority(), clock=lambda: NOW)
+        with service._transaction() as session:
+            assert session.execute(text("SHOW synchronous_commit")).scalar() == "on"
+    finally:
+        engine.dispose()

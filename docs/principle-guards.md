@@ -139,6 +139,13 @@ Lock and ordering guards:
   refuses numbering a workload intent, or writing `workload_intent_ordinal`,
   outside `workload_intent.py`; use `allocate_workload_intent` or
   `take_workload_intent`.
+- `control/tests/durable_revocations.py` (added-line mode `durable-revocations`)
+  refuses an added write of `revoked_at`, `ca_revoked_at`, `disabled_at` or
+  `password_verifier` in `control/src` outside `enrollment/` unless the function
+  calls `require_durable_commit` (Controller connections commit asynchronously;
+  enrollment gets durability from `EnrollmentCore._transaction`). Internal
+  revocations nobody is told about (`attempt_residues.py`, `local_ca.py`) are
+  out of scope and stay asynchronous.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
   contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
