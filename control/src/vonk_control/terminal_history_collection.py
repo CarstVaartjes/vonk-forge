@@ -27,6 +27,7 @@ from typing import Any, cast
 
 from sqlalchemy import (
     DateTime,
+    Select,
     and_,
     delete,
     exists,
@@ -610,24 +611,39 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
     )
 
 
-def history_rows_past_grace(session: Session, now: datetime) -> int:
-    """Count ended history independently of collector health, without reading JSON.
+def _removable_publications(cutoff: datetime) -> Select[Any]:
+    """Completed publications whose authority is past the cutoff and unowned.
 
-    Includes protected rows: their continuing retention is visible too. This is
-    an observation, never an admission decision or permission to remove them.
+    Publication rows have no clock; their owning authority supplies it.
     """
-    sources = []
-    for rule in retention_rules():
-        cutoff = now - rule.window
-        sources.append(select(rule.key).where(rule.clock <= cutoff, rule.ended(cutoff)))
-    sources.append(
+    return (
         select(RoutePublication.authority_id)
         .join(RecipeRouteAuthority)
         .where(
-            RecipeRouteAuthority.updated_at <= now - GRACE,
+            RecipeRouteAuthority.updated_at <= cutoff,
             RoutePublication.state == RoutePublicationState.COMPLETED.value,
+            ~exists().where(
+                RoutePublicationOwner.authority_id == RoutePublication.authority_id
+            ),
         )
     )
+
+
+def history_rows_past_grace(session: Session, now: datetime) -> int:
+    """Count history the collector may remove, independently of its health.
+
+    Counts the rows the collector's SQL selection admits, so rows its keyed
+    ``held`` checks keep are not counted. Rows kept by ``_protected_tokens``
+    (live installation, run, application and assignment plans, the selected
+    application's retry root) or by ``keep_row`` evidence checks are still
+    counted. This is an
+    observation, never an admission decision or permission to remove anything.
+    """
+    sources = [
+        select(rule.key).where(rule.candidate(now - rule.window))
+        for rule in retention_rules()
+    ]
+    sources.append(_removable_publications(now - GRACE))
     return (
         session.scalar(select(func.count()).select_from(union_all(*sources).subquery()))
         or 0
@@ -841,17 +857,8 @@ class TerminalHistoryCollector:
             return False
 
     def _publications(self, cutoff: datetime, protected: frozenset[str]) -> int:
-        # Publication rows have no clock; their owning authority supplies it.
         statement = (
-            select(RoutePublication.authority_id)
-            .join(RecipeRouteAuthority)
-            .where(
-                RecipeRouteAuthority.updated_at <= cutoff,
-                RoutePublication.state == RoutePublicationState.COMPLETED.value,
-                ~exists().where(
-                    RoutePublicationOwner.authority_id == RoutePublication.authority_id
-                ),
-            )
+            _removable_publications(cutoff)
             .limit(self._batch)
             .with_for_update(of=RoutePublication, skip_locked=True)
         )

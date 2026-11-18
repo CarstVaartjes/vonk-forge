@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ReservationState
 from vonk_control import terminal_history_collection
 from vonk_control.catalog_revision_collection import INTERVAL
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
@@ -34,6 +34,7 @@ from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunP
 from vonk_control.terminal_history_collection import (
     BACKLOG_PAUSE,
     TerminalHistoryCollector,
+    history_rows_past_grace,
 )
 
 
@@ -494,6 +495,38 @@ def test_history_backlog_metric_tracks_collection_and_grace(
     assert TerminalHistoryCollector(history_sessions, clock=lambda: now).collect()
     observer.refresh()
     assert "vonk_history_rows_past_grace 0\n" in metrics.render()
+
+
+def test_history_backlog_metric_excludes_rows_a_reservation_holds(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    job = _job(now - timedelta(days=2))
+    node_id = "spk_" + uuid.uuid4().hex
+    with history_sessions.begin() as session:
+        session.add_all((job, AgentNode(node_id=node_id, state="active")))
+        session.flush()
+        session.add(
+            ResourceReservation(
+                node_id=node_id,
+                kind="unified-memory",
+                resource_key="unified-memory",
+                amount_bytes=1,
+                owner_kind="job",
+                owner_id=job.id,
+                state=ReservationState.ACTIVE.value,
+                plan_digest="a" * 64,
+                created_at=now,
+            )
+        )
+    with history_sessions() as session:
+        assert history_rows_past_grace(session, now) == 0
+    with history_sessions.begin() as session:
+        session.execute(
+            update(ResourceReservation).values(state=ReservationState.RELEASED.value)
+        )
+    with history_sessions() as session:
+        assert history_rows_past_grace(session, now) == 1
 
 
 def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
