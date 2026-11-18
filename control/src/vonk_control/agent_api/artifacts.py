@@ -42,7 +42,6 @@ from .common import (
     _prepare_recipe_image_upload,
     _range,
     _require_services,
-    _scope_identity,
     _served_from_edge,
     _sha256_path,
 )
@@ -52,9 +51,8 @@ def install_artifacts_routes(
     agent: APIRouter, services: AgentApiServices | None
 ) -> None:
     def image_upload_context(build_id: str, request: Request):
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         try:
             uuid.UUID(build_id)
             headers = RecipeImageUploadHeaders.model_validate(
@@ -294,9 +292,8 @@ def install_artifacts_routes(
     )
     def artifact(sha256: str, request: Request) -> Response:
         """Authorize one owned artifact; the edge serves its bytes and range."""
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         path, size = _owned_artifact(required, identity, sha256)
         _range(request.headers.get("range"), size, required.max_range_bytes)
         return _served_from_edge(required, path, f'"sha256:{sha256}"')
@@ -330,9 +327,8 @@ def install_artifacts_routes(
         plan_digest: str, request: Request, response: Response
     ) -> DistributionAssignment:
         """Return the exact model plus OCI object set authorized for this node."""
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         if required.distribution is None:
             raise HTTPException(
                 status_code=503, detail="agent distribution is unavailable"
@@ -360,9 +356,8 @@ def install_artifacts_routes(
     )
     def distribution_object(sha256: str, request: Request) -> Response:
         """Authorize one assigned immutable object; the edge serves its range."""
-        _scope_identity(request)
         required = _require_services(services)
-        identity = _authenticated_identity(request, required)
+        identity = _authenticated_identity(request)
         if required.distribution is None:
             raise HTTPException(
                 status_code=503, detail="agent distribution is unavailable"
