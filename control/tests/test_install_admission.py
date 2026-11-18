@@ -552,7 +552,7 @@ def test_install_admission_blocks_malformed_mapping_parameters(tmp_path) -> None
 def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> None:
     """A receipt that cannot be read now is observed again, never a verdict."""
 
-    from vonk_control.install_admission import require_admissible
+    from vonk_control.install_admission import InstallAdmissionBusy, require_admissible
     from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
@@ -567,14 +567,12 @@ def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> Non
     ).plan_install(mapping_id, build, now=now)
 
     assert plan.allowed is False
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(InstallAdmissionBusy):
         require_admissible(plan)
 
 
-def test_unavailable_compilation_waits_and_a_fresh_plan_uses_repaired_evidence(
-    tmp_path,
-) -> None:
-    from vonk_control.install_admission import require_admissible
+def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> None:
+    from vonk_control.install_admission import InstallPlanStale, require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -586,7 +584,7 @@ def test_unavailable_compilation_waits_and_a_fresh_plan_uses_repaired_evidence(
     ).plan_install(mapping_id, build, now=now)
 
     assert plan.allowed is False
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(InstallPlanStale, match="compiled launch payload is invalid"):
         require_admissible(plan)
     repaired = _service(sessions, disk_floor_bytes=10).plan_install(
         mapping_id, build, now=now
