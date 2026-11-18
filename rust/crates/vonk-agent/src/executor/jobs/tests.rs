@@ -934,43 +934,50 @@ async fn an_exited_job_whose_outputs_break_their_bound_ends_failed_with_the_evid
     assert!(outputs.join("prepared-input.png").exists());
 }
 
-/// The canonical job vector, installed and invoked as one rank of a two-rank job.
-fn two_rank_job(
-    rank: u64,
-    local: &str,
-) -> (
+/// The Controller-bound rank-1 job vector, with the installed plan it was
+/// bound from (the single-rank vector made two-rank, carrying no start binding).
+fn bound_rank_one_job() -> (
     vonk_agent_protocol::RecipeJobRunRequest,
     CompiledExecutionPlan,
 ) {
-    let claim: Value = serde_json::from_str(include_str!(
+    let single: Value = serde_json::from_str(include_str!(
         "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
     ))
     .unwrap();
-    let mut installed = claim["payload"]["compiled_execution_plan"].clone();
+    let bound: AgentClaim = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-rank1-v1.json"
+    ))
+    .unwrap();
+    let AgentClaimPayload::RecipeJobRunRequest(request) = bound.payload else {
+        panic!("expected a bound job-run claim");
+    };
+    let mut installed = single["payload"]["compiled_execution_plan"].clone();
     installed["runtime"]["placement"]["world_size"] = 2.into();
-    installed["runtime"]["placement"]["rank"] = rank.into();
+    installed["runtime"]["placement"]["rank"] = 1.into();
+    installed["runtime"]["placement"]["role"] = "worker".into();
     installed["topology"]["node_count"] = 2.into();
-    let installed: CompiledExecutionPlan = serde_json::from_value(installed).unwrap();
-    let mut request = claim["payload"].clone();
-    request["compiled_execution_plan"] = serde_json::to_value(&installed).unwrap();
-    let placement = &mut request["compiled_execution_plan"]["runtime"]["placement"];
-    placement["local_address"] = local.into();
-    placement["master_address"] = "192.168.100.10".into();
-    placement["master_port"] = 29500.into();
-    request["compiled_execution_plan"]["security"]["network_mode"] = "host".into();
-    (serde_json::from_value(request).unwrap(), installed)
+    (request, serde_json::from_value(installed).unwrap())
 }
 
 #[test]
-fn every_rank_of_a_two_rank_job_is_prepared_and_only_rank_zero_owns_outputs() {
-    for (rank, local, owner) in [(0, "192.168.100.10", true), (1, "192.168.100.11", false)] {
-        let (request, installed) = two_rank_job(rank, local);
-        assert_eq!(request.is_endpoint_owner(), owner);
-        // The installed placement has no addresses: the start binds them.
-        let plan = prepare_job_invocation(&installed, &request).unwrap();
-        assert_eq!(job_placement(&plan).unwrap().rank, rank);
-        // An address is start-bound; a different role or rank is not.
-        let (other, _) = two_rank_job(1 - rank, local);
-        assert!(prepare_job_invocation(&installed, &other).is_err());
-    }
+fn a_bound_rank_one_job_is_prepared_and_is_a_companion_that_owns_no_outputs() {
+    let (request, installed) = bound_rank_one_job();
+    assert!(!request.is_endpoint_owner());
+    assert_eq!(
+        request.placement().peer_addresses.as_ref().map(Vec::len),
+        Some(2)
+    );
+    // Addresses, peers and rendezvous are start-bound; the installed plan has none.
+    let plan = prepare_job_invocation(&installed, &request).unwrap();
+    let placement = job_placement(&plan).unwrap();
+    assert_eq!(placement.rank, 1);
+    assert_eq!(
+        placement.local_address.map(|address| address.to_string()),
+        Some("192.168.100.11".to_string())
+    );
+    // A different rank is not the installed workload.
+    let mut other = serde_json::to_value(&request).unwrap();
+    other["compiled_execution_plan"]["runtime"]["placement"]["rank"] = 0.into();
+    let other: vonk_agent_protocol::RecipeJobRunRequest = serde_json::from_value(other).unwrap();
+    assert!(prepare_job_invocation(&installed, &other).is_err());
 }

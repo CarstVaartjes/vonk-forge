@@ -41,10 +41,8 @@ from vonk_control.artifact_job_evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
 )
-from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
-    AgentNode,
     AgentOperation,
     AgentOperationAttempt,
     ArtifactJob,
@@ -56,7 +54,6 @@ from vonk_control.recipe_operations import (
     RecipeRequestInvalid,
     RecipeRetryLater,
 )
-from vonk_control.recipe_operations.profile_job_run_stop import _exact_jobrun_sources
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
@@ -600,102 +597,5 @@ def test_a_frozen_job_relinked_to_another_issued_order_re_plans_the_stop(
     fresh = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000171"),
-    )
-    assert fresh.id != submitted.id
-
-
-# ----------------------------------------------------- one order per rank
-
-_OTHER_NODE = "spk_" + "e" * 32
-
-
-def _add_companion_rank(session, child: AgentOperation) -> AgentOperation:
-    """An issued order of the same job on a second Spark (rank 1 of two)."""
-
-    columns = AgentOperation.__table__.columns
-    companion = AgentOperation(
-        **{column.name: getattr(child, column.name) for column in columns}
-    )
-    companion.id = str(uuid.uuid4())
-    companion.node_id = _OTHER_NODE
-    companion.current_attempt = 1
-    companion.state = "running"
-    return companion
-
-
-def test_a_job_on_two_sparks_is_stopped_exactly_on_each_and_a_missing_one_holds_nothing(
-    tmp_path,
-) -> None:
-    sessions, _operations, service, run_id, node_id, agent_jobs, _clock, _stop = (
-        _service(tmp_path)
-    )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
-    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
-    with sessions.begin() as session:
-        _order_row, child = _order(session, submitted.id)
-        session.add(_add_companion_rank(session, child))
-    with sessions.begin() as session:
-        artifact = session.get(ArtifactJob, submitted.id)
-        assert artifact is not None
-        both = _exact_jobrun_sources(session, artifact, (), {node_id, _OTHER_NODE})
-        assert both is not None
-        assert {source.node_id for source in both} == {node_id, _OTHER_NODE}
-        # A rank on a Spark outside the Stop's scope never holds the others
-        # (main: RecipeRetryLater forever); its Spark removes what it left.
-        reachable = _exact_jobrun_sources(session, artifact, (), {node_id})
-        assert reachable is not None
-        assert [source.node_id for source in reachable] == [node_id]
-        # A second order on the same Spark names no one container: held.
-        twin = _add_companion_rank(session, both[0])
-        twin.node_id = node_id
-        session.add(twin)
-        session.flush()
-        with pytest.raises(RecipeRetryLater):
-            _exact_jobrun_sources(session, artifact, (), {node_id, _OTHER_NODE})
-
-
-def test_a_cancelled_job_on_two_sparks_gets_one_exact_stop_per_rank(tmp_path) -> None:
-    sessions, operations, service, run_id, node_id, agent_jobs, _clock, _stop = (
-        _service(tmp_path)
-    )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
-    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
-    cancel_key = "00000000-0000-4000-8000-000000000333"
-    service.cancel(
-        submitted.id, actor="operator", request_id=cancel_key, reason="stop it"
-    )
-    with sessions.begin() as session:
-        artifact = session.get(ArtifactJob, submitted.id)
-        assert artifact is not None
-        _parent, child = _order(session, artifact.id)
-        session.add(_add_companion_rank(session, child))
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        session.add(
-            AgentNode(
-                **{
-                    column.name: getattr(node, column.name)
-                    for column in AgentNode.__table__.columns
-                    if column.name != "node_id"
-                },
-                node_id=_OTHER_NODE,
-            )
-        )
-        artifact.state = "cancelled"
-        artifact.result_evidence = dump_result_evidence(
-            ArtifactJobResultEvidence(
-                cancel_request_id=cancel_key, active_scope_may_remain=True
-            )
-        )
-    # Main: one order was the only source the reconciler would use, so a job
-    # on two Sparks was never stopped and its cleanup waited forever.
-    assert reconcile_cancelled_runtime(operations) is True
-    with sessions() as session:
-        (stop,) = session.scalars(select(Job).where(Job.kind == "recipe.stop")).all()
-        assert sorted(stop.targets) == sorted([node_id, _OTHER_NODE])
-    # The cleanup Stop leaves the run serving: fresh work is still admitted.
-    fresh = create_artifact_job(
-        service,
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000334"),
     )
     assert fresh.id != submitted.id

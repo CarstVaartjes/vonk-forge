@@ -2753,7 +2753,9 @@ def test_a_job_on_a_two_node_run_is_one_host_network_order_per_rank(tmp_path) ->
     assert all(item.port is None for item in placements)
 
 
-def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -> None:
+def _two_rank_claims(tmp_path, suffix: int):
+    """A submitted job on a two-Spark run, with both Sparks' claimed orders."""
+
     sessions, recipe_operations, service, run_id, nodes = (
         running_two_rank_artifact_service(tmp_path)
     )
@@ -2766,7 +2768,7 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         )
     )
     recipe_operations._agent_jobs = agent_jobs
-    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    submitted = submitted_artifact_job(service, run_id, request_suffix=suffix)
     claims = {
         node_id: claim_agent(agent_jobs, node_id, f"serial-{index}")
         for index, node_id in enumerate(nodes)
@@ -2785,8 +2787,34 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         }
     owner_node = next(node for node, rank in ranks.items() if rank == 0)
     companion_node = next(node for node in nodes if node != owner_node)
-    companion = claims[companion_node]
-    assert companion is not None
+    owner_claim = claims[owner_node]
+    companion_claim = claims[companion_node]
+    assert owner_claim is not None and companion_claim is not None
+    return (
+        sessions,
+        recipe_operations,
+        service,
+        agent_jobs,
+        run_id,
+        submitted,
+        (owner_node, owner_claim),
+        (companion_node, companion_claim),
+        nodes,
+    )
+
+
+def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -> None:
+    (
+        sessions,
+        recipe_operations,
+        service,
+        agent_jobs,
+        run_id,
+        submitted,
+        (owner_node, owner),
+        (companion_node, companion),
+        nodes,
+    ) = _two_rank_claims(tmp_path, 118)
     agent_jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
@@ -2803,8 +2831,140 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         )
     )
     assert service.get(submitted.id).state == "failed"
-    owner = claims[owner_node]
-    assert owner is not None
     # The surviving rank is told to stop: nothing waits on it.
     directive = agent_jobs.heartbeat(owner, OperationProgress(phase="running"), 30)
     assert directive.cancel_requested is True
+    agent_jobs.record_result(
+        cancellation_result(
+            owner,
+            submitted,
+            state="cancelled",
+            reason="controller cancellation requested",
+        )
+    )
+
+    # The run's Stop removes the job's container on each Spark: one exact Stop
+    # per rank, each naming the job, and the run is stopped once both receipt.
+    from vonk_agent_protocol.recipe_operations import (
+        RecipeStopPayload,
+        RecipeStopResult,
+    )
+
+    plan_digest = recipe_operations.preview_stop(run_id).plan_digest
+
+    def stop():
+        return recipe_operations.stop(
+            run_id,
+            plan_digest=plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000154",
+        )
+
+    assert stop().state not in {"succeeded", "failed", "cancelled"}
+    # Sequential phases: each rank's exact Stop is claimed in turn.
+    stopped: set[str] = set()
+    serials = {node_id: f"serial-{index}" for index, node_id in enumerate(nodes)}
+    for _poll in range(4):
+        for node_id in (owner_node, companion_node):
+            if node_id in stopped:
+                continue
+            exact = claim_agent(agent_jobs, node_id, serials[node_id])
+            if exact is None:
+                continue
+            assert isinstance(exact.payload, RecipeStopPayload)
+            assert exact.payload.target_runtime_id == submitted.id
+            agent_jobs.record_result(
+                AgentResult(
+                    fence=exact.fence,
+                    state=AgentResultState.SUCCEEDED,
+                    result=RecipeStopResult(),
+                )
+            )
+            stopped.add(node_id)
+    assert stopped == {owner_node, companion_node}
+    assert stop().state == "succeeded"
+
+    # The stopped run takes fresh work: a new job run is admitted on it.
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "stopped"
+        installation_id = run.installation_id
+    fresh_plan = recipe_operations.preview_run(installation_id, "image-job")
+    fresh = recipe_operations.activate_job_run(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000160",
+    )
+    assert fresh.owner_id != run_id
+
+
+@pytest.mark.parametrize("companion_first", [True, False])
+def test_a_companion_receipt_without_files_never_ends_the_job_and_the_owner_does(
+    tmp_path, companion_first: bool
+) -> None:
+    (
+        sessions,
+        _recipe_operations,
+        service,
+        agent_jobs,
+        run_id,
+        submitted,
+        (owner_node, owner),
+        (_companion_node, companion),
+        _nodes,
+    ) = _two_rank_claims(tmp_path, 138)
+    from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+
+    content = b"image"
+    output = RecipeJobFile(
+        name="output.png",
+        media_type="image/png",
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    empty: tuple[RecipeJobFile, ...] = ()
+
+    def receipt(files: tuple[RecipeJobFile, ...]) -> RecipeJobRunResult:
+        return RecipeJobRunResult(
+            job_id=submitted.id,
+            run_id=run_id,
+            exit_code=0,
+            output_manifest=RecipeJobOutputManifest(
+                schema_version=1,
+                total_bytes=sum(file.size_bytes for file in files),
+                files=files,
+                manifest_sha256=recipe_job_manifest_sha256(files),
+            ),
+            evidence=RecipeJobEvidence(
+                elapsed_milliseconds=100, peak_memory_bytes=None
+            ),
+        )
+
+    if companion_first:
+        agent_jobs.succeed(companion, receipt(empty))
+        # A companion's empty receipt is all the job learns: it keeps running.
+        assert service.get(submitted.id).state == "running"
+    service.put_output(
+        submitted.id,
+        node_id=owner_node,
+        name=output.name,
+        media_type=output.media_type,
+        expected_sha256=output.sha256,
+        content=content,
+    )
+    agent_jobs.succeed(owner, receipt((output,)))
+    ended = service.get(submitted.id)
+    # The owner's delivery ends the job succeeded; a sibling still running is
+    # stopped without making the job "superseded" or cancelled.
+    assert ended.state == "succeeded"
+    assert ended.output_files[0].sha256 == output.sha256
+    if not companion_first:
+        # The sibling only computes: its own receipt ends its order and the
+        # job stays succeeded.
+        agent_jobs.succeed(companion, receipt(empty))
+        assert service.get(submitted.id).state == "succeeded"
+    with sessions() as session:
+        parent = session.get(Job, ended.operation_id)
+        assert parent is not None
+        assert parent.status_reason != "superseded_by_intent"

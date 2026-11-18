@@ -457,10 +457,6 @@ class JobRunStopMixin:
                     "new JobRun effect escaped the accepted Stop scope",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
-            if len(sources) != sum(
-                target.node_id in target_node_ids for target in frozen_for_job
-            ) and (frozen_for_job):
-                raise RecipeRetryLater("accepted JobRun Stop source disappeared")
             needs_stop |= may_remain
             for source in sources:
                 request = read_stored_model(
@@ -558,8 +554,8 @@ class JobRunStopMixin:
                 )
                 session.flush()
             return pending
-        # One-shot recipes are single-node. Sequential phases bind each distinct
-        # target without creating concurrent cleanup claims on that node.
+        # A job has one target per rank (one Spark each). Sequential phases bind
+        # each target without creating concurrent cleanup claims on a node.
         phases = tuple(
             ((target.node_id, json.loads(canonical_message(payload))),)
             for target, payload in rows
@@ -574,7 +570,7 @@ class JobRunStopMixin:
             plan_digest=stop_plan_digest,
             actor=actor,
             request_id=request_id,
-            node_payloads=phases[0],
+            node_payloads=tuple(item for phase in phases for item in phase),
             phases=phases,
             authority_digest=rows[0][1].recipe_content_sha256,
             now=now,

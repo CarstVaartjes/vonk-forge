@@ -429,12 +429,17 @@ def test_every_rank_of_a_job_binds_fabric_and_host_network_without_an_endpoint(
         master_address="192.168.100.10",
         master_port=29500,
         world_size=2,
+        peer_addresses=("192.168.100.10", "192.168.100.11"),
     )
     wire = WireCompiledExecutionPlan.parse(started)
     assert wire.job is not None and wire.endpoint is None
     assert wire.security.network_mode == "host"
     assert wire.runtime.placement.port is None
-    assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
+    placement = wire.runtime.placement
+    assert placement.local_address == f"192.168.100.{10 + rank}"
+    # Only rank 0 is the rendezvous master; a worker rank differs from it.
+    assert (placement.local_address == placement.master_address) is (rank == 0)
+    assert placement.peer_addresses == ["192.168.100.10", "192.168.100.11"]
 
 
 def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
@@ -1318,3 +1323,35 @@ def test_execution_identity_covers_compiled_launch_facts_and_ignores_notes() -> 
 
     assert all(value != baseline for value in changes)
     assert len(set(changes)) == len(changes)
+
+
+def test_binder_produces_the_shared_rank_one_job_claim_vector() -> None:
+    """The vector the agent suites read is exactly what this binder emits."""
+
+    vectors = (
+        Path(__file__).parents[2] / "agent_protocol/src/vonk_agent_protocol/vectors"
+    )
+    single = json.loads((vectors / "recipe-job-run-claim-v1.json").read_text())
+    shared = json.loads((vectors / "recipe-job-run-claim-rank1-v1.json").read_text())
+    plan = single["payload"]["compiled_execution_plan"]
+    plan["runtime"]["placement"].update(rank=1, world_size=2, role="worker")
+    plan["topology"]["node_count"] = 2
+    bound = bind_compiled_execution_plan(
+        WireCompiledExecutionPlan.model_validate(plan),
+        placement=RecipeStartPlacement(
+            "spk_" + "a" * 32,
+            1,
+            "worker",
+            None,
+            34359738368,
+            2147483648,
+            "unified",
+            "192.168.100.11",
+        ),
+        endpoint_address=None,
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+        peer_addresses=("192.168.100.10", "192.168.100.11"),
+    )
+    assert bound == shared["payload"]["compiled_execution_plan"]

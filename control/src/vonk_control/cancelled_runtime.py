@@ -90,8 +90,9 @@ def cancelled_runtime_source(
             or request.run_id != artifact.run_id
             or source.authority_revision != parent.authority_revision
         ):
-            # A rank whose Spark is gone or revoked is not reachable by a Stop;
-            # the others still are (that Spark's own reconcile removes its own).
+            # A rank whose Spark is gone or revoked, or whose order no longer
+            # names this job, run and authority, gets no Stop from here; the
+            # other ranks still do (that Spark's own reconcile removes its own).
             continue
         stops.append(
             (source, stop_payload_from_job_run(request, cancel_pending_start=True))

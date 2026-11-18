@@ -9,34 +9,40 @@ companions that only compute.  The rule mirrors the agent's
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
+
+from vonk_agent_protocol import RecipeJobRunRequest
 
 from ..models import AgentOperation
+from ..stored_json import read_row_column
 
 
-def payload_is_owner(payload: object) -> bool:
-    """Whether a stored job-run payload is the owner rank's (read, not parsed)."""
+def order_is_owner(order: AgentOperation) -> bool | None:
+    """Whether the order is the owner rank's, by the one rule on the typed request.
 
-    plan = (
-        payload.get("compiled_execution_plan") if isinstance(payload, Mapping) else None
-    )
-    runtime = plan.get("runtime") if isinstance(plan, Mapping) else None
-    placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
-    if not isinstance(placement, Mapping):
-        return False
-    local = placement.get("local_address")
-    return placement.get("world_size") == 1 or (
-        local is not None and local == placement.get("master_address")
-    )
+    ``None`` when the stored request cannot be read: an unreadable order is
+    unknown, never "not the owner".
+    """
+
+    request = read_row_column(order, "payload")
+    if isinstance(request, RecipeJobRunRequest):
+        return request.endpoint_owner
+    return None
 
 
 def owner_order(orders: Sequence[AgentOperation]) -> AgentOperation | None:
-    """The owner's order among a job's orders, or the only one there is."""
+    """The owner's order among a job's orders, or the only one there is.
 
-    owners = [order for order in orders if payload_is_owner(order.payload)]
-    if len(owners) == 1:
-        return owners[0]
-    return orders[0] if len(orders) == 1 else None
+    ``None`` while any order's request is unreadable or no single owner exists:
+    nothing then judges the job, and a later pass decides once the rows read.
+    """
+
+    if len(orders) == 1:
+        return orders[0]
+    owners = [order_is_owner(order) for order in orders]
+    if None in owners or owners.count(True) != 1:
+        return None
+    return orders[owners.index(True)]
 
 
 def fan_in_cancellation_key(parent_id: str) -> str:

@@ -41,7 +41,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..lifecycle.job_ranks import payload_is_owner
+from ..lifecycle.job_ranks import order_is_owner
 from ..models import (
     AgentOperation,
     ArtifactJob,
@@ -169,11 +169,18 @@ class ArtifactJobService:
             )
         )
         order = None if own is None else own.state
-        if owner_only and own is not None and not payload_is_owner(own.payload):
-            raise ArtifactJobInvalid(
-                "only the job's owner rank delivers its outputs",
-                reason=InvalidRequestReason.UNSUPPORTED,
-            )
+        if owner_only and own is not None:
+            owns = order_is_owner(own)
+            if owns is None:
+                raise ArtifactJobUnavailableError(
+                    "artifact order observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            if not owns:
+                raise ArtifactJobInvalid(
+                    "only the job's owner rank delivers its outputs",
+                    reason=InvalidRequestReason.UNSUPPORTED,
+                )
         if order is None:
             raise ArtifactJobUnavailableError(
                 "artifact order observation is unavailable",

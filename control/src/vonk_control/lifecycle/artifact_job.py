@@ -64,6 +64,7 @@ from vonk_agent_protocol import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
+    RecipeJobRunRequest,
     RecipeJobRunResult,
     RunDegradedReason,
     WaitOwnerKind,
@@ -916,6 +917,13 @@ class ArtifactJobAdapter:
         if parent is None or len(orders) < 2:
             return False
         owner = owner_order(orders)
+        request = None if owner is None else read_row_column(owner, "payload")
+        if (
+            not isinstance(request, RecipeJobRunRequest)
+            or request.compiled_execution_plan.runtime.placement.world_size < 2
+        ):
+            # Not a multi-rank job with a resolved owner: nothing to fan in.
+            return False
         asked = isinstance(parent.result, Mapping) and (
             parent.result.get("cancel_requested") is True
         )
@@ -956,6 +964,13 @@ class ArtifactJobAdapter:
                 0,
                 now,
                 request_id=fan_in_cancellation_key(parent.id),
+                # The siblings stop for the rank's own reason, or for none when
+                # the owner ended: a job that succeeded is not "superseded".
+                reason=(
+                    None
+                    if broken is None
+                    else broken.status_reason or FailureCode.RECIPE_JOB_RUN_FAILED
+                ),
             )
             changed = True
         return changed

@@ -25,6 +25,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
+from .. import agent_operation_states as aos
 from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
@@ -40,6 +41,7 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
 from ..logging import log_event
 from ..models import (
+    AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
@@ -55,7 +57,12 @@ from ..recipe_operations import (
     RecipeRetryLater,
 )
 from ..recipe_operations.observation_helpers import run_takes_jobs
-from ..recipe_start_payloads import RecipeStartPlacement, bind_compiled_execution_plan
+from ..recipe_runtime_specs import recipe_engine
+from ..recipe_start_payloads import (
+    RecipeStartPlacement,
+    bind_compiled_execution_plan,
+    start_peer_addresses,
+)
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -596,16 +603,32 @@ class ArtifactJobService(OutputService):
                     ArtifactJob.id != artifact_job.id,
                 )
             ):
-                parent, operation, attempt = adapter.order_of(session, prior)
-                if operation is not None and operation.current_attempt == 0:
-                    # New intent fences an unissued old order in this transaction.
-                    AgentOperationAdapter(session).record_outcome(
-                        operation,
-                        attempt,
-                        parent,
-                        Outcome.CANCELLED,
-                        now,
+                prior_orders = tuple(
+                    session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.parent_job_id == prior.operation_id
+                        )
                     )
+                    if prior.operation_id is not None
+                    else ()
+                )
+                if prior_orders and all(
+                    order.current_attempt == 0 for order in prior_orders
+                ):
+                    # New intent fences a prior job none of whose ranks was
+                    # handed to a Spark, in this transaction: every unissued
+                    # order of it, not only its owner's.
+                    parent = session.get(Job, prior.operation_id)
+                    operations = AgentOperationAdapter(session)
+                    for order in prior_orders:
+                        if order.state in aos.LIVE:
+                            operations.record_outcome(
+                                order,
+                                AgentOperationAdapter.attempt_of(session, order),
+                                parent,
+                                Outcome.CANCELLED,
+                                now,
+                            )
                     if parent is not None:
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
@@ -657,7 +680,14 @@ class ArtifactJobService(OutputService):
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
+                peer_addresses = start_peer_addresses(
+                    recipe_engine(revision.document),
+                    len(ranks),
+                    {rank.node.rank: rank.fabric_address for rank in ranks},
+                )
                 payloads: list[tuple[str, object]] = []
+                # Sequential on purpose: one session and transaction, and a job
+                # has a handful of ranks (the run's Sparks), so nothing to fan out.
                 for rank, launch in zip(ranks, launches, strict=True):
                     assert launch is not None
                     node = rank.node
@@ -699,6 +729,7 @@ class ArtifactJobService(OutputService):
                                 master_address=master_address,
                                 master_port=master_port,
                                 world_size=len(ranks),
+                                peer_addresses=peer_addresses,
                             )
                         )
                     payloads.append(
