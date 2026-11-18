@@ -748,6 +748,8 @@ Commands that change a profile (`add`, `remove`, `configure`, `import`, `load`,
 omission. Give it before or after the command: `vonkctl --profile 2 profile
 load` and `vonkctl profile load --profile 2` are the same. Reading commands
 default to profile 1.
+`profile list` is the overview and does not check the cache (cache counts read
+unknown there); `vonkctl profile` for one profile reads the cache state.
 
 ```bash
 vonkctl profile

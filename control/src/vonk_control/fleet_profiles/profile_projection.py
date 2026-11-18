@@ -199,9 +199,10 @@ class FleetProfileService:
                 else AssetAvailability.UNKNOWN.value
             )
             if cache is None:
-                warnings.append(
-                    "Cache observation is pending or unavailable; retry this profile read."
-                )
+                if observe:
+                    warnings.append(
+                        "Cache observation is pending or unavailable; retry this profile read."
+                    )
                 cache_unknown += 1
             elif recipe_state == "Cached" and model_state == "Cached":
                 cache_cached += 1
