@@ -215,6 +215,11 @@ def scan_source(source: str) -> list[tuple[int, str]]:
             and _absent(node.body)
         ):
             hits.append((node.lineno, "malformed value becomes absent"))
+        if isinstance(node, ast.Try):
+            hits.extend(
+                (handler.lineno, "deterministic error becomes a wait")
+                for handler in _verdicts_become_waits(node)
+            )
         if isinstance(node, ast.With) and any(
             isinstance(item.context_expr, ast.Call)
             and ast.unparse(item.context_expr.func).split(".")[-1] == "suppress"
@@ -226,3 +231,30 @@ def scan_source(source: str) -> list[tuple[int, str]]:
         ):
             hits.append((node.lineno, "malformed value becomes absent"))
     return hits
+
+
+BROAD = {"Exception", "BaseException"}
+
+
+def _verdicts_become_waits(node: ast.Try) -> list[ast.ExceptHandler]:
+    """Broad handlers that re-raise as an Unknown wait without first letting
+    InvalidRequestError (a deterministic verdict) through unchanged."""
+    passed: set[str] = set()
+    found: list[ast.ExceptHandler] = []
+    for handler in node.handlers:
+        names = set() if handler.type is None else _names(handler.type)
+        if (
+            handler.type is None or names & BROAD
+        ) and "InvalidRequestError" not in passed:
+            for inner in ast.walk(ast.Module(handler.body, [])):
+                if (
+                    isinstance(inner, ast.Raise)
+                    and isinstance(inner.exc, ast.Call)
+                    and ast.unparse(inner.exc.func)
+                    .split(".")[-1]
+                    .endswith(("Unknown", "UnknownOutcomeError"))
+                ):
+                    found.append(handler)
+                    break
+        passed |= names
+    return found

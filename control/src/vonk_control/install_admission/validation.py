@@ -58,8 +58,12 @@ def require_admissible(plan: InstallPlan) -> None:
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     raise InstallPlanStale(
-        f"{InstallAdmissionCode.PLAN_INVALID}: install plan is blocked by current admission evidence"
-        f" ({'; '.join(f'{node.node_id} {reason.code}: {reason.detail}' for node in plan.nodes for reason in node.blockers)[:1200]})",
+        f"{InstallAdmissionCode.PLAN_INVALID}: "
+        + "; ".join(
+            f"{node.node_id} {reason.code}: {reason.detail}"
+            for node in plan.nodes
+            for reason in node.blockers
+        )[:1200],
         reason=InvalidRequestReason.CONFLICT,
     )
 

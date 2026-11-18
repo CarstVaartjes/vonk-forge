@@ -4361,3 +4361,23 @@ def test_an_added_identity_state_literal_is_refused() -> None:
     source = 'def f(row):\n    return row.state == "revoked"\n'
     assert check_source(PATH, source, {2}, modes=("vocabulary",))
     assert not check_source(PATH, source, {1}, modes=("vocabulary",))
+
+
+def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
+    from tests.legacy_tolerance import scan_source
+
+    wait = (
+        "try:\n    f()\n"
+        "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
+    )
+    verdict_first = (
+        "try:\n    f()\n"
+        "except (UnknownOutcomeError, InvalidRequestError):\n    raise\n"
+        "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
+    )
+    assert (3, "deterministic error becomes a wait") in scan_source(wait)
+    assert not [
+        hit
+        for hit in scan_source(verdict_first)
+        if "verdict" in hit[1] or "wait" in hit[1]
+    ]

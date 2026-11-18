@@ -323,7 +323,9 @@ class InstallPlanningService:
                 or compiled_plan_error is not None
             ) and mapping_node.node_id not in compiled_plan_by_node:
                 detail = "Controller-issued compiled execution plan is unavailable."
-                if compiled_plan_error:
+                if compiled_plan_error and not compiled_plan_unsettled:
+                    detail = compiled_plan_error
+                elif compiled_plan_error:
                     detail = f"{detail} {compiled_plan_error}"
                 if compiled_plan_unsettled:
                     detail = f"{UNSETTLED_PLAN_PREFIX}{detail}"
