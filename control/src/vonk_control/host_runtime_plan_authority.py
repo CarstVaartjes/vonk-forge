@@ -44,6 +44,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .stored_json import read_row_column
+from .stored_states import ClusterMappingState
 from .strict_json import read_stored_model, serialize_json_value
 
 
@@ -266,7 +267,7 @@ def _service_run_authority(
     if (
         run.state not in {RunState.STARTING, RunState.RUNNING}
         or authority.installation.state != InstallationState.INSTALLED
-        or authority.mapping.state != "ready"
+        or authority.mapping.state != ClusterMappingState.READY
         or authority.revision.state != "active"
     ):
         # No producer readies these again for this order (a mapping is born
@@ -323,7 +324,7 @@ def _job_run_authority(
     if (
         run.state != RunState.RUNNING
         or authority.installation.state != InstallationState.INSTALLED
-        or authority.mapping.state != "ready"
+        or authority.mapping.state != ClusterMappingState.READY
         or authority.revision.state != "active"
     ):
         raise RuntimePlanUnsatisfiable(

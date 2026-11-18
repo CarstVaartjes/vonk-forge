@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     ObservedAssignmentState,
 )
-from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_forge_contracts import RecipeDefinition
 
 from ..cluster_mappings import mapping_option_choices
@@ -44,6 +43,7 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_operations import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
+from ..stored_states import ClusterMappingState
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (
@@ -131,7 +131,7 @@ class FleetProfileService:
                     catalog_reference_membership(
                         ClusterMapping.recipe_revision_id, revisions
                     ),
-                    ClusterMapping.state == ProfileDocumentState.READY.value,
+                    ClusterMapping.state == ClusterMappingState.READY.value,
                 )
                 .order_by(ClusterMapping.updated_at.desc(), ClusterMapping.id.desc())
             )

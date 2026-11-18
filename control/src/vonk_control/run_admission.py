@@ -88,6 +88,7 @@ from .resource_planning import (
     memory_reservation_kind,
     plan_capacity,
 )
+from .stored_states import ClusterMappingState
 from .topology import Placement, TopologyError, validate_topology
 
 _PORT_CONFLICTS = {
@@ -566,7 +567,7 @@ class RunAdmissionService:
             mapping = session.get(ClusterMapping, installation.mapping_id)
             if (
                 mapping is None
-                or mapping.state != "ready"
+                or mapping.state != ClusterMappingState.READY
                 or mapping.generation != installation.mapping_generation
             ):
                 raise InvalidValue(
@@ -1108,7 +1109,7 @@ class RunAdmissionService:
                 code=RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
             )
         plan = fresh
-        if mapping is None or mapping.state != "ready":
+        if mapping is None or mapping.state != ClusterMappingState.READY:
             raise RunAdmissionBusy(
                 "run mapping is waiting to become ready",
                 code=RunAdmissionCode.MAPPING_NOT_READY,

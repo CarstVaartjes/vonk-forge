@@ -19,9 +19,10 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import ClusterMappingCode
+from vonk_agent_protocol import ClusterMappingCode, machine_check
 
 from ..model_primitives import Base, _lower_hex
+from ..stored_states import ClusterMappingState
 
 
 class ClusterMapping(Base):
@@ -30,7 +31,7 @@ class ClusterMapping(Base):
         CheckConstraint("generation >= 1", name="ck_cluster_mappings_generation"),
         CheckConstraint("node_count >= 1", name="ck_cluster_mappings_node_count"),
         CheckConstraint(
-            "state IN ('planned','ready','stale')", name="ck_cluster_mappings_state"
+            machine_check(ClusterMappingState), name="ck_cluster_mappings_state"
         ),
         CheckConstraint(
             _lower_hex("placement_digest", 64),
