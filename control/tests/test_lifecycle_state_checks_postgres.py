@@ -178,3 +178,15 @@ def test_run_node_state_admits_only_run_state_words(postgres_engine):
         with pytest.raises(IntegrityError), connection.begin_nested():
             _set_state(connection, "run_nodes", RETIRED)
         _set_state(connection, "run_nodes", "stopped")
+
+
+def test_node_state_admits_only_its_enum_words(postgres_engine):
+    """A Spark identity's state is checked against NodeIdentityState."""
+
+    with postgres_engine.begin() as connection:
+        Base.metadata.create_all(connection)
+    _seed(postgres_engine)
+    with postgres_engine.begin() as connection:
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            _set_state(connection, "agent_nodes", RETIRED)
+        _set_state(connection, "agent_nodes", "retired")

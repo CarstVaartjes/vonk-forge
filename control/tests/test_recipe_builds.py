@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
@@ -410,7 +411,7 @@ def test_build_resolution_reuses_exact_receipt_without_builder_admission(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.state = "revoked"
+        node.state = NodeIdentityState.RETIRED
         set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)
@@ -1101,7 +1102,7 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        node.state = "revoked"
+        node.state = NodeIdentityState.RETIRED
         set_inventory_identity(node, binary_digest=None)
 
     resolution = service.resolve(revision.id)

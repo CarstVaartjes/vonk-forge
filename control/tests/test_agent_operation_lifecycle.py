@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import LifecycleState, ObservationCause, WaitReason
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
@@ -700,7 +701,7 @@ def test_nodes_never_polled_are_still_reconciled(agent_service) -> None:
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     with sessions.begin() as session:  # the Spark was revoked meanwhile
         node = session.get(AgentNode, NODE_A)
-        node.state = "revoked"
+        node.state = NodeIdentityState.RETIRED
         node.revoked_at = clock.now
     clock.advance(seconds=45)
     from types import SimpleNamespace

@@ -36,6 +36,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import ArtifactDistributionResult, canonical_payload
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
@@ -4490,7 +4491,7 @@ def test_gone_target_ends_without_retaining_queue_ownership(service, issued):
         assert claim_agent(jobs, NODE_A, "serial-a") is not None
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
-        node.state = "revoked"
+        node.state = NodeIdentityState.RETIRED
         node.revoked_at = clock.now
 
     def end(_):
