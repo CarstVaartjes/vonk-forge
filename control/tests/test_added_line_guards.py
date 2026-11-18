@@ -2291,6 +2291,24 @@ def test_private_or_classified_scratch_names_pass(path: str, source: str) -> Non
     assert not check_source(path, source, lines, modes=("scratch-names",))
 
 
+_CONTRACTS_PATH = "agent_protocol/src/vonk_agent_protocol/contracts.py"
+
+
+def test_a_length_term_in_a_typed_string_rule_is_flagged() -> None:
+    source = (
+        "def _typed_result_string(path, value):\n"
+        '    return len(value) <= 2048 and "\\x00" not in value\n'
+    )
+    modes = ("typed-string-lengths",)
+    assert check_source(_CONTRACTS_PATH, source, {2}, modes=modes)
+    assert not check_source(_CONTRACTS_PATH, source, set(), modes=modes)
+    ok = (
+        "def _typed_result_string(path, value):\n"
+        '    return len(path) == 4 and "\\x00" not in value\n'
+    )
+    assert not check_source(_CONTRACTS_PATH, ok, {2}, modes=modes)
+
+
 _SAVEPOINT_PATH = "control/src/vonk_control/admission_locking.py"
 
 

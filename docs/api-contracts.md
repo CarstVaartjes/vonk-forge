@@ -962,6 +962,8 @@ first (its reader accepts larger tails), then agents and helpers. The helper kee
 its `what()` message) ahead of the tail, marks the omitted middle, and stays
 within that bound. The status is omitted when no
 numeric status was observed (including spawn failure or signal termination).
+The ingress path rule only exempts the diagnostics log-tail and property-value
+leaves from the filesystem-path ban; `FailureDiagnostics` owns their length bounds.
 The helper carries that status in `HostHelperProcessLogs.exit_code`; the agent
 preserves it while sanitizing and projecting the failure. Classification never
 replaces a command's retained output. Neither field changes authorization or
