@@ -67,17 +67,11 @@ class _ProfilePageReads:
 
 class FleetProfileService:
     def _page_reads(
-        self,
-        session: Session,
-        choices: Sequence[FleetProfileAssignmentInput],
-        *,
-        include_documents: bool = False,
+        self, session: Session, choices: Sequence[FleetProfileAssignmentInput]
     ) -> _ProfilePageReads:
         """Read the selection, roster, recipe heads and model titles in set queries."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        self._prefetch_recipe_documents(
-            session, choices, include_documents=include_documents
-        )
+        self._prefetch_recipe_documents(session, choices)
         node_ids = tuple(
             session.scalars(
                 select(AgentNode.node_id)

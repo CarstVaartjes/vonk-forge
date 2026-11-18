@@ -67,24 +67,29 @@ class FleetProfileService:
                 )
             )
             # Rows share the selection, roster and recipe reads: one set query
-            # each for the page, never one per row.
-            # An unreadable definition contributes nothing to the page reads;
-            # _read_view shows that row as unavailable.
-            choices = [
-                choice
-                for row in rows
-                if isinstance(
-                    definition := self._readable_definition(row),
-                    FleetProfileDefinition,
-                )
-                for choice in definition.assignments
-            ]
-            page = self._page_reads(session, choices, include_documents=True)
+            # each for the page, never one per row. An unreadable definition
+            # contributes nothing to them; _read_view shows it as unavailable.
+            definitions = {row.id: self._readable_definition(row) for row in rows}
+            page = self._page_reads(
+                session,
+                [
+                    choice
+                    for definition in definitions.values()
+                    if isinstance(definition, FleetProfileDefinition)
+                    for choice in definition.assignments
+                ],
+            )
             return FleetProfileList(
                 generated_at=now,
                 # The list is the cheap overview; cache truth is read per profile.
                 profiles=[
-                    self._read_view(session, row, observe=False, page=page)
+                    self._read_view(
+                        session,
+                        row,
+                        observe=False,
+                        page=page,
+                        definition=definitions[row.id],
+                    )
                     for row in rows
                 ],
                 next_after=rows[-1].number if len(rows) == 128 else None,
@@ -198,14 +203,13 @@ class FleetProfileService:
     def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
         """Refuse new effects with the same typed cause as the draft read."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        try:
-            return self._definition(row)
-        except (TypeError, ValueError):
-            issue = self._definition_issue()
+        definition = self._readable_definition(row)
+        if isinstance(definition, SavedProfileProjectionIssue):
             raise FleetProfileDefinitionUnavailable(
-                f"{issue.detail} {issue.next_action}",
+                f"{definition.detail} {definition.next_action}",
                 reason=InvalidRequestReason.MALFORMED,
-            ) from None
+            )
+        return definition
 
     @staticmethod
     def _definition_issue() -> SavedProfileProjectionIssue:
@@ -221,9 +225,11 @@ class FleetProfileService:
         *,
         observe: bool = True,
         page: _ProfilePageReads | None = None,
+        definition: FleetProfileDefinition | SavedProfileProjectionIssue | None = None,
     ) -> FleetProfileReadView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        definition = self._readable_definition(row)
+        if definition is None:
+            definition = self._readable_definition(row)
         if isinstance(definition, SavedProfileProjectionIssue):
             return UnavailableFleetProfileView(
                 id=row.id,
@@ -260,15 +266,14 @@ class FleetProfileService:
                         name="Default" if number == 1 else f"Profile {number}"
                     ),
                 )
-            try:
-                definition = self._definition(row)
-            except (TypeError, ValueError):
+            definition = self._readable_definition(row)
+            if isinstance(definition, SavedProfileProjectionIssue):
                 return FleetProfileDefinitionView(
                     id=row.id,
                     number=row.number,
                     revision=row.revision,
                     definition=None,
-                    projection_issue=self._definition_issue(),
+                    projection_issue=definition,
                 )
             return FleetProfileDefinitionView(
                 id=row.id,

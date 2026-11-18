@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
@@ -13,6 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control.catalog_revision_contract import (
+    rederive_projection,
+    write_catalog_projection,
+)
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
@@ -1496,6 +1501,11 @@ def _add_recipe(sessions: sessionmaker, slug: str) -> str:
                 state="active",
                 document=document,
                 content_digest=document_sha256(document),
+                # Every catalog writer stores the projection beside the source.
+                projected=write_catalog_projection(
+                    rederive_projection({}, RecipeDefinition.model_validate(document)),
+                    kind="recipe",
+                ),
                 execution_key="c" * 64,
                 created_by="test",
                 created_at=NOW,
@@ -1526,7 +1536,7 @@ def test_profile_list_reads_a_page_in_queries_independent_of_its_rows() -> None:
                 actor="test",
             )
 
-    def listed_statements() -> int:
+    def listed_statements() -> list[str]:
         statements: list[str] = []
 
         def record(*args: object) -> None:
@@ -1537,28 +1547,33 @@ def test_profile_list_reads_a_page_in_queries_independent_of_its_rows() -> None:
             service.list()
         finally:
             event.remove(engine, "before_cursor_execute", record)
-        return len(statements)
+        return statements
 
-    add_profiles(0, 2)
-    few = listed_statements()
-    add_profiles(2, 6)
     # A recipe without a current revision, and a definition that cannot be
-    # read, keep their own row projections on the page.
+    # read, keep their own row projections on both pages.
+    add_profiles(0, 4)
     with sessions.begin() as session:
         session.execute(
             update(CatalogDocumentHead)
-            .where(CatalogDocumentHead.slug == "page-3")
+            .where(CatalogDocumentHead.slug == "page-2")
             .values(active_revision_id=None)
         )
         session.execute(
-            update(FleetProfile).where(FleetProfile.number == 5).values(assignments={})
+            update(FleetProfile).where(FleetProfile.number == 4).values(assignments={})
         )
+    few = listed_statements()
+    add_profiles(4, 6)
     listed = service.list()
 
-    # Only the unpublished recipe is resolved on its own (its typed refusal
-    # and attention lookup); six more readable rows add no statements.
-    assert listed_statements() <= few + 3
-    assert len(listed.profiles) == 8
+    many = listed_statements()
+    assert len(many) <= len(few)
+    # The overview reads stored projections, never the recipes' source documents.
+    assert not [
+        item
+        for item in many
+        if re.search(r"catalog_document_revisions\.document\b", item)
+    ]
+    assert len(listed.profiles) == 10
     with sessions() as session:
         rows = session.scalars(select(FleetProfile).order_by(FleetProfile.number))
         assert listed.profiles == [
