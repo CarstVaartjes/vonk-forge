@@ -35,6 +35,8 @@ from vonk_agent_protocol.state_machines import (
     ModelCacheOperatorStatus,
     NodeIdentityState,
 )
+from vonk_agent_protocol.wire_model import WireEnum
+from vonk_control import stored_states
 
 from .parsed_sources import memoized_scan, parse_file
 
@@ -806,6 +808,15 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
     # Stored certificate and node identity states are spelled by enum member.
     words.update(
         m.value for e in (CertificateRecordState, NodeIdentityState) for m in e
+    )
+    # Controller-only stored states (stored_states.py), spelled by enum member.
+    words.update(
+        member.value
+        for enum in vars(stored_states).values()
+        if isinstance(enum, type)
+        and issubclass(enum, WireEnum)
+        and enum.__module__ == stored_states.__name__
+        for member in enum
     )
     return frozenset(words)
 
