@@ -58,7 +58,7 @@ from ..runtime_preflight import (
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -135,7 +135,7 @@ class InstallPlanningService:
                 )
             if (
                 build is None
-                or build.state != "succeeded"
+                or build.state != RecipeBuildState.SUCCEEDED
                 or build.image_digest is None
                 or build.image_bytes is None
                 or build.oci_layout_sha256 is None

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import case, func, select
 from vonk_agent_protocol import (
-    LifecycleState,
     RecipeBuildCode,
     SecurityRefusalError,
     UnknownOutcomeError,
@@ -44,7 +43,7 @@ from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,
@@ -346,7 +345,9 @@ def _resolve_once(
             # A load binds a succeeded row, so one of the same content is
             # preferred over a newer row whose replacement attempt runs or failed.
             .order_by(
-                case((RecipeBuild.state == LifecycleState.SUCCEEDED.value, 0), else_=1),
+                case(
+                    (RecipeBuild.state == RecipeBuildState.SUCCEEDED.value, 0), else_=1
+                ),
                 RecipeBuild.updated_at.desc(),
                 RecipeBuild.id.desc(),
             )

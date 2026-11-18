@@ -30,6 +30,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeBuildRequest, canonical_message
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
@@ -452,6 +453,14 @@ def _refresh(catalog: Catalog, slug: str) -> tuple[str, str]:
     old = catalog.revision(slug, 1)
     head = catalog.revision(slug, 2, head="active")
     return old, head
+
+
+def test_build_state_admits_only_its_enum_words(catalog: Catalog) -> None:
+    revision = catalog.revision("build-state", 1)
+    for word in ("planned", "building", "succeeded", "failed"):
+        catalog.build(revision, state=word)
+    with pytest.raises(IntegrityError):
+        catalog.build(revision, state="waiting")
 
 
 def test_superseded_unreferenced_revision_is_removed_after_the_grace_period(

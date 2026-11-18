@@ -46,6 +46,7 @@ from ..runtime_image_preparation import (
 )
 from ..stall_window import last_progress_at, latest_progress
 from ..stored_json import Residue
+from ..stored_states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _LOGGER,
@@ -232,13 +233,13 @@ def _persist_receipt(
                 update(RecipeBuild)
                 .where(
                     RecipeBuild.state.in_(
-                        (LifecycleState.SUCCEEDED, LifecycleState.FAILED)
+                        (RecipeBuildState.SUCCEEDED, RecipeBuildState.FAILED)
                     ),
                     RecipeBuild.build_input_sha256 == receipt.build_input_sha256,
                     RecipeBuild.oci_layout_sha256 == receipt.oci_archive_sha256,
                 )
                 .values(
-                    state=LifecycleState.SUCCEEDED,
+                    state=RecipeBuildState.SUCCEEDED,
                     image_digest=receipt.image_digest,
                     image_bytes=receipt.image_bytes,
                     error=None,

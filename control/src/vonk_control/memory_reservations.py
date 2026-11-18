@@ -25,6 +25,7 @@ from .resource_planning import (
     memory_reservation_kinds,
 )
 from .run_switch_contract import StopImpact
+from .stored_states import RecipeBuildState
 
 MEMORY_RESERVATION_KINDS = ("host-memory", "gpu-memory", "unified-memory")
 
@@ -205,7 +206,7 @@ def memory_reservations(
         build = session.get(RecipeBuild, build_claim.owner_id)
         if (
             build is None
-            or build.state != "building"
+            or build.state != RecipeBuildState.BUILDING
             or build.build_input_sha256 != build_claim.plan_digest
             or build.builder_node_id != node_id
         ):

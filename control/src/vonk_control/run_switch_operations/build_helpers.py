@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 from pydantic import ValidationError
 from vonk_agent_protocol import (
-    LifecycleState,
     RunSwitchCode,
     WaitReason,
 )
@@ -18,6 +17,7 @@ from ..run_switch_contract import (
     FreshnessEvidence,
     RunSwitchContainerBuildResult,
 )
+from ..stored_states import RecipeBuildState
 from .constants import _CONTAINER_BUILD_STATE_ADAPTER
 from .errors import RunSwitchRetryLater
 
@@ -35,7 +35,7 @@ def _refreshed_freshness(
 
 def _container_build_result(build: RecipeBuild) -> RunSwitchContainerBuildResult:
     """Project the authoritative build record into its phase receipt."""
-    succeeded = build.state == LifecycleState.SUCCEEDED.value
+    succeeded = build.state == RecipeBuildState.SUCCEEDED.value
     try:
         receipt = RunSwitchContainerBuildResult(
             phase="prepare",

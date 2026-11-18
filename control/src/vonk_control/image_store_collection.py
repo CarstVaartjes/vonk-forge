@@ -33,7 +33,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignmentState,
     ImageStoreCode,
-    LifecycleState,
 )
 
 from .artifact_lifecycle import (
@@ -57,6 +56,7 @@ from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
+from .stored_states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
@@ -236,7 +236,10 @@ class ImageStoreCollector:
             str(address)
             for address, state, updated_at, in_flight in rows
             if in_flight
-            or (state == LifecycleState.SUCCEEDED and _aware(updated_at, now) >= recent)
+            or (
+                state == RecipeBuildState.SUCCEEDED
+                and _aware(updated_at, now) >= recent
+            )
         }
 
     def _collect_uploads(self) -> Collection:

@@ -18,7 +18,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, machine_check
 from vonk_forge_contracts import CatalogVocabulary
 
 from ..exact_integer_storage import (
@@ -35,6 +35,7 @@ from ..model_primitives import (
     _uuid_shape,
 )
 from ..stored_json import ContractJSON
+from ..stored_states import RecipeBuildState
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
@@ -385,7 +386,7 @@ class RecipeBuild(Base):
             name="uq_recipe_build_input_builder",
         ),
         CheckConstraint(
-            "state IN ('planned','building','succeeded','failed')",
+            machine_check(RecipeBuildState),
             name="ck_recipe_builds_state",
         ),
         CheckConstraint(

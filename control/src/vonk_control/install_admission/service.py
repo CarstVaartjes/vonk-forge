@@ -51,7 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,
@@ -226,7 +226,7 @@ class InstallAdmissionService(InstallPlanningService):
             or mapping.state != "ready"
             or revision is None
             or build is None
-            or build.state != "succeeded"
+            or build.state != RecipeBuildState.SUCCEEDED
             or build.image_digest != plan.image_digest
         ):
             raise InstallPlanStale(

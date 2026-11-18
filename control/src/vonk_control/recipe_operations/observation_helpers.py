@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
-    LifecycleState,
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
@@ -66,7 +65,7 @@ from ..recipe_execution_contract import (
 from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from .errors import RecipeRetryLater
 from .results import _RANK_FAILED
@@ -257,7 +256,7 @@ def record_build_evidence(
         )
     # The authenticated current attempt and verified ingress own these bytes.
     # Stored success/size observations are derived bookkeeping, not a veto.
-    build.state = LifecycleState.SUCCEEDED.value
+    build.state = RecipeBuildState.SUCCEEDED.value
     build.image_digest = image_digest
     build.oci_layout_sha256 = layout_digest
     build.image_bytes = image_bytes
