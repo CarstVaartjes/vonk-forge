@@ -20,7 +20,7 @@ from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control import profile_read_observation
 from vonk_control.categorized_errors import BookkeepingUnknown
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
+from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService, observation
 from vonk_control.model_cache_contract import (
     CacheManifest,
     CacheOperationKind,
@@ -37,6 +37,7 @@ from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspecto
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .pass_budget_clocks import completing_wait, expiring_wait
+from .test_model_cache import _artifact, _shared_connection_sessions
 
 
 @pytest.fixture
@@ -266,6 +267,65 @@ def test_observer_corrects_stale_cached_rows_and_missing_objects(observed_cache)
         )
 
 
+@pytest.mark.parametrize("slow", [False, True])
+def test_a_pass_checkpoints_by_elapsed_time_not_per_object(tmp_path, monkeypatch, slow):
+    """Catches a whole-checkpoint rewrite per object, quadratic in a set's files,
+    while slow storage still persists every observed prefix."""
+    service = ModelCacheService(
+        _shared_connection_sessions(),
+        tmp_path / "cache",
+        free_fraction=0,
+        fixture_sources=True,
+    )
+    model = "7" * 64
+    data = [f"object-{index}".encode() for index in range(12)]
+    manifest = service.resolve_artifact_set(
+        model_content_sha256=model,
+        artifacts=[
+            _artifact(
+                tmp_path,
+                item,
+                artifact_id=f"shard-{index}",
+                path=f"shard-{index}.bin",
+                model_content_sha256=model,
+            )
+            for index, item in enumerate(data)
+        ],
+    )
+    for item in data:
+        path = service._object_path(hashlib.sha256(item).hexdigest())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(item)
+    # A slow object check takes two seconds; a fast pass takes no time at all.
+    seconds = iter(range(0, 1000, 2))
+    monkeypatch.setattr(
+        observation, "monotonic", (lambda: next(seconds)) if slow else lambda: 0
+    )
+    observer = service._storage_observer
+    write = observer._write
+    checkpoints: list[int] = []
+
+    def record(manifest, value):
+        checkpoints.append(len(value.objects))
+        write(manifest, value)
+
+    monkeypatch.setattr(observer, "_write", record)
+    try:
+        observer._observe(manifest)
+        completed = observer._read(manifest)
+    finally:
+        service.close()
+    assert completed is not None and completed.completed_at is not None
+    assert all(entry.available for entry in completed.objects.values())
+    assert len(completed.objects) == len(data)
+    if slow:
+        # Each object outlasts the checkpoint interval: its prefix is durable.
+        assert set(range(1, len(data) + 1)) <= set(checkpoints)
+    else:
+        # A fast pass writes its start and its completion, whatever its size.
+        assert checkpoints == [0, len(data)]
+
+
 def _crash_after_checkpoint(database_url, root, manifest_json, clock):
     sessions = sessionmaker(create_engine(database_url), expire_on_commit=False)
     cache = ModelCacheService(
@@ -274,6 +334,8 @@ def _crash_after_checkpoint(database_url, root, manifest_json, clock):
     manifest = ArtifactSetManifest.from_contract(
         CacheManifest.model_validate_json(manifest_json)
     )
+    # Checkpoint after every object, so the crash lands after a known prefix.
+    observation._CHECKPOINT_SECONDS = 0
     write = cache._storage_observer._write
 
     def crash(manifest, value):
@@ -422,6 +484,8 @@ def test_other_observer_reports_live_checkpoint_without_taking_writer_lock(
 ):
     """Catches API progress staying at zero while the worker owns the scan."""
     cache, sessions, manifest, now = observed_cache
+    # Checkpoint after every object, so the pause lands after a known prefix.
+    monkeypatch.setattr(observation, "_CHECKPOINT_SECONDS", 0)
     entered, release = Event(), Event()
     write = cache._storage_observer._write
 

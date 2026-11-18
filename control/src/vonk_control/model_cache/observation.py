@@ -1,7 +1,8 @@
 """Durable set observations, independent of a profile request's deadline.
 
-Stored object files remain the storage owner. This disposable index checkpoints one object
-at a time; slow storage and process death cannot reset the completed prefix.
+Stored object files remain the storage owner. This disposable index checkpoints the
+observed prefix at most once per ``_CHECKPOINT_SECONDS`` and when a pass ends; slow
+storage and process death cannot reset more than that last second of the prefix.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -37,6 +39,10 @@ if TYPE_CHECKING:
 
 _REFRESH_SECONDS = 30
 _RECHECK_SECONDS = 5
+# Each checkpoint rewrites, fsyncs and republishes the whole observation, so
+# writing one per object costs quadratic time in the set's object count. A
+# fast pass writes once at its end; a slow one still persists its prefix.
+_CHECKPOINT_SECONDS = 1.0
 
 
 def _settled(value: ModelCacheStorageObservation | None) -> bool:
@@ -309,6 +315,7 @@ class StorageObserver:
                 if now < value.next_check_at and value.detail is not None:
                     return
                 try:
+                    checkpointed = monotonic()
                     for digest, spec in _unique_artifacts(manifest.artifacts).items():
                         if self._cache._closed.is_set():
                             return
@@ -337,7 +344,9 @@ class StorageObserver:
                             seconds=_RECHECK_SECONDS
                         )
                         value.detail = None
-                        self._write(manifest, value)
+                        if monotonic() - checkpointed >= _CHECKPOINT_SECONDS:
+                            self._write(manifest, value)
+                            checkpointed = monotonic()
                     value.available_bytes = self._cache.free_bytes()
                     value.detail = None
                     value.completed_at = self._cache._clock()
