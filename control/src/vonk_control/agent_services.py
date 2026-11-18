@@ -159,6 +159,7 @@ def build_agent_services(
                 host_runtime_key_path, clock=clock
             ),
             clock=clock,
+            peer_secret_key=lambda: settings.token_signing_key,
         )
 
     host_runtime_authority = registry.guard(

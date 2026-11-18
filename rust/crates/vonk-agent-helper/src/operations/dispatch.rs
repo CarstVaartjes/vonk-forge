@@ -118,6 +118,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     runtime_run_id,
                     runtime_target_id,
                     runtime_installation_id,
+                    peer_secret,
                     ..
                 },
             ) => {
@@ -136,6 +137,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         runtime_run_id: runtime_run_id.as_ref(),
                         runtime_target_id: runtime_target_id.as_ref(),
                         runtime_installation_id: runtime_installation_id.as_ref(),
+                        peer_secret: peer_secret.as_deref(),
                     },
                     request_sha256,
                 );

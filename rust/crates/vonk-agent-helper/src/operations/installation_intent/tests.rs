@@ -184,7 +184,7 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
             start_plan_sha256: request.start_plan.as_ref().map(|plan| hex_sha256(&canonical_json(plan).unwrap())), stop_plan_sha256: None,
             run_generation: request.run_generation,
             runtime_run_id: request.start_plan.as_ref().map(|plan| plan.run_id), runtime_target_id: request.start_plan.as_ref().map(|plan| plan.run_id), runtime_installation_id: request.start_plan.as_ref().map(|plan| plan.installation_id),
-            installation_intent_nonce: nonce, installation_intent_ordinal: Some(ordinal),
+            installation_intent_nonce: nonce, installation_intent_ordinal: Some(ordinal), peer_secret: None,
         })
     };
     let nonce = challenge(execute_signed(

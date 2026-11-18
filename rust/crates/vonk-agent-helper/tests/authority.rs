@@ -129,6 +129,7 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
                 type_: "execute-container-runtime-request".into(),
                 installation_intent_nonce: None,
                 installation_intent_ordinal: Some(1),
+                peer_secret: None,
                 action: ContainerRuntimeAction::Start,
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
@@ -583,6 +584,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
             type_: "execute-container-runtime-request".into(),
             installation_intent_nonce: None,
             installation_intent_ordinal: Some(1),
+            peer_secret: None,
             action: match request.action {
                 HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
                 HostRuntimeAction::ImagePull => ContainerRuntimeAction::ImagePull,

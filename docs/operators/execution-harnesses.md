@@ -76,6 +76,13 @@ the others are stopped. A multi-rank job's wrappers must print a heartbeat line
 well inside the job inactivity timeout (at most 3600 s), because only log lines
 reset it.
 
+The `vllm-omni` harness also gets a per-job peer secret in its signed Start
+grant, for the wrapper to authenticate its own ranks: derived from the parent
+job and the Controller's `token-signing-key`, never stored, and delivered to the
+container's environment by name only (`VONK_PEER_SECRET`, reserved for the
+platform). Upgrade the Controller first, then the agents; a Spark on an older
+helper fails that job closed.
+
 ## Acceptance evidence
 
 `scripts/qualify-recipe --level structural` resolves the exact canonical Model,

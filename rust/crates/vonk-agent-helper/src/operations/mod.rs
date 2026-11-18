@@ -241,6 +241,22 @@ pub trait CommandRunner: Send + Sync {
         self.run(executable, arguments)
     }
 
+    /// `run_with_timeout` with `environment` in the child's own environment,
+    /// never in its argument list. A runner that cannot carry it refuses.
+    fn run_with_environment(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout: Duration,
+        environment: &[(&str, &str)],
+    ) -> Result<CommandOutput, String> {
+        if environment.is_empty() {
+            self.run_with_timeout(executable, arguments, timeout)
+        } else {
+            Err("runner does not carry a child environment".to_owned())
+        }
+    }
+
     /// A listing read line by line: `on_line` receives each line of standard
     /// output without its newline, and the returned output carries the exit
     /// status and stderr but no stdout. The listing has no total bound (it
@@ -327,6 +343,9 @@ struct RuntimeRequestGrantBinding<'a> {
     runtime_run_id: Option<&'a uuid::Uuid>,
     runtime_target_id: Option<&'a uuid::Uuid>,
     runtime_installation_id: Option<&'a uuid::Uuid>,
+    /// The Start grant's per-job secret. Outside every identity: it reaches the
+    /// container's environment by name and is never formatted, stored or logged.
+    peer_secret: Option<&'a str>,
 }
 
 enum AuthorizedRuntimeEffect {

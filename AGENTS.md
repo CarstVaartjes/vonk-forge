@@ -197,6 +197,15 @@ multi-rank job (protocol 4.5): every rank is its own order on host network;
 only the rendezvous owner (`is_endpoint_owner` / `RecipeJobRunRequest.endpoint_owner`)
 owns `/inputs`, `/outputs` and the result, and a companion rank reports an empty
 output manifest. Job recipes may be `distributed` on the `diffusers` and `vllm-omni` engines only;
+a `vllm-omni` Start grant alone carries `peer_secret` (`peer_secret.py`:
+`HMAC(HKDF(token-signing-key), parent job id)`, read lazily so a key problem
+never blocks another workload's grant, and outside every identity: plan digest,
+request digest, label, compile-cache key). The helper adds it after those are
+fixed as `--env VONK_PEER_SECRET` by name, the value only in the docker child's
+environment; no argv, label, DB row, log or API field ever holds it, and a plan
+or recipe cannot name `VONK_PEER_SECRET`. A Spark on an older helper refuses the
+unknown grant field or the wrapper exits 2 (fail closed); deploy Controller,
+then agents, then the recipe;
 run admission reserves the rendezvous port on the owner of a multi-node job. A job submitted to a multi-node run is one order per rank in one
 phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
 own binder); `lifecycle/job_ranks.py` names the owner's order, the job's

@@ -79,6 +79,8 @@ _PLATFORM_ENV_NAMES = frozenset(
         "NCCL_IB_GID_INDEX",
         "TP_SOCKET_IFNAME",
         "GLOO_SOCKET_IFNAME",
+        # Delivered by the signed Start grant, never by a recipe.
+        "VONK_PEER_SECRET",
     }
 )
 
@@ -350,6 +352,18 @@ def _model_mounts(
 
 
 _PLACED_BY_ENVIRONMENT = frozenset({"diffusers", "ds4", "gr8", "vllm-omni"})
+_NEEDS_PEER_SECRET = frozenset({"vllm-omni"})
+
+
+def requires_peer_secret(engine: str) -> bool:
+    """Whether a Start of the engine carries the per-job peer secret.
+
+    The one owner of the answer, beside ``places_from_environment``: the
+    engine's wrapper authenticates its own peers with it and refuses to start
+    without it.
+    """
+
+    return engine in _NEEDS_PEER_SECRET
 
 
 def places_from_environment(engine: str) -> bool:

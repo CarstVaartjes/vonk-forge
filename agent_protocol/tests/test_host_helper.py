@@ -359,3 +359,37 @@ def test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant()
                 | {"installation_id": "70000000-0000-4000-8000-000000000010"},
             }
         )
+
+
+def test_the_peer_secret_is_an_optional_start_only_field_outside_the_other_bytes() -> (
+    None
+):
+    # Break caught: the secret changing the bytes of a grant that carries none,
+    # riding a Stop, or showing in a repr/log of the operation. The same vector
+    # is read by the Rust protocol tests.
+    vector = json.loads(
+        (
+            Path(__file__).parent.parent
+            / "fixtures"
+            / "host-helper-peer-secret-grant.json"
+        ).read_text(encoding="utf-8")
+    )
+    without = ExecuteContainerRuntimeRequestOperation.model_validate(vector["without"])
+    carried = ExecuteContainerRuntimeRequestOperation.model_validate(vector["with"])
+    assert (
+        canonical_message(without.to_mapping())
+        == json.dumps(vector["without"], sort_keys=True, separators=(",", ":")).encode()
+    )
+    assert (
+        canonical_message(carried.to_mapping())
+        == json.dumps(vector["with"], sort_keys=True, separators=(",", ":")).encode()
+    )
+    assert without.peer_secret is None and "peer_secret" not in without.to_mapping()
+    assert vector["with"]["peer_secret"] not in repr(carried)
+    for refused in (
+        vector["with"] | {"peer_secret": "short"},
+        vector["with"]
+        | {"action": "stop", "start_plan_sha256": None, "stop_plan_sha256": "d" * 64},
+    ):
+        with pytest.raises(ValidationError):
+            ExecuteContainerRuntimeRequestOperation.model_validate(refused)

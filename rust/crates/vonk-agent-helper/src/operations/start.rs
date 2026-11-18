@@ -110,6 +110,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 logical_run_id,
                 plan_digest,
                 image_config_id,
+                binding.peer_secret,
             )?;
             (launch, active_start)
         };
@@ -136,6 +137,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
         image_config_id: &str,
+        peer_secret: Option<&str>,
     ) -> Result<RuntimeStartLaunch, OperationError> {
         let [
             archive_sha256,
@@ -262,12 +264,24 @@ impl<R: CommandRunner> OperationExecutor<R> {
             compiled.insert(1, "--detach".to_owned());
         }
         validate_runtime_invocation(&compiled)?;
+        // The peer secret is added only now, after the digest, the cache key and
+        // the labels are fixed: by name in argv, by value in the docker child's
+        // own environment, so it is in no argv, label, request file or key.
+        let mut child_environment: Vec<(&str, &str)> = Vec::new();
+        if let Some(secret) = peer_secret {
+            compiled.splice(
+                1..1,
+                ["--env".to_owned(), PEER_SECRET_ENVIRONMENT.to_owned()],
+            );
+            child_environment.push((PEER_SECRET_ENVIRONMENT, secret));
+        }
         let timeout = if validated.job_timeout_seconds.is_some() {
             Duration::from_secs(30)
         } else {
             Duration::from_secs(60)
         };
-        let unread = match self.run_docker_with_timeout(&compiled, timeout) {
+        let unread = match self.run_docker_with_environment(&compiled, timeout, &child_environment)
+        {
             Ok(output) if !output.success => return Err(CommandFailure::exit(&output).into()),
             Ok(output) => {
                 let identifier = std::str::from_utf8(&output.stdout).map(str::trim);

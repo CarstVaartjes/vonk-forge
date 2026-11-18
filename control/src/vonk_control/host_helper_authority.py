@@ -53,6 +53,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdent
 
 from . import agent_operation_states, job_states
 from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
+from .harnesses.canonical import requires_peer_secret
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -72,6 +73,7 @@ from .offline_stops import is_deferred_stop
 from .own_cleanup import CLEANUP_ACTIONS
 from .owner_liveness import run_has_live_operation
 from .package_activation import matches_receipt
+from .peer_secret import derive_peer_secret
 from .strict_json import read_stored_model
 from .untracked_installations import run_wanted_here
 
@@ -352,6 +354,7 @@ class HostRuntimeAuthorityService:
         issuer: HostHelperGrantIssuer,
         *,
         clock: Callable[[], datetime] | None = None,
+        peer_secret_key: Callable[[], bytes] | None = None,
     ) -> None:
         if not callable(sessions):
             raise TypeError("host runtime sessions are invalid")
@@ -362,6 +365,9 @@ class HostRuntimeAuthorityService:
         self._sessions = sessions
         self._issuer = issuer
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Read lazily, only for an engine that needs a peer secret, so a key
+        # problem never blocks another workload's grant.
+        self._peer_secret_key = peer_secret_key
 
     def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
         from .gpu_clock import selected_gpu_clock
@@ -410,20 +416,22 @@ class HostRuntimeAuthorityService:
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
             raise HostHelperAuthorityError("container runtime action is invalid")
-        lease_deadline, plan_binding, intent_ordinal = self._check_attempt(
-            node_id=node_id,
-            fence=fence,
-            action=action,
-            start_plan_sha256=start_plan_sha256,
-            stop_plan_sha256=stop_plan_sha256,
-            run_generation=run_generation,
-            runtime_run_id=runtime_run_id,
-            runtime_target_id=runtime_target_id,
-            runtime_installation_id=runtime_installation_id,
-            installation_id=installation_id,
-            reconciliation_identity=reconciliation_identity,
-            request_sha256=request_sha256,
-            certificate_serial=certificate_serial,
+        lease_deadline, plan_binding, intent_ordinal, secret_job_id = (
+            self._check_attempt(
+                node_id=node_id,
+                fence=fence,
+                action=action,
+                start_plan_sha256=start_plan_sha256,
+                stop_plan_sha256=stop_plan_sha256,
+                run_generation=run_generation,
+                runtime_run_id=runtime_run_id,
+                runtime_target_id=runtime_target_id,
+                runtime_installation_id=runtime_installation_id,
+                installation_id=installation_id,
+                reconciliation_identity=reconciliation_identity,
+                request_sha256=request_sha256,
+                certificate_serial=certificate_serial,
+            )
         )
         grant = self._issuer.issue_grant(
             node_id=node_id,
@@ -442,6 +450,7 @@ class HostRuntimeAuthorityService:
                 reconciliation_identity=reconciliation_identity,
                 installation_intent_nonce=installation_intent_nonce,
                 installation_intent_ordinal=intent_ordinal,
+                peer_secret=self._peer_secret(secret_job_id),
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -450,6 +459,25 @@ class HostRuntimeAuthorityService:
                 "host runtime grant awaits active attempt lease renewal"
             )
         return grant
+
+    def _peer_secret(self, parent_job_id: str | None) -> str | None:
+        """The job's peer secret, or none for a grant that carries none.
+
+        A security edge: with the key unreadable the Start is not granted (the
+        agent asks again), never granted without the secret.
+        """
+
+        if parent_job_id is None:
+            return None
+        try:
+            if self._peer_secret_key is None:
+                raise ValueError("peer secret key is not configured")
+            return derive_peer_secret(self._peer_secret_key(), parent_job_id)
+        except (OSError, ValueError, TypeError) as error:
+            _LOGGER.warning("peer secret key unavailable: %s", type(error).__name__)
+            raise HostRuntimeEvidenceUnavailable(
+                "peer secret key is unavailable"
+            ) from None
 
     def issue_orphan_stop_grant(
         self,
@@ -652,7 +680,7 @@ class HostRuntimeAuthorityService:
         reconciliation_identity: RecipeReconciliationIdentity | None,
         request_sha256: str,
         certificate_serial: str,
-    ) -> tuple[datetime, RuntimePlanBinding, int | None]:
+    ) -> tuple[datetime, RuntimePlanBinding, int | None, str | None]:
         now = self._clock()
         with self._sessions() as session:
             current = session.scalar(
@@ -827,5 +855,11 @@ class HostRuntimeAuthorityService:
                     ContainerRuntimeAction.START,
                     ContainerRuntimeAction.INSTALLATION_CLEANUP,
                 }
+                else None,
+                # Both ranks of a job share the parent job, hence the secret.
+                parent.id
+                if action is ContainerRuntimeAction.START
+                and binding.engine is not None
+                and requires_peer_secret(binding.engine)
                 else None,
             )

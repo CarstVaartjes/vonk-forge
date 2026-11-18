@@ -232,6 +232,12 @@ pub(super) fn validate_docker_run_with_archive(
                 caller_fabric_environment |= value.split_once('=').is_some_and(|(name, _)| {
                     crate::runtime_fabric::ENVIRONMENT_NAMES.contains(&name)
                 });
+                if value
+                    .split_once('=')
+                    .is_some_and(|(name, _)| name == PEER_SECRET_ENVIRONMENT)
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
                 if let Some(value) = value.strip_prefix("VONK_WORLD_SIZE=") {
                     // This argv member must be a decimal token, not a Serde
                     // private arbitrary-precision number object.

@@ -5,6 +5,18 @@ use crate::operations::commands::captures_stdout;
 use crate::operations::reobserve::REOBSERVE_FORMAT;
 use crate::operations::test_support::*;
 
+/// The name and value pairs one docker child was given beside its argv.
+type ChildEnvironment = Vec<(String, String)>;
+
+/// The signed argv, the last launch's result, every docker call, and the
+/// environment of each docker child.
+type LaunchOutcome = (
+    Vec<String>,
+    Result<RuntimeStartLaunch, OperationError>,
+    Vec<Vec<String>>,
+    Vec<ChildEnvironment>,
+);
+
 #[derive(Clone)]
 struct LaunchRunner {
     calls: Arc<Mutex<Vec<Vec<String>>>>,
@@ -17,6 +29,8 @@ struct LaunchRunner {
     /// `docker run` has created it.
     launched: Option<String>,
     created: Arc<Mutex<bool>>,
+    /// The environment each docker child was given besides its argv.
+    environments: Arc<Mutex<Vec<ChildEnvironment>>>,
 }
 
 /// What `docker run` gives back to the helper.
@@ -31,6 +45,22 @@ enum RunAnswer {
 }
 
 impl CommandRunner for LaunchRunner {
+    fn run_with_environment(
+        &self,
+        executable: &Path,
+        args: &[String],
+        timeout: Duration,
+        environment: &[(&str, &str)],
+    ) -> Result<CommandOutput, String> {
+        self.environments.lock().unwrap().push(
+            environment
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        );
+        self.run_with_timeout(executable, args, timeout)
+    }
+
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         self.calls.lock().unwrap().push(args.to_vec());
         if executable == Path::new(gpu_clock::NVIDIA_SMI) {
@@ -196,7 +226,7 @@ fn start_fixture(plan: &mut RecipeStartPayload) -> (tempfile::TempDir, ManagedRo
 /// Launches `plan` with `docker run` giving `answer`; `launched` says whether
 /// the container it created, if it created one, is live.
 fn launch_answered(
-    mut plan: RecipeStartPayload,
+    plan: RecipeStartPayload,
     earlier_job: Option<uuid::Uuid>,
     answer: RunAnswer,
     launched: Option<&str>,
@@ -206,6 +236,22 @@ fn launch_answered(
     Result<RuntimeStartLaunch, OperationError>,
     Vec<Vec<String>>,
 ) {
+    let (arguments, result, calls, _) =
+        launch_with_secret(plan, earlier_job, answer, launched, broken_cache, &[None]);
+    (arguments, result, calls)
+}
+
+/// `launch_answered` for Start grants that may carry a peer secret, one launch
+/// per entry on one host (so one identity); also returns the environment each
+/// docker child was given.
+fn launch_with_secret(
+    mut plan: RecipeStartPayload,
+    earlier_job: Option<uuid::Uuid>,
+    answer: RunAnswer,
+    launched: Option<&str>,
+    broken_cache: bool,
+    peer_secrets: &[Option<&str>],
+) -> LaunchOutcome {
     let (_temp, roots) = start_fixture(&mut plan);
     if broken_cache {
         fs::write(
@@ -237,6 +283,7 @@ fn launch_answered(
             )
         }),
         created: Arc::default(),
+        environments: Arc::default(),
     };
     let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
     let arguments = executor
@@ -260,15 +307,23 @@ fn launch_answered(
             })
             .unwrap()
     });
-    let launched = executor.runtime_start_locked(
-        &arguments,
-        identity,
-        plan.run_id,
-        &plan.plan_digest,
-        &image.local_image_config_id,
-    );
+    let launched = peer_secrets
+        .iter()
+        .map(|peer_secret| {
+            executor.runtime_start_locked(
+                &arguments,
+                identity,
+                plan.run_id,
+                &plan.plan_digest,
+                &image.local_image_config_id,
+                *peer_secret,
+            )
+        })
+        .last()
+        .unwrap();
     let calls = runner.calls.lock().unwrap().clone();
-    (arguments, launched, calls)
+    let environments = runner.environments.lock().unwrap().clone();
+    (arguments, launched, calls, environments)
 }
 
 /// Returns the image position after checking that no helper option split a
@@ -615,6 +670,7 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
                     runtime_run_id: None,
                     runtime_target_id: None,
                     runtime_installation_id: None,
+                    peer_secret: None,
                 },
                 &digest,
             )
@@ -834,6 +890,7 @@ fn a_start_cleans_full_pages_before_launch_without_a_helper_restart() {
                     .compiled_execution_plan
                     .runtime_image
                     .local_image_config_id,
+                None,
             )
             .unwrap();
         assert!(
@@ -930,6 +987,7 @@ fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
             run: RunAnswer::NoId,
             launched,
             created: Arc::new(Mutex::new(launched_some)),
+            environments: Arc::default(),
         };
         let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
         let identity = RuntimeEffectIdentity {
@@ -969,4 +1027,67 @@ fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
             );
         }
     }
+}
+
+/// The per-job peer secret is added after the digest, the cache key and the
+/// labels are fixed: by name in argv, by value only in the docker child's
+/// environment. A run launched without it has the identity it always had.
+#[test]
+fn the_peer_secret_reaches_only_the_docker_childs_environment() {
+    const SECRET: &str = "Gj3LimhJaTIm5nvdTza8cCMCE9Bclfa_3nOuDUgoGfM";
+    let identity = |run: &[String]| {
+        let labels: Vec<&String> = run
+            .windows(2)
+            .filter(|pair| pair[0] == "--label")
+            .map(|pair| &pair[1])
+            .collect();
+        let cache_key = run
+            .iter()
+            .find(|arg| arg.ends_with(",dst=/outputs/cache"))
+            .and_then(|mount| mount.split("/compile-cache/").nth(1))
+            .and_then(|rest| rest.split('/').next())
+            .unwrap()
+            .to_owned();
+        (labels.into_iter().cloned().collect::<Vec<_>>(), cache_key)
+    };
+    let (signed, result, calls, environments) = launch_with_secret(
+        recipe_start_plan_for_authority(1),
+        None,
+        RunAnswer::Id,
+        None,
+        false,
+        &[None, Some(SECRET)],
+    );
+    result.unwrap();
+    let runs: Vec<Vec<String>> = calls
+        .iter()
+        .filter(|call| call.first().map(String::as_str) == Some("run"))
+        .cloned()
+        .collect();
+    let [without, with] = &runs[..] else {
+        panic!("two launches expected: {calls:?}");
+    };
+
+    // One identity, with or without the secret.
+    assert_eq!(identity(without), identity(with));
+    // The name only, once, in argv; the value only in the child's environment.
+    let names = with
+        .windows(2)
+        .filter(|pair| pair[0] == "--env" && pair[1] == "VONK_PEER_SECRET");
+    assert_eq!(names.count(), 1, "{with:?}");
+    assert!(!without.iter().any(|arg| arg.contains("VONK_PEER_SECRET")));
+    assert!(!format!("{calls:?}{signed:?}").contains(SECRET));
+    let carried: Vec<_> = environments.iter().filter(|e| !e.is_empty()).collect();
+    assert_eq!(
+        carried,
+        [&vec![("VONK_PEER_SECRET".to_owned(), SECRET.to_owned())]]
+    );
+    // Nothing else changed in the launched argv.
+    let mut stripped = with.clone();
+    let at = stripped
+        .iter()
+        .position(|arg| arg == "VONK_PEER_SECRET")
+        .unwrap();
+    stripped.drain(at - 1..=at);
+    assert_eq!(&stripped, without);
 }

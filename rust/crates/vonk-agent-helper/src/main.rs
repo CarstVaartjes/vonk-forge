@@ -978,6 +978,7 @@ mod tests {
                 type_: vonk_agent_protocol::generated::HostOperationKind::ExecuteContainerRuntimeRequest.as_str().into(),
                 installation_intent_nonce: None,
                 installation_intent_ordinal: Some(1),
+                peer_secret: None,
                 action: ContainerRuntimeAction::RunInspect,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),

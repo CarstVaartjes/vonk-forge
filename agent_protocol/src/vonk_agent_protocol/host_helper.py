@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
 MAX_HOST_HELPER_GRANT_SECONDS = 300
+
+#: A per-job peer secret: 32 random bytes as unpadded base64url.
+PEER_SECRET_PATTERN = r"^[A-Za-z0-9_-]{43}$"
 # A complete runtime request carries its typed plan plus one frame's worth of
 # projected argv and envelope. The signed helper frame itself carries only the
 # grant and request digest, never the request document.
@@ -276,6 +279,12 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     installation_intent_ordinal: (
         Annotated[int, Field(ge=0, le=MAX_RUN_GENERATION)] | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
+    # A per-job secret for the workload's own peers, delivered to a Start only.
+    # It is outside every identity (plan, request, label, cache key): the helper
+    # puts it in the container's environment by name and never in argv.
+    peer_secret: Annotated[str, Field(pattern=PEER_SECRET_PATTERN)] | None = Field(
+        default=None, exclude_if=lambda value: value is None, repr=False
+    )
 
     @model_validator(mode="after")
     def bind_action_authority(
@@ -290,6 +299,8 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
             or self.installation_id != self.reconciliation_identity.installation_id
         ):
             raise ValueError("container runtime reconciliation identity is invalid")
+        if self.peer_secret is not None and self.action != ContainerRuntimeAction.START:
+            raise ValueError("container runtime peer secret authority is invalid")
         if self.action == "start":
             if (
                 self.start_plan_sha256 is None

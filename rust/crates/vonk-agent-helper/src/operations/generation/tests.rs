@@ -62,6 +62,7 @@ fn start_authority_binds_generation_plan_identity_and_projected_arguments() {
         runtime_run_id: Some(&start_plan.run_id),
         runtime_target_id: Some(&start_plan.run_id),
         runtime_installation_id: Some(&start_plan.installation_id),
+        peer_secret: None,
     };
     let authorized = executor
         .authorize_runtime_effect(&request, grant)
@@ -142,6 +143,7 @@ fn stop_authority_binds_exact_target_node_plan_and_cancellation_semantics() {
         runtime_run_id: Some(&stop_plan.run_id),
         runtime_target_id: Some(&stop_plan.target_runtime_id),
         runtime_installation_id: Some(&stop_plan.installation_id),
+        peer_secret: None,
     };
     let authorized = executor
         .authorize_runtime_effect(&request, grant)
@@ -392,6 +394,7 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
                     runtime_run_id: None,
                     runtime_target_id: None,
                     runtime_installation_id: None,
+                    peer_secret: None,
                 },
             )
             .is_err()

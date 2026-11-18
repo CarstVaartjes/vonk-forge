@@ -281,3 +281,21 @@ fn runtime_cache_rejects_other_installations_and_symlinked_ancestors() {
         );
     }
 }
+
+#[test]
+fn a_plan_cannot_name_the_peer_secret_only_the_grant_delivers_it() {
+    let (_temp, roots) = runtime_fixture();
+    let model = artifact_path(&roots, 'a');
+    fs::create_dir_all(&model).unwrap();
+    let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+    assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+    let image = arguments
+        .iter()
+        .position(|value| value.starts_with("localhost/vonk/"))
+        .unwrap();
+    arguments.splice(
+        image..image,
+        ["--env", "VONK_PEER_SECRET=x"].map(str::to_owned),
+    );
+    assert!(validate_docker_run(&arguments, &roots, None).is_err());
+}

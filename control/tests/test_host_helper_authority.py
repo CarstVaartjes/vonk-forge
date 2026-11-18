@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine
 from sqlalchemy import select as sa_select
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     CompiledExecutionPlan,
@@ -1855,3 +1856,83 @@ def test_a_dual_start_carries_every_rank_fabric_address_only_for_engines_that_re
     assert "peer_addresses" not in _dual_start_placement(())
     with pytest.raises(RecipeStartPayloadError):
         start_peer_addresses("gr8", 2, {0: "192.0.2.10", 1: None})
+
+
+PEER_KEY = b"k" * 32
+
+
+def _peer_secret_service(
+    engine: str, key: Any = lambda: PEER_KEY
+) -> HostRuntimeAuthorityService:
+    """A job-run authority whose recipe revision names ``engine``."""
+    from vonk_control.catalog_revision_contract import read_catalog_projection
+
+    base = runtime_service(operation_kind="recipe.job.run.v1")
+    with base._sessions.begin() as session:
+        revision = session.scalars(sa_select(CatalogDocumentRevision)).one()
+        projection = read_catalog_projection(revision).model_dump(mode="json")
+        # A bulk update: an active revision is immutable to the unit of work.
+        session.execute(
+            sa_update(CatalogDocumentRevision).values(
+                projected={**projection, "runtime_engine": engine}
+            )
+        )
+    return HostRuntimeAuthorityService(
+        base._sessions, issuer(), clock=lambda: NOW, peer_secret_key=key
+    )
+
+
+def _start_grant(service: HostRuntimeAuthorityService) -> SignedHostHelperGrant:
+    return service.issue_grant(
+        node_id="spk_" + "1" * 32,
+        fence=FENCE,
+        action=ContainerRuntimeAction.START,
+        request_sha256="e" * 64,
+        certificate_serial="certificate-1",
+        **runtime_plan_binding(
+            service,
+            ContainerRuntimeAction.START,
+        ),
+    )
+
+
+def test_a_start_of_a_peer_secret_engine_carries_its_jobs_secret_only() -> None:
+    # Break caught: the secret on another engine's grant, on a Stop, or a value
+    # that is not the job's (both ranks share the parent job).
+    from vonk_control.peer_secret import derive_peer_secret
+
+    other = _start_grant(_peer_secret_service("diffusers")).claims.operation
+    assert isinstance(other, ExecuteContainerRuntimeRequestOperation)
+    assert other.peer_secret is None
+
+    service = _peer_secret_service("vllm-omni")
+    operation = _start_grant(service).claims.operation
+    assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+    parent_job_id = "20000000-0000-4000-8000-000000000002"
+    assert operation.peer_secret == derive_peer_secret(PEER_KEY, parent_job_id)
+    assert operation.peer_secret != derive_peer_secret(PEER_KEY, "other-job")
+
+    stop = service.issue_grant(
+        node_id="spk_" + "1" * 32,
+        fence=FENCE,
+        action=ContainerRuntimeAction.STOP,
+        request_sha256="e" * 64,
+        certificate_serial="certificate-1",
+        **runtime_plan_binding(service, ContainerRuntimeAction.STOP),
+    )
+    assert isinstance(stop.claims.operation, ExecuteContainerRuntimeRequestOperation)
+    assert stop.claims.operation.peer_secret is None
+
+
+@pytest.mark.parametrize("failure", [None, OSError, ValueError])
+def test_an_unreadable_key_refuses_only_the_peer_secret_start(failure) -> None:
+    # Break caught: a Start granted without its secret, or a key problem
+    # reaching another workload's grant.
+    def key() -> bytes:
+        raise failure("the key file is gone")
+
+    service = _peer_secret_service("vllm-omni", None if failure is None else key)
+    with pytest.raises(HostRuntimeEvidenceUnavailable) as refused:
+        _start_grant(service)
+    assert "k" * 8 not in str(refused.value)
+    assert _start_grant(_peer_secret_service("diffusers", None)) is not None

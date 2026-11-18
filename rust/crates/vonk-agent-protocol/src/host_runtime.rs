@@ -76,6 +76,13 @@ impl HostHelperOperation {
             Self::ApplySwapOperation(operation) => crate::swap::valid_intent(&operation.desired),
             Self::ExecuteContainerRuntimeRequestOperation(operation) => {
                 operation.fence.get_version() == Some(uuid::Version::Random)
+                    && operation.peer_secret.as_deref().is_none_or(|secret| {
+                        operation.action == HostHelperContainerRuntimeAction::Start
+                            && secret.len() == 43
+                            && secret.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+                            })
+                    })
                     && (operation.installation_id.is_some()
                         == (operation.action
                             == HostHelperContainerRuntimeAction::InstallationCleanup))
@@ -520,6 +527,7 @@ mod host_helper_reconciliation_identity_tests {
                     type_: "execute-container-runtime-request".into(),
                     installation_intent_nonce: None,
                     installation_intent_ordinal: Some(1),
+                    peer_secret: None,
                     action: HostHelperContainerRuntimeAction::InstallationCleanup,
                     fence: Uuid::new_v4(),
                     request_sha256: "e".repeat(64),

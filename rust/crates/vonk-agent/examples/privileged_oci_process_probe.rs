@@ -122,6 +122,7 @@ fn main() {
             type_: "execute-container-runtime-request".into(),
             installation_intent_nonce: None,
             installation_intent_ordinal: Some(1),
+            peer_secret: None,
             action: match action {
                 HostRuntimeAction::ImagePull => {
                     vonk_agent_helper::protocol::ContainerRuntimeAction::ImagePull

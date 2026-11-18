@@ -106,6 +106,10 @@ pub(super) fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16,
 /// Values are Controller-signed plan data, so their content is not restricted;
 /// they are only bounded and kept NUL-free so the exec environment stays
 /// well-formed.
+/// The environment variable a Start grant's per-job secret travels in. A plan
+/// can never name it: only the grant delivers it.
+pub(super) const PEER_SECRET_ENVIRONMENT: &str = "VONK_PEER_SECRET";
+
 pub(super) fn valid_environment(value: &str) -> bool {
     let Some((name, value)) = value.split_once('=') else {
         return false;

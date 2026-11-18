@@ -430,6 +430,17 @@ def test_llama_cpp_metrics_switch_is_platform_owned(model: ModelDefinition) -> N
 
 
 @pytest.mark.parametrize("slug", BUILTINS)
+def test_no_recipe_can_set_the_platform_delivered_peer_secret(
+    slug: str, model: ModelDefinition
+) -> None:
+    # Break caught: a recipe fixing the per-job secret the grant delivers.
+    raw = _recipe(slug)
+    raw["runtime"]["environment"] = [{"name": "VONK_PEER_SECRET", "value": "x" * 43}]
+    with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
+        _projection(slug, recipe=raw, model=model)
+
+
+@pytest.mark.parametrize("slug", BUILTINS)
 def test_builtin_harness_rejects_shell_entrypoint(
     slug: str, model: ModelDefinition
 ) -> None:

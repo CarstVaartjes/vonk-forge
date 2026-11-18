@@ -20,6 +20,16 @@ impl CommandRunner for ProcessCommandRunner {
         arguments: &[String],
         timeout: Duration,
     ) -> Result<CommandOutput, String> {
+        self.run_with_environment(executable, arguments, timeout, &[])
+    }
+
+    fn run_with_environment(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout: Duration,
+        environment: &[(&str, &str)],
+    ) -> Result<CommandOutput, String> {
         let nvidia = executable == Path::new(gpu_clock::NVIDIA_SMI);
         if nvidia && !gpu_clock::allowed_arguments(arguments) {
             return Err("GPU clock command is not compiled into the helper".to_owned());
@@ -61,6 +71,7 @@ impl CommandRunner for ProcessCommandRunner {
         // command-output reader.
         let inherit_output = executable == Path::new("/usr/bin/dpkg");
         let mut command = base_command(executable, arguments);
+        command.envs(environment.iter().copied());
         command
             // Standard error is the command's own account of a failure; a
             // captured command retains its tail as `CommandFailure` evidence.
@@ -240,6 +251,23 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    /// A docker command whose child process also receives `environment`.
+    pub(super) fn run_docker_with_environment(
+        &self,
+        arguments: &[String],
+        timeout: Duration,
+        environment: &[(&str, &str)],
+    ) -> Result<CommandOutput, OperationError> {
+        self.runner
+            .run_with_environment(
+                Path::new("/usr/bin/docker"),
+                arguments,
+                timeout,
+                environment,
+            )
+            .map_err(|reason| CommandFailure::Runner(reason).into())
+    }
+
     pub(super) fn run_docker_with_timeout(
         &self,
         arguments: &[String],

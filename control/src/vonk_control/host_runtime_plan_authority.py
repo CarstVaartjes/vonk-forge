@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
+from .catalog_revision_contract import RecipeRevisionProjection, read_catalog_projection
 from .categorized_errors import InvalidType
 from .models import (
     AgentOperation,
@@ -72,6 +73,9 @@ class RuntimePlanBinding:
     runtime_run_id: str | None = None
     runtime_target_id: str | None = None
     runtime_installation_id: str | None = None
+    # The recipe engine of a job run, read for the grant's engine-keyed extras
+    # (the peer secret).
+    engine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +163,7 @@ def derive_runtime_plan_binding(
             runtime_installation_id=start.installation_id,
         )
     job_plan = _parse_job_run(operation.payload)
-    _job_run_authority(
+    authority = _job_run_authority(
         session,
         parent=parent,
         operation=operation,
@@ -172,7 +176,29 @@ def derive_runtime_plan_binding(
         runtime_run_id=job_plan.run_id,
         runtime_target_id=job_plan.job_id,
         runtime_installation_id=job_plan.installation_id,
+        engine=_recipe_engine(authority.revision),
     )
+
+
+def _recipe_engine(revision: CatalogDocumentRevision) -> str | None:
+    """The run's recipe engine, from the revision's validated projection.
+
+    The projection is disposable and re-derived from the verified document; a
+    document that cannot be read is evidence not yet available (the agent asks
+    again), as for every other read of the run's authority.
+    """
+
+    try:
+        projection = read_catalog_projection(revision)
+    except (TypeError, ValueError) as error:
+        raise RuntimePlanEvidenceUnavailable(
+            "recipe engine is unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error
+    if not isinstance(projection, RecipeRevisionProjection):
+        raise RuntimePlanEvidenceUnavailable(
+            "recipe engine is unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        )
+    return projection.runtime_engine
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")

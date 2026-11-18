@@ -4,7 +4,8 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use serde_json::Value;
 use vonk_agent_protocol::{
-    AgentClaim, AgentResult, EnrollmentRequest, canonical_json, hex_sha256, parse_strict,
+    AgentClaim, AgentResult, EnrollmentRequest, HostHelperOperation, canonical_generated_json,
+    canonical_json, hex_sha256, parse_strict,
 };
 
 #[test]
@@ -56,4 +57,41 @@ fn signed_messages_reject_unknown_fields() {
         .unwrap()
         .insert("shell".into(), Value::String("no".into()));
     assert!(parse_strict::<AgentClaim>(&canonical_json(&value).unwrap()).is_err());
+}
+
+#[test]
+fn peer_secret_vector_round_trips_and_is_a_start_only_field() {
+    // The vector the Python tests read: a Start grant operation with and
+    // without the per-job secret. Without it the bytes are what they always were.
+    let vector: Value = serde_json::from_slice(
+        &fs::read(fixtures().join("host-helper-peer-secret-grant.json")).unwrap(),
+    )
+    .unwrap();
+    for key in ["without", "with"] {
+        let raw = canonical_json(&vector[key]).unwrap();
+        let operation: HostHelperOperation = parse_strict(&raw).unwrap();
+        operation.validate().unwrap();
+        assert_eq!(canonical_generated_json(&operation).unwrap(), raw, "{key}");
+        let HostHelperOperation::ExecuteContainerRuntimeRequestOperation(parsed) = &operation
+        else {
+            panic!("the vector is a runtime request");
+        };
+        assert_eq!(parsed.peer_secret.is_some(), key == "with");
+    }
+    for refused in [
+        serde_json::json!({"peer_secret": "short"}),
+        serde_json::json!({"action": "stop", "start_plan_sha256": null, "stop_plan_sha256": "d".repeat(64)}),
+    ] {
+        let mut changed = vector["with"].clone();
+        for (name, value) in refused.as_object().unwrap() {
+            if value.is_null() {
+                changed.as_object_mut().unwrap().remove(name);
+            } else {
+                changed[name] = value.clone();
+            }
+        }
+        let valid = parse_strict::<HostHelperOperation>(&canonical_json(&changed).unwrap())
+            .is_ok_and(|operation| operation.validate().is_ok());
+        assert!(!valid, "{changed}");
+    }
 }
