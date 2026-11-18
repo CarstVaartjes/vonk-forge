@@ -45,6 +45,7 @@ from ..lifecycle.artifact_job import (
     receipt_account,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
+from ..lifecycle.job_ranks import owner_order
 from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
 from .contracts import (
     ArtifactJobInvalid,
@@ -197,7 +198,7 @@ class ArtifactJobService(InputService):
         self, job_id: str, *, node_id: str, parsed: RecipeJobFile
     ) -> None:
         with self._sessions() as session:
-            job = self._authorized_agent_job(session, job_id, node_id)
+            job = self._authorized_agent_job(session, job_id, node_id, owner_only=True)
             limits = self._stored_output_limits(session, job, repair=True)
             if isinstance(limits, Residue):
                 raise ArtifactJobUnavailableError(
@@ -236,7 +237,9 @@ class ArtifactJobService(InputService):
         # ingress. Its typed receipt is the authority for the attached content.
         now = self._clock()
         with self._sessions.begin() as session:
-            job = self._authorized_agent_job(session, job_id, node_id, lock=True)
+            job = self._authorized_agent_job(
+                session, job_id, node_id, lock=True, owner_only=True
+            )
             limits = self._stored_output_limits(session, job, repair=True)
             if isinstance(limits, Residue):
                 raise ArtifactJobUnavailableError(
@@ -417,6 +420,17 @@ class ArtifactJobService(InputService):
         demote_ranks_on_lost_image(
             session, raw_result, artifact_job.run_id, operation.node_id, now
         )
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
+            )
+        )
+        owner = owner_order(orders)
+        if len(orders) > 1 and (owner is None or owner.id != operation.id):
+            # A companion rank owns no outputs and judges nothing: its order
+            # ending is all the job learns (``fan_in`` ends the job on a failure).
+            adapter.project(artifact_job, now)
+            return
         if (
             isinstance(state, str)
             and state in agent_operation_states.FAILURE_REPORT

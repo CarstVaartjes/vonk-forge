@@ -196,7 +196,13 @@ generation), and only the run's own Stop cancels it
 multi-rank job (protocol 4.5): every rank is its own order on host network;
 only the rendezvous owner (`is_endpoint_owner` / `RecipeJobRunRequest.endpoint_owner`)
 owns `/inputs`, `/outputs` and the result, and a companion rank reports an empty
-output manifest. The host firewall is told the owner of a job serves no endpoint
+output manifest. A job submitted to a multi-node run is one order per rank in one
+phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
+own binder); `lifecycle/job_ranks.py` names the owner's order, the job's
+lifecycle is the owner's (`ArtifactJobAdapter.order_of`), and `fan_in` ends the job
+with the first failed companion's reason and cancels every live sibling (and
+all companions when the owner ends) through the supersession cancellation. The
+host firewall is told the owner of a job serves no endpoint
 port by passing `0` instead of one. Decide an intent fence by kind
 (`fencing_intent`), never by a stored ordinal alone. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues

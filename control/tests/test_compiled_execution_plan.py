@@ -48,7 +48,7 @@ from vonk_control.models import (
 from vonk_control.recipe_runtime_specs import ResolvedRecipe
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
-    _bind_compiled_execution_plan,
+    bind_compiled_execution_plan,
 )
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_control.runtime_adapters import resolve_runtime_adapter
@@ -392,6 +392,51 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
     assert wire.runtime.placement.port is None
 
 
+@pytest.mark.parametrize("rank", [0, 1])
+def test_every_rank_of_a_job_binds_fabric_and_host_network_without_an_endpoint(
+    rank: int,
+) -> None:
+    payload = _launch(
+        _compile(_job_spec()),
+        _job_spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": rank,
+            "role": "entrypoint" if rank == 0 else "worker",
+            "world_size": 2,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": None,
+            "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+        },
+    )
+    _mapping(payload["topology"]).update(name="dual", node_count=2)
+    started = bind_compiled_execution_plan(
+        WireCompiledExecutionPlan.model_validate(payload),
+        placement=RecipeStartPlacement(
+            node_id="spk_" + "a" * 32,
+            rank=rank,
+            role="entrypoint" if rank == 0 else "worker",
+            port=None,
+            reserved_memory_bytes=4096,
+            memory_floor_bytes=2048,
+            memory_kind="unified",
+            fabric_address=f"192.168.100.{10 + rank}",
+        ),
+        endpoint_address=None,
+        master_address="192.168.100.10",
+        master_port=29500,
+        world_size=2,
+    )
+    wire = WireCompiledExecutionPlan.parse(started)
+    assert wire.job is not None and wire.endpoint is None
+    assert wire.security.network_mode == "host"
+    assert wire.runtime.placement.port is None
+    assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
+
+
 def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
     spec = _spec()
     payload = _launch(
@@ -631,7 +676,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "memory_floor_bytes": 0,
         },
     )
-    started = _bind_compiled_execution_plan(
+    started = bind_compiled_execution_plan(
         WireCompiledExecutionPlan.model_validate(payload),
         placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,
@@ -676,7 +721,7 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
     )
     _mapping(payload["topology"]).update(name="dual", node_count=2)
     _mapping(_mapping(payload["runtime"])["placement"]).update(world_size=2)
-    started = _bind_compiled_execution_plan(
+    started = bind_compiled_execution_plan(
         WireCompiledExecutionPlan.model_validate(payload),
         placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,

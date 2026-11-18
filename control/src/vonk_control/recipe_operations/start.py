@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
@@ -402,14 +403,17 @@ class StartMixin:
         *,
         artifact_job_id: str,
         run_id: str,
-        node_id: str,
-        payload: object,
+        payloads: Sequence[tuple[str, object]],
         actor: str,
         request_id: str,
         authority_digest: str,
         now: datetime,
     ) -> Job:
         """Enqueue one job fenced by its run, never by its Spark's workload intent.
+
+        ``payloads`` is one order per rank, every rank of the job at once: a
+        JobRun only completes on exit, so a phased start order would deadlock
+        the ranks that wait for each other.
 
         The job belongs to its run: it is admitted while the run and its node
         are RUNNING and no Stop of the run is underway, and the host grant
@@ -427,14 +431,16 @@ class StartMixin:
             raise RecipeRequestInvalid(
                 "recipe run is stopping", reason=InvalidRequestReason.SUPERSEDED
             )
-        node = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == run_id,
-                RunNode.node_id == node_id,
-                RunNode.state == RunState.RUNNING,
+        running = set(
+            session.scalars(
+                select(RunNode.node_id).where(
+                    RunNode.run_id == run_id,
+                    RunNode.node_id.in_([node_id for node_id, _ in payloads]),
+                    RunNode.state == RunState.RUNNING,
+                )
             )
         )
-        if node is None:
+        if running != {node_id for node_id, _ in payloads}:
             raise RecipeRetryLater("recipe job target observation is not running")
         return service._queue_in_session(
             session,
@@ -444,10 +450,10 @@ class StartMixin:
             plan_digest=run.plan_digest,
             actor=actor,
             request_id=request_id,
-            node_payloads=((node_id, payload),),
-            # The parent records its exact child, the manifest the host-runtime
-            # grant binds the job container's Start and Stop to.
-            phases=(((node_id, payload),),),
+            node_payloads=tuple(payloads),
+            # The parent records its exact children, the manifest the host-runtime
+            # grant binds each job container's Start and Stop to.
+            phases=(tuple(payloads),),
             authority_digest=authority_digest,
             now=now,
         )
