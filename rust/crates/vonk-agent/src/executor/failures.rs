@@ -25,10 +25,7 @@ pub fn recipe_start_result(request: &RecipeStartRequest) -> RecipeStartResult {
         }
         _ => None,
     };
-    RecipeStartResult {
-        endpoint,
-        preload_diagnostics: None,
-    }
+    RecipeStartResult { endpoint }
 }
 
 pub fn distribution_success(evidence: DistributionDownloadEvidence) -> ExecutionResult {

@@ -197,7 +197,6 @@ class RecipeStartResult(WireModel):
     """The serving rank reports its endpoint; every other rank reports ``{}``."""
 
     endpoint: str | None = None
-    preload_diagnostics: FailureDiagnostics | None = None
 
 
 class ArtifactDistributionResult(WireModel):
@@ -1155,7 +1154,9 @@ class AgentDirective(_ProtocolEnvelopeModel):
             raise AgentProtocolError(str(error)) from error
 
 
-# Where a started workload's diagnostics ride: the diagnostics groups' paths.
+# Agents before the removal of ``RecipeStartResult.preload_diagnostics`` still send
+# it; it is not a model field, so the groups drop it and the start result is kept
+# (the model forbids extra fields). Delete once every agent is past that release.
 _PRELOAD_DIAGNOSTICS: tuple[tuple[str, ...], ...] = (
     ("result", "preload_diagnostics"),
     ("result", "result", "preload_diagnostics"),
