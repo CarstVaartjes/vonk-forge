@@ -141,7 +141,7 @@ def request_superseded_workload_cancellation_in_session(
             if run is None or run.state != RunState.STOPPED or not children:
                 continue
             if any(
-                child.state not in {"succeeded", "failed", "cancelled"}
+                child.state not in agent_operation_states.FINISHED
                 and not (
                     child.state in agent_operation_states.PARKED
                     and child.current_attempt > 0
@@ -253,9 +253,7 @@ def _cancel_order(
             }
         state = "running"
     elif all(
-        child.state
-        in {"succeeded", "failed", "cancelled", *agent_operation_states.PARKED}
-        for child in children
+        child.state in agent_operation_states.FINISHED_OR_PARKED for child in children
     ):
         # A superseded parent may have one rank finish just before the
         # replacement fences the other rank.  Once no child is still

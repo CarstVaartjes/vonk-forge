@@ -285,7 +285,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
             or_(
                 and_(
                     Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
-                    Job.state.in_(("queued", "running")),
+                    Job.state.in_(job_states.IN_FLIGHT),
                     or_(
                         Job.payload["plan"]["recipe_build_id"].as_string() == build.id,
                         Job.payload["plan"]["build"]["build_id"].as_string()

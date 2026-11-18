@@ -44,6 +44,14 @@ LIVE: tuple[str, ...] = words(
 )
 
 
+#: A load that is queued or running (not backing off).
+IN_FLIGHT: tuple[str, ...] = words(LifecycleState.QUEUED, LifecycleState.RUNNING)
+#: A load that ended without succeeding or failing: cancelled, or superseded.
+CANCELLED_OR_SUPERSEDED: tuple[str, ...] = words(
+    LifecycleState.CANCELLED, LifecycleState.SUPERSEDED
+)
+
+
 def cancel_in_flight(stored: object) -> bool:
     return isinstance(stored, str) and is_state(
         SUBJECT, stored, LifecycleState.OBSERVING

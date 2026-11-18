@@ -966,9 +966,7 @@ class ArtifactJobAdapter:
                             RecipeRun.state.not_in(STOPPABLE_RUN_STATES),
                             # A job already mirroring its waiting order (a lost
                             # one keeps observing) has nothing to heal.
-                            StoredOperation.state.in_(
-                                {*aos.PARKED, "cancelled", "failed"}
-                            )
+                            StoredOperation.state.in_(aos.PARKED_OR_UNSUCCESSFUL)
                             & (ArtifactJob.state != StoredOperation.state),
                             # A job waiting for a claim whose order a Spark
                             # claimed (again, after a reissue).

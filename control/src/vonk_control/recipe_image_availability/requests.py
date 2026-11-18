@@ -219,7 +219,7 @@ def cancel_profile_preparation(
                 )
                 cancelled.append(job.id)
                 break
-            if job.state not in {"failed", "cancelled", *_SUCCEEDED}:
+            if job.state not in job_states.FINISHED:
                 break
             request_id = str(
                 uuid.uuid5(

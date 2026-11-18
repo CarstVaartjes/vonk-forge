@@ -206,7 +206,7 @@ class ResumeMixin:
             active = [
                 operation
                 for operation in stored_operations
-                if operation.state in {"queued", "running"}
+                if operation.state in agent_operation_states.IN_FLIGHT
             ]
             if len({operation.node_id for operation in stored_operations}) != len(
                 stored_operations

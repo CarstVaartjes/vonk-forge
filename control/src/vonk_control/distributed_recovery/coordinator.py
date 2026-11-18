@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
+from .. import job_states
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..failure_classification import is_definite
 from ..job_documents import DistributedRecoveryMarker
@@ -522,7 +523,7 @@ class DistributedRecoveryCoordinator:
         jobs = session.scalars(
             select(Job).where(
                 Job.kind.in_({"recipe.start", "recipe.stop"}),
-                Job.state.in_({"queued", "running"}),
+                Job.state.in_(job_states.IN_FLIGHT),
             )
         )
         for job in jobs:

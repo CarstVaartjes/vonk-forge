@@ -332,7 +332,7 @@ def profile_build_memory_claims(
         .order_by(Job.id)
     )
     if request_id is None:
-        query = query.where(Job.state.in_(("queued", "running")))
+        query = query.where(Job.state.in_(job_states.IN_FLIGHT))
     candidates = tuple(session.scalars(query))
     for candidate in candidates:
         if request_id is not None and request_id != str(

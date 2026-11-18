@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ModelFileState,
 )
 
+from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle import Outcome, Reported, State
 from ..model_cache_contract import ModelCacheSetState, ModelCacheTransferArtifact
@@ -164,7 +165,10 @@ class CheckpointsMixin:
                 ):
                     cache._transfer_stop(operation_id).set()
                     return
-                if operation is not None and operation.state in {"succeeded", "failed"}:
+                if (
+                    operation is not None
+                    and operation.state in model_cache_states.COMPLETED
+                ):
                     return
                 # Refresh bytes belong to the operation's transfer ledger. The
                 # last verified object remains published until
