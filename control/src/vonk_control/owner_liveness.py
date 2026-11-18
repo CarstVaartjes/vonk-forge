@@ -68,6 +68,7 @@ from .models import (
     RecipeRun,
     ResourceReservation,
 )
+from .stored_states import LibrarySyncRunState
 from .strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
@@ -427,7 +428,7 @@ def _sync_run(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     run = session.get(RecipeLibrarySyncRun, ref.id)
     if run is None:
         return Owner(ref, False, "library sync is missing", state="missing")
-    if run.state != LifecycleState.RUNNING:
+    if run.state != LibrarySyncRunState.RUNNING:
         return Owner(ref, False, f"library sync is {run.state}", state=run.state)
     last = run.heartbeat_at or run.started_at
     if now is not None and _aware(now) - _aware(last) > SYNC_HEARTBEAT_WINDOW:

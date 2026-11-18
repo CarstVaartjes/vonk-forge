@@ -217,18 +217,31 @@ def _sync(sessions, service, reader) -> ManagedRecipeCatalogSyncService:
 
 
 def test_sync_run_state_admits_only_its_enum_words(tmp_path: Path) -> None:
-    sessions, service, reader, _item = _fixture(tmp_path)
-    result = _sync(sessions, service, reader).sync(
-        ManagedCatalogSyncRequest(
-            request_key=str(uuid.uuid4()),
-            trigger=CatalogSyncTrigger.MANUAL,
-            actor="test",
-        )
-    )
-    with pytest.raises(IntegrityError), sessions.begin() as session:
-        run = session.get(RecipeLibrarySyncRun, result.id)
-        assert run is not None
-        run.state = "waiting"
+    engine = create_engine(f"sqlite:///{tmp_path / 'state.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 9, 5, tzinfo=UTC)
+
+    def insert(state: str) -> None:
+        with sessions.begin() as session:
+            session.add(
+                RecipeLibrarySyncRun(
+                    request_key=str(uuid.uuid4()),
+                    trigger="automatic",
+                    state=state,
+                    active_slot=None,
+                    repository="repo",
+                    result={},
+                    actor="test",
+                    created_at=now,
+                    started_at=now,
+                    completed_at=now,
+                )
+            )
+
+    insert("failed")
+    with pytest.raises(IntegrityError, match="ck_recipe_library_sync_runs_state"):
+        insert("waiting")
 
 
 def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -> None:
