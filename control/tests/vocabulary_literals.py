@@ -29,7 +29,12 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     WaitReason,
 )
-from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
+from vonk_agent_protocol.state_machines import (
+    MACHINES,
+    CertificateRecordState,
+    ModelCacheOperatorStatus,
+    NodeIdentityState,
+)
 
 from .parsed_sources import memoized_scan, parse_file
 
@@ -43,10 +48,6 @@ PYTHON_ROOTS = (
 #: Generated Python (never hand-edited) is not scanned.
 PYTHON_EXCLUDED_PREFIXES = ("src/cluster_profiles/generated_control/",)
 AGENT_WORDS_MODULE = "agent_protocol/src/vonk_agent_protocol/agent_words.py"
-STATE_MACHINES_MODULE = "agent_protocol/src/vonk_agent_protocol/state_machines.py"
-#: A stored certificate or node identity state (``revoked``, ``staged``,
-#: ``retired``) is spelled by its enum member; ``active`` is ordinary prose.
-IDENTITY_STATE_MACHINES = frozenset({"CertificateRecordState", "NodeIdentityState"})
 #: The contract itself, and the one place that still reads an untyped agent body.
 ALLOWED_FILES = frozenset(
     {
@@ -802,22 +803,11 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
         and isinstance(statement.value, ast.Constant)
         and isinstance(statement.value.value, str)
     }
-    return frozenset(words | _identity_state_words(root))
-
-
-def _identity_state_words(root: Path) -> set[str]:
-    """The certificate and node identity machines' words, except the plain ``active``."""
-    tree = ast.parse((root / STATE_MACHINES_MODULE).read_text())
-    return {
-        statement.value.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ClassDef) and node.name in IDENTITY_STATE_MACHINES
-        for statement in node.body
-        if isinstance(statement, (ast.Assign, ast.AnnAssign))
-        and isinstance(statement.value, ast.Constant)
-        and isinstance(statement.value.value, str)
-        and statement.value.value != "active"
-    }
+    # Stored certificate and node identity states are spelled by enum member.
+    words.update(
+        m.value for e in (CertificateRecordState, NodeIdentityState) for m in e
+    )
+    return frozenset(words)
 
 
 def _structural_field_keys(tree: ast.Module) -> Iterator[ast.Constant]:
