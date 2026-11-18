@@ -23,7 +23,7 @@ from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import (
     CatalogRevisionContractError,
-    read_catalog_document,
+    read_shared_catalog_document,
 )
 from ..model_cache_contract import (
     UUID_PATTERN,
@@ -565,7 +565,7 @@ class ResolutionMixin:
                     unreadable_candidates = True
                     return "", None
                 try:
-                    recipe = read_catalog_document(readable)
+                    recipe = read_shared_catalog_document(readable)
                 except CatalogRevisionContractError:
                     unreadable_candidates = True
                     return "", None
@@ -600,7 +600,7 @@ class ResolutionMixin:
                         unreadable_candidates = True
                         continue
                     try:
-                        model = read_catalog_document(readable_model)
+                        model = read_shared_catalog_document(readable_model)
                     except CatalogRevisionContractError:
                         unreadable_candidates = True
                         continue
