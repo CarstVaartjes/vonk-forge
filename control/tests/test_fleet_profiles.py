@@ -919,6 +919,41 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+def test_a_first_load_reads_its_own_progress_and_plan_once(monkeypatch) -> None:
+    """A load that reviewed itself is its own root: one read of each document."""
+
+    from vonk_control.fleet_profiles import application_projection
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    application = service.apply(profile.id, request_key=_uuid(441), actor="admin")
+    reads: list[str] = []
+    for name in ("_stored_progress", "_persisted_profile_plan"):
+        original = getattr(application_projection, name)
+        monkeypatch.setattr(
+            application_projection,
+            name,
+            lambda row, _name=name, _read=original: reads.append(_name) or _read(row),
+        )
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        intended = service._intended_profile(row, session=session)
+
+    assert not isinstance(intended, Residue)
+    assert intended.reviewed_application_id == application.id
+    assert sorted(reads) == ["_persisted_profile_plan", "_stored_progress"]
+
+
 def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
