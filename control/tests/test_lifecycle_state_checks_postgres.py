@@ -10,12 +10,14 @@ word is refused.  Starting again changes nothing.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import CheckConstraint, Table, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.db import reconcile_schema
+from vonk_control.model_cache_contract import ModelCacheSetState
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -24,6 +26,7 @@ from vonk_control.models import (
     Base,
     Job,
     JobAttempt,
+    ModelCacheSet,
 )
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
@@ -164,3 +167,22 @@ def test_startup_adds_the_state_checks_and_never_refuses(
         assert {name: _constraint(connection, name) for name in CHECKS.values()} == (
             first
         )
+
+
+def test_model_cache_set_check_is_generated_from_its_enum(postgres_engine):
+    """The set CHECK admits every ModelCacheSetState word and nothing else."""
+
+    check = next(
+        constraint
+        for constraint in cast(Table, ModelCacheSet.__table__).constraints
+        if isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_model_cache_sets_state"
+    )
+    expression = str(check.sqltext)
+    with postgres_engine.begin() as connection:
+        for word in (*(state.value for state in ModelCacheSetState), RETIRED):
+            admitted = connection.execute(
+                text(f"SELECT {expression} FROM (SELECT :word AS state) AS probe"),
+                {"word": word},
+            ).scalar_one()
+            assert admitted is (word != RETIRED), word

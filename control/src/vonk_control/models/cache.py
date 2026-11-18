@@ -26,6 +26,7 @@ from ..exact_integer_storage import (
     DecimalIntegerToken,
     ExactNonnegativeInteger,
 )
+from ..model_cache_contract import ModelCacheSetState
 from ..model_primitives import (
     Base,
     _lower_hex,
@@ -60,8 +61,9 @@ class ModelCacheSet(Base):
             name="ck_model_cache_sets_recipe_revision_digest",
         ),
         CheckConstraint(
-            "state IN ('incomplete','downloading','verifying','cached',"
-            "'needs-repair','failed')",
+            "state IN ("
+            + ",".join(f"'{state.value}'" for state in ModelCacheSetState)
+            + ")",
             name="ck_model_cache_sets_state",
         ),
         CheckConstraint(
