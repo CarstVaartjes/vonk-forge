@@ -603,24 +603,24 @@ class ArtifactJobService(OutputService):
                     ArtifactJob.id != artifact_job.id,
                 )
             ):
-                prior_orders = tuple(
-                    session.scalars(
-                        select(AgentOperation).where(
-                            AgentOperation.parent_job_id == prior.operation_id
-                        )
-                    )
-                    if prior.operation_id is not None
-                    else ()
+                if prior.operation_id is None:
+                    continue
+                orders = select(AgentOperation).where(
+                    AgentOperation.parent_job_id == prior.operation_id
                 )
-                if prior_orders and all(
-                    order.current_attempt == 0 for order in prior_orders
-                ):
+                unissued = tuple(
+                    session.scalars(orders.where(AgentOperation.current_attempt == 0))
+                )
+                some_issued = session.scalar(
+                    orders.where(AgentOperation.current_attempt > 0).limit(1)
+                )
+                if unissued and some_issued is None:
                     # New intent fences a prior job none of whose ranks was
                     # handed to a Spark, in this transaction: every unissued
                     # order of it, not only its owner's.
                     parent = session.get(Job, prior.operation_id)
                     operations = AgentOperationAdapter(session)
-                    for order in prior_orders:
+                    for order in unissued:
                         if order.state in aos.LIVE:
                             operations.record_outcome(
                                 order,

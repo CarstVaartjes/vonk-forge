@@ -2803,6 +2803,24 @@ def _two_rank_claims(tmp_path, suffix: int):
     )
 
 
+def test_a_newer_submit_fences_every_unissued_order_of_a_two_rank_job(tmp_path) -> None:
+    sessions, _operations, service, run_id, _nodes = running_two_rank_artifact_service(
+        tmp_path
+    )
+    first = submitted_artifact_job(service, run_id, request_suffix=118)
+    second = submitted_artifact_job(service, run_id, request_suffix=128)
+    assert second.state not in ajs.ENDED
+    with sessions() as session:
+        first_orders = session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == first.operation_id
+            )
+        ).all()
+        assert len(first_orders) == 2
+        assert {order.state for order in first_orders} == {"cancelled"}
+    assert service.get(first.id).state == "cancelled"
+
+
 def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -> None:
     (
         sessions,
