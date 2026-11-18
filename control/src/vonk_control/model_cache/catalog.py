@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheCode, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
+from ..catalog_queries import WITHOUT_DOCUMENT
 from ..catalog_revision_contract import (
     catalog_document_readable,
     read_shared_catalog_document,
@@ -67,7 +68,11 @@ class CatalogMixin:
         """The shared parse of the exact recipe content: callers only read it."""
         cache = cast("ModelCacheService", self)
         if revision_id is not None:
-            revision = session.get(CatalogDocumentRevision, revision_id)
+            revision = session.get(
+                CatalogDocumentRevision,
+                revision_id,
+                options=[WITHOUT_DOCUMENT],
+            )
             if revision is not None:
                 revision = cache._readable_content_revision(session, revision)
         else:
@@ -125,7 +130,9 @@ class CatalogMixin:
             )
         active.add(digest)
         row = session.scalar(
-            select(CatalogDocumentRevision).where(
+            select(CatalogDocumentRevision)
+            .options(WITHOUT_DOCUMENT)
+            .where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.content_digest == digest,
             )

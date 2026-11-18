@@ -243,6 +243,44 @@ def test_an_active_operation_retains_the_archive_a_pinned_sibling_built(
     assert findings["9" * 64] == ()
 
 
+@pytest.mark.parametrize("damaged", [False, True])
+def test_a_pinned_image_is_read_from_the_projection_not_the_document(
+    sessions, damaged_json_rows, damaged
+) -> None:
+    """The document loads only to re-derive a damaged projection's own fields."""
+
+    with sessions.begin() as session:
+        _add_revision(session, "revision-built", _recipe("recipe-job.json"))
+        mine = _add_revision(
+            session, "revision-pinned", _recipe("recipe-source-build.json"), built=False
+        )
+        projected = dict(mine.projected)
+        projected["prebuilt_image"] = {
+            "reference": "ghcr.io/vonk/resolver@" + IMAGE_DIGEST,
+            "build_key": "9" * 64,
+        }
+        if damaged:
+            projected["topology"] = "damaged"
+        mine.projected = projected
+    statements: list[str] = []
+    engine = sessions.kw["bind"]
+    record = lambda *args: statements.append(str(args[2]))
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with sessions() as session:
+            archives = revision_archives(session, ["revision-pinned"])
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert archives == {ARCHIVE_SHA}
+    document_reads = [
+        item
+        for item in statements
+        if "catalog_document_revisions.document," in item
+        or "catalog_document_revisions.document " in item
+    ]
+    assert len(document_reads) == (1 if damaged else 0)
+
+
 def _operation(session: Session, revision_id: str) -> None:
     session.add(
         Job(

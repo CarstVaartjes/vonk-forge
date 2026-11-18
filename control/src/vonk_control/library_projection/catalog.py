@@ -6,12 +6,11 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import defer
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
-from ..catalog_queries import active_head_revision
+from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -249,7 +248,7 @@ def _catalog_documents[T](
             ),
         )
         if projection_only:
-            query = query.options(defer(CatalogDocumentRevision.document))
+            query = query.options(WITHOUT_DOCUMENT)
         if digests is not None:
             query = query.where(CatalogDocumentRevision.content_digest.in_(digests))
         documents: list[tuple[CatalogDocumentRevision, T]] = []

@@ -20,7 +20,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_retry import bounded_attempts
-from ..catalog_queries import active_head_revision
+from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog_revision_contract import (
     CatalogRevisionContractError,
     read_shared_catalog_document,
@@ -466,14 +466,18 @@ class ResolutionMixin:
         with cache._session() as session:
             if re.fullmatch(_DIGEST_PATTERN, identity):
                 seed = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.content_digest == identity,
                     )
                 )
             elif re.fullmatch(UUID_PATTERN, identity):
                 seed = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         (CatalogDocumentRevision.id == identity)
                         | (CatalogDocumentRevision.document_id == identity),
@@ -483,6 +487,7 @@ class ResolutionMixin:
                 publisher, slug = identity.split("/", 1)
                 seed = session.scalar(
                     select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
                     .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.publisher == publisher,
@@ -493,6 +498,7 @@ class ResolutionMixin:
             else:
                 seed = session.scalar(
                     select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
                     .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.slug == identity,
@@ -520,7 +526,9 @@ class ResolutionMixin:
                         "exact recipe revision is invalid",
                     )
                 exact = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.id == exact_revision_id.strip(),
                     )
@@ -537,7 +545,9 @@ class ResolutionMixin:
 
             revisions = list(
                 session.scalars(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.document_id == seed.document_id,
                         CatalogDocumentRevision.state == "active",
@@ -581,6 +591,7 @@ class ResolutionMixin:
                 for digest in digests if requested_model is None else [requested_model]:
                     model_revision = session.scalar(
                         select(CatalogDocumentRevision)
+                        .options(WITHOUT_DOCUMENT)
                         .where(
                             CatalogDocumentRevision.kind == "model",
                             CatalogDocumentRevision.content_digest == digest,

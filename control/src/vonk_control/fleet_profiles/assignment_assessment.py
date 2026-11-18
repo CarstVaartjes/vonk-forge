@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
@@ -74,7 +74,6 @@ class FleetProfileService:
         mapping: ClusterMapping | None
         installation: RecipeInstallation | None
         run: RecipeRun | None
-        build: RecipeBuild | None
         installation_ready: bool
 
         def __init__(
@@ -84,14 +83,12 @@ class FleetProfileService:
             mapping: ClusterMapping | None,
             installation: RecipeInstallation | None,
             run: RecipeRun | None,
-            build: RecipeBuild | None,
             installation_ready: bool = False,
         ) -> None:
             self.current_state = current_state
             self.mapping = mapping
             self.installation = installation
             self.run = run
-            self.build = build
             self.installation_ready = installation_ready
 
     @staticmethod
@@ -114,7 +111,9 @@ class FleetProfileService:
         )
         builds = tuple(
             session.scalars(
+                # A state reads a build's image columns, never its plan or policy.
                 select(RecipeBuild)
+                .options(defer(RecipeBuild.plan), defer(RecipeBuild.policy_report))
                 .where(
                     catalog_reference_membership(
                         RecipeBuild.recipe_revision_id, revisions
@@ -317,7 +316,6 @@ class FleetProfileService:
                 mapping=None,
                 installation=None,
                 run=None,
-                build=build,
             )
         installation = next(
             (
@@ -337,7 +335,6 @@ class FleetProfileService:
                 mapping=mapping,
                 installation=None,
                 run=None,
-                build=build,
             )
         install_members = tuple(
             item
@@ -380,7 +377,6 @@ class FleetProfileService:
                 mapping=mapping,
                 installation=installation,
                 run=None,
-                build=build,
             )
         run = serving_run(rows.runs, installation.id)
         if run is None:
@@ -389,7 +385,6 @@ class FleetProfileService:
                 mapping=mapping,
                 installation=installation,
                 run=None,
-                build=build,
                 installation_ready=True,
             )
         run_members = tuple(item for item in rows.run_nodes if item.run_id == run.id)
@@ -416,7 +411,6 @@ class FleetProfileService:
             mapping=mapping,
             installation=installation,
             run=run,
-            build=build,
             installation_ready=True,
         )
 
