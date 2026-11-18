@@ -304,11 +304,26 @@ class RecipeJobRunRequest(_RecipeJobModel):
     def arrays_are_immutable(cls, value: object) -> object:
         return _as_tuple(value)
 
+    @property
+    def endpoint_owner(self) -> bool:
+        """Whether this rank owns the job's inputs, outputs and result.
+
+        Mirrors Rust ``is_endpoint_owner``: a single-node job, or the rank of a
+        multi-rank job whose fabric address is the rendezvous address. The other
+        ranks are companions that only compute.
+        """
+
+        placement = self.compiled_execution_plan.runtime.placement
+        return placement.world_size == 1 or (
+            placement.local_address is not None
+            and placement.local_address == placement.master_address
+        )
+
     @model_validator(mode="after")
     def request_is_canonical(self) -> RecipeJobRunRequest:
         plan = self.compiled_execution_plan
-        if plan.job is None or plan.runtime.placement.world_size != 1:
-            raise ValueError("job invocation requires a single-rank job plan")
+        if plan.job is None:
+            raise ValueError("job invocation requires a job plan")
         names = [item.name for item in self.inputs]
         if names != sorted(names, key=lambda value: value.encode("utf-8")):
             raise ValueError("artifact manifest is not canonically sorted")

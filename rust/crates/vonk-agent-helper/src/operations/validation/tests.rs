@@ -45,6 +45,62 @@ fn attached_jobs_require_readonly_inputs_from_the_same_run() {
 }
 
 #[test]
+fn every_rank_of_a_multi_rank_job_validates_but_only_jobs_are_exempt_from_the_owner_rule() {
+    let (_temp, roots) = runtime_fixture();
+    let model = artifact_path(&roots, 'a');
+    fs::create_dir(&model).unwrap();
+    let mut job = job_runtime_arguments(&roots, model);
+    let network = job.iter().position(|value| value == "none").unwrap();
+    job[network] = "host".to_owned();
+    let image = job
+        .iter()
+        .position(|value| value.starts_with("localhost/vonk/"))
+        .unwrap();
+    let fabric = |rank: &str, local: &str| {
+        [
+            "--device",
+            "nvidia.com/gpu=all",
+            "--device",
+            "/dev/infiniband:/dev/infiniband",
+            "--ulimit",
+            "memlock=-1:-1",
+            "--ulimit",
+            "stack=67108864:67108864",
+            "--env",
+            "VONK_MASTER_PORT=29500",
+            "--env",
+            &format!("VONK_RANK={rank}"),
+            "--env",
+            "VONK_WORLD_SIZE=2",
+            "--env",
+            &format!("VONK_LOCAL_ADDR={local}"),
+            "--env",
+            "VONK_MASTER_ADDR=192.168.100.10",
+        ]
+        .map(str::to_owned)
+    };
+    let with = |rank: &str, local: &str| {
+        let mut arguments = job.clone();
+        arguments.splice(image..image, fabric(rank, local));
+        arguments
+    };
+    // The owner (rank 0) and the companion (rank 1) of one job both validate.
+    assert!(validate_docker_run(&with("0", "192.168.100.10"), &roots, None).is_ok());
+    assert!(validate_docker_run(&with("1", "192.168.100.11"), &roots, None).is_ok());
+    // A job never serves an endpoint, whichever rank asks.
+    let mut serving = with("0", "192.168.100.10");
+    let image = serving
+        .iter()
+        .position(|value| value.starts_with("localhost/vonk/"))
+        .unwrap();
+    serving.splice(
+        image..image,
+        ["--env", "VONK_LISTEN_PORT=8000"].map(str::to_owned),
+    );
+    assert!(validate_docker_run(&serving, &roots, None).is_err());
+}
+
+#[test]
 fn runtime_publications_require_an_explicit_routable_bind_address() {
     assert!(parse_publication("192.168.1.211:8101:8000").is_some());
     assert!(parse_publication("192.168.100.10:29500:29500").is_some());

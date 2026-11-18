@@ -933,3 +933,44 @@ async fn an_exited_job_whose_outputs_break_their_bound_ends_failed_with_the_evid
     // The job's files stay for the retention sweep.
     assert!(outputs.join("prepared-input.png").exists());
 }
+
+/// The canonical job vector, installed and invoked as one rank of a two-rank job.
+fn two_rank_job(
+    rank: u64,
+    local: &str,
+) -> (
+    vonk_agent_protocol::RecipeJobRunRequest,
+    CompiledExecutionPlan,
+) {
+    let claim: Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+    ))
+    .unwrap();
+    let mut installed = claim["payload"]["compiled_execution_plan"].clone();
+    installed["runtime"]["placement"]["world_size"] = 2.into();
+    installed["runtime"]["placement"]["rank"] = rank.into();
+    installed["topology"]["node_count"] = 2.into();
+    let installed: CompiledExecutionPlan = serde_json::from_value(installed).unwrap();
+    let mut request = claim["payload"].clone();
+    request["compiled_execution_plan"] = serde_json::to_value(&installed).unwrap();
+    let placement = &mut request["compiled_execution_plan"]["runtime"]["placement"];
+    placement["local_address"] = local.into();
+    placement["master_address"] = "192.168.100.10".into();
+    placement["master_port"] = 29500.into();
+    request["compiled_execution_plan"]["security"]["network_mode"] = "host".into();
+    (serde_json::from_value(request).unwrap(), installed)
+}
+
+#[test]
+fn every_rank_of_a_two_rank_job_is_prepared_and_only_rank_zero_owns_outputs() {
+    for (rank, local, owner) in [(0, "192.168.100.10", true), (1, "192.168.100.11", false)] {
+        let (request, installed) = two_rank_job(rank, local);
+        assert_eq!(request.is_endpoint_owner(), owner);
+        // The installed placement has no addresses: the start binds them.
+        let plan = prepare_job_invocation(&installed, &request).unwrap();
+        assert_eq!(job_placement(&plan).unwrap().rank, rank);
+        // An address is start-bound; a different role or rank is not.
+        let (other, _) = two_rank_job(1 - rank, local);
+        assert!(prepare_job_invocation(&installed, &other).is_err());
+    }
+}

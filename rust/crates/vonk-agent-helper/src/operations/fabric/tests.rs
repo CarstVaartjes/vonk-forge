@@ -442,3 +442,19 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
         assert!(validate_docker_run(&polluted, &roots, None).is_err());
     }
 }
+
+#[test]
+fn only_the_rendezvous_owner_of_a_job_asks_the_firewall_for_no_endpoint_port() {
+    let fabric = |local: &str| NativeFabric {
+        local: local.parse().unwrap(),
+        master: "192.168.100.10".parse().unwrap(),
+        port: 29500,
+    };
+    let argument = |port: Option<u16>, local: &str| {
+        let host_endpoint = port.map_or_else(|| "none".to_owned(), |port| port.to_string());
+        job_owner_endpoint(host_endpoint, port, &fabric(local))
+    };
+    assert_eq!(argument(Some(8000), "192.168.100.10"), "8000");
+    assert_eq!(argument(None, "192.168.100.10"), "0");
+    assert_eq!(argument(None, "192.168.100.11"), "none");
+}

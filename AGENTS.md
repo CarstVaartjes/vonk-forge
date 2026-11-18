@@ -192,7 +192,12 @@ writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `control/tests/intent_ordinal_writers.py`. A one-shot JobRun is never fenced
 by a Spark's intent: it belongs to its run (run and RunNode RUNNING, run
 generation), and only the run's own Stop cancels it
-(`request_run_job_cancellation_in_session`). Decide an intent fence by kind
+(`request_run_job_cancellation_in_session`). A job plan may be one rank of a
+multi-rank job (protocol 4.5): every rank is its own order on host network;
+only the rendezvous owner (`is_endpoint_owner` / `RecipeJobRunRequest.endpoint_owner`)
+owns `/inputs`, `/outputs` and the result, and a companion rank reports an empty
+output manifest. The host firewall is told the owner of a job serves no endpoint
+port by passing `0` instead of one. Decide an intent fence by kind
 (`fencing_intent`), never by a stored ordinal alone. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never
