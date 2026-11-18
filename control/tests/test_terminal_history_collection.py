@@ -34,6 +34,7 @@ from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunP
 from vonk_control.terminal_history_collection import (
     BACKLOG_PAUSE,
     TerminalHistoryCollector,
+    history_rows_past_grace,
 )
 
 
@@ -494,6 +495,34 @@ def test_history_backlog_metric_tracks_collection_and_grace(
     assert TerminalHistoryCollector(history_sessions, clock=lambda: now).collect()
     observer.refresh()
     assert "vonk_history_rows_past_grace 0\n" in metrics.render()
+
+
+def test_history_backlog_metric_excludes_rows_a_reservation_holds(
+    history_sessions: sessionmaker[Session],
+) -> None:
+    now = datetime.now(UTC)
+    job = _job(now - timedelta(days=2))
+    with history_sessions.begin() as session:
+        session.add(job)
+        session.add(
+            ResourceReservation(
+                node_id=str(uuid.uuid4()),
+                kind="unified-memory",
+                resource_key="unified-memory",
+                amount_bytes=1,
+                owner_kind="job",
+                owner_id=job.id,
+                state="active",
+                plan_digest="a" * 64,
+                created_at=now,
+            )
+        )
+    with history_sessions() as session:
+        assert history_rows_past_grace(session, now) == 0
+    with history_sessions.begin() as session:
+        session.execute(update(ResourceReservation).values(state="released"))
+    with history_sessions() as session:
+        assert history_rows_past_grace(session, now) == 1
 
 
 def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(

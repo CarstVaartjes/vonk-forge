@@ -177,8 +177,11 @@ persisted state; never retry a revoked or stale plan.
 ## History retention stalled
 
 `vonk_history_rows_past_grace` counts ended coordination history older than the
-24-hour grace directly from PostgreSQL, independently of the retention worker.
-It includes evidence retained by live references; it never authorizes deletion.
+24-hour grace that no live reference holds, directly from PostgreSQL,
+independently of the retention worker. Held rows (a selected profile
+application, an owned route publication, a reserved job) are not counted, so a
+flat count means rows the collector should remove but is not. Rows kept only by
+evidence checks in the worker are still counted. It never authorizes deletion.
 `HistoryRetentionStalled` warns when a nonempty backlog has no net decline
 against six hours earlier, continuously for six hours (earliest firing after
 twelve hours of observations). The hold exceeds Prometheus's five-minute
@@ -190,8 +193,8 @@ Inspect worker events `history.references_unavailable`, `history.scan_deferred`,
 once per pass and retains itself and recognizable references while unrelated
 history drains. Check live consumers, worker health, database contention and
 storage before repairing the owning bookkeeping through its normal path.
-Protected evidence can legitimately remain past grace; do not delete it merely
-to clear the alert. A declining count clears the pending or firing alert.
+Evidence kept by worker checks can legitimately remain past grace; do not
+delete it merely to clear the alert. A declining count clears the pending or firing alert.
 
 ## Stale backup
 

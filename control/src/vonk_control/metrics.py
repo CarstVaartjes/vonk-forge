@@ -672,7 +672,7 @@ class MetricsRegistry:
         if history_rows is not None:
             lines.extend(
                 (
-                    "# HELP vonk_history_rows_past_grace Ended history rows older than the retention grace, including protected evidence.",
+                    "# HELP vonk_history_rows_past_grace Ended history past grace that no live reference holds.",
                     "# TYPE vonk_history_rows_past_grace gauge",
                     f"vonk_history_rows_past_grace {history_rows}",
                 )
