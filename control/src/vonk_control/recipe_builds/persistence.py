@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    LifecycleState,
     RecipeBuildCode,
     ReservationState,
     WaitReason,
@@ -159,7 +158,7 @@ def persist_plan_in_session(
     )
     if (
         existing is not None
-        and existing.state == LifecycleState.SUCCEEDED.value
+        and existing.state == RecipeBuildState.SUCCEEDED.value
         and not self._succeeded_build_available(existing)
     ):
         _reopen_build_attempt(existing, now=now)
@@ -212,8 +211,8 @@ def persist_plan_in_session(
             payload["build_id"] = existing.id
             existing.plan = copy.deepcopy(payload)
             existing.policy_report = copy.deepcopy(policy_document)
-            if existing.state == LifecycleState.FAILED.value or (
-                existing.state == LifecycleState.SUCCEEDED.value
+            if existing.state == RecipeBuildState.FAILED.value or (
+                existing.state == RecipeBuildState.SUCCEEDED.value
                 and not _valid_succeeded_receipt(existing)
             ):
                 _reopen_build_attempt(existing, now=now)

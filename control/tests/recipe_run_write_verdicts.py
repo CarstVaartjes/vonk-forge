@@ -154,7 +154,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/projection.py": {
         "_project_node_result": (
-            "89645c096523f986a563ddb04e33910f87c9175b6e46385d7a7d1fe179e7b85b",
+            "ddd2ed9347f5cac7830f6e0e6deac6d021ae064ae3abf6d5465fb9eb2134616f",
             "caller-owned: queue result transaction owns rank and run projection",
         ),
     },

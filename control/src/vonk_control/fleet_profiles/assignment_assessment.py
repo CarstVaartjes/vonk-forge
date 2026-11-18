@@ -13,7 +13,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
-    LifecycleState,
     ObservedAssignmentState,
 )
 from vonk_agent_protocol.agent_words import ProfileDocumentState
@@ -275,7 +274,7 @@ class FleetProfileService:
                 (
                     item
                     for item in rows.builds.get(assignment.recipe_revision_id, ())
-                    if item.state == LifecycleState.SUCCEEDED.value
+                    if item.state == RecipeBuildState.SUCCEEDED.value
                 ),
                 None,
             )
