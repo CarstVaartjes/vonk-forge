@@ -94,3 +94,44 @@ def test_a_log_tail_holds_exactly_the_policy_bytes():
     assert FailureLogTail.model_validate(tail("x" * LOG_TAIL_BYTES))
     with pytest.raises(ValidationError):
         FailureLogTail.model_validate(tail("x" * (LOG_TAIL_BYTES + 1)))
+
+
+_KEY_ERROR = (
+    '  File "/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/'
+    'glm4_moe.py", line 512, in load_weights\n'
+    "    param = params_dict[name]\n"
+    "KeyError: 'layers.0.self_attn.conv1d.weight'"
+)
+
+
+def _failed_start_with_tail(length: int) -> dict[str, object]:
+    document = json.loads(
+        (VECTORS / "recipe-start-workload-exited-v1.json").read_text()
+    )
+    progress = "Loading safetensors checkpoint shards:   0% Completed | 0/48 [00:08<?, ?it/s]\r"
+    diagnostics = document["result"]["evidence"]["diagnostics"]
+    diagnostics["stderr"]["text"] = (progress * length)[: length - len(_KEY_ERROR)] + (
+        _KEY_ERROR
+    )
+    diagnostics["stdout"]["text"] = "loading weights from /outputs/cache/home"
+    return document
+
+
+def test_a_traceback_tail_up_to_the_policy_bound_is_kept():
+    """Wrong implementation caught: a path-rule copy of the tail bound (2048)
+    dropped every traceback longer than 2048 characters after the policy
+    became 16384."""
+
+    kept = AgentResult.model_validate(_failed_start_with_tail(LOG_TAIL_BYTES))
+    assert kept.evidence_drops == ()
+    diagnostics = kept.result.evidence.diagnostics
+    assert len(diagnostics.stderr.text) == LOG_TAIL_BYTES
+    assert diagnostics.stderr.text.endswith(
+        "KeyError: 'layers.0.self_attn.conv1d.weight'"
+    )
+
+    over = AgentResult.model_validate(_failed_start_with_tail(LOG_TAIL_BYTES + 1))
+    assert [drop.location for drop in over.evidence_drops] == [
+        "result.evidence.diagnostics.stderr.text"
+    ]
+    assert over.result.evidence.diagnostics is None
