@@ -127,10 +127,14 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     ),
     "tensorrt-llm": EngineTelemetryContract("unsupported", None),
     "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
+    # ds4 serves no /metrics at its pinned revisions; the monitor reads nothing.
+    # gr8 serves vLLM-named /metrics and is parsed as the vllm format.
     "ds4": EngineTelemetryContract(
         "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
-    # TensorFold serves no /metrics; like TensorRT-LLM it is unsupported.
+    # TensorFold does serve /metrics (tensorfold: names, read by the agent's
+    # monitor). These adapter and path values have no reader and are part of the
+    # launch identity, so they stay as they are.
     "tensorfold": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),

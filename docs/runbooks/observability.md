@@ -67,7 +67,7 @@ the `vonk_engine_*` series the agents report: `decode_throughput` and
 prompt tokens in the window, not lifetime), `spec_decode_acceptance` and
 `preemption_rate`. Ratios divide rates summed by alias, so a quiet window is
 `None` ("No requests"), never 0. Only engines with verified metric names report
-today (TensorFold); the others show Not reported and keep their gateway
+today (TensorFold and vLLM, including gr8); the others show Not reported and keep their gateway
 estimates. A Spark view shows the aliases that Spark serves; a dual run shows the
 same alias on both Sparks. There is no `kv_pool_memory`: no agent reports the
 pool size yet.

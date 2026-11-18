@@ -653,3 +653,17 @@ def test_the_engine_window_counts_by_receive_time_so_a_slow_spark_clock_counts(
         ("glm-5-flash", 7)
     ]
     assert repository.live_engine_readings(clock.now + ENGINE_LIVE_WINDOW * 2) == []
+
+
+_ENGINE_METRICS = json.loads(
+    (files("vonk_agent_protocol") / "vectors" / "engine-metrics-v1.json").read_text()
+)["samples"]
+
+
+@pytest.mark.parametrize("sample", _ENGINE_METRICS, ids=lambda s: s["name"])
+def test_engine_metrics_vector_readings_are_valid_wire_readings(sample) -> None:
+    from vonk_agent_protocol.telemetry import EngineReading
+
+    assert sample["source"].startswith("source-derived")
+    reading = EngineReading.model_validate_json(canonical_message(sample["expected"]))
+    assert json.loads(canonical_message(reading)) == sample["expected"]
