@@ -196,7 +196,7 @@ generation), and only the run's own Stop cancels it
 multi-rank job (protocol 4.5): every rank is its own order on host network;
 only the rendezvous owner (`is_endpoint_owner` / `RecipeJobRunRequest.endpoint_owner`)
 owns `/inputs`, `/outputs` and the result, and a companion rank reports an empty
-output manifest. Job recipes may be `distributed` on the `diffusers` engine only;
+output manifest. Job recipes may be `distributed` on the `diffusers` and `vllm-omni` engines only;
 run admission reserves the rendezvous port on the owner of a multi-node job. A job submitted to a multi-node run is one order per rank in one
 phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
 own binder); `lifecycle/job_ranks.py` names the owner's order, the job's

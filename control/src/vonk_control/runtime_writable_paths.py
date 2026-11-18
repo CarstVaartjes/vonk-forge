@@ -108,6 +108,7 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "pytorch-server": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "gr8": _COMMON_PATHS,
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
+    "vllm-omni": (*_COMMON_PATHS, *_PYTHON_PATHS, *_VLLM_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
 }
@@ -167,6 +168,12 @@ _ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
 # gr8's front end serves vLLM-named /metrics and the agent parses it as the vllm
 # format; this adapter and path pair has no reader and stays as launch identity.
 _ENGINE_TELEMETRY["gr8"] = _ENGINE_TELEMETRY["exllamav3"]
+# vLLM-Omni's API is loopback-only inside a job, so the monitor reads nothing
+# (unsupported, as ExLlamaV3); the usage-stats opt-out is platform-owned because
+# job ranks run on the host network. The opt-out names are vLLM's.
+_ENGINE_TELEMETRY["vllm-omni"] = EngineTelemetryContract(
+    _ENGINE_TELEMETRY["exllamav3"].adapter, None, _ENGINE_TELEMETRY["vllm"].environment
+)
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
 # it for every runtime so recipes never carry it.
@@ -222,6 +229,7 @@ for _slug in (
     "pytorch-pipeline",
 ):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
+_ENGINE_ENVIRONMENT["vllm-omni"] = dict(_ENGINE_ENVIRONMENT["vllm"])
 _HOME_NAMES = ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
 for _name in _HOME_NAMES:
     _ENGINE_ENVIRONMENT["llama-cpp"] = {

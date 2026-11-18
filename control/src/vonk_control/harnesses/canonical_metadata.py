@@ -134,6 +134,15 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         wrapper="/opt/vonk/bin/diffusers-job",
     ),
     CanonicalHarnessMetadata(
+        slug="vllm-omni",
+        adapters=("video-job",),
+        capability_requirements=("nvidia-gpu",),
+        topology_modes=("distributed",),
+        security_exceptions=("model.trust-remote-code",),
+        executables=("vllm-omni-job", "vllm-omni"),
+        wrapper="/opt/vonk/bin/vllm-omni-job",
+    ),
+    CanonicalHarnessMetadata(
         slug="comfyui",
         adapters=("image-job", "audio-job", "video-job", "artifact-job"),
         capability_requirements=("nvidia-gpu", "immutable-workflow"),
