@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from vonk_agent_protocol import (
     InvalidRequestReason,
 )
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..agent_contacts import last_seen as contact_last_seen
 from ..agent_upgrade_contract import (
@@ -62,7 +63,7 @@ class EligibilityMixin:
     ) -> str | None:
         """A reason this package can never be dispatched to ``node``."""
 
-        if node.state != "active" or node.revoked_at is not None:
+        if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
             return "is not active"
         if (
             runtime_value(node, lambda identity: identity.architecture)

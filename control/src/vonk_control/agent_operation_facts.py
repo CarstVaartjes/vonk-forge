@@ -14,7 +14,12 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import AgentClaim, AgentOperation, RecipeJobRunRequest
+from vonk_agent_protocol import (
+    AgentClaim,
+    AgentOperation,
+    LifecycleState,
+    RecipeJobRunRequest,
+)
 
 from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
@@ -290,7 +295,7 @@ def attempt_holds_open_launch_budget(
     return (
         attempt is not None
         and attempt.attempt == operation.current_attempt
-        and attempt.state == "running"
+        and attempt.state == LifecycleState.RUNNING
         and lapsed_renewal_allowed(operation, attempt, now)
     )
 
@@ -315,7 +320,7 @@ def attempt_is_live(
 
     return (
         attempt is not None
-        and attempt.state == "running"
+        and attempt.state == LifecycleState.RUNNING
         and (
             aware(attempt.lease_deadline) > aware(now)
             or attempt_holds_open_launch_budget(operation, attempt, now)

@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     AgentResult,
     Disposition,
     FailureCode,
+    LifecycleState,
     canonical_message,
 )
 
@@ -329,8 +330,8 @@ def _fail_spent_start_budgets(
         if deadline is None or _aware(now) < deadline:
             continue
         if attempt is None or (
-            operation.state == "running"
-            and attempt.state == "running"
+            operation.state == LifecycleState.RUNNING
+            and attempt.state == LifecycleState.RUNNING
             and _aware(attempt.lease_deadline) > _aware(now)
         ):
             continue

@@ -138,7 +138,7 @@ def _reconciled_dead_attempt_reason(
 
     if attempt is None:
         detail = f"attempt {max(1, operation.current_attempt)} has no recorded attempt"
-    elif attempt.state != "running":
+    elif attempt.state != LifecycleState.RUNNING:
         detail = f"attempt {operation.current_attempt} stopped in state {attempt.state}"
     else:
         return _lease_expiry_reason(operation, attempt, node, now)
