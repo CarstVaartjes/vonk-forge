@@ -31,6 +31,7 @@ from ..model_cache_contract import (
     CachedRecipeResolution,
     CachedResourceEstimate,
     CacheResolution,
+    ModelCacheSetState,
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..revision_images import RevisionImage, revision_images
@@ -669,7 +670,7 @@ class ResolutionMixin:
                 session.scalars(
                     select(ModelCacheSet).where(
                         ModelCacheSet.model_content_sha256 == digest,
-                        ModelCacheSet.state == "cached",
+                        ModelCacheSet.state == ModelCacheSetState.CACHED,
                     )
                 )
             )
@@ -685,7 +686,7 @@ class ResolutionMixin:
                 shared = None
             if (
                 shared is not None
-                and shared.state == "cached"
+                and shared.state == ModelCacheSetState.CACHED
                 and shared not in model_rows
             ):
                 model_rows.append(shared)

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LibraryAssessmentCode
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .library_contract import (
     LibraryRecipeProjection,
@@ -131,7 +132,7 @@ class LibraryAssessment:
                         session.scalars(
                             select(AgentNode.node_id)
                             .where(
-                                AgentNode.state == "active",
+                                AgentNode.state == NodeIdentityState.ACTIVE,
                                 AgentNode.revoked_at.is_(None),
                             )
                             .order_by(AgentNode.node_id)

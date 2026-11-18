@@ -59,6 +59,7 @@ from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
+    LifecycleState,
     ModelAccessReason,
     ModelCacheCode,
     WaitOwnerKind,
@@ -719,8 +720,8 @@ class ModelCacheAdapter:
             return False
         if operation.kind == "remove":
             changed = False
-            if operation.state != "running":
-                operation.state = "running"
+            if operation.state != LifecycleState.RUNNING:
+                operation.state = LifecycleState.RUNNING
                 changed = True
             if operation.next_action_at is not None:
                 schedule_wait(operation, None)

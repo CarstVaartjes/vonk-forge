@@ -11,6 +11,7 @@ from vonk_agent_protocol import ModelCacheCode, WaitReason
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue
+from ..model_cache_contract import ModelCacheSetState
 from ..models import ModelCacheSet
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
@@ -73,12 +74,15 @@ class AvailabilityMixin:
                 row = session.get(ModelCacheSet, manifest.digest)
                 if row is not None:
                     row.verified_bytes = cache._verified_bytes(manifest.digest)
-                    if present and row.state in {"needs-repair", "incomplete"}:
-                        row.state = "cached"
+                    if present and row.state in {
+                        ModelCacheSetState.NEEDS_REPAIR,
+                        ModelCacheSetState.INCOMPLETE,
+                    }:
+                        row.state = ModelCacheSetState.CACHED
                         row.verified_at = now
                         row.last_error = None
-                    elif not present and row.state == "cached":
-                        row.state = "needs-repair"
+                    elif not present and row.state == ModelCacheSetState.CACHED:
+                        row.state = ModelCacheSetState.NEEDS_REPAIR
                         row.last_error = (
                             "a stored object is missing or has the wrong size"
                         )
@@ -212,8 +216,8 @@ class AvailabilityMixin:
             )
             row = cache._ensure_set(session, manifest)
             cache._remember_verified_models(session, row, manifest)
-            if row.state != "cached":
-                row.state = "cached"
+            if row.state != ModelCacheSetState.CACHED:
+                row.state = ModelCacheSetState.CACHED
                 row.verified_bytes = manifest.expected_bytes
                 row.verified_at = now
                 row.updated_at = now
