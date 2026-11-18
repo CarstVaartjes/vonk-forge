@@ -164,3 +164,15 @@ def test_startup_adds_the_state_checks_and_never_refuses(
         assert {name: _constraint(connection, name) for name in CHECKS.values()} == (
             first
         )
+
+
+def test_certificate_state_admits_only_its_enum_words(postgres_engine):
+    """A certificate record's state is checked against CertificateRecordState."""
+
+    with postgres_engine.begin() as connection:
+        Base.metadata.create_all(connection)
+    _seed(postgres_engine)
+    with postgres_engine.begin() as connection:
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            _set_state(connection, "agent_certificates", RETIRED)
+        _set_state(connection, "agent_certificates", "staged")
