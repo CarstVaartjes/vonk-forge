@@ -2325,6 +2325,26 @@ def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
     assert not check_source(path, source, lines, modes=("savepoints",))
 
 
+_REVOCATION_PATH = "control/src/vonk_control/browser_auth.py"
+_REVOCATION_SOURCE = "def f(row):\n    row.revoked_at = now\n{extra}"
+
+
+def test_a_revocation_without_a_durable_commit_is_flagged() -> None:
+    source = _REVOCATION_SOURCE.format(extra="")
+    modes = ("durable-revocations",)
+    assert check_source(_REVOCATION_PATH, source, {2}, modes=modes)
+    assert not check_source(_REVOCATION_PATH, source, set(), modes=modes)
+
+
+def test_a_revocation_with_a_durable_commit_or_in_enrollment_passes() -> None:
+    modes = ("durable-revocations",)
+    durable = _REVOCATION_SOURCE.format(extra="    require_durable_commit(db)\n")
+    assert not check_source(_REVOCATION_PATH, durable, {2}, modes=modes)
+    plain = _REVOCATION_SOURCE.format(extra="")
+    enrollment = "control/src/vonk_control/enrollment/service.py"
+    assert not check_source(enrollment, plain, {2}, modes=modes)
+
+
 _BARRIER_TEST = "control/tests/test_example.py"
 
 

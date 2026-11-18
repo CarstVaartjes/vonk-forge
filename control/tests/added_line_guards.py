@@ -17,6 +17,7 @@ from . import (
     bare_savepoints,
     contract_constant_copies,
     docker_listings,
+    durable_revocations,
     fixture_closures,
     git_free_test_lines,
     intent_ordinal_writers,
@@ -112,6 +113,7 @@ MODES = (
     "alias-rules",
     "intent-ordinal",
     "savepoints",
+    "durable-revocations",
     "barriers",
     "sync-in-async",
     "git-free-tests",
@@ -2521,6 +2523,16 @@ def check_source(
         hits.extend(
             (line, intent_ordinal_writers.KIND)
             for line in intent_ordinal_writers.scan_source(source)
+        )
+    if (
+        python
+        and not is_test
+        and "durable-revocations" in modes
+        and durable_revocations.in_scope(path)
+    ):
+        hits.extend(
+            (line, durable_revocations.KIND)
+            for line in durable_revocations.scan_source(source)
         )
     if (
         python
