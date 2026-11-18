@@ -47,6 +47,7 @@ from .projection_support import (
 )
 
 if TYPE_CHECKING:
+    from .profile_projection import _ProfilePageReads
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
 
@@ -65,10 +66,32 @@ class FleetProfileService:
                     .limit(128)
                 )
             )
+            # Rows share the selection, roster and recipe reads: one set query
+            # each for the page, never one per row. An unreadable definition
+            # contributes nothing to them; _read_view shows it as unavailable.
+            definitions = {row.id: self._readable_definition(row) for row in rows}
+            page = self._page_reads(
+                session,
+                [
+                    choice
+                    for definition in definitions.values()
+                    if isinstance(definition, FleetProfileDefinition)
+                    for choice in definition.assignments
+                ],
+            )
             return FleetProfileList(
                 generated_at=now,
                 # The list is the cheap overview; cache truth is read per profile.
-                profiles=[self._read_view(session, row, observe=False) for row in rows],
+                profiles=[
+                    self._read_view(
+                        session,
+                        row,
+                        observe=False,
+                        page=page,
+                        definition=definitions[row.id],
+                    )
+                    for row in rows
+                ],
                 next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
@@ -180,14 +203,13 @@ class FleetProfileService:
     def _required_definition(self, row: FleetProfile) -> FleetProfileDefinition:
         """Refuse new effects with the same typed cause as the draft read."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        try:
-            return self._definition(row)
-        except (TypeError, ValueError):
-            issue = self._definition_issue()
+        definition = self._readable_definition(row)
+        if isinstance(definition, SavedProfileProjectionIssue):
             raise FleetProfileDefinitionUnavailable(
-                f"{issue.detail} {issue.next_action}",
+                f"{definition.detail} {definition.next_action}",
                 reason=InvalidRequestReason.MALFORMED,
-            ) from None
+            )
+        return definition
 
     @staticmethod
     def _definition_issue() -> SavedProfileProjectionIssue:
@@ -197,19 +219,34 @@ class FleetProfileService:
         )
 
     def _read_view(
-        self, session: Session, row: FleetProfile, *, observe: bool = True
+        self,
+        session: Session,
+        row: FleetProfile,
+        *,
+        observe: bool = True,
+        page: _ProfilePageReads | None = None,
+        definition: FleetProfileDefinition | SavedProfileProjectionIssue | None = None,
     ) -> FleetProfileReadView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        try:
-            self._definition(row)
-        except (TypeError, ValueError):
+        if definition is None:
+            definition = self._readable_definition(row)
+        if isinstance(definition, SavedProfileProjectionIssue):
             return UnavailableFleetProfileView(
                 id=row.id,
                 number=row.number,
                 revision=row.revision,
-                projection_issue=self._definition_issue(),
+                projection_issue=definition,
             )
-        return self._view(session, row, observe=observe)
+        return self._view(session, row, observe=observe, page=page)
+
+    def _readable_definition(
+        self, row: FleetProfile
+    ) -> FleetProfileDefinition | SavedProfileProjectionIssue:
+        """The saved definition, or the typed issue that it cannot be read."""
+        try:
+            return self._definition(row)
+        except (TypeError, ValueError):
+            return self._definition_issue()
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""
@@ -229,15 +266,14 @@ class FleetProfileService:
                         name="Default" if number == 1 else f"Profile {number}"
                     ),
                 )
-            try:
-                definition = self._definition(row)
-            except (TypeError, ValueError):
+            definition = self._readable_definition(row)
+            if isinstance(definition, SavedProfileProjectionIssue):
                 return FleetProfileDefinitionView(
                     id=row.id,
                     number=row.number,
                     revision=row.revision,
                     definition=None,
-                    projection_issue=self._definition_issue(),
+                    projection_issue=definition,
                 )
             return FleetProfileDefinitionView(
                 id=row.id,

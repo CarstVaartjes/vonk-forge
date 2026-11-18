@@ -2,23 +2,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, event, update
+from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control.catalog_revision_contract import (
+    rederive_projection,
+    write_catalog_projection,
+)
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileInput,
     FleetProfilePreview,
     FleetProfileView,
+    UnavailableFleetProfileView,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.model_cache_contract import (
@@ -35,6 +41,7 @@ from vonk_control.models import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    FleetProfile,
     FleetProfileApplication,
     User,
 )
@@ -1463,6 +1470,122 @@ def test_profile_list_skips_cache_check_and_single_read_observes(
     assert isinstance(read, FleetProfileView)
     assert len(calls) == 1
     assert read.cache_summary.unknown == 0
+
+
+def _add_recipe(sessions: sessionmaker, slug: str) -> str:
+    """Publish another active recipe revision; returns its selector."""
+    with sessions.begin() as session:
+        base = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert base is not None
+        document = json.loads(json.dumps(base.document))
+        document["identity"]["slug"] = slug
+        root = CatalogDocument(
+            kind="recipe",
+            publisher=base.publisher,
+            slug=slug,
+            title=slug,
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(root)
+        session.flush()
+        session.add(
+            CatalogDocumentRevision(
+                document_id=root.id,
+                kind="recipe",
+                publisher=base.publisher,
+                slug=slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=document_sha256(document),
+                # Every catalog writer stores the projection beside the source.
+                projected=write_catalog_projection(
+                    rederive_projection({}, RecipeDefinition.model_validate(document)),
+                    kind="recipe",
+                ),
+                execution_key="c" * 64,
+                created_by="test",
+                created_at=NOW,
+            )
+        )
+        return f"{base.publisher}/{slug}"
+
+
+def test_profile_list_reads_a_page_in_queries_independent_of_its_rows() -> None:
+    """Each listed row shows exactly its single read, without per-row queries."""
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    engine = sessions.kw["bind"]
+
+    def add_profiles(first: int, count: int) -> None:
+        for index in range(first, first + count):
+            service.create(
+                FleetProfileInput(
+                    name=f"Page {index}",
+                    assignments=[
+                        FleetProfileAssignmentInput(
+                            recipe_selector=_add_recipe(sessions, f"page-{index}"),
+                            spark_ids=[NODE_1],
+                        )
+                    ],
+                ),
+                actor="test",
+            )
+
+    def listed_statements() -> list[str]:
+        statements: list[str] = []
+
+        def record(*args: object) -> None:
+            statements.append(str(args[2]))
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            service.list()
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return statements
+
+    # A recipe without a current revision, and a definition that cannot be
+    # read, keep their own row projections on both pages.
+    add_profiles(0, 4)
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentHead)
+            .where(CatalogDocumentHead.slug == "page-2")
+            .values(active_revision_id=None)
+        )
+        session.execute(
+            update(FleetProfile).where(FleetProfile.number == 4).values(assignments={})
+        )
+    few = listed_statements()
+    add_profiles(4, 6)
+    listed = service.list()
+
+    many = listed_statements()
+    assert len(many) <= len(few)
+    # The overview reads stored projections, never the recipes' source documents.
+    assert not [
+        item
+        for item in many
+        if re.search(r"catalog_document_revisions\.document\b", item)
+    ]
+    assert len(listed.profiles) == 10
+    with sessions() as session:
+        rows = session.scalars(select(FleetProfile).order_by(FleetProfile.number))
+        assert listed.profiles == [
+            service._read_view(session, row, observe=False) for row in rows
+        ]
+    states = [
+        entry.assignments[0].recipe.state
+        for entry in listed.profiles
+        if isinstance(entry, FleetProfileView)
+    ]
+    assert states.count("Needs attention") == 1
+    assert sum(isinstance(e, UnavailableFleetProfileView) for e in listed.profiles) == 1
 
 
 @pytest.mark.parametrize("endpoint", ["get", "preview"])
