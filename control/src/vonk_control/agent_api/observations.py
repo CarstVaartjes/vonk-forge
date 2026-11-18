@@ -8,7 +8,7 @@ import math
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from sqlalchemy import select
@@ -79,7 +79,6 @@ from .common import (
     _log_evidence_dropped,
     _log_evidence_warnings,
     _now,
-    _require_services,
     _validated_authenticated_source,
     contract_verdict_or_wait,
 )
@@ -121,8 +120,11 @@ def _wait_out_clock_skew(observed_at: datetime, now: datetime) -> None:
 def install_observations_routes(
     agent: APIRouter, services: AgentApiServices | None
 ) -> None:
+    # Every route here is unreachable without
+    # services: the auth middleware answers 401 first.
+    required = cast(AgentApiServices, services)
+
     def helper_identity(request: Request) -> AgentIdentity:
-        _require_services(services)
         return _authenticated_identity(request)
 
     @agent.post(
@@ -136,7 +138,6 @@ def install_observations_routes(
         body: ClaimRequest,
         request_id: Annotated[UuidId | None, Header(alias="X-Request-ID")] = None,
     ) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         source = _validated_authenticated_source(request, required, identity)
         _log_evidence_warnings(body, endpoint="claim", node_id=identity.node_id)
@@ -176,7 +177,6 @@ def install_observations_routes(
     )
     @operator_acceptance(ReceiptPolicy.AGENT_INVENTORY)
     def inventory(body: InventoryRequest, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         if body.observed_at.tzinfo is None or body.observed_at.utcoffset() is None:
             raise HTTPException(
@@ -280,7 +280,6 @@ def install_observations_routes(
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)
     @operator_acceptance(ReceiptPolicy.AGENT_TELEMETRY)
     def telemetry(body: TelemetryRequest, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         for sample in body.samples:
             _log_evidence_warnings(
@@ -300,7 +299,6 @@ def install_observations_routes(
     def recipe_run_observations(
         body: RecipeRunObservationsWire, request: Request
     ) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
@@ -588,7 +586,7 @@ def install_observations_routes(
         identity = helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
-        with _require_services(services).sessions() as session:
+        with required.sessions() as session:
             wanted = run_wanted_here(session, identity.node_id, run_id)
             # A lost run (a cancelled start left it so) is reported on too: the
             # agent's word that its process is gone releases its claims.
@@ -616,7 +614,6 @@ def install_observations_routes(
         openapi_extra={"x-vonk-streaming-transport": True},
     )
     def source_bundle(source_sha256: str, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         if _DIGEST.fullmatch(source_sha256) is None:
             raise HTTPException(status_code=404, detail="source bundle does not exist")

@@ -4337,3 +4337,9 @@ def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
         {1, 2},
         modes=("newest-snapshot",),
     )
+
+
+def test_an_added_identity_state_literal_is_refused() -> None:
+    source = 'def f(row):\n    return row.state == "revoked"\n'
+    assert check_source(PATH, source, {2}, modes=("vocabulary",))
+    assert not check_source(PATH, source, {1}, modes=("vocabulary",))

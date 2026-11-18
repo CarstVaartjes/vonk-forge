@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
@@ -566,6 +566,49 @@ def test_a_sibling_recipe_follows_the_shared_set_while_it_downloads(
             recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
         )
         assert "model-not-cached" in resolution.blockers, slug
+
+
+def test_image_presence_never_reads_a_builds_plan_or_policy(
+    cache,  # noqa: F811
+):
+    """An image is its build's archive columns; the build documents stay unread.
+
+    The dual runs its single's build through the pinned digest, so both the
+    document's own builds and the shared-image builds are read.
+    """
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        resolutions = [
+            service.resolve_latest_cached(
+                recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
+            )
+            for slug in ("resolver-recipe", "resolver-dual")
+        ]
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert [item.recipe.cached for item in resolutions] == [True, True]
+    build_reads = [item for item in statements if "FROM recipe_builds" in item]
+    assert build_reads
+    assert not [
+        item
+        for item in build_reads
+        if re.search(r'recipe_builds\."?(plan|policy_report)\b', item)
+    ]
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(

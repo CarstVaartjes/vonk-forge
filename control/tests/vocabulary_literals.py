@@ -29,7 +29,12 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     WaitReason,
 )
-from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
+from vonk_agent_protocol.state_machines import (
+    MACHINES,
+    CertificateRecordState,
+    ModelCacheOperatorStatus,
+    NodeIdentityState,
+)
 
 from .parsed_sources import memoized_scan, parse_file
 
@@ -789,7 +794,7 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
         )
         if previous == enum_names:
             break
-    return frozenset(
+    words = {
         statement.value.value
         for node in classes
         if node.name in enum_names
@@ -797,7 +802,12 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
         if isinstance(statement, (ast.Assign, ast.AnnAssign))
         and isinstance(statement.value, ast.Constant)
         and isinstance(statement.value.value, str)
+    }
+    # Stored certificate and node identity states are spelled by enum member.
+    words.update(
+        m.value for e in (CertificateRecordState, NodeIdentityState) for m in e
     )
+    return frozenset(words)
 
 
 def _structural_field_keys(tree: ast.Module) -> Iterator[ast.Constant]:

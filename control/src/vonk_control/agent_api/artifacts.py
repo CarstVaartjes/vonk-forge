@@ -7,6 +7,7 @@ import hashlib
 import os
 import stat
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
@@ -41,7 +42,6 @@ from .common import (
     _owned_artifact,
     _prepare_recipe_image_upload,
     _range,
-    _require_services,
     _served_from_edge,
     _sha256_path,
 )
@@ -50,8 +50,11 @@ from .common import (
 def install_artifacts_routes(
     agent: APIRouter, services: AgentApiServices | None
 ) -> None:
+    # Every route here is unreachable without
+    # services: the auth middleware answers 401 first.
+    required = cast(AgentApiServices, services)
+
     def image_upload_context(build_id: str, request: Request):
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         try:
             uuid.UUID(build_id)
@@ -292,7 +295,6 @@ def install_artifacts_routes(
     )
     def artifact(sha256: str, request: Request) -> Response:
         """Authorize one owned artifact; the edge serves its bytes and range."""
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         path, size = _owned_artifact(required, identity, sha256)
         _range(request.headers.get("range"), size, required.max_range_bytes)
@@ -327,7 +329,6 @@ def install_artifacts_routes(
         plan_digest: str, request: Request, response: Response
     ) -> DistributionAssignment:
         """Return the exact model plus OCI object set authorized for this node."""
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         if required.distribution is None:
             raise HTTPException(
@@ -356,7 +357,6 @@ def install_artifacts_routes(
     )
     def distribution_object(sha256: str, request: Request) -> Response:
         """Authorize one assigned immutable object; the edge serves its range."""
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         if required.distribution is None:
             raise HTTPException(
