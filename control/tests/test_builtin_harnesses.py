@@ -33,6 +33,7 @@ BUILTINS = (
     "tensorfold",
     "exllamav3",
     "pytorch-server",
+    "gr8",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
@@ -47,6 +48,7 @@ OPENAI_BUILTINS = {
     "tensorfold",
     "exllamav3",
     "pytorch-server",
+    "gr8",
 }
 ENTRYPOINTS = {
     "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
@@ -57,6 +59,7 @@ ENTRYPOINTS = {
     "tensorfold": ["/opt/vonk/bin/tensorfold-serve"],
     "exllamav3": ["/opt/vonk/bin/exllamav3-serve"],
     "pytorch-server": ["/opt/vonk/bin/pytorch-server"],
+    "gr8": ["/opt/vonk/bin/gr8-serve"],
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
@@ -105,6 +108,10 @@ ARGS = {
         {"name": "host", "value": "0.0.0.0"},
         {"name": "port", "value": 8000},
         {"name": "max-model-len", "value": 16384},
+    ],
+    "gr8": [
+        {"name": "host", "value": "0.0.0.0"},
+        {"name": "port", "value": 8000},
     ],
     "diffusers": [
         {"name": "pipeline", "value": "text-to-image"},
