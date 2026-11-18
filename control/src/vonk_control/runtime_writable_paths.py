@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
+
+from vonk_agent_protocol.telemetry import EngineFormat
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +167,18 @@ _ENGINE_TELEMETRY = {
     )
     for _slug, _contract in _ENGINE_TELEMETRY.items()
 }
+
+# llama.cpp serves /metrics only when asked; the platform always asks, so a
+# recipe never carries (or can override) the switch. SGLang's switch is an
+# argument, added by the harness compiler (``_metrics_args``).
+_LLAMA_CPP_TELEMETRY = _ENGINE_TELEMETRY[EngineFormat.LLAMA_CPP]
+_ENGINE_TELEMETRY[EngineFormat.LLAMA_CPP] = replace(
+    _LLAMA_CPP_TELEMETRY,
+    environment=(
+        *_LLAMA_CPP_TELEMETRY.environment,
+        ("LLAMA_ARG_ENDPOINT_METRICS", "1"),
+    ),
+)
 
 # These names are paths rather than recipe tuning knobs. They are injected by
 # the platform; a recipe cannot repeat them, move them, or introduce a second

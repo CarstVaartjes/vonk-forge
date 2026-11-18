@@ -6,6 +6,7 @@ from importlib.resources import files
 from typing import Any
 
 import pytest
+from vonk_control.catalog_entities import _digest, _execution_projection
 from vonk_control.harnesses.canonical import compile_canonical_harness
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.recipe_runtime_specs import (
@@ -350,6 +351,58 @@ def test_vllm_injects_platform_owned_environment(model: ModelDefinition) -> None
     assert projection.environment == environment("vllm", ())
     assert ("XDG_CACHE_HOME", "/outputs/cache") in projection.environment
     assert ("VLLM_CACHE_ROOT", "/outputs/cache/vllm") in projection.environment
+
+
+def test_sglang_metrics_flag_is_injected_once(model: ModelDefinition) -> None:
+    injected = _projection("sglang", model=model).command
+    assert injected.count("--enable-metrics") == 1
+
+    raw = _recipe("sglang")
+    raw["runtime"]["arguments"].append({"name": "enable-metrics", "value": True})
+    authored = _projection("sglang", recipe=raw, model=model).command
+    assert authored.count("--enable-metrics") == 1
+
+
+def test_llama_cpp_metrics_switch_is_platform_owned(model: ModelDefinition) -> None:
+    projection = _projection("llama-cpp", model=model)
+    assert ("LLAMA_ARG_ENDPOINT_METRICS", "1") in projection.environment
+
+    raw = _recipe("llama-cpp")
+    raw["runtime"]["environment"] = [
+        {"name": "LLAMA_ARG_ENDPOINT_METRICS", "value": "0"}
+    ]
+    with pytest.raises(Exception):  # noqa: B017 -- the platform owns the switch
+        _projection("llama-cpp", recipe=raw, model=model)
+
+
+# Catalog execution keys of the synthetic recipes, computed before the
+# injection existed (the key reads the recipe document only).
+_PROVEN_KEYS = {
+    "sglang": "7b8edcca185d09d97646da056e6d9d4c6f207ae25584dbfa00d88a6a451fe795",
+    "llama-cpp": "ccde828fa5ca70376a686ff2b3f3c0046d600dae14997b5fbb5a362a0ebd085e",
+}
+
+
+@pytest.mark.parametrize("slug", ("sglang", "llama-cpp"))
+def test_metrics_switch_moves_no_status_key(slug: str, model: ModelDefinition) -> None:
+    """Proven/working status is keyed by the recipe document, not the compiled launch.
+
+    The catalog execution key (and the qualification fingerprint built from the
+    same document fields) must be identical before and after the platform
+    injects the metrics switch; only the compiled launch carries it.
+    """
+    raw = _recipe(slug)
+    recipe = read_recipe(raw)
+    before = _digest(_execution_projection(recipe))
+    projection = _projection(slug, model=model)
+    after = _digest(_execution_projection(read_recipe(raw)))
+
+    assert before == after == _PROVEN_KEYS[slug]
+    assert read_recipe(raw).model_dump(mode="json") == recipe.model_dump(mode="json")
+    injected = {"--enable-metrics", "LLAMA_ARG_ENDPOINT_METRICS"}
+    document = json.dumps(recipe.model_dump(mode="json"))
+    assert not any(name in document for name in injected)
+    assert injected & {*projection.command, *dict(projection.environment)}
 
 
 @pytest.mark.parametrize("slug", BUILTINS)

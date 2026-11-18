@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from math import isfinite
 from pathlib import Path
 
+from vonk_agent_protocol.telemetry import EngineFormat
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import MAX_RUNTIME_ARGV_TOKEN_BYTES
 from vonk_forge_contracts.resolver import (
@@ -348,6 +349,27 @@ def _model_mounts(
     return tuple(selected)
 
 
+def _has_flag(command: Sequence[str], name: str) -> bool:
+    wanted = name.removeprefix("--").replace("_", "-")
+    return any(
+        item.startswith("--") and item[2:].split("=", 1)[0].replace("_", "-") == wanted
+        for item in command
+    )
+
+
+def _metrics_args(slug: str, command: list[str]) -> list[str]:
+    """Switch on the engine metrics endpoint where the engine has it off.
+
+    The one platform-owned place for the argv half of "metrics always on":
+    SGLang serves ``/metrics`` only with ``--enable-metrics`` (llama.cpp's
+    switch is the ``LLAMA_ARG_ENDPOINT_METRICS`` telemetry environment). A
+    recipe that already passes the flag is left as authored.
+    """
+    if slug == EngineFormat.SGLANG and not _has_flag(command, "enable-metrics"):
+        command.append("--enable-metrics")
+    return command
+
+
 def _distributed_args(
     recipe: RecipeDefinition,
     command: list[str],
@@ -360,12 +382,7 @@ def _distributed_args(
         return command
 
     def has(name: str) -> bool:
-        wanted = name.removeprefix("--").replace("_", "-")
-        return any(
-            item.startswith("--")
-            and item[2:].split("=", 1)[0].replace("_", "-") == wanted
-            for item in command
-        )
+        return _has_flag(command, name)
 
     if recipe.runtime.engine == "sglang":
         if not has("nnodes"):
@@ -465,6 +482,7 @@ def compile_canonical_harness(
     if slug != "sglang":
         command = [primary_target if value == "/models" else value for value in command]
     command = _distributed_args(recipe, command, role=role, rank=rank)
+    command = _metrics_args(slug, command)
     interface = recipe.interfaces[0]
     if interface.adapter == "openai":
         if "--host" not in command:
