@@ -890,7 +890,10 @@ def test_a_long_traceback_tail_is_kept_and_still_redacted(durable_evidence):
         assert stored is not None and stored.result is not None
         assert "dropped_evidence" not in stored.result
     bundle = evidence.read(operation.id, 1)
-    assert not any(e.startswith("evidence-collector=") for e in bundle.collector_errors)
+    assert not any(
+        AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED.value in e
+        for e in bundle.collector_errors
+    )
     text = bundle.diagnostics.stderr.text
     assert key_error in text
     assert "[redacted diagnostic line]" in text

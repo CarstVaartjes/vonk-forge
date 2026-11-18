@@ -510,13 +510,13 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
         and isinstance(path[2], int)
         and path[3] in {"name", "value"}
     ):
-        return len(value) <= 1024 and "\x00" not in value
+        return "\x00" not in value
     if (
         len(path) == 3
         and path[:2] == ("options", "unset_labels")
         and isinstance(path[2], int)
     ):
-        return len(value) <= 128 and "\x00" not in value
+        return "\x00" not in value
     if (
         len(path) == 3
         and path[0] == "base_images"
@@ -529,7 +529,6 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
         and path[0] == "arguments"
         and isinstance(path[1], int)
         and path[2] == "value"
-        and len(value) <= 1024
         and "\x00" not in value
     )
 
