@@ -116,6 +116,15 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         wrapper="/opt/vonk/bin/pytorch-server",
     ),
     CanonicalHarnessMetadata(
+        slug="gr8",
+        adapters=("openai",),
+        capability_requirements=("nvidia-gpu",),
+        topology_modes=("single", "distributed"),
+        security_exceptions=(),
+        executables=("gr8-serve", "gr8"),
+        wrapper="/opt/vonk/bin/gr8-serve",
+    ),
+    CanonicalHarnessMetadata(
         slug="diffusers",
         adapters=("image-job", "audio-job", "video-job", "artifact-job"),
         capability_requirements=("nvidia-gpu",),
