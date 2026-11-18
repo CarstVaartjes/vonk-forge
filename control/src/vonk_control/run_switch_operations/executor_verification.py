@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..machine_states import rank_installed
 from ..models import (
@@ -105,7 +106,7 @@ class ExecutorVerificationMixin:
                 )
                 if (
                     agent is None
-                    or agent.state != "active"
+                    or agent.state != NodeIdentityState.ACTIVE
                     or agent.revoked_at is not None
                     or snapshot is None
                     or (inventory.age_seconds or 0) > service._inventory_max_age

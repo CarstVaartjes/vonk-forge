@@ -278,7 +278,7 @@ def _cancel_update_child(
             )
         elif (
             current.cancel_request_id != cancellation.cancel_request_id
-            and job.state != "cancelled"
+            and job.state != LifecycleState.CANCELLED
         ):
             # A separately accepted child cancellation owns this child.
             # Observe it and let the parent's durable reconciliation wait.

@@ -314,7 +314,7 @@ def _read_removal_owner(
             "active recipe removal has a terminal failure checkpoint",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    if operation.state == "failed" and (
+    if operation.state == LifecycleState.FAILED and (
         owner.checkpoint.failure is None or owner.checkpoint.failure.retryable
     ):
         raise RecipeImageAvailabilityUnknown(
@@ -341,7 +341,7 @@ def _removal_progress_document(
     reclaimed_bytes = (
         checkpoint.image_reclaimed_bytes + checkpoint.model_reclaimed_bytes
     )
-    successful = operation.state == "succeeded"
+    successful = operation.state == LifecycleState.SUCCEEDED
     progress = OperationProgress(
         phase=(
             ProgressPhase.COMPLETED
@@ -356,7 +356,7 @@ def _removal_progress_document(
         completed_items=completed_items,
         total_items=total_items,
         observed_at=_iso(operation.updated_at),
-        activity=_ACTIVE if operation.state == "running" else _WAITING,
+        activity=_ACTIVE if operation.state == LifecycleState.RUNNING else _WAITING,
     )
     return progress
 
@@ -376,7 +376,7 @@ def removal_status(
 ) -> RecipeCacheRemovalStatus:
     """Project a known typed owner without independently admitting it again."""
     intent = owner.plan.intent
-    if operation.state == "succeeded":
+    if operation.state == LifecycleState.SUCCEEDED:
         self._stored_removal_result(operation, intent, owner)
     status = RecipeCacheRemovalStatus(
         schema_version=SCHEMA_VERSION,

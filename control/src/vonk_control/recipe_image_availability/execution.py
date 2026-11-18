@@ -531,13 +531,13 @@ def _update_model_progress(
         ):
             raise _AvailabilityClaimLost()
         cancelling = operation.state in job_states.words(LifecycleState.OBSERVING)
-        if not cancelling and operation.state != "running":
+        if not cancelling and operation.state != LifecycleState.RUNNING:
             raise _AvailabilityClaimLost()
         if (
             not cancelling
             and model_operation is not None
             and (
-                model_operation.state == "cancelled"
+                model_operation.state == LifecycleState.CANCELLED
                 or self._model_child_has_cancel_intent(model_operation)
             )
         ):

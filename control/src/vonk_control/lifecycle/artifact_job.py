@@ -62,6 +62,7 @@ from vonk_agent_protocol import (
     AgentFailureResult,
     FailureCode,
     InvalidRequestReason,
+    LifecycleState,
     RecipeJobRunResult,
     RunDegradedReason,
     WaitOwnerKind,
@@ -972,7 +973,7 @@ class ArtifactJobAdapter:
                             # A job waiting for a claim whose order a Spark
                             # claimed (again, after a reissue).
                             ArtifactJob.state.in_(ajs.AWAITING_CLAIM)
-                            & (StoredOperation.state == "running"),
+                            & (StoredOperation.state == LifecycleState.RUNNING),
                         ),
                     )
                     .order_by(ArtifactJob.updated_at, ArtifactJob.id)

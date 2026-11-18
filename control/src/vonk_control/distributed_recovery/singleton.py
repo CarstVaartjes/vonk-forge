@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
+    LifecycleState,
     RecipeStartPayload,
     WaitReason,
     canonical_message,
@@ -18,6 +19,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..job_documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.evidence import Residue
@@ -176,7 +178,7 @@ def _singleton_recovery_authority(
         now, None, timedelta(seconds=start_timeout + stop_timeout)
     )
     agent_node = session.get(AgentNode, run_node.node_id)
-    if agent_node is None or agent_node.state != "active":
+    if agent_node is None or agent_node.state != NodeIdentityState.ACTIVE:
         return _unproven(
             run.id,
             _MISSING if agent_node is None else _MISMATCH,
@@ -325,7 +327,7 @@ def _accepted_start_authority(
         for job in starts
         if isinstance((parent := _parent(job)), RecipeStartParent)
         and parent.recovery is None
-        and job.state == "succeeded"
+        and job.state == LifecycleState.SUCCEEDED
         and _start_binds_current_run_plan(session, job, run)
     )
     original = accepted[-1] if accepted else None
@@ -358,7 +360,7 @@ def _accepted_start_authority(
             for job in starts
             if isinstance((parent := _parent(job)), RecipeStartParent)
             and parent.recovery is not None
-            and job.state == "succeeded"
+            and job.state == LifecycleState.SUCCEEDED
             and _start_binds_current_run_plan(session, job, run)
             and _launch_generation(session, job, node_id) == run.run_generation
         )
@@ -405,7 +407,7 @@ def _launch_generation(session: Session, job: Job, node_id: str) -> int | None:
             AgentOperation.parent_job_id == job.id,
             AgentOperation.node_id == node_id,
             AgentOperation.kind == "recipe.start",
-            AgentOperation.state == "succeeded",
+            AgentOperation.state == LifecycleState.SUCCEEDED,
         )
         .order_by(AgentOperation.created_at.desc(), AgentOperation.id.desc())
         .limit(1)
@@ -461,7 +463,10 @@ def _validate_singleton_recovery_start_origin(
     recovery = (
         stop_parent.recovery if isinstance(stop_parent, RecipeStopParent) else None
     )
-    if stop.state != "succeeded" or stop.actor != "system:singleton-recovery":
+    if (
+        stop.state != LifecycleState.SUCCEEDED
+        or stop.actor != "system:singleton-recovery"
+    ):
         return _unproven(
             run.id,
             _MISMATCH,
