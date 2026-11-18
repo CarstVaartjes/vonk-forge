@@ -594,7 +594,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
         };
-        if receipt.output_manifest.files.is_empty() {
+        // A companion rank owns no outputs: its receipt is empty by contract.
+        if receipt.output_manifest.files.is_empty() && request.is_endpoint_owner() {
             receipt.output_manifest = match self
                 .collect_receipted_outputs(job, &receipt, &output_root, &mut cancellation)
                 .await
@@ -720,7 +721,8 @@ pub(super) fn job_placement(
     spec: &CompiledExecutionPlan,
 ) -> Result<CompiledRuntimePlacement, WorkloadError> {
     let placement = &spec.runtime.placement;
-    if placement.rank != 0 || placement.world_size != 1 || placement.port.is_some() {
+    // A rank of a multi-rank job is a companion or the owner; neither serves a port.
+    if placement.port.is_some() {
         return Err(WorkloadError::Invalid("job placement"));
     }
     placement.validate_bound()?;
@@ -957,7 +959,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Ok(root) => root,
             Err(error) => return unknown(FailureStage::OutputStorage, error.to_string(), receipt),
         };
-        if receipt.output_manifest.files.is_empty() {
+        if receipt.output_manifest.files.is_empty() && request.is_endpoint_owner() {
             receipt.output_manifest = match outputs::collect_job_outputs(
                 Some(&root),
                 &request.output_limits,

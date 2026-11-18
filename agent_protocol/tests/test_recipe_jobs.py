@@ -144,6 +144,28 @@ def test_recipe_job_request_accepts_unambiguous_longest_suffix_mapping() -> None
     assert [item.slot for item in parsed.output_mappings] == ["binary", "detailed"]
 
 
+def test_every_rank_of_a_two_rank_job_validates_and_only_rank_zero_owns_outputs() -> (
+    None
+):
+    claim_document, _ = documents()
+    for rank, local in ((0, "192.168.100.10"), (1, "192.168.100.11")):
+        payload = json.loads(json.dumps(claim_document["payload"]))
+        plan = payload["compiled_execution_plan"]
+        plan["runtime"]["placement"].update(
+            rank=rank,
+            world_size=2,
+            local_address=local,
+            master_address="192.168.100.10",
+            master_port=29500,
+        )
+        plan["topology"]["node_count"] = 2
+        plan["security"]["network_mode"] = "host"
+        request = RecipeJobRunRequest.parse(payload)
+        assert request.endpoint_owner is (rank == 0)
+    single = RecipeJobRunRequest.parse(claim_document["payload"])
+    assert single.endpoint_owner
+
+
 def test_recipe_job_result_rejects_manifest_drift() -> None:
     _claim_document, result_document = documents()
     result = result_document["result"]

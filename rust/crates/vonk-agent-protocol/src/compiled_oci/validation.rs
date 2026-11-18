@@ -49,7 +49,6 @@ pub(super) fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), Comp
         && (plan.topology.node_count < 2
             || placement.local_address.is_none()
             || placement.master_address.is_none()
-            || plan.endpoint.is_none()
             || !plan.security.gpu)
     {
         return Err(CompiledOciError::Invalid(

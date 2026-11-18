@@ -175,6 +175,8 @@ if [ "$action" = check-fabric-run ]; then
     [ "$requested_rendezvous" = "$rendezvous_port" ] \
         || fail "runtime rendezvous port $requested_rendezvous is not authorized (authorized rendezvous port: $rendezvous_port)"
     if [ "$requested_master" = "$node_fabric_ip" ]; then
+        # The owner of a service publishes an endpoint port. The owner of a
+        # multi-rank job passes 0 (never a port): its inputs and outputs are files.
         [ "$requested_host_port" != none ] || fail "rendezvous owner endpoint is missing"
     else
         [ "$requested_master" = "$peer_fabric_ip" ] \
@@ -193,7 +195,8 @@ if [ "$action" = check-endpoint-port ]; then
     esac
 fi
 
-if [ "$action" = check-host-port ] || { [ "$action" = check-fabric-run ] && [ "$requested_host_port" != none ]; }; then
+if [ "$action" = check-host-port ] || { [ "$action" = check-fabric-run ] && [ "$requested_host_port" != none ] \
+    && [ "$requested_host_port" != 0 ]; }; then
     valid_port "$requested_host_port" \
         || fail "requested host endpoint port $requested_host_port is invalid"
     case ",$host_endpoint_ports," in

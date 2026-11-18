@@ -531,7 +531,6 @@ class CompiledExecutionPlan(_Strict):
             self.topology.node_count < 2
             or placement.local_address is None
             or placement.master_address is None
-            or self.endpoint is None
             or not self.security.gpu
         ):
             raise ValueError("native fabric placement is incomplete")
