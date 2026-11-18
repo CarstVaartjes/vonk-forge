@@ -688,7 +688,9 @@ only compute and report an empty manifest. The artifact job is the projection of
 the owner's order. A companion that ends without success ends the job with its
 reason and every live sibling is cancelled; when the owner (or the job) ends, the
 companions are cancelled the same way. There is no new state: the parent is
-terminal when no order is live.
+terminal when no order is live. A run's Stop, and the cleanup of a cancelled job,
+build one exact Stop per issued rank; the job is confirmed stopped only when every
+rank's Stop is proven.
 
 ## Profile cache lifecycle
 

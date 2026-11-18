@@ -71,7 +71,7 @@ from .errors import (
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
-from .profile_job_run_stop import _exact_jobrun_source, _jobrun_effect_may_remain
+from .profile_job_run_stop import _exact_jobrun_sources, _jobrun_effect_may_remain
 from .rank_authority import _profile_jobrun_parent, _run_is_one_shot
 from .results import _validated_result
 
@@ -429,11 +429,11 @@ class JobRunStopMixin:
             frozen = RecipeStopParent.model_validate_json(
                 canonical_message(read_row_column(pending_job, "payload")), strict=True
             ).job_run_stop_authorization
-        frozen_targets = (
-            {target.artifact_job_id: target for target in frozen.targets}
-            if frozen is not None
-            else {}
-        )
+        frozen_targets: dict[str, list[ProfileJobRunStopTarget]] = {}
+        for frozen_target in frozen.targets if frozen is not None else ():
+            frozen_targets.setdefault(frozen_target.artifact_job_id, []).append(
+                frozen_target
+            )
         retired: set[str] = set()
         needs_stop = False
         for artifact in session.scalars(
@@ -443,47 +443,52 @@ class JobRunStopMixin:
             .with_for_update(of=ArtifactJob)
         ):
             may_remain = _jobrun_effect_may_remain(adapter, artifact)
-            frozen_target = frozen_targets.get(artifact.id)
-            if frozen_target is None and not may_remain:
+            frozen_for_job = frozen_targets.get(artifact.id, [])
+            if not frozen_for_job and not may_remain:
                 continue
-            source = _exact_jobrun_source(
-                session, artifact, frozen_target, target_node_ids
+            sources = _exact_jobrun_sources(
+                session, artifact, frozen_for_job, target_node_ids
             )
-            if source is None:
+            if sources is None:
                 retired.add(artifact.id)
                 continue
-            if frozen is not None and frozen_target is None:
+            if frozen is not None and not frozen_for_job:
                 raise RecipeRequestInvalid(
                     "new JobRun effect escaped the accepted Stop scope",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
+            if len(sources) != sum(
+                target.node_id in target_node_ids for target in frozen_for_job
+            ) and (frozen_for_job):
+                raise RecipeRetryLater("accepted JobRun Stop source disappeared")
             needs_stop |= may_remain
-            request = read_stored_model(
-                RecipeJobRunRequest,
-                canonical_message(read_row_column(source, "payload")),
-                from_json=True,
-            )
-            payload = stop_payload_from_job_run(request, cancel_pending_start=True)
-            target = ProfileJobRunStopTarget(
-                artifact_job_id=artifact.id,
-                source_job_id=source.parent_job_id,
-                source_operation_id=source.id,
-                node_id=source.node_id,
-                stop_payload_sha256=hashlib.sha256(
-                    canonical_message(payload)
-                ).hexdigest(),
-            )
-            try:
-                validate_jobrun_stop_source(session, target, payload, run)
-            except ProfileStopAuthorityError as error:
-                # Drift in the Controller's own records since the Stop was
-                # reviewed: re-planned, as the profile Stop's refusal is.
-                raise RecipeRequestInvalid(
-                    "run Stop does not authorize this exact JobRun Stop: "
-                    + str(error)[:240],
-                    reason=error.typed_reason or InvalidRequestReason.SUPERSEDED,
-                ) from error
-            rows.append((target, payload))
+            for source in sources:
+                request = read_stored_model(
+                    RecipeJobRunRequest,
+                    canonical_message(read_row_column(source, "payload")),
+                    from_json=True,
+                )
+                payload = stop_payload_from_job_run(request, cancel_pending_start=True)
+                target = ProfileJobRunStopTarget(
+                    artifact_job_id=artifact.id,
+                    source_job_id=source.parent_job_id,
+                    source_operation_id=source.id,
+                    node_id=source.node_id,
+                    stop_payload_sha256=hashlib.sha256(
+                        canonical_message(payload)
+                    ).hexdigest(),
+                )
+                try:
+                    validate_jobrun_stop_source(session, target, payload, run)
+                except ProfileStopAuthorityError as error:
+                    # Drift in the Controller's own records since the Stop was
+                    # reviewed: re-planned, as the profile Stop's refusal is.
+                    raise RecipeRequestInvalid(
+                        "run Stop does not authorize this exact JobRun Stop: "
+                        + str(error)[:240],
+                        reason=error.typed_reason or InvalidRequestReason.SUPERSEDED,
+                    ) from error
+                rows.append((target, payload))
         # A frozen job retired since holds nothing of its own on a Spark.
         if frozen is not None and set(frozen_targets) - retired != {
             target.artifact_job_id for target, _payload in rows
