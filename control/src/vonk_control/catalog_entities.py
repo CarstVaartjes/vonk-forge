@@ -60,6 +60,7 @@ from .models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
+from .stored_states import CatalogRevisionState
 from .strict_json import serialize_json_value
 
 if TYPE_CHECKING:
@@ -228,7 +229,7 @@ class CatalogEntityService:
                     CatalogDocumentRevision.id, CatalogDocumentRevision.projected
                 ).where(
                     CatalogDocumentRevision.kind == _MODEL_KIND,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
             ).all()
         for revision_id, projected in rows:
@@ -245,7 +246,8 @@ class CatalogEntityService:
                         select(CatalogDocumentRevision)
                         .where(
                             CatalogDocumentRevision.id == revision_id,
-                            CatalogDocumentRevision.state == "active",
+                            CatalogDocumentRevision.state
+                            == CatalogRevisionState.ACTIVE,
                         )
                         .with_for_update(skip_locked=True)
                         .execution_options(populate_existing=True)
@@ -480,7 +482,7 @@ class CatalogEntityService:
                 )
             if revision is None:
                 raise KeyError(entity_or_revision_id)
-            if revision.state == "active":
+            if revision.state == CatalogRevisionState.ACTIVE:
                 if (
                     head.active_revision_id is None
                     and head.candidate_revision_id is None
@@ -506,7 +508,7 @@ class CatalogEntityService:
             if revision.kind == "recipe":
                 self._bind_recipe_models(session, revision)
             revision.state, head.active_revision_id, head.candidate_revision_id = (
-                "active",
+                CatalogRevisionState.ACTIVE,
                 revision.id,
                 None,
             )
@@ -544,7 +546,7 @@ class CatalogEntityService:
                 return
             candidate = session.get(CatalogDocumentRevision, head.candidate_revision_id)
             if candidate is not None:
-                candidate.state = "failed"
+                candidate.state = CatalogRevisionState.FAILED
                 if reason:
                     try:
                         projected = read_catalog_projection(candidate).model_dump(
@@ -602,7 +604,7 @@ class CatalogEntityService:
                     CatalogDocumentRevision.publisher == publisher,
                     CatalogDocumentRevision.slug == slug,
                     CatalogDocumentRevision.content_digest == digest,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
                 .limit(1)
             )
@@ -633,7 +635,7 @@ class CatalogEntityService:
                     CatalogDocumentRevision.publisher == ref.publisher,
                     CatalogDocumentRevision.slug == ref.slug,
                     CatalogDocumentRevision.content_digest == ref.content_sha256,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
                 .limit(1)
             )
@@ -796,7 +798,7 @@ def _revision(
         slug=parsed.identity.slug,
         revision_number=number,
         schema_version=2,
-        state="candidate",
+        state=CatalogRevisionState.CANDIDATE,
         document=copy.deepcopy(clean),
         content_digest=document_sha256(clean),
         artifact_key=artifact_key,
@@ -846,7 +848,7 @@ def _active_recipe_revisions(session: Session) -> list[CatalogDocumentRevision]:
         session.scalars(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
         )
     )
@@ -861,7 +863,7 @@ def _lock_active_recipe_revision(
         .where(
             CatalogDocumentRevision.id == observed.id,
             CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.state == "active",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
         )
         .with_for_update(skip_locked=True)
         .execution_options(populate_existing=True)

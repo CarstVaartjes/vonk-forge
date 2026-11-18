@@ -43,6 +43,7 @@ from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
 )
+from ..stored_states import CatalogRevisionState
 from ..strict_json import (
     read_stored_model,
 )
@@ -331,7 +332,7 @@ class ExecutorPreflightMixin:
                 or parsed_plan.build_input_sha256 != build_input_sha256
                 or revision is None
                 or revision.kind != "recipe"
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
                 or parsed_plan.recipe_content_sha256 != revision.content_digest
             ):
                 raise RunSwitchRetryLater(

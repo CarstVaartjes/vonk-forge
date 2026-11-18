@@ -62,6 +62,7 @@ from ..recipe_image_availability_view_contract import (
 )
 from ..revision_images import revision_archives
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _PREPARATION_RECHECK_QUIET,
@@ -567,7 +568,7 @@ def _start_request_once(
             if (
                 revision is None
                 or revision.kind != "recipe"
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
             ):
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.RECIPE_UNAVAILABLE,

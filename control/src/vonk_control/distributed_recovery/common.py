@@ -63,6 +63,7 @@ from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 
 """Durable controller coordination for distributed recipe recovery."""
 
@@ -138,7 +139,7 @@ def _active_recipe_revision(
         revision is None
         or revision.kind != "recipe"
         or revision.schema_version != 2
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
     ):
         return None
     try:

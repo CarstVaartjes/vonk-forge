@@ -62,6 +62,7 @@ from ..operator_receipt_contract import ReceiptOwner
 from ..persisted_waits import read_wait
 from ..revision_images import revision_images
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from .common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,
@@ -268,7 +269,7 @@ def _database_local_state(
                 CatalogDocumentRevision.id,
                 CatalogDocumentRevision.content_digest,
                 and_(
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     active_head_revision(),
                 ),
             ).where(

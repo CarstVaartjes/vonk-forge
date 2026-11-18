@@ -96,6 +96,7 @@ from .runtime_image_preparation import (
     OciLayoutImageTransport,
 )
 from .runtime_spec_contract import SpecRuntime
+from .stored_states import CatalogRevisionState
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 
@@ -296,7 +297,7 @@ def build_recipe_image_availability(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.id == recipe_revision_id,
                     CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
             )
             if revision is None:

@@ -39,6 +39,7 @@ from ..models import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from .common import (
     DocumentText,
     _document_text,
@@ -230,13 +231,13 @@ def _catalog_documents[T](
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == kind,
             and_(
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
             if kind == "recipe"
             else or_(
                 and_(
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     active_head_revision(),
                 ),
                 CatalogDocumentRevision.content_digest.in_(local_digests),

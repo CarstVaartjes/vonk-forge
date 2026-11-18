@@ -44,6 +44,7 @@ from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
+from ..stored_states import CatalogRevisionState
 from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
@@ -355,7 +356,7 @@ class FleetProjection:
                 .where(
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.schema_version == 2,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
                 .where(InstallationNode.installation_id.in_(selected))
                 .order_by(InstallationNode.installation_id, InstallationNode.rank)
@@ -446,7 +447,7 @@ class FleetProjection:
                 .where(
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.schema_version == 2,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
                 .where(RunNode.run_id.in_(selected))
                 .order_by(RunNode.run_id, RunNode.rank)

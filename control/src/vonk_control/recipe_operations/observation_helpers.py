@@ -66,6 +66,7 @@ from ..recipe_execution_contract import (
 from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from ..strict_json import read_stored_model
 from .errors import RecipeRetryLater
 from .results import _RANK_FAILED
@@ -165,7 +166,7 @@ def _active_recipe_revision(
     statement = select(CatalogDocumentRevision).where(
         CatalogDocumentRevision.id == revision_id,
         CatalogDocumentRevision.kind == "recipe",
-        CatalogDocumentRevision.state == "active",
+        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
     )
     if for_update:
         statement = statement.with_for_update(of=CatalogDocumentRevision)

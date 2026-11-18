@@ -17,6 +17,7 @@ from ..catalog_revision_contract import (
 )
 from ..categorized_errors import InvalidValue
 from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..stored_states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import (
@@ -71,7 +72,7 @@ class UpdatesMixin:
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.content_digest == current_digest,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
         )
         if current is None:
@@ -81,7 +82,7 @@ class UpdatesMixin:
                     CatalogDocumentRevision.kind == "model",
                     CatalogDocumentRevision.publisher == ref.publisher,
                     CatalogDocumentRevision.slug == ref.slug,
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
                 .order_by(CatalogDocumentRevision.revision_number.asc())
             )
@@ -98,7 +99,7 @@ class UpdatesMixin:
         for candidate in session.scalars(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
         ):
             if candidate.content_digest == current.content_digest:
@@ -127,7 +128,7 @@ class UpdatesMixin:
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.content_digest == digest,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
         )
         if current is None:
@@ -136,7 +137,7 @@ class UpdatesMixin:
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.document_id == current.document_id,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
         )

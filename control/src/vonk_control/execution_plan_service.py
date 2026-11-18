@@ -47,6 +47,7 @@ from .recipe_runtime_specs import (
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .runtime_image_preparation import RuntimeImageReceipt
 from .runtime_spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
+from .stored_states import CatalogRevisionState
 
 
 def compile_job_invocation(
@@ -224,7 +225,7 @@ class ControllerExecutionPlanService:
 
         if (
             revision.kind != "recipe"
-            or revision.state != "active"
+            or revision.state != CatalogRevisionState.ACTIVE
             or revision.content_digest is None
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")

@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
-from vonk_agent_protocol.agent_words import ProfileDocumentState
 
 from ..catalog_revision_contract import RecipeRevisionProjection
 from ..categorized_errors import BookkeepingUnknown
@@ -45,6 +44,7 @@ from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
 )
+from ..stored_states import CatalogRevisionState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,
@@ -144,7 +144,7 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
             select(digest_column, func.min(CatalogDocumentRevision.id))
             .where(
                 CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 digest_column.is_not(None),
             )
             .group_by(digest_column, package_column)

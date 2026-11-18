@@ -40,6 +40,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
+from ..stored_states import CatalogRevisionState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
@@ -397,7 +398,7 @@ def _reserve_in_session(
     if (
         revision is None
         or revision.kind != "recipe"
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
         or revision.content_digest != plan.recipe_content_sha256
         or revision.source_bundle_sha256 != plan.source_bundle_sha256
     ):
