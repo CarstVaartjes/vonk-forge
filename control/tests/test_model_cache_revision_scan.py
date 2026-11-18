@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -12,7 +13,7 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_service import CatalogService
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache import ModelCacheService, model_artifact_cache
 from vonk_control.model_cache.artifacts import _unique_artifacts
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheSet
 from vonk_forge_contracts import document_sha256
@@ -159,6 +160,13 @@ def _store_document(engine, digest: str, document: dict) -> None:
         )
 
 
+def _forget_derived_specs(monkeypatch) -> None:
+    # Damage or repair in place keeps the digest, which the spec cache trusts as
+    # the content identity; a restarted process would hold no such entry.
+    monkeypatch.setattr(model_artifact_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(model_artifact_cache, "_retained", 0)
+
+
 def _bound(sessions, service, set_digest: str) -> set[str]:
     with sessions() as session:
         row = session.get(ModelCacheSet, set_digest)
@@ -196,10 +204,12 @@ def test_head_repaired_in_place_is_adopted_into_its_held_set(
     try:
         alias_digest = document_sha256(alias)
         _store_document(engine, alias_digest, damage(alias))
+        _forget_derived_specs(monkeypatch)
         scan = _counting_scans(service, monkeypatch)
         assert alias_digest in scan()
         assert alias_digest not in _bound(sessions, service, set_digest)
         catalog.import_catalog_models("system:test", [alias])  # repaired in place
+        _forget_derived_specs(monkeypatch)
         with sessions() as session:
             assert (
                 len(

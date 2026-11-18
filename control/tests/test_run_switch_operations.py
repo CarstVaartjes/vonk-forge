@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
     read_recipe_projection,
@@ -1134,7 +1135,7 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         active_state = node.state
-        node.state = LifecycleState.FAILED
+        node.state = NodeIdentityState.RETIRED
 
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
