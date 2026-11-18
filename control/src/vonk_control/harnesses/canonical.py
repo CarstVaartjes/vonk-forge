@@ -348,6 +348,11 @@ def _model_mounts(
     return tuple(selected)
 
 
+# Engines whose own wrapper reads the platform's VONK_* placement environment, so
+# the compiler adds no rank arguments for them.
+_PLACEMENT_FROM_ENVIRONMENT = frozenset({"ds4"})
+
+
 def _distributed_args(
     recipe: RecipeDefinition,
     command: list[str],
@@ -404,6 +409,8 @@ def _distributed_args(
             command.extend(("--master", "VONK_MASTER_ADDR"))
         if not has("master-port"):
             command.extend(("--master-port", "VONK_MASTER_PORT"))
+        return command
+    if recipe.runtime.engine in _PLACEMENT_FROM_ENVIRONMENT:
         return command
     raise HarnessCompileError(
         f"distributed topology is not supported by the {recipe.runtime.engine} harness"

@@ -18,12 +18,20 @@ from typing import Any, get_args
 
 import pytest
 from vonk_agent_protocol import validate_compiled_execution_plan
-from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
+from vonk_control.harnesses import canonical
+from vonk_control.harnesses.canonical_metadata import (
+    CANONICAL_HARNESSES,
+    canonical_harness,
+)
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_forge_contracts import document_sha256, read_model, read_recipe
 from vonk_forge_contracts.recipe import RecipeJobInterface
 
 from .catalog_launch_fixtures import (
     PAYLOADS,
+    _package,
+    compile_launch_plan,
     compile_recipe_payloads,
     expected_payload_names,
     load_inputs,
@@ -174,3 +182,51 @@ def test_distribution_is_refused_for_engines_without_a_distributed_harness() -> 
         RECIPES["gemma-4-e2b-it-nvidia-vllm-single"], MODELS
     )
     assert fresh
+
+
+def test_harness_topology_change_moves_only_the_controller_internal_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A running single keeps its installed plan when a harness gains a topology.
+
+    Only the Controller-internal launch identity moves; the wire plan (hence the
+    installation plan digest and the rendered argv) and the image adaptation
+    stay byte-identical.
+    """
+    document = RECIPES["deepseek-v4-flash-0731-ds4-single"]
+    recipe = read_recipe(document)
+    digest = document_sha256(document)
+    models = {
+        selection.model.content_sha256: read_model(
+            MODELS[selection.model.content_sha256]
+        )
+        for selection in recipe.models
+    }
+
+    def observe() -> tuple[dict[str, Any], str, str]:
+        plan = compile_launch_plan(
+            recipe, digest, models, role="entrypoint", rank=0
+        ).model_dump(mode="json")
+        spec = compile_runtime_spec(
+            recipe,
+            models=models,
+            recipe_digest=digest,
+            package_handle=_package(recipe),
+            role="entrypoint",
+            rank=0,
+        )
+        adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
+        return plan, spec.launch_identity_sha256(), adapter.digest
+
+    current = observe()
+    older = canonical_harness("ds4").model_copy(update={"topology_modes": ("single",)})
+    monkeypatch.setattr(
+        canonical,
+        "canonical_harness",
+        lambda slug: older if slug == "ds4" else canonical_harness(slug),
+    )
+    before = observe()
+
+    assert before[0] == current[0]
+    assert before[2] == current[2]
+    assert before[1] != current[1]

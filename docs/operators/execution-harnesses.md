@@ -37,7 +37,7 @@ variants from one creator with different engines or settings.
 ## The eleven built-in harnesses
 
 The built-in compiler adapters are `comfyui`, `diffusers`, `ds4`, `exllamav3`,
-`llama-cpp`, `pytorch-pipeline`, `pytorch-server`, `sglang`, `tensorfold`, `tensorrt-llm`, and `vllm`. `pytorch-server` is the generic launch contract for a Python/PyTorch server that speaks an OpenAI-shaped interface and is none of the named engines; it carries no engine-specific memory or metrics assumptions. Their names describe
+`llama-cpp`, `pytorch-pipeline`, `pytorch-server`, `sglang`, `tensorfold`, `tensorrt-llm`, and `vllm`. `pytorch-server` is the generic launch contract for a Python/PyTorch server that speaks an OpenAI-shaped interface and is none of the named engines; it carries no engine-specific memory or metrics assumptions. `ds4` runs on one Spark, or on two Sparks as network tensor parallelism: the compiler adds no rank arguments, because the recipe's `ds4-serve` wrapper reads the platform placement environment (`VONK_WORLD_SIZE`, `VONK_LOCAL_ADDR`, `VONK_MASTER_ADDR`, `VONK_MASTER_PORT`). Their names describe
 execution behavior, not separate catalog entities or a promise that every
 model supports every engine or topology. The selected Model, Recipe, package,
 compiler, structural qualification, and Fleet admission must agree.
