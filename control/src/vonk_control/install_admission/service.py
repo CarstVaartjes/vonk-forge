@@ -51,6 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
+from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,
@@ -222,10 +223,10 @@ class InstallAdmissionService(InstallPlanningService):
         revision = _active_recipe_revision(session, plan.recipe_revision_id)
         if (
             mapping is None
-            or mapping.state != "ready"
+            or mapping.state != ClusterMappingState.READY
             or revision is None
             or build is None
-            or build.state != "succeeded"
+            or build.state != RecipeBuildState.SUCCEEDED
             or build.image_digest != plan.image_digest
         ):
             raise InstallPlanStale(
@@ -269,7 +270,7 @@ class InstallAdmissionService(InstallPlanningService):
         plan = fresh
         if (
             revision is None
-            or revision.state != "active"
+            or revision.state != CatalogRevisionState.ACTIVE
             or revision.content_digest != plan.recipe_content_sha256
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)

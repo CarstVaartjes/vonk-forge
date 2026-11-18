@@ -52,6 +52,7 @@ from ..models import (
     RunNode,
 )
 from ..recipe_update_notice import RecipeUpdateNotice
+from ..stored_states import CatalogRevisionState
 from ..strict_json import StrictModel
 from ..telemetry import TelemetrySampleView
 from .host_checks import HostCheck, HostCheckAdvice, Text1024
@@ -83,7 +84,7 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
     if (
         revision.kind != "recipe"
         or revision.schema_version != 2
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
     ):
         return None
     # The row's digest was verified at ingress; it is read, never re-hashed.

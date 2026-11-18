@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
-from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.http_failure import TransientReason
 
 from ..distribution import DistributionError, DistributionUnknown
@@ -27,6 +26,7 @@ from ..http_errors import temporary_http_answer
 from ..models import RecipeBuild
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
+from ..stored_states import RecipeBuildState
 from ..strict_json import _retry_later_response
 from .common import (
     _DISTRIBUTION_ERROR_CODE,
@@ -82,7 +82,7 @@ def install_artifacts_routes(
             if (
                 build is None
                 or build.builder_node_id != identity.node_id
-                or build.state != ProgressPhase.BUILDING
+                or build.state != RecipeBuildState.BUILDING
             ):
                 raise HTTPException(
                     status_code=404, detail="recipe build does not exist"
@@ -261,7 +261,7 @@ def install_artifacts_routes(
                     if (
                         build is None
                         or build.builder_node_id != identity.node_id
-                        or build.state != ProgressPhase.BUILDING
+                        or build.state != RecipeBuildState.BUILDING
                     ):
                         raise HTTPException(
                             status_code=409, detail="recipe build authority changed"

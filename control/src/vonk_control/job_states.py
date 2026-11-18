@@ -34,6 +34,14 @@ def words(*states: LifecycleState) -> tuple[str, ...]:
     return stored_words(SUBJECT, states)
 
 
+#: A job that has been accepted and is queued or running (not backing off).
+IN_FLIGHT: tuple[str, ...] = words(LifecycleState.QUEUED, LifecycleState.RUNNING)
+#: A job that ended on its own: succeeded, failed or cancelled (not superseded).
+FINISHED: tuple[str, ...] = words(
+    LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+)
+
+
 def means(stored: str | None, *states: LifecycleState) -> bool:
     """Whether a stored word means one of ``states``."""
 

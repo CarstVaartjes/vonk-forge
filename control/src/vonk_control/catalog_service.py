@@ -73,6 +73,7 @@ from .source_bundles import (
     SourceBundleUnknown,
     parse_source_bundle_manifest,
 )
+from .stored_states import CatalogRevisionState
 
 if TYPE_CHECKING:
     from .catalog_sync_contract import ManagedCatalogSyncProblem
@@ -274,7 +275,8 @@ class CatalogService:
                     session.scalars(
                         select(CatalogDocumentRevision).where(
                             CatalogDocumentRevision.kind == "recipe",
-                            CatalogDocumentRevision.state == "active",
+                            CatalogDocumentRevision.state
+                            == CatalogRevisionState.ACTIVE,
                             active_head_revision(),
                             or_(*predicates),
                         )
@@ -722,7 +724,7 @@ class CatalogService:
                 session, clock=self._clock, cursors=self._cursors
             )
             head = _head(session, root)
-            if existing.state != "active":
+            if existing.state != CatalogRevisionState.ACTIVE:
                 service.fail_candidate(root.id)
                 head.candidate_revision_id = existing.id
                 return service.resolve(existing.id, actor=actor), True
@@ -786,7 +788,7 @@ def _get_active_recipe(
     return session.scalar(
         select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.state == "active",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             or_(
                 CatalogDocumentRevision.id == recipe_id,
                 and_(
@@ -818,7 +820,9 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         slug=revision.slug,
         source_kind="recipe_library",
         revision_number=revision.revision_number,
-        lifecycle="resolved" if revision.state == "active" else revision.state,
+        lifecycle="resolved"
+        if revision.state == CatalogRevisionState.ACTIVE
+        else revision.state,
         schema_version=revision.schema_version,
         document=dict(revision.document),
         content_sha256=revision.content_digest,

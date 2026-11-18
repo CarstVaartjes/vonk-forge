@@ -24,7 +24,7 @@ from vonk_forge_contracts.model import (
 )
 
 from ..bounded_json import require_mapping
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog_revision_contract import read_shared_catalog_document
 from ..categorized_errors import InvalidType
 from ..models import CatalogDocumentRevision
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _is_hex
@@ -385,7 +385,7 @@ def _recipe_model_file_ids(
 
 def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArtifact]:
     try:
-        definition = read_catalog_document(row)
+        definition = read_shared_catalog_document(row)
         if not isinstance(definition, ModelDefinition):
             raise InvalidType("catalog revision is not a model")
     except (TypeError, ValueError) as error:

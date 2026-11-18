@@ -6,12 +6,10 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import defer
-from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
-from ..catalog_queries import active_head_revision
+from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -39,6 +37,7 @@ from ..models import (
 )
 from ..operator_receipt_contract import ReceiptOwner
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState, LibrarySyncRunState
 from .common import (
     DocumentText,
     _document_text,
@@ -57,7 +56,7 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
         run = session.scalar(
             select(RecipeLibrarySyncRun)
             .where(
-                RecipeLibrarySyncRun.state == "succeeded",
+                RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED,
                 RecipeLibrarySyncRun.library_version.is_not(None),
             )
             .order_by(RecipeLibrarySyncRun.completed_at.desc())
@@ -87,7 +86,7 @@ def library_vocabulary(self: LibraryProjection) -> CatalogVocabulary | None:
     with self._sessions() as session:
         stored = session.scalar(
             select(RecipeLibrarySyncRun.vocabulary)
-            .where(RecipeLibrarySyncRun.state == LifecycleState.SUCCEEDED.value)
+            .where(RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED.value)
             .order_by(RecipeLibrarySyncRun.completed_at.desc())
             .limit(1)
         )
@@ -230,13 +229,13 @@ def _catalog_documents[T](
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == kind,
             and_(
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
             if kind == "recipe"
             else or_(
                 and_(
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     active_head_revision(),
                 ),
                 CatalogDocumentRevision.content_digest.in_(local_digests),
@@ -249,7 +248,7 @@ def _catalog_documents[T](
             ),
         )
         if projection_only:
-            query = query.options(defer(CatalogDocumentRevision.document))
+            query = query.options(WITHOUT_DOCUMENT)
         if digests is not None:
             query = query.where(CatalogDocumentRevision.content_digest.in_(digests))
         documents: list[tuple[CatalogDocumentRevision, T]] = []

@@ -918,6 +918,37 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
     assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
 
 
+def test_an_endpoint_read_parses_a_first_loads_documents_once(monkeypatch) -> None:
+    """A load that reviewed itself is its own root: no second parse of its documents."""
+
+    from vonk_control.fleet_profiles import persistence
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        switch_adapter=_SwitchAdapter(),
+        assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
+            _assessment(_exact_preparation(node_ids))
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    service.apply(profile.id, request_key=_uuid(441), actor="admin")
+    parsed: list[str] = []
+    original = persistence.read_row_column
+
+    def counting(row, column):
+        parsed.append(column)
+        return original(row, column)
+
+    monkeypatch.setattr(persistence, "read_row_column", counting)
+    with sessions() as session:
+        service.endpoint_intent(session, profile.number)
+
+    assert (parsed.count("progress"), parsed.count("plan")) == (2, 1)
+
+
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
     sessions = _database()

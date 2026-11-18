@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_control.agent_contacts import record_contact
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.models import AgentCertificate, AgentNode, AgentNodeContact, Base
@@ -168,7 +169,7 @@ def test_latest_is_unknown_until_fresh_authenticated_contact(
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
         assert certificate is not None
-        certificate.state = "retired"
+        certificate.state = CertificateRecordState.REVOKED
     assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
 
 

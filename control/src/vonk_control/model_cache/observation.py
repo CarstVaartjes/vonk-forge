@@ -10,11 +10,11 @@ from __future__ import annotations
 import fcntl
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
-from time import monotonic
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -315,7 +315,7 @@ class StorageObserver:
                 if now < value.next_check_at and value.detail is not None:
                     return
                 try:
-                    checkpointed = monotonic()
+                    checkpointed = time.monotonic()
                     for digest, spec in _unique_artifacts(manifest.artifacts).items():
                         if self._cache._closed.is_set():
                             return
@@ -344,9 +344,9 @@ class StorageObserver:
                             seconds=_RECHECK_SECONDS
                         )
                         value.detail = None
-                        if monotonic() - checkpointed >= _CHECKPOINT_SECONDS:
+                        if time.monotonic() - checkpointed >= _CHECKPOINT_SECONDS:
                             self._write(manifest, value)
-                            checkpointed = monotonic()
+                            checkpointed = time.monotonic()
                     value.available_bytes = self._cache.free_bytes()
                     value.detail = None
                     value.completed_at = self._cache._clock()

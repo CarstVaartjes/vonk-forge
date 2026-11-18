@@ -13,17 +13,16 @@ from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
 from vonk_agent_protocol.agent_words import (
-    ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_retry import bounded_attempts
-from ..catalog_queries import active_head_revision
+from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog_revision_contract import (
     CatalogRevisionContractError,
-    read_catalog_document,
+    read_shared_catalog_document,
 )
 from ..model_cache_contract import (
     UUID_PATTERN,
@@ -35,6 +34,7 @@ from ..model_cache_contract import (
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..revision_images import RevisionImage, revision_images
+from ..stored_states import CatalogRevisionState
 from .artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,
@@ -60,6 +60,7 @@ from .errors import (
     ModelCacheSelectorAmbiguous,
     ModelCacheStorageUnknown,
 )
+from .model_artifact_cache import model_artifact_specs
 from .source_helpers import _model_selector
 
 if TYPE_CHECKING:
@@ -268,17 +269,19 @@ class ResolutionMixin:
                     slug=row.slug,
                     content_sha256=digest,
                 )
-            raw_artifacts = _canonical_model_artifacts(row)
             selected_ids = _recipe_model_file_ids(recipe_document, digest)
-            for raw in raw_artifacts:
-                if selected_ids is not None and raw.id not in selected_ids:
-                    continue
-                specs.append(
-                    cache._artifact_from_catalog(
-                        raw,
-                        model_content_sha256=digest,
-                    )
+            specs.extend(
+                spec
+                for spec in model_artifact_specs(
+                    row,
+                    fixture_sources=cache._fixture_sources,
+                    build=lambda built, digest=digest: tuple(
+                        cache._artifact_from_catalog(raw, model_content_sha256=digest)
+                        for raw in _canonical_model_artifacts(built)
+                    ),
                 )
+                if selected_ids is None or spec.artifact_id in selected_ids
+            )
         manifest = ArtifactSetManifest(
             model_content_sha256=model_digest,
             recipe_revision_sha256=recipe_digest,
@@ -327,7 +330,7 @@ class ResolutionMixin:
                 session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         CatalogDocumentRevision.content_digest == selector,
                     )
                 )
@@ -339,14 +342,14 @@ class ResolutionMixin:
         elif re.fullmatch(UUID_PATTERN, selector):
             fallback = [
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.document_id == selector,
             ]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         (CatalogDocumentRevision.id == selector)
                         | (
                             (CatalogDocumentRevision.document_id == selector)
@@ -361,7 +364,7 @@ class ResolutionMixin:
                 publisher, slug = selector.split("/", 1)
             conditions = [
                 CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             ]
             if publisher is not None:
                 conditions.append(CatalogDocumentRevision.publisher == publisher)
@@ -466,14 +469,18 @@ class ResolutionMixin:
         with cache._session() as session:
             if re.fullmatch(_DIGEST_PATTERN, identity):
                 seed = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.content_digest == identity,
                     )
                 )
             elif re.fullmatch(UUID_PATTERN, identity):
                 seed = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         (CatalogDocumentRevision.id == identity)
                         | (CatalogDocumentRevision.document_id == identity),
@@ -483,6 +490,7 @@ class ResolutionMixin:
                 publisher, slug = identity.split("/", 1)
                 seed = session.scalar(
                     select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
                     .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.publisher == publisher,
@@ -493,6 +501,7 @@ class ResolutionMixin:
             else:
                 seed = session.scalar(
                     select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
                     .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.slug == identity,
@@ -520,7 +529,9 @@ class ResolutionMixin:
                         "exact recipe revision is invalid",
                     )
                 exact = session.scalar(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.id == exact_revision_id.strip(),
                     )
@@ -537,10 +548,12 @@ class ResolutionMixin:
 
             revisions = list(
                 session.scalars(
-                    select(CatalogDocumentRevision).where(
+                    select(CatalogDocumentRevision)
+                    .options(WITHOUT_DOCUMENT)
+                    .where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.document_id == seed.document_id,
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         active_head_revision(),
                     )
                 )
@@ -566,7 +579,7 @@ class ResolutionMixin:
                     unreadable_candidates = True
                     return "", None
                 try:
-                    recipe = read_catalog_document(readable)
+                    recipe = read_shared_catalog_document(readable)
                 except CatalogRevisionContractError:
                     unreadable_candidates = True
                     return "", None
@@ -581,12 +594,16 @@ class ResolutionMixin:
                 for digest in digests if requested_model is None else [requested_model]:
                     model_revision = session.scalar(
                         select(CatalogDocumentRevision)
+                        .options(WITHOUT_DOCUMENT)
                         .where(
                             CatalogDocumentRevision.kind == "model",
                             CatalogDocumentRevision.content_digest == digest,
                         )
                         .order_by(
-                            (CatalogDocumentRevision.state == "active").desc(),
+                            (
+                                CatalogDocumentRevision.state
+                                == CatalogRevisionState.ACTIVE
+                            ).desc(),
                             CatalogDocumentRevision.revision_number.desc(),
                             CatalogDocumentRevision.id.desc(),
                         )
@@ -601,7 +618,7 @@ class ResolutionMixin:
                         unreadable_candidates = True
                         continue
                     try:
-                        model = read_catalog_document(readable_model)
+                        model = read_shared_catalog_document(readable_model)
                     except CatalogRevisionContractError:
                         unreadable_candidates = True
                         continue

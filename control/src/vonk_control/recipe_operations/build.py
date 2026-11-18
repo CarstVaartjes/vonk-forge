@@ -13,10 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
-    InstallationState,
     InvalidRequestReason,
     LifecycleState,
-    ProgressPhase,
     RecipeBuildCode,
     UnknownOutcomeError,
     WaitReason,
@@ -68,6 +66,7 @@ from ..recipe_lifecycle_contract import (
 )
 from ..source_policy import SourcePolicyReport
 from ..stored_json import read_row_column
+from ..stored_states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView, new_recipe_job
@@ -233,7 +232,7 @@ class BuildMixin:
                 admission_guard(session)
             if (
                 build is not None
-                and build.state == LifecycleState.SUCCEEDED.value
+                and build.state == RecipeBuildState.SUCCEEDED.value
                 and not force
                 and build.build_input_sha256 == plan.build_input_sha256
                 and build.builder_node_id == plan.builder_node_id
@@ -312,8 +311,8 @@ class BuildMixin:
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
             if (
-                force and build.state == LifecycleState.SUCCEEDED.value
-            ) or build.state == ProgressPhase.BUILDING.value:
+                force and build.state == RecipeBuildState.SUCCEEDED.value
+            ) or build.state == RecipeBuildState.BUILDING.value:
                 # A building row is owned by its live build Job. The same input
                 # adopts that Job; a row whose Job ended or is gone has no owner,
                 # so this request starts a fresh attempt. The ended Job is the
@@ -337,10 +336,10 @@ class BuildMixin:
                     request_id=request_id,
                     now=now,
                     # Only a forced rebuild replaces a succeeded receipt.
-                    force=build.state == LifecycleState.SUCCEEDED.value,
+                    force=build.state == RecipeBuildState.SUCCEEDED.value,
                     intent=intent,
                 )
-            elif build.state == LifecycleState.FAILED.value:
+            elif build.state == RecipeBuildState.FAILED.value:
                 previous = session.scalar(
                     select(Job)
                     .where(
@@ -403,7 +402,7 @@ class BuildMixin:
                         now=now,
                         intent=intent,
                     )
-            elif build.state == InstallationState.PLANNED.value:
+            elif build.state == RecipeBuildState.PLANNED.value:
                 job = service._start_build_in_session(
                     session,
                     build,
@@ -489,7 +488,7 @@ class BuildMixin:
         service._builds.reserve_in_session(
             session, plan, now=now, request_id=request_id
         )
-        build.state = ProgressPhase.BUILDING.value
+        build.state = RecipeBuildState.BUILDING.value
         build.error = None
         build.updated_at = now
         return service._queue_in_session(
@@ -540,7 +539,7 @@ class BuildMixin:
         )
         if existing is not None:
             return existing
-        build.state = ProgressPhase.BUILDING.value
+        build.state = RecipeBuildState.BUILDING.value
         build.error = None
         build.updated_at = now
         payload = RecipeBuildParent(

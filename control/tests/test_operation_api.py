@@ -14,6 +14,7 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
@@ -906,7 +907,7 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         assert node is not None
         if changed_authority == "revocation":
             node.revoked_at = clock.now
-            node.state = "revoked"
+            node.state = NodeIdentityState.RETIRED
         else:
             node.workload_intent_ordinal = 2
 

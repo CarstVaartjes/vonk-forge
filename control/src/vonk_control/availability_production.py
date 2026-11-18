@@ -97,6 +97,7 @@ from .runtime_image_preparation import (
     OciLayoutImageTransport,
 )
 from .runtime_spec_contract import SpecRuntime
+from .stored_states import CatalogRevisionState
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 
@@ -297,7 +298,7 @@ def build_recipe_image_availability(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.id == recipe_revision_id,
                     CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 )
             )
             if revision is None:
@@ -492,7 +493,7 @@ def build_recipe_image_availability(
                     .where(
                         RecipeBuild.recipe_revision_id == revision_id,
                         Job.kind == "recipe.build.v1",
-                        Job.state.in_(("queued", "running")),
+                        Job.state.in_(job_states.IN_FLIGHT),
                     )
                     .order_by(RecipeBuild.created_at, RecipeBuild.id)
                 ).unique()
@@ -547,7 +548,7 @@ def build_recipe_image_availability(
                             Job.kind == "recipe.build.v1",
                             Job.owner_id == build.id,
                             Job.payload["plan_digest"].as_string() == digest,
-                            Job.state.in_(("queued", "running")),
+                            Job.state.in_(job_states.IN_FLIGHT),
                         )
                         .order_by(Job.created_at, Job.id)
                         .limit(1)

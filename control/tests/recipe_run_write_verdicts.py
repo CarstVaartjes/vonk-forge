@@ -10,7 +10,7 @@ import hashlib
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
-            "05708e19afca85e6e68fd656076b225b3804e2cf51e46d82a3891f7f81ea7360",
+            "d6c8ab046beaf89745b11957b46e98f7511c203669ffd22d90b535ea34734067",
             "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
@@ -154,7 +154,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/projection.py": {
         "_project_node_result": (
-            "89645c096523f986a563ddb04e33910f87c9175b6e46385d7a7d1fe179e7b85b",
+            "ddd2ed9347f5cac7830f6e0e6deac6d021ae064ae3abf6d5465fb9eb2134616f",
             "caller-owned: queue result transaction owns rank and run projection",
         ),
     },

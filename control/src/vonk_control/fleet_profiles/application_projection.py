@@ -369,7 +369,8 @@ class FleetProfileService:
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
                 "the reviewed application is unavailable",
             )
-        root_progress = _stored_progress(root)
+        # A first load reviewed itself: its progress and plan are read once.
+        root_progress = progress if root is application else _stored_progress(root)
         if isinstance(root_progress, Residue):
             return root_progress
         root_plan = _persisted_profile_plan(root)
@@ -387,7 +388,9 @@ class FleetProfileService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "the reviewed application identity is inconsistent",
             )
-        plan = _persisted_profile_plan(application)
+        plan = (
+            root_plan if root is application else _persisted_profile_plan(application)
+        )
         if isinstance(plan, Residue):
             return plan
         if (

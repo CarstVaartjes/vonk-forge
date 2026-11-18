@@ -42,6 +42,7 @@ from ..revision_images import revision_images
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
+from ..stored_states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
@@ -136,7 +137,7 @@ class RequestsMixin:
                 for row in session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         active_head_revision(),
                     )
                 )
@@ -187,7 +188,7 @@ class RequestsMixin:
                 revision = session.get(CatalogDocumentRevision, revision_id)
                 if (
                     revision is None
-                    or revision.state != "active"
+                    or revision.state != CatalogRevisionState.ACTIVE
                     or revision.execution_key is None
                 ):
                     raise RecipeImageAvailabilityInvalid(

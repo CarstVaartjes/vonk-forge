@@ -101,6 +101,7 @@ from .owner_liveness import builds_in_flight, installations_named_by_live_jobs
 from .run_states import ENDED_RUN_STATES
 from .step_ca import CERTIFICATE_LIFETIME
 from .stored_json import binding_for, read_row_column
+from .stored_states import LibrarySyncRunState
 
 PASS_BUDGET_SECONDS = 2.0
 
@@ -314,8 +315,8 @@ def _newest_sync() -> ColumnElement[bool]:
         ),
     )
     # Two named outcomes kept by recency, not a live or ended set.
-    succeeded = LifecycleState.SUCCEEDED.value
-    failed = LifecycleState.FAILED.value
+    succeeded = LibrarySyncRunState.SUCCEEDED.value
+    failed = LibrarySyncRunState.FAILED.value
     return or_(
         and_(
             RecipeLibrarySyncRun.state == succeeded,

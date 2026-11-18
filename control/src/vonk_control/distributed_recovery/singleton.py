@@ -46,6 +46,7 @@ from ..recipe_start_payloads import (
 )
 from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
+from ..stored_states import ClusterMappingState
 from ..strict_json import read_stored_model
 from .authority import (
     _accepted_start_authority_payload,
@@ -165,7 +166,7 @@ def _singleton_recovery_authority(
     mapping = session.get(ClusterMapping, run.mapping_id)
     if (
         mapping is None
-        or mapping.state != "ready"
+        or mapping.state != ClusterMappingState.READY
         or mapping.generation != run.mapping_generation
         or mapping.endpoint_owner_node_id != run_node.node_id
     ):

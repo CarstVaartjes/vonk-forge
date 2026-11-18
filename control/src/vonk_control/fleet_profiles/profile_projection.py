@@ -24,6 +24,7 @@ from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileAssignmentView,
+    FleetProfileDefinition,
     FleetProfileView,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
@@ -36,6 +37,7 @@ from ..models import (
     FleetProfile,
 )
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
+from ..stored_states import CatalogRevisionState
 from .assignment_assessment import _AssignmentRows
 from .contracts import _SelectedProfileSnapshot
 from .dependencies import (
@@ -102,12 +104,17 @@ class FleetProfileService:
         *,
         observe: bool = True,
         page: _ProfilePageReads | None = None,
+        profile_definition: FleetProfileDefinition | None = None,
     ) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         # Saves return the same typed projection with unobserved cache/live
         # fields unknown. Admission and full reads still observe exact assets;
         # a draft edit needs neither filesystem walks nor workload assessment.
-        choices = self._choices(row)
+        # The saved definition is read once and serves the choices, the
+        # document digest and the view.
+        if profile_definition is None:
+            profile_definition = self._definition(row)
+        choices = tuple(profile_definition.assignments)
         if page is None:
             page = self._page_reads(session, choices)
         assignments: list[FleetProfileAssignmentView] = []
@@ -355,7 +362,7 @@ class FleetProfileService:
             )
             for node_id, display_name in page.roster
         ]
-        document = _profile_document(row)
+        document = _profile_document(row, profile_definition)
         loaded_revision = (
             selection.profile_revision
             if selection is not None and selection.profile_id == row.id
@@ -375,7 +382,7 @@ class FleetProfileService:
             ),
             labels=dict(row.labels),
             favorite=row.favorite,
-            definition=self._definition(row),
+            definition=profile_definition,
             assignments=assignments,
             fleet=fleet,
             status=ProfileDocumentState.LOADED.value
@@ -544,7 +551,7 @@ class FleetProfileService:
             )
             .where(
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 CatalogDocumentRevision.content_digest.in_(
                     [item[2] for item in references]
                 ),

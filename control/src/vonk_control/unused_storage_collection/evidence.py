@@ -26,6 +26,7 @@ from ..models import (
 )
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
+from ..stored_states import CatalogRevisionState
 from .references import _applied_revision_ids, _profile_pointers
 
 
@@ -99,7 +100,7 @@ class _Evidence:
                         CatalogDocumentRevision.document_id,
                     ).where(
                         CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         active_head_revision(),
                     )
                 )

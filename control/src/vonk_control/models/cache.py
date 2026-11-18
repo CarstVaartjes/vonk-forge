@@ -18,7 +18,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, machine_check
 from vonk_forge_contracts import CatalogVocabulary
 
 from ..exact_integer_storage import (
@@ -26,6 +26,7 @@ from ..exact_integer_storage import (
     DecimalIntegerToken,
     ExactNonnegativeInteger,
 )
+from ..model_cache_contract import ModelCacheSetState
 from ..model_primitives import (
     Base,
     _lower_hex,
@@ -34,6 +35,7 @@ from ..model_primitives import (
     _uuid_shape,
 )
 from ..stored_json import ContractJSON
+from ..stored_states import LibrarySyncRunState, RecipeBuildState
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
@@ -60,8 +62,9 @@ class ModelCacheSet(Base):
             name="ck_model_cache_sets_recipe_revision_digest",
         ),
         CheckConstraint(
-            "state IN ('incomplete','downloading','verifying','cached',"
-            "'needs-repair','failed')",
+            "state IN ("
+            + ",".join(f"'{state.value}'" for state in ModelCacheSetState)
+            + ")",
             name="ck_model_cache_sets_state",
         ),
         CheckConstraint(
@@ -296,7 +299,7 @@ class RecipeLibrarySyncRun(Base):
             name="ck_recipe_library_sync_runs_trigger",
         ),
         CheckConstraint(
-            "state IN ('running','succeeded','failed')",
+            machine_check(LibrarySyncRunState),
             name="ck_recipe_library_sync_runs_state",
         ),
         CheckConstraint(
@@ -383,7 +386,7 @@ class RecipeBuild(Base):
             name="uq_recipe_build_input_builder",
         ),
         CheckConstraint(
-            "state IN ('planned','building','succeeded','failed')",
+            machine_check(RecipeBuildState),
             name="ck_recipe_builds_state",
         ),
         CheckConstraint(

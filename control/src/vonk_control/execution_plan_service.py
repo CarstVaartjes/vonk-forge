@@ -47,6 +47,7 @@ from .recipe_runtime_specs import (
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .runtime_image_preparation import RuntimeImageReceipt
 from .runtime_spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
+from .stored_states import CatalogRevisionState, RecipeBuildState
 
 
 def compile_job_invocation(
@@ -224,7 +225,7 @@ class ControllerExecutionPlanService:
 
         if (
             revision.kind != "recipe"
-            or revision.state != "active"
+            or revision.state != CatalogRevisionState.ACTIVE
             or revision.content_digest is None
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
@@ -373,7 +374,7 @@ def _runtime_image_receipt(
 
 def _build_package(build: RecipeBuild) -> dict[str, object]:
     if (
-        build.state != "succeeded"
+        build.state != RecipeBuildState.SUCCEEDED
         or not isinstance(build.image_digest, str)
         or not isinstance(build.build_input_sha256, str)
     ):

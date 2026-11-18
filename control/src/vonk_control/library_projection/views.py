@@ -33,6 +33,7 @@ from ..model_cache.source_helpers import _model_selector
 from ..models import CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
+from ..stored_states import CatalogRevisionState
 from .common import (
     _LIBRARY_ORDER,
     _canonical_model,
@@ -542,7 +543,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     with self._sessions() as session:
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
-            CatalogDocumentRevision.state == "active",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
         )
         if _REVISION_ID.fullmatch(wanted):
             # An exact revision, as a run or fleet row names it: a running
@@ -685,7 +686,7 @@ def authoring_recipe_detail(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.document_id == recipe_id,
                 CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
         )
@@ -699,7 +700,7 @@ def authoring_recipe_detail(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                         CatalogDocumentRevision.content_digest.in_(
                             [reference.content_sha256 for reference in references]
                         ),

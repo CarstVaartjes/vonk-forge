@@ -19,6 +19,7 @@ from .catalog_queries import active_head_revision
 from .catalog_revision_contract import shared_catalog_document
 from .content_identity import RecipeExecution, runs_identically
 from .models import CatalogDocumentRevision
+from .stored_states import CatalogRevisionState
 from .strict_json import StrictJSONModel
 
 RECIPE_UPDATE_AVAILABLE = ProjectionCode.RECIPE_UPDATE_AVAILABLE
@@ -59,7 +60,7 @@ def newest_active_revisions(
     rows = session.scalars(
         select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == "recipe",
-            CatalogDocumentRevision.state == "active",
+            CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             CatalogDocumentRevision.document_id.in_(sorted(document_ids)),
             active_head_revision(),
         )

@@ -55,6 +55,7 @@ from ..run_switch_contract import (
 from ..run_switch_observation_contract import (
     RunSwitchObservedImageIdentity,
 )
+from ..stored_states import CatalogRevisionState
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision, _is_artifact_phase
 from .identity_helpers import _primary_model_digest
@@ -112,7 +113,10 @@ class RunPlanningMixin:
             )
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
-            if revision.state != "active" or revision.content_digest is None:
+            if (
+                revision.state != CatalogRevisionState.ACTIVE
+                or revision.content_digest is None
+            ):
                 blockers.append(
                     _as_reason(
                         RunSwitchCode.RECIPE_UNRESOLVED,

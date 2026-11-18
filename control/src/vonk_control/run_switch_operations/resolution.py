@@ -54,6 +54,7 @@ from ..run_switch_contract import (
     SparkGroup,
     SparkGroupNode,
 )
+from ..stored_states import ClusterMappingState, RecipeBuildState
 from .planning_helpers import _as_reason
 
 if TYPE_CHECKING:
@@ -170,7 +171,7 @@ class ResolutionMixin:
                 select(ClusterMapping)
                 .where(
                     ClusterMapping.recipe_revision_id == revision.id,
-                    ClusterMapping.state == "ready",
+                    ClusterMapping.state == ClusterMappingState.READY,
                 )
                 .order_by(ClusterMapping.generation.desc(), ClusterMapping.id)
             )
@@ -378,7 +379,7 @@ class ResolutionMixin:
         """Newest first: the SUCCEEDED builds of this revision and source bundle."""
         query = select(RecipeBuild).where(
             RecipeBuild.recipe_revision_id == revision_id,
-            RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+            RecipeBuild.state == RecipeBuildState.SUCCEEDED.value,
             RecipeBuild.image_digest.is_not(None),
             RecipeBuild.image_bytes.is_not(None),
         )
@@ -455,7 +456,7 @@ class ResolutionMixin:
             candidates = session.scalars(
                 select(RecipeBuild)
                 .where(
-                    RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+                    RecipeBuild.state == RecipeBuildState.SUCCEEDED.value,
                     RecipeBuild.image_digest == expected_image.image_digest,
                     RecipeBuild.oci_layout_sha256 == expected_image.oci_layout_sha256,
                 )

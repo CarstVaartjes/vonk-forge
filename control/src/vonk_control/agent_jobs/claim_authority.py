@@ -212,11 +212,10 @@ def _reconcile_agent_upgrade(
         )
         .with_for_update(of=AgentOperationAttempt)
     )
-    if attempt is None or attempt.state not in {
-        "running",
-        "failed",
-        *agent_operation_states.ATTEMPT_OBSERVING,
-    }:
+    if (
+        attempt is None
+        or attempt.state not in agent_operation_states.ATTEMPT_REPORTABLE
+    ):
         return
     message = AgentResult.model_validate(
         {"fence": attempt.fence, "state": "succeeded", "result": evidence}

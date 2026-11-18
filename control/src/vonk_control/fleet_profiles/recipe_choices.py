@@ -9,14 +9,13 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, SessionTransaction, defer
+from sqlalchemy.orm import Session, SessionTransaction
 from vonk_agent_protocol import DesiredAssignmentState, InvalidRequestReason
 from vonk_agent_protocol.agent_words import (
-    ProfileDocumentState,
     RunSwitchReasonScopeName,
 )
 
-from ..catalog_queries import active_head_revision
+from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..content_identity import (
     cache_resolution_answers_revision,
@@ -32,6 +31,7 @@ from ..model_cache_contract import CacheResolution
 from ..models import CatalogDocument, CatalogDocumentRevision, FleetProfile
 from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
+from ..stored_states import CatalogRevisionState
 from .contracts import (
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,
@@ -107,7 +107,7 @@ class FleetProfileService:
             .where(
                 CatalogDocumentRevision.document_id == document,
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
             .limit(1)
@@ -168,16 +168,10 @@ class FleetProfileService:
                 .where(
                     CatalogDocumentRevision.document_id.in_(document_ids),
                     CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
-                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     active_head_revision(),
                 )
-                .options(
-                    *(
-                        ()
-                        if include_documents
-                        else (defer(CatalogDocumentRevision.document),)
-                    )
-                )
+                .options(*(() if include_documents else (WITHOUT_DOCUMENT,)))
             )
         }
         for selector, identity in selectors.items():
@@ -227,7 +221,7 @@ class FleetProfileService:
             revision = session.get(
                 CatalogDocumentRevision,
                 revision_id,
-                options=(defer(CatalogDocumentRevision.document),),
+                options=(WITHOUT_DOCUMENT,),
             )
             if document is not None and revision is not None:
                 cached[selector] = (document, revision)

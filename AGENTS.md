@@ -373,6 +373,11 @@ rewrite a timestamp's spelling. Test actual producer-to-consumer round trips,
 including signatures/digests and both missing/null forms, not just acceptance
 by two parsers. See `docs/api-contracts.md` for the serialization policy.
 
+A stored catalog document is parsed once per content identity
+(`catalog_revision_contract`). `read_catalog_document` returns the caller's own
+copy; read-only paths use `read_shared_catalog_document` and never mutate it.
+The Controller test session fails when any caller mutated a shared parse.
+
 Allow engine-owned content through its declared extension fields; do not
 introduce an exhaustive engine-argument allowlist.
 

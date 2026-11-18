@@ -115,8 +115,9 @@ class FleetProfileService:
             )
             if row is None:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
-            self._required_definition(row)
-            return self._view(session, row)
+            return self._view(
+                session, row, profile_definition=self._required_definition(row)
+            )
 
     @profile_read
     def read_number(self, number: int) -> FleetProfileReadView:
@@ -237,7 +238,9 @@ class FleetProfileService:
                 revision=row.revision,
                 projection_issue=definition,
             )
-        return self._view(session, row, observe=observe, page=page)
+        return self._view(
+            session, row, observe=observe, page=page, profile_definition=definition
+        )
 
     def _readable_definition(
         self, row: FleetProfile

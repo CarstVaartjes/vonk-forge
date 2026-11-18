@@ -43,6 +43,7 @@ from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
 )
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import (
     read_stored_model,
 )
@@ -278,7 +279,7 @@ class ExecutorPreflightMixin:
                     RunSwitchCode.CONTAINER_BUILD_PLAN_INVALID,
                     reason=WaitReason.STALE_PLAN,
                 )
-            if build.state == LifecycleState.SUCCEEDED.value:
+            if build.state == RecipeBuildState.SUCCEEDED.value:
                 return PhaseExecution(result=_container_build_result(build))
             if build.state not in {"planned", "building", LifecycleState.FAILED.value}:
                 raise RunSwitchRetryLater(
@@ -331,7 +332,7 @@ class ExecutorPreflightMixin:
                 or parsed_plan.build_input_sha256 != build_input_sha256
                 or revision is None
                 or revision.kind != "recipe"
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
                 or parsed_plan.recipe_content_sha256 != revision.content_digest
             ):
                 raise RunSwitchRetryLater(

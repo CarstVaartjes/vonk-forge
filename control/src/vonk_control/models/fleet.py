@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import JsonValue
 from sqlalchemy import (
@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
     event,
@@ -26,7 +27,8 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
     from .telemetry import NodeInventoryItemsSnapshot
-from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, machine_check
+from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
 from ..model_primitives import (
     Base,
@@ -67,6 +69,9 @@ class LoginSession(Base):
 
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
+    __table_args__ = (
+        CheckConstraint(machine_check(NodeIdentityState), name="ck_agent_nodes_state"),
+    )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workload_intent_ordinal: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
@@ -400,6 +405,13 @@ class AgentCertificate(Base):
     csr_pem: Mapped[str | None] = mapped_column(Text)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ca_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+cast(Table, AgentCertificate.__table__).append_constraint(
+    CheckConstraint(
+        machine_check(CertificateRecordState), name="ck_agent_certificates_state"
+    )
+)
 
 
 class AgentCertificateRotation(Base):

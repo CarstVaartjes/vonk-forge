@@ -92,6 +92,17 @@ def _resolve(
     return service.resolve(draft.id, actor="operator")
 
 
+def test_revision_state_admits_only_its_enum_words(
+    session: Session, service: CatalogEntityService
+) -> None:
+    draft = create_draft(service, _model(), actor="operator")
+    assert draft.state == "candidate"
+    draft.state = "waiting"
+    with pytest.raises(IntegrityError):
+        session.flush()
+    session.rollback()
+
+
 @pytest.mark.parametrize("scalar_type_change", [False, True])
 def test_active_canonical_revision_is_immutable(
     session: Session, service: CatalogEntityService, scalar_type_change: bool

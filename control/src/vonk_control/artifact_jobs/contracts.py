@@ -58,6 +58,7 @@ from ..lifecycle.evidence import (
 )
 from ..models import ArtifactJob, CatalogDocumentRevision, Job
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from ..strict_json import StrictJSONModel, read_stored_model
 
 MAX_INPUT_FILES = 32
@@ -157,7 +158,7 @@ def _active_recipe_revision(
         revision is None
         or revision.kind != "recipe"
         or revision.schema_version != 2
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
     ):
         return None
     try:

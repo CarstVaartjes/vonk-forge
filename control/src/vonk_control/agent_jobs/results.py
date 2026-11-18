@@ -23,7 +23,7 @@ from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import agent_operation_states
+from .. import agent_operation_states, job_states
 from ..admission_locking import admission_attempts
 from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
@@ -332,7 +332,7 @@ def record_late_result(
                         LeaseLapsed(reason=lapse_reason),
                         now,
                     )
-                if parent.state in {"queued", "running"}:
+                if parent.state in job_states.IN_FLIGHT:
                     self._aggregate_parent(session, operation.parent_job_id)
         if not agent_operation_states.attempt_lapsed(attempt):
             raise StaleAgentRequest(

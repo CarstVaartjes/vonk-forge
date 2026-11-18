@@ -14,6 +14,7 @@ import copy
 import itertools
 import re
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from vonk_control.catalog_revision_contract import (
 from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
+from vonk_control.model_cache import model_artifact_cache
 from vonk_control.models import (
     AgentNode,
     CatalogDocument,
@@ -42,7 +44,7 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.stored_json import write_guard_mode
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_library_local_state_history import _cache_set, _operation
 from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
@@ -611,6 +613,75 @@ def test_image_presence_never_reads_a_builds_plan_or_policy(
     ]
 
 
+def test_cache_resolution_reads_the_shared_catalog_parse_without_copying(
+    cache,  # noqa: F811
+    monkeypatch,
+):
+    """Resolution only reads recipe and model documents, so it copies none."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+    copies: list[str] = []
+    copy_model = RecipeDefinition.model_copy
+
+    def record(self, *args, **kwargs):
+        copies.append(type(self).__name__)
+        return copy_model(self, *args, **kwargs)
+
+    for definition in (RecipeDefinition, ModelDefinition):
+        monkeypatch.setattr(definition, "model_copy", record)
+    resolutions = [
+        service.resolve_latest_cached(
+            recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
+        )
+        for slug in ("resolver-recipe", "resolver-dual")
+    ]
+
+    assert [item.recipe.cached for item in resolutions] == [True, True]
+    assert copies == []
+
+
+def _count_artifact_builds(service, monkeypatch) -> list[str]:
+    """Start from an empty derived-spec cache and record every spec built."""
+
+    monkeypatch.setattr(model_artifact_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(model_artifact_cache, "_retained", 0)
+    built: list[str] = []
+    derive = service._artifact_from_catalog
+
+    def record(value, **kwargs):
+        built.append(value.id)
+        return derive(value, **kwargs)
+
+    monkeypatch.setattr(service, "_artifact_from_catalog", record)
+    return built
+
+
+@pytest.mark.parametrize(("models", "expected"), [(1, 1), (2, 2)])
+def test_a_model_content_identity_builds_its_artifact_specs_once(
+    cache,  # noqa: F811
+    monkeypatch,
+    models,
+    expected,
+):
+    """Each model digest derives its specs once; a hit equals a rebuild."""
+
+    service, sessions = cache
+    world = _World(sessions, count=models)
+    built = _count_artifact_builds(service, monkeypatch)
+
+    first = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+    second = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+
+    assert len(built) == expected
+    assert second == first
+
+
 def test_each_recipe_set_is_resolved_once_across_library_reads(
     cache,  # noqa: F811
     monkeypatch,
@@ -671,3 +742,37 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
         _projection(sessions, archive=service._runtime_archive_available)
     )
     assert recipes["vonk-forge/resolver-dual"].local.controller == "unknown"
+
+
+def test_cache_resolution_loads_documents_only_where_it_reads_them(
+    cache,  # noqa: F811
+):
+    """Row lookups select revision columns; only content checks load a document."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+    statements: list[str] = []
+
+    def record(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        resolution = service.resolve_latest_cached(
+            recipe_identity=world.recipe_revision_id, model_variant="fp16"
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert resolution.recipe.cached and resolution.model.cached
+    document_reads = [
+        item
+        for item in statements
+        if re.search(r"catalog_document_revisions\.document\b(?!_id)", item)
+    ]
+    assert len(document_reads) == 4

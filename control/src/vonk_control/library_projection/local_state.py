@@ -62,6 +62,7 @@ from ..operator_receipt_contract import ReceiptOwner
 from ..persisted_waits import read_wait
 from ..revision_images import revision_images
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,
@@ -268,7 +269,7 @@ def _database_local_state(
                 CatalogDocumentRevision.id,
                 CatalogDocumentRevision.content_digest,
                 and_(
-                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                     active_head_revision(),
                 ),
             ).where(
@@ -423,7 +424,9 @@ def _database_local_state(
         # row of its own: it runs the images its recipe's builds of the
         # same source produced.
         built = {
-            revision_id for revision_id, state, _, _ in builds if state == "succeeded"
+            revision_id
+            for revision_id, state, _, _ in builds
+            if state == RecipeBuildState.SUCCEEDED
         }
         digest_of = {revision_id: digest for revision_id, digest, _ in revisions}
         inherited_images = revision_images(
@@ -606,7 +609,7 @@ def _database_local_state(
         builds=[
             (revision_digests.get(revision_id), layout, size)
             for revision_id, state, layout, size in builds
-            if state == "succeeded"
+            if state == RecipeBuildState.SUCCEEDED
         ],
         inherited=inherited_claims,
     )

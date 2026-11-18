@@ -39,7 +39,6 @@ from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
     LifecycleState,
-    ProgressPhase,
     canonical_message,
 )
 from vonk_agent_protocol.state_machines import EnrollmentRecordState
@@ -68,6 +67,7 @@ from .models import (
     RecipeRun,
     ResourceReservation,
 )
+from .stored_states import LibrarySyncRunState, RecipeBuildState
 from .strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.
@@ -84,8 +84,8 @@ CACHE_OPERATION_ENDED_STATES = model_cache_states.words(
 _ACTIVE_JOB_STATES = (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
 #: A build row in one of these has not produced its image yet.
 UNFINISHED_BUILD_STATES = (
-    InstallationState.PLANNED.value,
-    ProgressPhase.BUILDING.value,
+    RecipeBuildState.PLANNED.value,
+    RecipeBuildState.BUILDING.value,
 )
 #: A Spark not heard from for longer is away (the Fleet view's offline bound).
 SPARK_PRESENCE_WINDOW = timedelta(seconds=150)
@@ -281,7 +281,7 @@ def _recipe_build(session: Session, ref: OwnerRef, now: datetime | None) -> Owne
         return Owner(ref, False, "recipe build is missing", state="missing")
     if not _settled(build.updated_at, now, OWNER_SETTLE_GRACE):
         return Owner(ref, True, "settling", state=build.state)
-    if build.state == ProgressPhase.BUILDING.value:
+    if build.state == RecipeBuildState.BUILDING.value:
         if referencing_active_job(session, OwnerKind.RECIPE_BUILD, ref.id):
             return Owner(
                 ref, True, "an active operation refers to it", state=build.state
@@ -307,7 +307,7 @@ def build_may_run(session: Session, build: RecipeBuild) -> bool:
     Spark's observed inventory.
     """
 
-    if build.state == ProgressPhase.BUILDING.value:
+    if build.state == RecipeBuildState.BUILDING.value:
         return True
     for job_id in session.scalars(
         select(Job.id).where(
@@ -427,7 +427,7 @@ def _sync_run(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     run = session.get(RecipeLibrarySyncRun, ref.id)
     if run is None:
         return Owner(ref, False, "library sync is missing", state="missing")
-    if run.state != LifecycleState.RUNNING:
+    if run.state != LibrarySyncRunState.RUNNING:
         return Owner(ref, False, f"library sync is {run.state}", state=run.state)
     last = run.heartbeat_at or run.started_at
     if now is not None and _aware(now) - _aware(last) > SYNC_HEARTBEAT_WINDOW:
@@ -667,8 +667,8 @@ def builds_in_flight(now: datetime) -> ColumnElement[bool]:
     )
     return RecipeBuild.state.in_(UNFINISHED_BUILD_STATES) & or_(
         RecipeBuild.updated_at > now - OWNER_SETTLE_GRACE,
-        (RecipeBuild.state == ProgressPhase.BUILDING.value) & referenced,
-        (RecipeBuild.state != ProgressPhase.BUILDING.value) & may_run,
+        (RecipeBuild.state == RecipeBuildState.BUILDING.value) & referenced,
+        (RecipeBuild.state != RecipeBuildState.BUILDING.value) & may_run,
     )
 
 

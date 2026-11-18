@@ -1,6 +1,7 @@
 """Selection of current catalog heads without retiring accepted revisions."""
 
 from sqlalchemy import Exists, select
+from sqlalchemy.orm import defer
 
 from .models import CatalogDocumentHead, CatalogDocumentRevision
 
@@ -17,3 +18,8 @@ def active_head_revision() -> Exists:
         )
         .exists()
     )
+
+
+# Row lookups select revisions without their document, which loads (on access)
+# only where it is read: decoding it also snapshots it for the immutability guard.
+WITHOUT_DOCUMENT = defer(CatalogDocumentRevision.document)

@@ -27,6 +27,7 @@ from ..models import (
 )
 from ..reference_facts import profiles_naming
 from ..stored_json import read_row_column
+from ..stored_states import CatalogRevisionState
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import _iso, _recipe_model_content_digests
 from .constants import SCHEMA_VERSION
@@ -308,7 +309,7 @@ class InventoryMixin:
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.publisher == publisher,
                 CatalogDocumentRevision.slug == slug,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
                 active_head_revision(),
             )
         )

@@ -24,8 +24,8 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState
 
+from .catalog_queries import WITHOUT_DOCUMENT
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
@@ -33,6 +33,7 @@ from .catalog_revision_contract import (
 from .content_identity import build_source_bundles
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import CatalogDocumentRevision, RecipeBuild
+from .stored_states import RecipeBuildState
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,9 @@ def revision_images(
     revisions = {
         row.id: row
         for row in session.scalars(
-            select(CatalogDocumentRevision).where(
+            select(CatalogDocumentRevision)
+            .options(WITHOUT_DOCUMENT)
+            .where(
                 CatalogDocumentRevision.id.in_(sorted(revision_ids)),
                 CatalogDocumentRevision.kind == "recipe",
             )
@@ -106,7 +109,7 @@ def revision_images(
         )
         .where(
             CatalogDocumentRevision.document_id.in_(sorted(documents)),
-            RecipeBuild.state == "succeeded",
+            RecipeBuild.state == RecipeBuildState.SUCCEEDED,
             RecipeBuild.image_digest.is_not(None),
             RecipeBuild.oci_layout_sha256.is_not(None),
             RecipeBuild.image_bytes.is_not(None),
@@ -184,7 +187,7 @@ def revision_images(
             )
             .where(
                 RecipeBuild.image_digest.in_(sorted(set(pinned.values()))),
-                RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+                RecipeBuild.state == RecipeBuildState.SUCCEEDED.value,
                 RecipeBuild.oci_layout_sha256.is_not(None),
                 RecipeBuild.image_bytes.is_not(None),
             )

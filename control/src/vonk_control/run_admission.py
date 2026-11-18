@@ -88,6 +88,7 @@ from .resource_planning import (
     memory_reservation_kind,
     plan_capacity,
 )
+from .stored_states import CatalogRevisionState, ClusterMappingState
 from .topology import Placement, TopologyError, validate_topology
 
 _PORT_CONFLICTS = {
@@ -440,7 +441,7 @@ def _active_recipe_revision(
     statement = select(CatalogDocumentRevision).where(
         CatalogDocumentRevision.id == revision_id,
         CatalogDocumentRevision.kind == "recipe",
-        CatalogDocumentRevision.state == "active",
+        CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
     )
     return session.scalar(statement)
 
@@ -566,7 +567,7 @@ class RunAdmissionService:
             mapping = session.get(ClusterMapping, installation.mapping_id)
             if (
                 mapping is None
-                or mapping.state != "ready"
+                or mapping.state != ClusterMappingState.READY
                 or mapping.generation != installation.mapping_generation
             ):
                 raise InvalidValue(
@@ -574,7 +575,7 @@ class RunAdmissionService:
                     reason=InvalidRequestReason.CONFLICT,
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            if revision is None or revision.state != "active":
+            if revision is None or revision.state != CatalogRevisionState.ACTIVE:
                 raise InvalidValue(
                     "recipe revision is unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
@@ -1108,7 +1109,7 @@ class RunAdmissionService:
                 code=RunAdmissionCode.TARGET_MEMBERSHIP_CHANGED,
             )
         plan = fresh
-        if mapping is None or mapping.state != "ready":
+        if mapping is None or mapping.state != ClusterMappingState.READY:
             raise RunAdmissionBusy(
                 "run mapping is waiting to become ready",
                 code=RunAdmissionCode.MAPPING_NOT_READY,
@@ -1118,7 +1119,7 @@ class RunAdmissionService:
             or installation.mapping_id != plan.mapping_id
             or installation.mapping_generation != plan.mapping_generation
             or revision is None
-            or revision.state != "active"
+            or revision.state != CatalogRevisionState.ACTIVE
             or tuple(
                 (node.node_id, node.rank, node.role, node.endpoint_owner)
                 for node in mapping_nodes

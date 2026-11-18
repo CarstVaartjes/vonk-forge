@@ -65,6 +65,7 @@ from .recipe_runtime_specs import recipe_topology
 from .run_switch_contract import (
     RunSwitchReconciliationAuthority,
 )
+from .stored_states import CatalogRevisionState
 from .strict_json import read_stored_model, serialize_json_value
 
 
@@ -237,7 +238,7 @@ def _recipe_model_identities(
                 CatalogDocumentRevision.publisher == reference.publisher,
                 CatalogDocumentRevision.slug == reference.slug,
                 CatalogDocumentRevision.content_digest == reference.content_sha256,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
             .limit(1)
         )

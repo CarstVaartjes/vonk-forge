@@ -58,6 +58,7 @@ from ..runtime_preflight import (
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
+from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -117,7 +118,7 @@ class InstallPlanningService:
                     "recipe build evidence is unavailable",
                     reason=WaitReason.RECEIPT_MISSING,
                 )
-            if mapping.state != "ready":
+            if mapping.state != ClusterMappingState.READY:
                 raise InvalidValue(
                     "cluster mapping is not ready",
                     reason=InvalidRequestReason.NOT_READY,
@@ -125,7 +126,7 @@ class InstallPlanningService:
             revision = _active_recipe_revision(session, mapping.recipe_revision_id)
             if (
                 revision is None
-                or revision.state != "active"
+                or revision.state != CatalogRevisionState.ACTIVE
                 or revision.content_digest is None
             ):
                 raise InvalidValue(
@@ -134,7 +135,7 @@ class InstallPlanningService:
                 )
             if (
                 build is None
-                or build.state != "succeeded"
+                or build.state != RecipeBuildState.SUCCEEDED
                 or build.image_digest is None
                 or build.image_bytes is None
                 or build.oci_layout_sha256 is None

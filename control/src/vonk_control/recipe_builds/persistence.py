@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    LifecycleState,
     RecipeBuildCode,
     ReservationState,
     WaitReason,
@@ -40,6 +39,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
+from ..stored_states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
@@ -158,7 +158,7 @@ def persist_plan_in_session(
     )
     if (
         existing is not None
-        and existing.state == LifecycleState.SUCCEEDED.value
+        and existing.state == RecipeBuildState.SUCCEEDED.value
         and not self._succeeded_build_available(existing)
     ):
         _reopen_build_attempt(existing, now=now)
@@ -171,7 +171,7 @@ def persist_plan_in_session(
             .where(
                 RecipeBuild.builder_node_id == plan.builder_node_id,
                 RecipeBuild.build_input_sha256 == plan.build_input_sha256,
-                RecipeBuild.state == "succeeded",
+                RecipeBuild.state == RecipeBuildState.SUCCEEDED,
             )
             .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         )
@@ -191,7 +191,7 @@ def persist_plan_in_session(
             builder_node_id=plan.builder_node_id,
             source_bundle_sha256=plan.source_bundle_sha256,
             build_input_sha256=plan.build_input_sha256,
-            state="planned",
+            state=RecipeBuildState.PLANNED.value,
             policy_report=copy.deepcopy(policy_document),
             plan=copy.deepcopy(payload),
             created_at=now,
@@ -211,13 +211,13 @@ def persist_plan_in_session(
             payload["build_id"] = existing.id
             existing.plan = copy.deepcopy(payload)
             existing.policy_report = copy.deepcopy(policy_document)
-            if existing.state == LifecycleState.FAILED.value or (
-                existing.state == LifecycleState.SUCCEEDED.value
+            if existing.state == RecipeBuildState.FAILED.value or (
+                existing.state == RecipeBuildState.SUCCEEDED.value
                 and not _valid_succeeded_receipt(existing)
             ):
                 _reopen_build_attempt(existing, now=now)
         else:
-            if existing.state == "failed":
+            if existing.state == RecipeBuildState.FAILED:
                 # A cancelled or failed attempt must not block the rebuild
                 # the operator asked for.  The stored envelope is still
                 # exact, so keep it and return the row to a clean planned
@@ -314,7 +314,7 @@ def _record_success_once(
             )
         # The current accepted input binds the completion. An old failed or
         # succeeded label is not an independent content-verification authority.
-        build.state = LifecycleState.SUCCEEDED.value
+        build.state = RecipeBuildState.SUCCEEDED.value
         build.image_digest = image_digest
         build.oci_layout_sha256 = oci_layout_sha256
         build.image_bytes = image_bytes
@@ -397,7 +397,7 @@ def _reserve_in_session(
     if (
         revision is None
         or revision.kind != "recipe"
-        or revision.state != "active"
+        or revision.state != CatalogRevisionState.ACTIVE
         or revision.content_digest != plan.recipe_content_sha256
         or revision.source_bundle_sha256 != plan.source_bundle_sha256
     ):

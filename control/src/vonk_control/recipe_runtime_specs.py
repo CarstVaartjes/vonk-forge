@@ -49,6 +49,7 @@ from .runtime_spec_contract import (
     SpecWritablePath,
 )
 from .runtime_writable_paths import document as writable_path_document
+from .stored_states import CatalogRevisionState
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
 
@@ -412,7 +413,7 @@ def resolve_recipe_entities(
                 CatalogDocumentRevision.publisher == reference.publisher,
                 CatalogDocumentRevision.slug == reference.slug,
                 CatalogDocumentRevision.content_digest == reference.content_sha256,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.state == CatalogRevisionState.ACTIVE,
             )
             .limit(1)
         )
