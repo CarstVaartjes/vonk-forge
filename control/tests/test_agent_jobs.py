@@ -155,6 +155,7 @@ def canonical_start_payload(*, start_deadline: datetime) -> dict[str, object]:
         master_address="192.168.100.10",
         master_port=29500,
         world_size=2,
+        peer_addresses=(),
     )
     payload: dict[str, object] = {
         "run_id": "00000000-0000-4000-8000-0000000000aa",

@@ -2009,6 +2009,7 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
             compiled_execution_plan=CompiledExecutionPlan.model_validate(fixture),
             master_address=None,
             master_port=None,
+            peer_addresses=(),
         )
     )
     placement = payload.compiled_execution_plan.runtime.placement

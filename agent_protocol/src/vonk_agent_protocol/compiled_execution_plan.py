@@ -13,6 +13,7 @@ import re
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -109,6 +110,11 @@ def _validate_ip(value: str | None) -> str | None:
     return value
 
 
+PeerAddress = Annotated[
+    str, AfterValidator(_validate_ip), Field(json_schema_extra={"format": "ip"})
+]
+
+
 class CompiledIdentity(_Strict):
     recipe_revision_sha256: Digest
     model_artifact_set_sha256: Digest
@@ -144,6 +150,14 @@ class CompiledPlacement(_Strict):
     port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
     memory_floor_bytes: int = Field(ge=0, le=16 * 1024**4)
+    # Every rank's fabric address in rank order, for the engines whose wrapper
+    # reads the whole placement from the environment. Absent for every other
+    # launch, so an existing plan and its wire form are unchanged.
+    # Absent from every dump when unset, so a stored plan, its digest and its wire
+    # form are the same as before the field existed.
+    peer_addresses: list[PeerAddress] | None = Field(
+        default=None, min_length=1, max_length=8, exclude_if=lambda value: value is None
+    )
 
     _addresses_are_safe = field_validator(
         "endpoint_address", "local_address", "master_address"

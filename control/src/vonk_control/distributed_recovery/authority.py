@@ -47,6 +47,7 @@ from ..recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
     build_recipe_start_payload,
+    start_peer_addresses,
     validate_distributed_start_timeout_seconds,
 )
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
@@ -325,6 +326,11 @@ def _recovery_authority(
                 compiled_execution_plan=compiled_plan,
                 master_address=master_address,
                 master_port=master_port,
+                peer_addresses=start_peer_addresses(
+                    recipe.runtime.engine,
+                    len(nodes),
+                    {item.rank: item.fabric_address for item in plans},
+                ),
                 phase="rank-launch",
                 start_deadline=start_deadline,
             )
