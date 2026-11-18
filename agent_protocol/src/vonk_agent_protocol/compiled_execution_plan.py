@@ -156,7 +156,7 @@ class CompiledPlacement(_Strict):
     # Absent from every dump when unset, so a stored plan, its digest and its wire
     # form are the same as before the field existed.
     peer_addresses: list[PeerAddress] | None = Field(
-        default=None, min_length=1, max_length=8, exclude_if=lambda value: value is None
+        default=None, min_length=1, exclude_if=lambda value: value is None
     )
 
     _addresses_are_safe = field_validator(
