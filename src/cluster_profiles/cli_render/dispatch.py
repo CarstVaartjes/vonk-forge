@@ -189,6 +189,9 @@ def render_payload(
                 _preview(payload)
             elif action in {"progress", "load", "cancel"}:
                 _application(payload)
+            elif action == "delete":
+                _field("Profile", payload.get("number"))
+                _field("Deleted", payload.get("outcome"))
             elif action == "export":
                 _field("Profile", payload.get("profile"))
                 _field("Revision", payload.get("revision"))

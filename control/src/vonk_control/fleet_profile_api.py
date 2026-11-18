@@ -15,6 +15,8 @@ from .endpoint_contract import inference_gateway_api_base
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileDefinitionView,
+    FleetProfileDeleteRequest,
+    FleetProfileDeletion,
     FleetProfileEndpointsView,
     FleetProfileInput,
     FleetProfileList,
@@ -48,6 +50,7 @@ FLEET_PROFILE_OPERATION_IDS = {
     ("put", _PROFILE_PATH): "autosaveProfile",
     ("post", "/api/profile/{number}/preview"): "previewProfile",
     ("post", "/api/profile/{number}/load"): "loadProfile",
+    ("post", "/api/profile/{number}/delete"): "deleteProfile",
     ("get", "/api/profile/{number}/progress"): "getProfileProgress",
     ("get", "/api/profile/{number}/endpoints"): "getProfileEndpoints",
     ("get", _APPLICATION_PATH): "getProfileApplication",
@@ -278,6 +281,32 @@ def install_fleet_profile_routes(
                 status_code=503, detail="Profile load unavailable"
             ) from None
         return result
+
+    @app.post(
+        "/api/profile/{number}/delete",
+        response_model=FleetProfileDeletion,
+        responses=bounded_error_responses(401, 403, 409, 422, 503),
+        operation_id="deleteProfile",
+    )
+    @operator_acceptance(ReceiptPolicy.OBSERVATION)
+    def delete_profile(
+        number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        body: FleetProfileDeleteRequest,
+        actor: Actor = authenticated,
+    ) -> FleetProfileDeletion:
+        require_mutation(actor, "POST", "/api/profile/{number}/delete")
+        try:
+            return service().delete_number(
+                number, actor=actor.subject, expected_revision=body.expected_revision
+            )
+        except FleetProfilePermissionDenied as error:
+            raise HTTPException(status_code=403, detail=str(error)) from None
+        except FleetProfileConflict as error:
+            raise_profile_conflict(error)
+        except AVAILABILITY_ERRORS:
+            raise HTTPException(
+                status_code=503, detail="Profile delete unavailable"
+            ) from None
 
     @app.get(
         _APPLICATION_PATH,

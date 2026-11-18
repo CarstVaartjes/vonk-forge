@@ -116,6 +116,7 @@ def test_superseded_replay_ends_and_selected_load_replans(
             sim.sparks.round()
             with world.sessions() as session:
                 selection = session.get_one(FleetProfileSelection, 1)
+                assert selection.application_id is not None
                 selected = profiles.application(selection.application_id)
             if selected.state == LifecycleState.SUCCEEDED:
                 break

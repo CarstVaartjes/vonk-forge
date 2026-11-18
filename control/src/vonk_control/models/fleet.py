@@ -352,6 +352,10 @@ class FleetProfileSelection(Base):
             name="ck_fleet_profile_selection_generation_positive",
         ),
         CheckConstraint(
+            "(profile_id IS NULL) = (application_id IS NULL)",
+            name="ck_fleet_profile_selection_pointer_pair",
+        ),
+        CheckConstraint(
             "profile_revision >= 1",
             name="ck_fleet_profile_selection_revision_positive",
         ),
@@ -362,13 +366,15 @@ class FleetProfileSelection(Base):
     )
     singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
-    profile_id: Mapped[str] = mapped_column(
-        ForeignKey("fleet_profiles.id", ondelete="RESTRICT"), nullable=False
+    # NULL pointers mean no profile is loaded; the row stays because it is the
+    # only durable owner of ``generation``, which Sparks fence clock/swap on.
+    profile_id: Mapped[str | None] = mapped_column(
+        ForeignKey("fleet_profiles.id", ondelete="SET NULL"), nullable=True
     )
     profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
-    application_id: Mapped[str] = mapped_column(
-        ForeignKey("fleet_profile_applications.id", ondelete="RESTRICT"),
-        nullable=False,
+    application_id: Mapped[str | None] = mapped_column(
+        ForeignKey("fleet_profile_applications.id", ondelete="SET NULL"),
+        nullable=True,
     )
     roster_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

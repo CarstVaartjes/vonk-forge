@@ -751,6 +751,11 @@ _CONFLICT_ROUTES = {
         "/api/profile/1/load",
         {"request_key": _PROBE_KEY},
     ),
+    ("POST", "/api/profile/{number}/delete"): (
+        "delete_number",
+        "/api/profile/1/delete",
+        {},
+    ),
     ("POST", "/api/profile/applications/{application_id}/cancel"): (
         "cancel",
         f"/api/profile/applications/{_PROBE_APPLICATION}/cancel",

@@ -225,7 +225,9 @@ class FleetProfileService:
                 )
                 selection_source = (
                     session.get(FleetProfileApplication, selection.application_id)
-                    if pending_roster_reconciliation and selection is not None
+                    if pending_roster_reconciliation
+                    and selection is not None
+                    and selection.application_id is not None
                     else existing
                     if existing is not None
                     and existing.selection_generation is not None
@@ -498,6 +500,7 @@ class FleetProfileService:
                         FleetProfileApplication, current_selection.application_id
                     )
                     if current_selection is not None
+                    and current_selection.application_id is not None
                     else None
                 )
                 current_selected_order = None

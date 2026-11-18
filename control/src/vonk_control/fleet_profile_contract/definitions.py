@@ -261,6 +261,18 @@ class FleetProfileInput(FleetProfileDefinition):
     expected_revision: int = Field(le=MAX_DATABASE_INTEGER, default=0, ge=0)
 
 
+class FleetProfileDeleteRequest(StrictModel):
+    # Absent means the newest request wins; a number refuses a stale delete.
+    expected_revision: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=1)
+
+
+class FleetProfileDeletion(StrictModel):
+    """What a delete did: ``cancelling`` asks the caller to send it again."""
+
+    number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
+    outcome: Literal["deleted", "already-gone", "cancelling"]
+
+
 class SavedProfileProjectionIssue(StrictModel):
     """An observation problem; it never authorizes changing saved intent."""
 

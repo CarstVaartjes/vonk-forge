@@ -28,6 +28,7 @@ from .contracts import (
     _AssessmentProvider,
 )
 from .control_effects import FleetProfileService as _ControlEffects
+from .deletion import FleetProfileService as _Deletion
 from .endpoint_projection import FleetProfileService as _EndpointProjection
 from .operation_projection import FleetProfileService as _OperationProjection
 from .pending_admission import FleetProfileService as _PendingAdmission
@@ -48,6 +49,7 @@ class FleetProfileService(
     _Selection,
     _RecipeChoices,
     _SavedProfiles,
+    _Deletion,
     _EndpointProjection,
     _Assessment,
     _ControlEffects,

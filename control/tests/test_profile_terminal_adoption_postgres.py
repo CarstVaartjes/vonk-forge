@@ -129,9 +129,11 @@ def test_terminal_owner_replans_unobservable_effects(
         for _ in range(60):
             tick()
             with world.sessions() as session:
-                selected = profiles.application(
-                    session.get_one(FleetProfileSelection, 1).application_id
-                )
+                application_id = session.get_one(
+                    FleetProfileSelection, 1
+                ).application_id
+                assert application_id is not None
+                selected = profiles.application(application_id)
             if selected.state == LifecycleState.SUCCEEDED:
                 break
         assert selected.state == LifecycleState.SUCCEEDED, selected.blockers

@@ -126,7 +126,11 @@ class FleetProfileService:
         from .service import FleetProfileService
 
         selection = session.get(FleetProfileSelection, 1)
-        if selection is None or selection.application_id == application.id:
+        if (
+            selection is None
+            or selection.application_id is None
+            or selection.application_id == application.id
+        ):
             return None
         selected = session.get(FleetProfileApplication, selection.application_id)
         if selected is None or selected.selection_generation != selection.generation:

@@ -1,0 +1,54 @@
+{
+  "samples": [
+    {
+      "name": "vllm",
+      "source": "source-derived: names verbatim from https://raw.githubusercontent.com/vllm-project/vllm/v0.30.0/vllm/v1/metrics/loggers.py and vllm/v1/spec_decode/metrics.py (tag v0.30.0); values invented. Swap for a real capture when a vLLM workload first serves.",
+      "run_id": "22222222-2222-4222-8222-222222222222",
+      "metrics": "vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 2.0\nvllm:num_requests_running{engine=\"1\",model_name=\"m\"} 1.0\nvllm:num_requests_waiting{engine=\"0\",model_name=\"m\"} 1.0\nvllm:kv_cache_usage_perc{engine=\"0\",model_name=\"m\"} 0.25\nvllm:kv_cache_usage_perc{engine=\"1\",model_name=\"m\"} 0.5\nvllm:prefix_cache_hits_total{engine=\"0\",model_name=\"m\"} 4000.0\nvllm:num_preemptions_total{engine=\"0\",model_name=\"m\"} 2.0\nvllm:prompt_tokens_total{engine=\"0\",model_name=\"m\"} 10000.0\nvllm:prompt_tokens_by_source_total{engine=\"0\",model_name=\"m\",source=\"local_compute\"} 6000.0\nvllm:prompt_tokens_by_source_total{engine=\"0\",model_name=\"m\",source=\"local_cache_hit\"} 4000.0\nvllm:prompt_tokens_cached_total{engine=\"0\",model_name=\"m\"} 4000.0\nvllm:generation_tokens_total{engine=\"0\",model_name=\"m\"} 500.0\nvllm:spec_decode_num_drafts_total{engine=\"0\",model_name=\"m\"} 100.0\nvllm:spec_decode_num_draft_tokens_total{engine=\"0\",model_name=\"m\"} 300.0\nvllm:spec_decode_num_accepted_tokens_total{engine=\"0\",model_name=\"m\"} 180.0\nvllm:time_to_first_token_seconds_bucket{engine=\"0\",model_name=\"m\",le=\"1.0\"} 4.0\nvllm:time_to_first_token_seconds_sum{engine=\"0\",model_name=\"m\"} 12.5\nvllm:time_to_first_token_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\nvllm:inter_token_latency_seconds_sum{engine=\"0\",model_name=\"m\"} 1.0\nvllm:request_time_per_output_token_seconds_sum{engine=\"0\",model_name=\"m\"} 2.0\nvllm:request_time_per_output_token_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\nvllm:e2e_request_latency_seconds_sum{engine=\"0\",model_name=\"m\"} 40.0\nvllm:e2e_request_latency_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\nvllm:request_prefill_time_seconds_sum{engine=\"0\",model_name=\"m\"} 8.0\nvllm:request_prefill_time_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\nvllm:request_decode_time_seconds_sum{engine=\"0\",model_name=\"m\"} 30.0\nvllm:request_decode_time_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\n",
+      "expected": {
+        "run_id": "22222222-2222-4222-8222-222222222222",
+        "format": "vllm",
+        "prompt_tokens": 10000,
+        "generation_tokens": 500,
+        "cached_prompt_tokens": 4000,
+        "preemptions": 2,
+        "spec_decode_draft_tokens": 300,
+        "spec_decode_accepted_tokens": 180,
+        "requests_running": 3,
+        "requests_waiting": 1,
+        "kv_cache_usage_ratio": 0.5,
+        "ttft_seconds_sum": 12.5,
+        "ttft_seconds_count": 5,
+        "time_per_output_token_seconds_sum": 2.0,
+        "time_per_output_token_seconds_count": 5,
+        "prefill_seconds_sum": 8.0,
+        "prefill_seconds_count": 5,
+        "decode_seconds_sum": 30.0,
+        "decode_seconds_count": 5,
+        "e2e_seconds_sum": 40.0,
+        "e2e_seconds_count": 5
+      }
+    },
+    {
+      "name": "gr8",
+      "source": "source-derived: names verbatim from https://github.com/kindlingai/gr8 @ 2f3b287c4749e377b8ff42335503670d0f086594 frontend/g6front-rs/src/metrics.rs (vLLM-named /metrics, PROTOCOL.md); values invented. Swap for a real capture when a gr8 workload serves.",
+      "run_id": "33333333-3333-4333-8333-333333333333",
+      "metrics": "vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 1.0\nvllm:num_requests_waiting{engine=\"0\",model_name=\"m\"} 0.0\nvllm:prefix_cache_hits_total{engine=\"0\",model_name=\"m\"} 300.0\nvllm:prompt_tokens_total{engine=\"0\",model_name=\"m\"} 900.0\nvllm:prompt_tokens_cached_total{engine=\"0\",model_name=\"m\"} 300.0\nvllm:generation_tokens_total{engine=\"0\",model_name=\"m\"} 300.0\nvllm:spec_decode_num_draft_tokens_total{engine=\"0\",model_name=\"m\"} 60.0\nvllm:spec_decode_num_accepted_tokens_total{engine=\"0\",model_name=\"m\"} 45.0\nvllm:kv_cache_size_tokens{engine=\"0\",model_name=\"m\"} 393216.0\nvllm:kv_active_tokens{engine=\"0\",model_name=\"m\"} 77376.0\nvllm:time_to_first_token_seconds_sum{engine=\"0\",model_name=\"m\"} 12.5\nvllm:time_to_first_token_seconds_count{engine=\"0\",model_name=\"m\"} 5.0\nvllm:inter_token_latency_seconds_sum{engine=\"0\",model_name=\"m\"} 1.25\nvllm:request_prefill_time_seconds_sum{engine=\"0\",model_name=\"m\"} 3.0\nvllm:request_decode_time_seconds_sum{engine=\"0\",model_name=\"m\"} 4.5\n",
+      "expected": {
+        "run_id": "33333333-3333-4333-8333-333333333333",
+        "format": "vllm",
+        "prompt_tokens": 900,
+        "generation_tokens": 300,
+        "cached_prompt_tokens": 300,
+        "spec_decode_draft_tokens": 60,
+        "spec_decode_accepted_tokens": 45,
+        "requests_running": 1,
+        "requests_waiting": 0,
+        "ttft_seconds_sum": 12.5,
+        "ttft_seconds_count": 5,
+        "prefill_seconds_sum": 3.0,
+        "decode_seconds_sum": 4.5
+      }
+    }
+  ]
+}

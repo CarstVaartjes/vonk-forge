@@ -116,7 +116,7 @@ class FakeClient:
 
     def _validate_request(self, method, path, payload, query):
         profile_path = re.fullmatch(
-            r"/api/profile/(\d+)(?:/(definition|preview|load|progress|endpoints))?",
+            r"/api/profile/(\d+)(?:/(definition|preview|load|delete|progress|endpoints))?",
             path,
         )
         application_path = re.fullmatch(
@@ -275,6 +275,9 @@ class FakeClient:
         if path.endswith("/preview"):
             assert payload is None
             assert installation_reconcile_path is not None or profile_path is not None
+        elif path.endswith("/delete"):
+            assert profile_path is not None
+            validate_control_document("FleetProfileDeleteRequest", payload)
         elif path.endswith("/load"):
             assert profile_path is not None
             validate_control_document("FleetProfileLoadRequest", payload)
@@ -2261,6 +2264,41 @@ def test_profile_cancel_targets_one_application_with_replayable_request_identity
             None,
         )
     ]
+
+
+def test_profile_delete_confirms_then_repeats_while_the_cancel_finishes() -> None:
+    path = "/api/profile/4/delete"
+    refused = FakeClient({})
+    status, _ = run(("--profile", "4", "profile", "delete", "--json"), refused)
+    assert status == 2
+    assert refused.calls == []
+
+    client = FakeClient(
+        {
+            ("POST", path): [
+                {"number": 4, "outcome": "cancelling"},
+                {"number": 4, "outcome": "deleted"},
+            ]
+        }
+    )
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "delete",
+            "--yes",
+            "--expected-revision",
+            "2",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0
+    assert result["outcome"] == "deleted"
+    assert [call[:3] for call in client.calls] == [
+        ("POST", path, {"expected_revision": 2})
+    ] * 2
 
 
 _CANCEL_ARGV = (

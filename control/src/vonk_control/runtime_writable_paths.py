@@ -13,6 +13,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from vonk_agent_protocol.telemetry import EngineFormat
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeWritablePath:
@@ -127,11 +129,18 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
         (("HF_HUB_DISABLE_TELEMETRY", "1"), ("SGLANG_DISABLE_USAGE_REPORT", "1")),
     ),
     "tensorrt-llm": EngineTelemetryContract("unsupported", None),
-    "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
+    # llama.cpp serves /metrics only when asked; the platform always asks and a
+    # recipe cannot override it. SGLang's switch is an argument (_metrics_args).
+    EngineFormat.LLAMA_CPP: EngineTelemetryContract(
+        EngineFormat.LLAMA_CPP, "/metrics", (("LLAMA_ARG_ENDPOINT_METRICS", "1"),)
+    ),
+    # ds4 serves no /metrics at its pinned revisions; the monitor reads nothing.
     "ds4": EngineTelemetryContract(
         "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
-    # TensorFold serves no /metrics; like TensorRT-LLM it is unsupported.
+    # TensorFold does serve /metrics (tensorfold: names, read by the agent's
+    # monitor). These adapter and path values have no reader and are part of the
+    # launch identity, so they stay as they are.
     "tensorfold": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
@@ -155,8 +164,8 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
 # The generic PyTorch server serves no engine-defined /metrics: the same contract
 # as ExLlamaV3, bound once rather than restated.
 _ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
-# gr8's front end serves vLLM-named /metrics, which the agent does not parse yet;
-# until it does, gr8 shares the generic server's contract.
+# gr8's front end serves vLLM-named /metrics and the agent parses it as the vllm
+# format; this adapter and path pair has no reader and stays as launch identity.
 _ENGINE_TELEMETRY["gr8"] = _ENGINE_TELEMETRY["exllamav3"]
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets

@@ -13,6 +13,7 @@ from vonk_control.harnesses.canonical import (
 )
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
 from vonk_control.runtime_writable_paths import (
@@ -378,6 +379,39 @@ def test_vllm_injects_platform_owned_environment(model: ModelDefinition) -> None
     assert projection.environment == environment("vllm", ())
     assert ("XDG_CACHE_HOME", "/outputs/cache") in projection.environment
     assert ("VLLM_CACHE_ROOT", "/outputs/cache/vllm") in projection.environment
+
+
+def test_sglang_metrics_flag_is_injected_once(model: ModelDefinition) -> None:
+    injected = _projection("sglang", model=model).command
+    assert injected.count("--enable-metrics") == 1
+
+    raw = _recipe("sglang")
+    raw["runtime"]["arguments"].append({"name": "enable-metrics", "value": True})
+    authored = _projection("sglang", recipe=raw, model=model).command
+    assert authored.count("--enable-metrics") == 1
+
+
+def test_sglang_creator_launcher_gets_no_metrics_flag(model: ModelDefinition) -> None:
+    # No --model-path: the creator's launcher builds the SGLang argv itself.
+    raw = _recipe("sglang")
+    raw["runtime"]["arguments"] = [
+        item for item in raw["runtime"]["arguments"] if item["name"] != "model-path"
+    ]
+    assert (
+        "--enable-metrics" not in _projection("sglang", recipe=raw, model=model).command
+    )
+
+
+def test_llama_cpp_metrics_switch_is_platform_owned(model: ModelDefinition) -> None:
+    projection = _projection("llama-cpp", model=model)
+    assert ("LLAMA_ARG_ENDPOINT_METRICS", "1") in projection.environment
+
+    raw = _recipe("llama-cpp")
+    raw["runtime"]["environment"] = [
+        {"name": "LLAMA_ARG_ENDPOINT_METRICS", "value": "0"}
+    ]
+    with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
+        _projection("llama-cpp", recipe=raw, model=model)
 
 
 @pytest.mark.parametrize("slug", BUILTINS)

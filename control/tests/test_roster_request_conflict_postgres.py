@@ -154,6 +154,7 @@ def test_roster_request_survives_repreview_and_worker_restart(
     with sessions() as session:
         selection = session.get_one(FleetProfileSelection, 1)
         assert selection.generation == selected.generation + 1
+        assert selection.application_id is not None
         reconciled = restarted.application(selection.application_id)
         assert len(session.scalars(select(FleetProfileApplication)).all()) == (
             2 if pending else 3

@@ -290,6 +290,40 @@ def _profile(
             args,
             validate=validate_observed_cancellation,
         )
+    if action == "delete":
+        _confirm_action(
+            args,
+            f"Delete saved profile {number}? Running workloads are not stopped.",
+        )
+        path = f"/api/profile/{number}/delete"
+        body = (
+            {}
+            if args.expected_revision is None
+            else {"expected_revision": args.expected_revision}
+        )
+
+        def delete_validated(observed: object) -> None:
+            try:
+                validate_control_document("FleetProfileDeletion", observed)
+            except ControlClientError:
+                raise ControlMalformedResponse(
+                    "profile deletion answer is unreadable"
+                ) from None
+
+        # A profile still loading is cancelled first; the same request is sent
+        # again until the cancel has ended and the profile is gone.
+        return _poll_path(
+            client,
+            path,
+            {},
+            args,
+            fetch_initial=True,
+            fetch=lambda remaining: client.request(
+                "POST", path, body, timeout_seconds=remaining, retry=False
+            ),
+            terminal=lambda observed: observed.get("outcome") != "cancelling",
+            validate=delete_validated,
+        )
     if action == "load":
         if args.dry_run:
             if args.yes or args.detach:
