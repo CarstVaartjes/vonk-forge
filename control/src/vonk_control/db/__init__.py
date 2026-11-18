@@ -69,6 +69,7 @@ from .connections import _DatabaseStartupContention as _DatabaseStartupContentio
 from .connections import _startup_retryable as _startup_retryable
 from .connections import build_engine as build_engine
 from .connections import postgresql_connect_args as postgresql_connect_args
+from .connections import require_durable_commit as require_durable_commit
 from .connections import (
     run_with_database_startup_retry as run_with_database_startup_retry,
 )

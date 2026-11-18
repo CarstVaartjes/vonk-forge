@@ -19,6 +19,7 @@ from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import ADMIN_ROLE, Actor
+from .db.connections import require_durable_commit
 from .models import LoginSession, User
 from .passwords import hash_password, verify_password
 
@@ -292,6 +293,7 @@ class BrowserAuthService:
         with self._sessions.begin() as db:
             row, _ = self._active_session(db, digest, now)
             row.revoked_at = now
+            require_durable_commit(db)
 
     def _active_session(
         self, db: Session, digest: str, now: datetime

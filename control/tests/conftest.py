@@ -296,8 +296,6 @@ class _PostgresServer:
                 "-c",
                 "fsync=off",
                 "-c",
-                "synchronous_commit=off",
-                "-c",
                 "full_page_writes=off",
             ],
             timeout=180,

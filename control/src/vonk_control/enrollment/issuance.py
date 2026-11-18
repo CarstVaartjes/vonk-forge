@@ -181,8 +181,14 @@ class EnrollmentCore:
             try:
                 with session.begin():
                     if not local:
+                        # One round trip. Certificate state is acknowledged to
+                        # agents, so its commit must survive a crash even
+                        # though Controller connections commit asynchronously.
                         session.execute(
-                            text("SELECT set_config('lock_timeout', :timeout, true)"),
+                            text(
+                                "SELECT set_config('lock_timeout', :timeout, true),"
+                                " set_config('synchronous_commit', 'on', true)"
+                            ),
                             {
                                 "timeout": f"{DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms}ms"
                             },

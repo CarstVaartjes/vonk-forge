@@ -223,6 +223,7 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
                         " -c statement_timeout=120000"
                         " -c transaction_timeout=300000"
                         " -c idle_in_transaction_session_timeout=60000"
+                        " -c synchronous_commit=off"
                     ),
                 },
             },
@@ -245,7 +246,7 @@ def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) ->
             rows = connection.exec_driver_sql(
                 "SELECT name, setting FROM pg_settings WHERE name IN ("
                 "'lock_timeout', 'statement_timeout', 'transaction_timeout',"
-                " 'idle_in_transaction_session_timeout')"
+                " 'idle_in_transaction_session_timeout', 'synchronous_commit')"
             ).all()
             settings = {str(row[0]): str(row[1]) for row in rows}
     finally:
@@ -256,6 +257,7 @@ def test_build_engine_sets_every_finite_budget_on_the_server(postgres_engine) ->
         "statement_timeout": "120000",
         "transaction_timeout": "300000",
         "idle_in_transaction_session_timeout": "60000",
+        "synchronous_commit": "off",
     }
 
 

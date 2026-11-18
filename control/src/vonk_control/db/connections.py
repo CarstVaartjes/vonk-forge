@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import (
     DBAPIError,
@@ -87,9 +87,24 @@ def postgresql_connect_args(*, component: str) -> dict[str, int | str]:
                 f"-c transaction_timeout={budgets.transaction_timeout_ms}",
                 "-c idle_in_transaction_session_timeout="
                 + f"{budgets.idle_in_transaction_timeout_ms}",
+                # Controller commits do not wait for the WAL fsync that model
+                # downloads on the shared pool stall; revocations opt back in
+                # with require_durable_commit.
+                "-c synchronous_commit=off",
             )
         ),
     }
+
+
+def require_durable_commit(session: Session) -> None:
+    """Make this transaction's commit wait for the WAL flush (PostgreSQL only).
+
+    Controller connections commit asynchronously; call this inside the
+    transaction of every write whose success is acknowledged as a security
+    state change (revocation, certificate state), so a crash cannot undo it.
+    """
+    if session.get_bind().dialect.name != "sqlite":
+        session.execute(text("SELECT set_config('synchronous_commit', 'on', true)"))
 
 
 def build_engine(database_url: str, *, component: str = "control") -> Engine:
