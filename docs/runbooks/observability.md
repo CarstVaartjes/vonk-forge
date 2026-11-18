@@ -67,7 +67,7 @@ the `vonk_engine_*` series the agents report: `decode_throughput` and
 prompt tokens in the window, not lifetime), `spec_decode_acceptance` and
 `preemption_rate`. Ratios divide rates summed by alias, so a quiet window is
 `None` ("No requests"), never 0. Only engines with verified metric names report
-today (TensorFold); the others show Not reported and keep their gateway
+today (TensorFold and vLLM, including gr8); the others show Not reported and keep their gateway
 estimates. The platform switches the engine metrics endpoint on for every
 recipe where the engine has it off by default: `LLAMA_ARG_ENDPOINT_METRICS=1`
 for llama.cpp (telemetry environment, platform-owned like `DO_NOT_TRACK`) and

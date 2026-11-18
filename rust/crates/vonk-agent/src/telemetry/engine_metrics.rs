@@ -143,17 +143,111 @@ async fn fetch(
     String::from_utf8(body).ok()
 }
 
-/// Recognise the format by the metric-name prefix and read the families whose
-/// names a verbatim capture proved. Other prefixes have no reading yet.
+/// One reading field a metric family feeds.
+#[derive(Clone, Copy)]
+enum Field {
+    PromptTokens,
+    GenerationTokens,
+    CachedPromptTokens,
+    Preemptions,
+    DraftTokens,
+    AcceptedTokens,
+    Running,
+    Waiting,
+    KvRatio,
+    TtftSum,
+    TtftCount,
+    TpotSum,
+    TpotCount,
+    PrefillSum,
+    PrefillCount,
+    DecodeSum,
+    DecodeCount,
+    E2eSum,
+    E2eCount,
+}
+
+/// A format's metric-name prefix and its name table (names after the prefix).
+struct Format {
+    format: EngineFormat,
+    prefix: &'static str,
+    names: &'static [(&'static str, Field)],
+}
+
+const TENSORFOLD: Format = Format {
+    format: EngineFormat::Tensorfold,
+    prefix: "tensorfold:",
+    names: &[
+        ("prompt_tokens_total", Field::PromptTokens),
+        ("generation_tokens_total", Field::GenerationTokens),
+        ("prompt_tokens_cached_total", Field::CachedPromptTokens),
+        ("preemptions_total", Field::Preemptions),
+        ("spec_decode_num_draft_tokens_total", Field::DraftTokens),
+        (
+            "spec_decode_num_accepted_tokens_total",
+            Field::AcceptedTokens,
+        ),
+        ("requests_running", Field::Running),
+        ("requests_waiting", Field::Waiting),
+        ("kv_cache_usage_ratio", Field::KvRatio),
+        ("time_to_first_token_seconds_sum", Field::TtftSum),
+        ("time_to_first_token_seconds_count", Field::TtftCount),
+        ("request_time_per_output_token_seconds_sum", Field::TpotSum),
+        (
+            "request_time_per_output_token_seconds_count",
+            Field::TpotCount,
+        ),
+        ("request_prefill_seconds_sum", Field::PrefillSum),
+        ("request_prefill_seconds_count", Field::PrefillCount),
+        ("request_decode_seconds_sum", Field::DecodeSum),
+        ("request_decode_seconds_count", Field::DecodeCount),
+        ("e2e_request_latency_seconds_sum", Field::E2eSum),
+        ("e2e_request_latency_seconds_count", Field::E2eCount),
+    ],
+};
+
+/// vLLM (v0.30.0 `PrometheusStatLogger`); gr8 serves the same names.
+const VLLM: Format = Format {
+    format: EngineFormat::Vllm,
+    prefix: "vllm:",
+    names: &[
+        ("prompt_tokens_total", Field::PromptTokens),
+        ("generation_tokens_total", Field::GenerationTokens),
+        ("prompt_tokens_cached_total", Field::CachedPromptTokens),
+        ("num_preemptions_total", Field::Preemptions),
+        ("spec_decode_num_draft_tokens_total", Field::DraftTokens),
+        (
+            "spec_decode_num_accepted_tokens_total",
+            Field::AcceptedTokens,
+        ),
+        ("num_requests_running", Field::Running),
+        ("num_requests_waiting", Field::Waiting),
+        ("kv_cache_usage_perc", Field::KvRatio),
+        ("time_to_first_token_seconds_sum", Field::TtftSum),
+        ("time_to_first_token_seconds_count", Field::TtftCount),
+        ("request_time_per_output_token_seconds_sum", Field::TpotSum),
+        (
+            "request_time_per_output_token_seconds_count",
+            Field::TpotCount,
+        ),
+        ("request_prefill_time_seconds_sum", Field::PrefillSum),
+        ("request_prefill_time_seconds_count", Field::PrefillCount),
+        ("request_decode_time_seconds_sum", Field::DecodeSum),
+        ("request_decode_time_seconds_count", Field::DecodeCount),
+        ("e2e_request_latency_seconds_sum", Field::E2eSum),
+        ("e2e_request_latency_seconds_count", Field::E2eCount),
+    ],
+};
+
+/// Recognise the format by the metric-name prefix and read the families its
+/// table names. Other prefixes have no reading yet.
 pub fn parse_engine(body: &str, run_id: Uuid) -> Option<EngineReading> {
-    let format = if body.lines().any(|line| line.starts_with("tensorfold:")) {
-        EngineFormat::Tensorfold
-    } else {
-        return None;
-    };
+    let format = [TENSORFOLD, VLLM]
+        .into_iter()
+        .find(|format| body.lines().any(|line| line.starts_with(format.prefix)))?;
     let mut reading = EngineReading {
         run_id,
-        format,
+        format: format.format,
         prompt_tokens: None,
         generation_tokens: None,
         cached_prompt_tokens: None,
@@ -178,7 +272,12 @@ pub fn parse_engine(body: &str, run_id: Uuid) -> Option<EngineReading> {
         let Some((name, value)) = split_sample(line) else {
             continue;
         };
-        add_tensorfold(&mut reading, name, value);
+        let Some(name) = name.strip_prefix(format.prefix) else {
+            continue;
+        };
+        if let Some((_, field)) = format.names.iter().find(|(known, _)| *known == name) {
+            add(&mut reading, *field, value);
+        }
     }
     Some(reading)
 }
@@ -196,16 +295,11 @@ fn split_sample(line: &str) -> Option<(&str, f64)> {
 
 /// Sum across label sets, as a counter or gauge of the whole engine; the KV
 /// ratio is per pool, so the fullest pool stands for the engine.
-fn add_tensorfold(reading: &mut EngineReading, name: &str, value: f64) {
-    let Some(name) = name.strip_prefix("tensorfold:") else {
-        return;
-    };
-    let count = || {
-        (0.0..=i64::MAX as f64)
-            .contains(&value)
-            .then_some(value as u64)
-    };
-    fn add(slot: &mut Option<u64>, value: Option<u64>) {
+fn add(reading: &mut EngineReading, field: Field, value: f64) {
+    let count = (0.0..=i64::MAX as f64)
+        .contains(&value)
+        .then_some(value as u64);
+    fn add_count(slot: &mut Option<u64>, value: Option<u64>) {
         if let Some(value) = value {
             *slot = Some(slot.unwrap_or(0).saturating_add(value));
         }
@@ -213,36 +307,30 @@ fn add_tensorfold(reading: &mut EngineReading, name: &str, value: f64) {
     fn add_seconds(slot: &mut Option<f64>, value: f64) {
         *slot = Some(slot.unwrap_or(0.0) + value);
     }
-    match name {
-        "prompt_tokens_total" => add(&mut reading.prompt_tokens, count()),
-        "generation_tokens_total" => add(&mut reading.generation_tokens, count()),
-        "prompt_tokens_cached_total" => add(&mut reading.cached_prompt_tokens, count()),
-        "preemptions_total" => add(&mut reading.preemptions, count()),
-        "spec_decode_num_draft_tokens_total" => add(&mut reading.spec_decode_draft_tokens, count()),
-        "spec_decode_num_accepted_tokens_total" => {
-            add(&mut reading.spec_decode_accepted_tokens, count())
-        }
-        "requests_running" => add(&mut reading.requests_running, count()),
-        "requests_waiting" => add(&mut reading.requests_waiting, count()),
-        "kv_cache_usage_ratio" if (0.0..=1.0).contains(&value) => {
+    match field {
+        Field::PromptTokens => add_count(&mut reading.prompt_tokens, count),
+        Field::GenerationTokens => add_count(&mut reading.generation_tokens, count),
+        Field::CachedPromptTokens => add_count(&mut reading.cached_prompt_tokens, count),
+        Field::Preemptions => add_count(&mut reading.preemptions, count),
+        Field::DraftTokens => add_count(&mut reading.spec_decode_draft_tokens, count),
+        Field::AcceptedTokens => add_count(&mut reading.spec_decode_accepted_tokens, count),
+        Field::Running => add_count(&mut reading.requests_running, count),
+        Field::Waiting => add_count(&mut reading.requests_waiting, count),
+        Field::KvRatio if (0.0..=1.0).contains(&value) => {
             reading.kv_cache_usage_ratio =
-                Some(reading.kv_cache_usage_ratio.unwrap_or(0.0).max(value))
+                Some(reading.kv_cache_usage_ratio.unwrap_or(0.0).max(value));
         }
-        "time_to_first_token_seconds_sum" => add_seconds(&mut reading.ttft_seconds_sum, value),
-        "time_to_first_token_seconds_count" => add(&mut reading.ttft_seconds_count, count()),
-        "request_time_per_output_token_seconds_sum" => {
-            add_seconds(&mut reading.time_per_output_token_seconds_sum, value)
-        }
-        "request_time_per_output_token_seconds_count" => {
-            add(&mut reading.time_per_output_token_seconds_count, count())
-        }
-        "request_prefill_seconds_sum" => add_seconds(&mut reading.prefill_seconds_sum, value),
-        "request_prefill_seconds_count" => add(&mut reading.prefill_seconds_count, count()),
-        "request_decode_seconds_sum" => add_seconds(&mut reading.decode_seconds_sum, value),
-        "request_decode_seconds_count" => add(&mut reading.decode_seconds_count, count()),
-        "e2e_request_latency_seconds_sum" => add_seconds(&mut reading.e2e_seconds_sum, value),
-        "e2e_request_latency_seconds_count" => add(&mut reading.e2e_seconds_count, count()),
-        _ => {}
+        Field::KvRatio => {}
+        Field::TtftSum => add_seconds(&mut reading.ttft_seconds_sum, value),
+        Field::TtftCount => add_count(&mut reading.ttft_seconds_count, count),
+        Field::TpotSum => add_seconds(&mut reading.time_per_output_token_seconds_sum, value),
+        Field::TpotCount => add_count(&mut reading.time_per_output_token_seconds_count, count),
+        Field::PrefillSum => add_seconds(&mut reading.prefill_seconds_sum, value),
+        Field::PrefillCount => add_count(&mut reading.prefill_seconds_count, count),
+        Field::DecodeSum => add_seconds(&mut reading.decode_seconds_sum, value),
+        Field::DecodeCount => add_count(&mut reading.decode_seconds_count, count),
+        Field::E2eSum => add_seconds(&mut reading.e2e_seconds_sum, value),
+        Field::E2eCount => add_count(&mut reading.e2e_seconds_count, count),
     }
 }
 
@@ -263,8 +351,27 @@ mod tests {
         let run_id = expected["run_id"].as_str().unwrap().parse().unwrap();
         let reading = parse_engine(body, run_id).unwrap();
         assert_eq!(serde_json::to_value(&reading).unwrap(), *expected);
-        // A body in another (not yet captured) format gives no reading.
-        assert!(parse_engine("vllm:num_requests_running 1\n", run_id).is_none());
+        // A body in a format without a name table gives no reading.
+        assert!(parse_engine("sglang:num_running_reqs 1\n", run_id).is_none());
+    }
+
+    #[test]
+    fn the_vllm_and_gr8_samples_give_the_vector_readings() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/engine-metrics-v1.json"
+        ))
+        .unwrap();
+        for sample in vector["samples"].as_array().unwrap() {
+            let expected = &sample["expected"];
+            let run_id = sample["run_id"].as_str().unwrap().parse().unwrap();
+            let reading = parse_engine(sample["metrics"].as_str().unwrap(), run_id).unwrap();
+            let mut actual = serde_json::to_value(&reading).unwrap();
+            actual
+                .as_object_mut()
+                .unwrap()
+                .retain(|_, value| !value.is_null());
+            assert_eq!(actual, *expected, "{}", sample["name"]);
+        }
     }
 
     async fn serve(body: Option<String>) -> u16 {
