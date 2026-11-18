@@ -181,6 +181,30 @@ def test_job_invocation_binds_the_accepted_reservation_instead_of_recipe_peak(
     assert compiled.runtime.placement.reserved_memory_bytes == reservation
 
 
+def test_a_model_cache_refusal_is_a_compilation_verdict(installation):
+    """A model set the catalog cannot resolve is a verdict, not a wait."""
+
+    from vonk_control.execution_plan_service import ControllerExecutionPlanService
+    from vonk_control.model_cache.errors import ModelCacheResolutionInvalid
+
+    sessions, revision, _installed, _plan = installation
+
+    class Cache:
+        def resolve_artifact_set(self, **_unused):
+            raise ModelCacheResolutionInvalid(
+                "model_cache.recipe_model_missing", "the recipe binds no model"
+            )
+
+    with sessions() as session, pytest.raises(ModelCacheResolutionInvalid):
+        ControllerExecutionPlanService(Cache()).compile_installation(
+            session,
+            revision=revision,
+            build=None,
+            mapping_nodes=[],
+            parameters={},
+        )
+
+
 def test_unconfirmed_model_cache_evidence_keeps_its_type(installation):
     """A model receipt that cannot be read now is an unknown outcome the
     admitting owner observes again, not a compilation verdict."""
