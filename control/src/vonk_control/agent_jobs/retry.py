@@ -342,7 +342,11 @@ def _renew_distribution_grant(
     session.execute(
         update(ArtifactDistributionAssignment)
         .where(*conditions)
-        .values(state="active", expires_at=now + _GRANT_LIFETIME, updated_at=now)
+        .values(
+            state=DistributionAssignmentState.ACTIVE,
+            expires_at=now + _GRANT_LIFETIME,
+            updated_at=now,
+        )
     )
 
 
