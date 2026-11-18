@@ -2341,6 +2341,26 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     )
 
 
+def test_agent_routes_answer_401_when_agent_services_are_absent() -> None:
+    """Fully forwarded agent headers still get 401 from the middleware.
+
+    The agent route installers rely on this: without services no ``/agent/*``
+    handler (other than bootstrap, enroll, renew/expired) can run.
+    """
+    app = create_app(
+        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), trusted_agent_proxy_auth=b"p" * 32
+    )
+    headers = {
+        "x-vonk-agent-proxy-auth": "p" * 32,
+        "x-vonk-agent-node": NODE_A,
+        "x-vonk-agent-serial": "serial-a",
+        "x-vonk-agent-fingerprint": "fingerprint",
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-source": "192.0.2.1",
+    }
+    assert TestClient(app).post("/agent/claim", headers=headers).status_code == 401
+
+
 def test_claim_requires_a_trusted_policy_bounded_source(agent_system) -> None:
     client, services, _, _ = agent_system
     missing = agent_headers(NODE_A, "serial-a")
