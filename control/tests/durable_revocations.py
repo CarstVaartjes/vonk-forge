@@ -16,6 +16,14 @@ KIND = (
 )
 FIELDS = frozenset({"revoked_at", "ca_revoked_at", "disabled_at", "password_verifier"})
 ENROLLMENT = "control/src/vonk_control/enrollment/"
+# Internal revocations nobody is told about; the next pass or the following
+# durable enrollment commit covers them, so they stay asynchronous.
+INTERNAL = frozenset(
+    {
+        "control/src/vonk_control/attempt_residues.py",
+        "control/src/vonk_control/local_ca.py",
+    }
+)
 
 
 def in_scope(path: str) -> bool:
@@ -23,6 +31,7 @@ def in_scope(path: str) -> bool:
         path.startswith("control/src/vonk_control/")
         and path.endswith(".py")
         and not path.startswith(ENROLLMENT)
+        and path not in INTERNAL
     )
 
 
@@ -57,7 +66,7 @@ def _writes(scope: ast.AST) -> list[int]:
             if isinstance(target, ast.Attribute) and target.attr in FIELDS
         )
         if isinstance(node, ast.Call):
-            lines.extend(node.lineno for kw in node.keywords if kw.arg in FIELDS)
+            lines.extend(kw.lineno for kw in node.keywords if kw.arg in FIELDS)
     return lines
 
 

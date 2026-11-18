@@ -2333,7 +2333,25 @@ def test_a_revocation_without_a_durable_commit_is_flagged() -> None:
     source = _REVOCATION_SOURCE.format(extra="")
     modes = ("durable-revocations",)
     assert check_source(_REVOCATION_PATH, source, {2}, modes=modes)
-    assert not check_source(_REVOCATION_PATH, source, set(), modes=modes)
+    # Only an added write line can fail the change.
+    assert not check_source(_REVOCATION_PATH, source, {1}, modes=modes)
+
+
+def test_an_added_keyword_in_a_multiline_update_is_flagged() -> None:
+    source = (
+        "def f(db):\n"
+        "    db.execute(\n"
+        "        update(Key)\n"
+        "        .where(Key.id == 1)\n"
+        "        .values(\n"
+        "            state='revoked',\n"
+        "            revoked_at=now,\n"
+        "        )\n"
+        "    )\n"
+    )
+    modes = ("durable-revocations",)
+    assert check_source(_REVOCATION_PATH, source, {7}, modes=modes)
+    assert not check_source(_REVOCATION_PATH, source, {3}, modes=modes)
 
 
 def test_a_revocation_with_a_durable_commit_or_in_enrollment_passes() -> None:

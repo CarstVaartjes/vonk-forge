@@ -143,7 +143,9 @@ Lock and ordering guards:
   refuses an added write of `revoked_at`, `ca_revoked_at`, `disabled_at` or
   `password_verifier` in `control/src` outside `enrollment/` unless the function
   calls `require_durable_commit` (Controller connections commit asynchronously;
-  enrollment gets durability from `EnrollmentCore._transaction`).
+  enrollment gets durability from `EnrollmentCore._transaction`). Internal
+  revocations nobody is told about (`attempt_residues.py`, `local_ca.py`) are
+  out of scope and stay asynchronous.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
   contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
