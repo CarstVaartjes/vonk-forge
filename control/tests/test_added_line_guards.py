@@ -4337,3 +4337,19 @@ def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
         {1, 2},
         modes=("newest-snapshot",),
     )
+
+
+_STATE_PATH = "control/src/vonk_control/fleet_projection/service.py"
+
+
+def test_a_quoted_state_word_on_a_state_attribute_is_flagged() -> None:
+    source = 'def f(row):\n    return row.state == "revoked"\n'
+    modes = ("state-literals",)
+    assert check_source(_STATE_PATH, source, {2}, modes=modes)
+    # Only an added line can fail the change.
+    assert not check_source(_STATE_PATH, source, {1}, modes=modes)
+
+
+def test_a_state_enum_member_is_not_flagged() -> None:
+    source = "def f(row):\n    return row.state == CertificateRecordState.ACTIVE\n"
+    assert not check_source(_STATE_PATH, source, {2}, modes=("state-literals",))

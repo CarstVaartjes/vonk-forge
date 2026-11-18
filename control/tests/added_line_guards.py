@@ -32,6 +32,7 @@ from . import (
     retention_head_digests,
     scratch_names,
     shell_trap_waits,
+    state_literals,
     sync_io_in_async,
     whole_collection_readers,
 )
@@ -128,6 +129,7 @@ MODES = (
     "head-digests",
     "set-first-requester",
     "printed-output",
+    "state-literals",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2599,6 +2601,15 @@ def check_source(
             (number, RANK_INSTALLED_KIND)
             for number, text in enumerate(source.splitlines(), 1)
             if RANK_INSTALLED_COPY.search(text)
+        )
+    if (
+        python
+        and not is_test
+        and "state-literals" in modes
+        and state_literals.in_scope(path)
+    ):
+        hits.extend(
+            (line, state_literals.KIND) for line in state_literals.scan_source(source)
         )
     if (
         python

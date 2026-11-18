@@ -146,6 +146,11 @@ Lock and ordering guards:
   enrollment gets durability from `EnrollmentCore._transaction`). Internal
   revocations nobody is told about (`attempt_residues.py`, `local_ca.py`) are
   out of scope and stay asynchronous.
+- `control/tests/state_literals.py` (added-line mode `state-literals`) refuses an
+  added `.state ==`, `!=` or `=` against a quoted state word in `control/src`.
+  The word list is derived from the `WireEnum` state machines in
+  `vonk_agent_protocol.state_machines`; use the enum member. Existing literals
+  are not counted; the guard only stops them growing.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
   contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
