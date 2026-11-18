@@ -348,7 +348,7 @@ def _model_mounts(
     return tuple(selected)
 
 
-_PLACED_BY_ENVIRONMENT = frozenset({"ds4", "gr8"})
+_PLACED_BY_ENVIRONMENT = frozenset({"diffusers", "ds4", "gr8"})
 
 
 def places_from_environment(engine: str) -> bool:

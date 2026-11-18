@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
+    RecipeJobRunRequest,
     RecipeJobRunResult,
     canonical_message,
     recipe_job_manifest_document,
@@ -33,6 +34,7 @@ from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import (
     _WORKLOAD_INTENT_OPERATIONS,
     AgentJobService,
+    controller_result_consumer,
     fencing_intent,
 )
 from vonk_control.artifact_blob_store import (
@@ -2687,3 +2689,122 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
         service.result_blob(job.id, output.name, output.sha256)[0].read_bytes()
         == content
     )
+
+
+def running_two_rank_artifact_service(tmp_path):
+    sessions, recipe_operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, recipe_transform=_configure_artifact_recipe
+    )
+    installed = installed_recipe(
+        recipe_operations,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="00000000-0000-4000-8000-000000000101",
+    )
+    run_plan = recipe_operations.preview_run(installed.owner_id, "image-job")
+    activated = recipe_operations.activate_job_run(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000102",
+    )
+    service = ArtifactJobService(
+        sessions,
+        recipe_operations=recipe_operations,
+        blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+        clock=lambda: NOW,
+    )
+    return sessions, recipe_operations, service, activated.owner_id, nodes
+
+
+def test_a_job_on_a_two_node_run_is_one_host_network_order_per_rank(tmp_path) -> None:
+    sessions, _operations, service, run_id, nodes = running_two_rank_artifact_service(
+        tmp_path
+    )
+    # Admission accepts the job on both nodes and reserves the rendezvous on the
+    # owner alone (main: "artifact job recipes currently require one node").
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        planned = parse_stored_run_plan(run.plan).nodes
+    assert [node.endpoint_owner for node in planned].count(True) == 1
+    assert {node.node_id for node in planned if node.rendezvous_port} == {
+        node.node_id for node in planned if node.endpoint_owner
+    }
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    with sessions() as session:
+        orders = session.scalars(
+            select(AgentOperation)
+            .where(AgentOperation.parent_job_id == submitted.operation_id)
+            .order_by(AgentOperation.node_id)
+        ).all()
+        assert [order.node_id for order in orders] == sorted(nodes)
+        plans = [
+            RecipeJobRunRequest.model_validate(order.payload).compiled_execution_plan
+            for order in orders
+        ]
+    placements = [plan.runtime.placement for plan in plans]
+    assert {plan.security.network_mode for plan in plans} == {"host"}
+    assert sorted(item.rank for item in placements) == [0, 1]
+    # Only the rendezvous owner's fabric address is the master's.
+    owners = [item for item in placements if item.local_address == item.master_address]
+    assert [item.rank for item in owners] == [0]
+    assert all(item.port is None for item in placements)
+
+
+def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -> None:
+    sessions, recipe_operations, service, run_id, nodes = (
+        running_two_rank_artifact_service(tmp_path)
+    )
+    clock = MutableClock(NOW)
+    agent_jobs = AgentJobService(sessions, clock=clock)
+    agent_jobs.set_result_consumer(
+        controller_result_consumer(
+            artifact_jobs=service.consume_agent_result,
+            recipe_operations=recipe_operations.consume_agent_result,
+        )
+    )
+    recipe_operations._agent_jobs = agent_jobs
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    claims = {
+        node_id: claim_agent(agent_jobs, node_id, f"serial-{index}")
+        for index, node_id in enumerate(nodes)
+    }
+    assert all(claim is not None for claim in claims.values())
+    with sessions() as session:
+        ranks = {
+            order.node_id: RecipeJobRunRequest.model_validate(
+                order.payload
+            ).compiled_execution_plan.runtime.placement.rank
+            for order in session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == submitted.operation_id
+                )
+            )
+        }
+    owner_node = next(node for node, rank in ranks.items() if rank == 0)
+    companion_node = next(node for node in nodes if node != owner_node)
+    companion = claims[companion_node]
+    assert companion is not None
+    agent_jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": str(companion.fence),
+                    "state": "failed",
+                    "result": {
+                        "kind": "failed",
+                        "code": "recipe_job_run_failed",
+                        "reason": "rank 1 exited",
+                    },
+                }
+            )
+        )
+    )
+    assert service.get(submitted.id).state == "failed"
+    owner = claims[owner_node]
+    assert owner is not None
+    # The surviving rank is told to stop: nothing waits on it.
+    directive = agent_jobs.heartbeat(owner, OperationProgress(phase="running"), 30)
+    assert directive.cancel_requested is True
