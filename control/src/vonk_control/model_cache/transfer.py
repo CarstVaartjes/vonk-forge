@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 import httpx2
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import OperationMemberProgress
+from vonk_agent_protocol import LifecycleState, OperationMemberProgress
 
 from ..categorized_faults import OperationInterrupted
 from ..model_cache_contract import (
@@ -20,6 +20,7 @@ from ..model_cache_contract import (
     ModelCacheOperationProgress,
     ModelCacheRepairCheckpoint,
     ModelCacheRepairPayload,
+    ModelCacheSetState,
     ModelCacheTransfer,
     ModelCacheTransferArtifact,
 )
@@ -272,7 +273,7 @@ class TransferMixin:
                 manifest=manifest.document(),
                 expected_bytes=manifest.expected_bytes,
                 verified_bytes=0,
-                state="incomplete",
+                state=ModelCacheSetState.INCOMPLETE,
                 protected=False,
                 protected_reasons=[],
                 created_at=now,
@@ -447,7 +448,7 @@ class TransferMixin:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
                     cache._remember_verified_models(session, row, manifest)
-                    row.state = "cached"
+                    row.state = ModelCacheSetState.CACHED
                     row.verified_bytes = manifest.expected_bytes
                     row.verified_at = cache._clock()
                     row.updated_at = cache._clock()
@@ -546,7 +547,9 @@ class TransferMixin:
         with cache._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             assert operation is not None
-            if operation.state == "cancelled" or _operation_cancellation(operation):
+            if operation.state == LifecycleState.CANCELLED or _operation_cancellation(
+                operation
+            ):
                 cache._transfer_stop(operation_id).set()
                 raise OperationInterrupted(
                     "model download cancellation was accepted; partial files preserved"

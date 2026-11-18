@@ -15,6 +15,7 @@ from .. import model_cache_states
 from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
+    ModelCacheSetState,
     ModelCacheTransfer,
 )
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
@@ -359,7 +360,10 @@ class StorageMixin:
         if manifest is None:
             return  # unknown set: left as it is until it is re-derived
         row.verified_bytes = cache._verified_bytes(set_digest)
-        if row.state not in {"downloading", "verifying"}:
+        if row.state not in {
+            ModelCacheSetState.DOWNLOADING,
+            ModelCacheSetState.VERIFYING,
+        }:
             row.state = (
                 "cached"
                 if cache._manifest_coverage_complete(manifest)

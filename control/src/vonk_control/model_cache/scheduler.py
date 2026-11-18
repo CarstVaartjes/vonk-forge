@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     Disposition,
     InvalidRequestReason,
+    LifecycleState,
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.http_failure import TransientReason
@@ -27,6 +28,7 @@ from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
+    ModelCacheSetState,
     ModelCacheTransfer,
 )
 from ..models import ModelCacheOperation, ModelCacheSet
@@ -415,7 +417,7 @@ class SchedulerMixin:
                 # An unreadable document carries no readable cancel intent: the
                 # transfer keeps its lease and the claim loop reconciles the row.
                 operation_payload = cache._payload_or_none(operation)
-                if operation.state == "cancelled" or (
+                if operation.state == LifecycleState.CANCELLED or (
                     operation_payload is not None
                     and operation_payload.cancellation is not None
                 ):
@@ -470,7 +472,7 @@ class SchedulerMixin:
                     row = session.get(ModelCacheSet, set_digest)
                     if row is not None:
                         cache._remember_verified_models(session, row, manifest)
-                        row.state = "cached"
+                        row.state = ModelCacheSetState.CACHED
                         row.verified_bytes = manifest.expected_bytes
                         row.verified_at = now
                         row.updated_at = now

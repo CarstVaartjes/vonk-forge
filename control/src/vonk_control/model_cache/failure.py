@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
+    LifecycleState,
     ModelCacheCode,
     SecurityRefusalReason,
     WaitReason,
@@ -109,7 +110,7 @@ class FailureMixin:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
             )
-            if operation is not None and operation.state == "cancelled":
+            if operation is not None and operation.state == LifecycleState.CANCELLED:
                 return
             if transfer_attempt is not None and (
                 source_status in _SOURCE_GONE_STATUSES or digest_mismatch
@@ -239,7 +240,7 @@ class FailureMixin:
                     if payload_before is None
                     else payload_before.retry.operator_retries
                 )
-                if operation.state == "failed":
+                if operation.state == LifecycleState.FAILED:
                     # A recheck that finds the failure transient: withdraw the
                     # end, and let the core decide again (retry, with backoff).
                     cache._lifecycle.reopen(operation, now)

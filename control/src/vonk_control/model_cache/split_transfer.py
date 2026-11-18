@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
 from vonk_agent_protocol import (
+    LifecycleState,
     ModelCacheCode,
     ModelFileState,
     OperatorActionName,
@@ -270,7 +271,7 @@ class SplitTransferMixin:
             operation = session.get(ModelCacheOperation, operation_id)
             return bool(
                 operation is not None
-                and operation.state != "cancelled"
+                and operation.state != LifecycleState.CANCELLED
                 and _operation_cancellation(operation) is not None
             )
 

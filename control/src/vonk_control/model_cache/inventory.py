@@ -17,7 +17,7 @@ from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..categorized_errors import InvalidValue
 from ..machine_states import INSTALLATION_ACTIVE
-from ..model_cache_contract import CacheManifest
+from ..model_cache_contract import CacheManifest, ModelCacheSetState
 from ..models import (
     CatalogDocumentRevision,
     ModelCacheSet,
@@ -179,7 +179,10 @@ class InventoryMixin:
                         continue  # unknown set: skipped, the rest reconcile
                     verified = cache._verified_bytes(row.artifact_set_sha256)
                     row.verified_bytes = verified
-                    if row.state not in {"downloading", "verifying"}:
+                    if row.state not in {
+                        ModelCacheSetState.DOWNLOADING,
+                        ModelCacheSetState.VERIFYING,
+                    }:
                         row.state = (
                             "cached"
                             if cache._manifest_coverage_complete(manifest)

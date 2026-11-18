@@ -311,7 +311,8 @@ class OperationsMixin:
             kind=operation.kind,
             state=(
                 LifecycleState.OBSERVING.value
-                if cancellation is not None and operation.state != "cancelled"
+                if cancellation is not None
+                and operation.state != LifecycleState.CANCELLED
                 else model_cache_states.adopted(operation.state)
             ),
             attempt=int(operation.attempt),
