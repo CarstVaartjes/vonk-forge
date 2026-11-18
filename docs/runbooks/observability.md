@@ -177,16 +177,18 @@ persisted state; never retry a revoked or stale plan.
 ## History retention stalled
 
 `vonk_history_rows_past_grace` counts ended coordination history older than the
-24-hour grace that no live reference holds, directly from PostgreSQL,
-independently of the retention worker. Held rows (a selected profile
-application, an owned route publication, a reserved job) are not counted, so a
-flat count means rows the collector should remove but is not. Rows kept only by
-evidence checks in the worker are still counted. It never authorizes deletion.
-`HistoryRetentionStalled` warns when a nonempty backlog has no net decline
-against six hours earlier, continuously for six hours (earliest firing after
-twelve hours of observations). The hold exceeds Prometheus's five-minute
-lookback. A backlog that keeps shrinking, even over many hours, stays quiet.
-Growing history that collection cannot keep up with also warns.
+24-hour grace that the collector's SQL selection admits, directly from
+PostgreSQL, independently of the retention worker. Rows kept by keyed holds (a
+selected profile application, an owned route publication, a reserved job) are
+not counted. Rows kept by live plan references (installation, run, application
+and assignment plans, the selected application's retry root) or by worker
+evidence checks are still counted, and can stay for a long time as a constant
+floor. It never authorizes deletion.
+`HistoryRetentionStalled` warns when the count is strictly higher than six
+hours earlier, continuously for six hours (earliest firing after twelve hours
+of observations). The hold exceeds Prometheus's five-minute lookback. A flat
+floor or a shrinking backlog stays quiet; history growing faster than
+collection removes it warns.
 
 Inspect worker events `history.references_unavailable`, `history.scan_deferred`,
 `history.row_deferred`, and `history.pruned`. An unreadable owner is reported

@@ -175,7 +175,7 @@ def test_history_retention_alert_requires_sustained_failure_to_drain(
 
     tests = [
         _test(
-            backlog("100x800 0x400"),
+            backlog("100+1x800 0x400"),
             [
                 ("6h", name, []),
                 ("11h59m", name, []),
@@ -189,6 +189,11 @@ def test_history_retention_alert_requires_sustained_failure_to_drain(
             backlog("100x299 90x299 80x299 70x299"),
             [("12h", name, []), ("19h", name, [])],
         ),
+        # A constant floor of legitimately held rows never fires.
+        _test(
+            backlog("100x1200"),
+            [("12h", name, []), ("19h", name, [])],
+        ),
         _test(
             backlog("10+1x800"),
             [("12h", name, [_alert(name)])],
@@ -199,7 +204,7 @@ def test_history_retention_alert_requires_sustained_failure_to_drain(
             [
                 {
                     "series": f'{metric}{{job="vonk-control",instance="old"}}',
-                    "values": "100x719",
+                    "values": "100+1x719",
                 },
                 {
                     "series": f'{metric}{{job="vonk-control",instance="new"}}',

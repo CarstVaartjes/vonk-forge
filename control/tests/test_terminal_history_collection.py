@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, ReservationState
 from vonk_control import terminal_history_collection
 from vonk_control.catalog_revision_collection import INTERVAL
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
@@ -502,17 +502,19 @@ def test_history_backlog_metric_excludes_rows_a_reservation_holds(
 ) -> None:
     now = datetime.now(UTC)
     job = _job(now - timedelta(days=2))
+    node_id = "spk_" + uuid.uuid4().hex
     with history_sessions.begin() as session:
-        session.add(job)
+        session.add_all((job, AgentNode(node_id=node_id, state="active")))
+        session.flush()
         session.add(
             ResourceReservation(
-                node_id=str(uuid.uuid4()),
+                node_id=node_id,
                 kind="unified-memory",
                 resource_key="unified-memory",
                 amount_bytes=1,
                 owner_kind="job",
                 owner_id=job.id,
-                state="active",
+                state=ReservationState.ACTIVE.value,
                 plan_digest="a" * 64,
                 created_at=now,
             )
@@ -520,7 +522,9 @@ def test_history_backlog_metric_excludes_rows_a_reservation_holds(
     with history_sessions() as session:
         assert history_rows_past_grace(session, now) == 0
     with history_sessions.begin() as session:
-        session.execute(update(ResourceReservation).values(state="released"))
+        session.execute(
+            update(ResourceReservation).values(state=ReservationState.RELEASED.value)
+        )
     with history_sessions() as session:
         assert history_rows_past_grace(session, now) == 1
 

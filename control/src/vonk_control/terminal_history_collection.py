@@ -632,9 +632,11 @@ def _removable_publications(cutoff: datetime) -> Select[Any]:
 def history_rows_past_grace(session: Session, now: datetime) -> int:
     """Count history the collector may remove, independently of its health.
 
-    Uses the collector's own selection, so rows a live reference holds are not
-    counted: a flat count means removable rows the collector is not removing.
-    Rows kept only by Python ``keep_row`` checks are still counted. This is an
+    Counts the rows the collector's SQL selection admits, so rows its keyed
+    ``held`` checks keep are not counted. Rows kept by ``_protected_tokens``
+    (live installation, run, application and assignment plans, the selected
+    application's retry root) or by ``keep_row`` evidence checks are still
+    counted. This is an
     observation, never an admission decision or permission to remove anything.
     """
     sources = [
