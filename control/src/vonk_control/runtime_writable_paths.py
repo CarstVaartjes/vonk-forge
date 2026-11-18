@@ -213,11 +213,15 @@ for _slug in (
     "pytorch-pipeline",
 ):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
-for _slug in ("llama-cpp", "gr8"):
-    _ENGINE_ENVIRONMENT[_slug] = {
-        _name: _ENGINE_ENVIRONMENT["sglang"][_name]
-        for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
+_HOME_NAMES = ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
+for _name in _HOME_NAMES:
+    _ENGINE_ENVIRONMENT["llama-cpp"] = {
+        **_ENGINE_ENVIRONMENT.get("llama-cpp", {}),
+        _name: dict(_ENGINE_ENVIRONMENT["sglang"])[_name],
     }
+_ENGINE_ENVIRONMENT["gr8"] = {
+    _name: _ENGINE_ENVIRONMENT["ds4"][_name] for _name in _HOME_NAMES
+}
 
 _OPTIONAL_PATH_NAMES = frozenset(
     {

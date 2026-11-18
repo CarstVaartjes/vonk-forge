@@ -348,23 +348,17 @@ def _model_mounts(
     return tuple(selected)
 
 
-# Distributed engines whose arguments the compiler adds itself (see
-# `_distributed_args`); every other distributed engine takes its placement from
-# the platform's VONK_* environment through its own wrapper.
-_RANK_ARGUMENT_ENGINES = frozenset({"sglang", "vllm", "tensorfold"})
+_PLACED_BY_ENVIRONMENT = frozenset({"ds4", "gr8"})
 
 
 def places_from_environment(engine: str) -> bool:
     """Whether the engine's wrapper reads the platform's VONK_* placement.
 
     The compiler adds no rank arguments for such an engine, and its start carries
-    every rank's fabric address.
+    every rank's fabric address. The one owner of the answer.
     """
 
-    return (
-        engine not in _RANK_ARGUMENT_ENGINES
-        and "distributed" in canonical_harness(engine).topology_modes
-    )
+    return engine in _PLACED_BY_ENVIRONMENT
 
 
 def _distributed_args(
