@@ -14,6 +14,7 @@ import copy
 import itertools
 import re
 import uuid
+from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from vonk_control.catalog_revision_contract import (
 from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
+from vonk_control.model_cache import model_artifact_cache
 from vonk_control.models import (
     AgentNode,
     CatalogDocument,
@@ -642,6 +644,42 @@ def test_cache_resolution_reads_the_shared_catalog_parse_without_copying(
 
     assert [item.recipe.cached for item in resolutions] == [True, True]
     assert copies == []
+
+
+def _count_artifact_builds(service, monkeypatch) -> list[str]:
+    """Start from an empty derived-spec cache and record every spec built."""
+
+    monkeypatch.setattr(model_artifact_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(model_artifact_cache, "_retained", 0)
+    built: list[str] = []
+    derive = service._artifact_from_catalog
+
+    def record(value, **kwargs):
+        built.append(value.id)
+        return derive(value, **kwargs)
+
+    monkeypatch.setattr(service, "_artifact_from_catalog", record)
+    return built
+
+
+@pytest.mark.parametrize(("models", "expected"), [(1, 1), (2, 2)])
+def test_a_model_content_identity_builds_its_artifact_specs_once(
+    cache,  # noqa: F811
+    monkeypatch,
+    models,
+    expected,
+):
+    """Each model digest derives its specs once; a hit equals a rebuild."""
+
+    service, sessions = cache
+    world = _World(sessions, count=models)
+    built = _count_artifact_builds(service, monkeypatch)
+
+    first = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+    second = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+
+    assert len(built) == expected
+    assert second == first
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(
