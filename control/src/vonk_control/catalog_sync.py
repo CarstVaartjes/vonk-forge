@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
-    LifecycleState,
     UnknownError,
     UnknownOutcomeError,
     WaitReason,
@@ -57,6 +56,7 @@ from .recipe_library_types import (
 )
 from .recipe_packages.contracts import has_newer_major_note
 from .source_bundles import SourceBundleUnknown
+from .stored_states import LibrarySyncRunState
 from .wait_contract import QueueWait
 
 _LOGGER = logging.getLogger(__name__)
@@ -182,7 +182,7 @@ class ManagedRecipeCatalogSyncService:
         run = RecipeLibrarySyncRun(
             request_key=request_key,
             trigger=trigger,
-            state=LifecycleState.RUNNING,
+            state=LibrarySyncRunState.RUNNING.value,
             active_slot="managed-recipes",
             repository=self._repository,
             expected_commit=None,
@@ -209,7 +209,7 @@ class ManagedRecipeCatalogSyncService:
             with admitting(), self._sessions.begin() as session:
                 active = session.scalar(
                     select(RecipeLibrarySyncRun).where(
-                        RecipeLibrarySyncRun.state == LifecycleState.RUNNING
+                        RecipeLibrarySyncRun.state == LibrarySyncRunState.RUNNING
                     )
                 )
                 if active is not None and self._expired(session, active):
@@ -295,7 +295,7 @@ class ManagedRecipeCatalogSyncService:
     def _expire(self, run: RecipeLibrarySyncRun) -> None:
         failed = json.loads(canonical_message(_result(run.result)))
         failed["state"] = CatalogSyncState.FAILED.value
-        run.state = "failed"
+        run.state = LibrarySyncRunState.FAILED.value
         run.active_slot = None
         run.result = json.loads(canonical_message(_result(failed)))
         run.error_code = CatalogSyncCode.LEASE_EXPIRED
@@ -319,7 +319,7 @@ class ManagedRecipeCatalogSyncService:
                 newest.where(
                     ~and_(
                         RecipeLibrarySyncRun.trigger == "automatic",
-                        RecipeLibrarySyncRun.state == "failed",
+                        RecipeLibrarySyncRun.state == LibrarySyncRunState.FAILED,
                         RecipeLibrarySyncRun.observed_commit.is_(None),
                     )
                 )
@@ -328,7 +328,7 @@ class ManagedRecipeCatalogSyncService:
                 return None
             failure = session.scalar(
                 select(RecipeLibrarySyncRun)
-                .where(RecipeLibrarySyncRun.state == "failed")
+                .where(RecipeLibrarySyncRun.state == LibrarySyncRunState.FAILED)
                 .order_by(
                     RecipeLibrarySyncRun.completed_at.desc(),
                     RecipeLibrarySyncRun.id.desc(),
@@ -337,7 +337,7 @@ class ManagedRecipeCatalogSyncService:
             )
             succeeded = session.scalar(
                 select(RecipeLibrarySyncRun.completed_at)
-                .where(RecipeLibrarySyncRun.state == "succeeded")
+                .where(RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED)
                 .order_by(RecipeLibrarySyncRun.completed_at.desc())
                 .limit(1)
             )
@@ -462,7 +462,7 @@ class ManagedRecipeCatalogSyncService:
                 return False
             running = session.scalar(
                 select(RecipeLibrarySyncRun).where(
-                    RecipeLibrarySyncRun.state == LifecycleState.RUNNING
+                    RecipeLibrarySyncRun.state == LibrarySyncRunState.RUNNING
                 )
             )
             if running is not None and not self._expired(session, running):
@@ -547,7 +547,7 @@ class ManagedRecipeCatalogSyncService:
             current = session.scalar(
                 select(RecipeLibrarySyncRun)
                 .where(
-                    RecipeLibrarySyncRun.state == "succeeded",
+                    RecipeLibrarySyncRun.state == LibrarySyncRunState.SUCCEEDED,
                     RecipeLibrarySyncRun.observed_commit == snapshot.commit,
                 )
                 .order_by(RecipeLibrarySyncRun.completed_at.desc())
@@ -661,7 +661,7 @@ class ManagedRecipeCatalogSyncService:
             )
             if (
                 latest is not None
-                and latest.state == "failed"
+                and latest.state == LibrarySyncRunState.FAILED
                 and latest.trigger == "automatic"
                 and latest.observed_commit is None
                 and (latest.error_code, latest.error_detail) == (code, detail)
@@ -677,7 +677,7 @@ class ManagedRecipeCatalogSyncService:
                 RecipeLibrarySyncRun(
                     request_key=str(uuid.uuid4()),
                     trigger="automatic",
-                    state="failed",
+                    state=LibrarySyncRunState.FAILED.value,
                     active_slot=None,
                     repository=self._repository,
                     expected_commit=None,
@@ -990,7 +990,7 @@ class ManagedRecipeCatalogSyncService:
 
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
-            if run is None or run.state != "running":
+            if run is None or run.state != LibrarySyncRunState.RUNNING:
                 return False
             run.heartbeat_at = self._clock()
             run.observed_commit = snapshot.commit
@@ -1009,7 +1009,7 @@ class ManagedRecipeCatalogSyncService:
 
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
-            if run is None or run.state != "running":
+            if run is None or run.state != LibrarySyncRunState.RUNNING:
                 return False
             parsed = result
             run.heartbeat_at = self._clock()
@@ -1026,9 +1026,9 @@ class ManagedRecipeCatalogSyncService:
 
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
-            if run is None or run.state != "running":
+            if run is None or run.state != LibrarySyncRunState.RUNNING:
                 return
-            run.state = "succeeded"
+            run.state = LibrarySyncRunState.SUCCEEDED.value
             run.active_slot = None
             run.result = json.loads(canonical_message(result))
             run.missing_count = 0
@@ -1037,7 +1037,7 @@ class ManagedRecipeCatalogSyncService:
     def _fail(self, run_id: str, code: str, detail: str) -> None:
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
-            if run is None or run.state != "running":
+            if run is None or run.state != LibrarySyncRunState.RUNNING:
                 return
             failed = _result(run.result)
             if len(failed.problems) < _MAX_RESULT_ITEMS:
@@ -1047,7 +1047,7 @@ class ManagedRecipeCatalogSyncService:
                     )
                 )
             failed.state = CatalogSyncState.FAILED
-            run.state = "failed"
+            run.state = LibrarySyncRunState.FAILED.value
             run.active_slot = None
             run.result = json.loads(canonical_message(failed))
             run.error_code = code[:128]
@@ -1237,7 +1237,7 @@ def _view(row: RecipeLibrarySyncRun | None) -> CatalogSyncView:
         request_key=row.request_key,
         trigger=_TRIGGER.validate_python(row.trigger),
         state=CatalogSyncState.SYNCING
-        if row.state == LifecycleState.RUNNING
+        if row.state == LibrarySyncRunState.RUNNING
         else result.state,
         repository=row.repository,
         expected_commit=row.expected_commit,

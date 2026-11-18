@@ -13,6 +13,7 @@ import vonk_control.catalog_service as catalog_service_module
 import vonk_control.catalog_sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
@@ -213,6 +214,21 @@ def _sync(sessions, service, reader) -> ManagedRecipeCatalogSyncService:
         reader=reader,
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
     )
+
+
+def test_sync_run_state_admits_only_its_enum_words(tmp_path: Path) -> None:
+    sessions, service, reader, _item = _fixture(tmp_path)
+    result = _sync(sessions, service, reader).sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        run = session.get(RecipeLibrarySyncRun, result.id)
+        assert run is not None
+        run.state = "waiting"
 
 
 def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -> None:
