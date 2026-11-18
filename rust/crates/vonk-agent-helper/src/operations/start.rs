@@ -52,19 +52,12 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
 }
 
 /// Every workload runs with unlimited memlock (owner 2026-11-18): Docker's
-/// default 8 MiB breaks engines that pin memory. The signed argv names it
-/// only on host-network runs, so this rule is helper-owned and outside the
-/// run identity digest: a run started before it is still adopted as is, and
-/// agent and helper upgrade in either order.
-fn launch_unlimited_memlock(arguments: &[String], image_index: usize) -> Vec<String> {
-    let named = arguments[..image_index]
-        .windows(2)
-        .any(|pair| pair[0] == "--ulimit" && pair[1] == "memlock=-1:-1");
-    if named {
-        return Vec::new();
-    }
-    vec!["--ulimit".to_owned(), "memlock=-1:-1".to_owned()]
-}
+/// default 8 MiB breaks engines that pin memory. Host-network runs also name
+/// it in the signed argv; Docker takes the last repeated value. For every
+/// other workload the rule is helper-owned and outside the run identity
+/// digest: a run started before it is still adopted as is, and agent and
+/// helper upgrade in either order.
+const WORKLOAD_MEMLOCK: [&str; 2] = ["--ulimit", vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT];
 
 /// The exit a job reports when the helper itself ended it -- at its deadline or
 /// on the Controller's cancellation (the `timeout(1)` convention). Never a
@@ -250,7 +243,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // Helper-owned launch policy also covers accepted images built before
         // passwd adaptation. Keep files durable for delayed Docker starts.
         let identity_mounts = self.runtime_identity_mounts(validated.uid, validated.gid)?;
-        let mut launch_options = launch_unlimited_memlock(&compiled, image_index);
+        let mut launch_options: Vec<String> = WORKLOAD_MEMLOCK.map(str::to_owned).into();
         launch_options.extend([
             WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),

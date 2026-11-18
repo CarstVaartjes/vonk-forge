@@ -129,7 +129,7 @@ impl CompiledOciInvocation {
                 "--device".to_owned(),
                 "/dev/infiniband:/dev/infiniband".to_owned(),
                 "--ulimit".to_owned(),
-                "memlock=-1:-1".to_owned(),
+                crate::WORKLOAD_MEMLOCK_ULIMIT.to_owned(),
                 "--ulimit".to_owned(),
                 "stack=67108864:67108864".to_owned(),
             ]);

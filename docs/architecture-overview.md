@@ -572,10 +572,11 @@ The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
 user, runtime-interface label, resource limits, mounts, ports, and optional
 `--device nvidia.com/gpu=all` request. Single-node endpoints use bridge mode.
 Every workload, on any network, runs with unlimited memlock
-(`--ulimit memlock=-1:-1`): the helper adds it at launch, outside the signed
-argv and the run identity digest, so runs started earlier are adopted as is.
+(`--ulimit memlock=-1:-1`): the helper adds it at launch for workloads whose
+signed argv does not carry it (today every non-host workload), outside the run
+identity digest, so runs started earlier are adopted as is.
 A signed distributed serving placement uses one native fabric shape: host
-networking, the exact `/dev/infiniband` device mount, a fixed stack limit,
+networking, the exact `/dev/infiniband` device mount, fixed memlock/stack limits,
 private IPC, and bounded shared memory. It has no Docker port publications, so
 the engine listens on the host: the Controller admits such a run on the one host
 endpoint port the Spark firewall authorises (8888), whatever port the recipe
