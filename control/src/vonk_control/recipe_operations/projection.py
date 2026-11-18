@@ -91,6 +91,7 @@ from ..recipe_progress import (
     _stored_phases as _stored_phases,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from ..stored_states import RecipeBuildState
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid
@@ -208,9 +209,9 @@ class ProjectionMixin:
                     # attempt fails; the availability operation itself reports
                     # the failed attempt and remains retryable.
                     build.state = (
-                        LifecycleState.SUCCEEDED.value
+                        RecipeBuildState.SUCCEEDED.value
                         if force_rebuild
-                        else LifecycleState.FAILED.value
+                        else RecipeBuildState.FAILED.value
                     )
                     build.error = (
                         unproven[node_id]

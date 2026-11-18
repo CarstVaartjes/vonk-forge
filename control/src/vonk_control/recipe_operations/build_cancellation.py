@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     LifecycleState,
-    ProgressPhase,
     RecipeBuildCleanupRequest,
     RecipeBuildCode,
     WaitReason,
@@ -54,6 +53,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
+from ..stored_states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
 from .observation_helpers import _aware
@@ -194,11 +194,11 @@ class BuildCancellationMixin:
             cancellation = request_build_cancellation(
                 job, actor=actor, request_id=request_id, reason=reason, now=_aware(now)
             )
-            if build.state == ProgressPhase.BUILDING.value:
+            if build.state == RecipeBuildState.BUILDING.value:
                 build.state = (
-                    LifecycleState.SUCCEEDED.value
+                    RecipeBuildState.SUCCEEDED.value
                     if _parent_force_rebuild(job) is True
-                    else LifecycleState.FAILED.value
+                    else RecipeBuildState.FAILED.value
                 )
             build.error = cancellation.reason
             build.updated_at = now
@@ -312,11 +312,11 @@ class BuildCancellationMixin:
             )
             # As with a failed replacement, cancellation keeps the last verified
             # image. Explicit cache removal independently invalidates its bytes.
-            if build.state == ProgressPhase.BUILDING.value:
+            if build.state == RecipeBuildState.BUILDING.value:
                 build.state = (
-                    LifecycleState.SUCCEEDED.value
+                    RecipeBuildState.SUCCEEDED.value
                     if _parent_force_rebuild(job) is True
-                    else LifecycleState.FAILED.value
+                    else RecipeBuildState.FAILED.value
                 )
             build.error = cancellation.reason
             build.updated_at = now

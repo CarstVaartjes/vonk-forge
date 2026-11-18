@@ -40,6 +40,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
+from ..stored_states import RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
@@ -171,7 +172,7 @@ def persist_plan_in_session(
             .where(
                 RecipeBuild.builder_node_id == plan.builder_node_id,
                 RecipeBuild.build_input_sha256 == plan.build_input_sha256,
-                RecipeBuild.state == "succeeded",
+                RecipeBuild.state == RecipeBuildState.SUCCEEDED,
             )
             .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         )
@@ -191,7 +192,7 @@ def persist_plan_in_session(
             builder_node_id=plan.builder_node_id,
             source_bundle_sha256=plan.source_bundle_sha256,
             build_input_sha256=plan.build_input_sha256,
-            state="planned",
+            state=RecipeBuildState.PLANNED.value,
             policy_report=copy.deepcopy(policy_document),
             plan=copy.deepcopy(payload),
             created_at=now,
@@ -217,7 +218,7 @@ def persist_plan_in_session(
             ):
                 _reopen_build_attempt(existing, now=now)
         else:
-            if existing.state == "failed":
+            if existing.state == RecipeBuildState.FAILED:
                 # A cancelled or failed attempt must not block the rebuild
                 # the operator asked for.  The stored envelope is still
                 # exact, so keep it and return the row to a clean planned
@@ -314,7 +315,7 @@ def _record_success_once(
             )
         # The current accepted input binds the completion. An old failed or
         # succeeded label is not an independent content-verification authority.
-        build.state = LifecycleState.SUCCEEDED.value
+        build.state = RecipeBuildState.SUCCEEDED.value
         build.image_digest = image_digest
         build.oci_layout_sha256 = oci_layout_sha256
         build.image_bytes = image_bytes

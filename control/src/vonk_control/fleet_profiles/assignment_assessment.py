@@ -44,6 +44,7 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_operations import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
+from ..stored_states import RecipeBuildState
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (
@@ -119,7 +120,7 @@ class FleetProfileService:
                     catalog_reference_membership(
                         RecipeBuild.recipe_revision_id, revisions
                     ),
-                    RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+                    RecipeBuild.state == RecipeBuildState.SUCCEEDED.value,
                 )
                 .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
             )

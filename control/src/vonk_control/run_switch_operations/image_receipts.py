@@ -27,6 +27,7 @@ from ..run_switch_observation_contract import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
+from ..stored_states import RecipeBuildState
 from .errors import RunSwitchRetryLater
 from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
 
@@ -208,7 +209,7 @@ def _build_receipt_in_session(
     build = session.get(RecipeBuild, build_id)
     if (
         build is None
-        or build.state != LifecycleState.SUCCEEDED.value
+        or build.state != RecipeBuildState.SUCCEEDED.value
         or build.build_input_sha256 != plan.build.build_input_sha256
         or not _is_oci_digest(build.image_digest)
         or not _is_hex_digest(build.oci_layout_sha256)

@@ -45,6 +45,7 @@ from ..run_switch_operations.publish import _persist_run_switch_runtime_image_re
 from ..runtime_image_preparation import (
     RuntimeImageReceipt,
 )
+from ..stored_states import RecipeBuildState
 from ..strict_json import read_stored_model
 from ..worker_memory_contract import WorkerMemoryComponent
 
@@ -340,7 +341,7 @@ class CompositeDistributionPhaseExecutor(
             )
             if (
                 build is None
-                or build.state != LifecycleState.SUCCEEDED.value
+                or build.state != RecipeBuildState.SUCCEEDED.value
                 or build.image_digest is None
             ):
                 raise RuntimeError(

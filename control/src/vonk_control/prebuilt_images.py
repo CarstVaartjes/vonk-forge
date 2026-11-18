@@ -70,6 +70,7 @@ from .recipe_execution_contract import (
 )
 from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
+from .stored_states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -577,7 +578,7 @@ class PrebuiltImageImporter:
             for build_id, layout in session.execute(
                 select(RecipeBuild.id, RecipeBuild.oci_layout_sha256)
                 .where(
-                    RecipeBuild.state == LifecycleState.SUCCEEDED,
+                    RecipeBuild.state == RecipeBuildState.SUCCEEDED,
                     RecipeBuild.oci_layout_sha256.is_not(None),
                 )
                 .order_by(RecipeBuild.updated_at, RecipeBuild.id)
@@ -853,7 +854,7 @@ class PrebuiltImageImporter:
             else:
                 assert failure is not None
                 code, detail = failure
-                build.state = "failed"
+                build.state = RecipeBuildState.FAILED.value
                 build.error = f"{code}: {detail}"[:512]
                 build.updated_at = now
                 self._lifecycle.finish(job, ok=False, now=now)

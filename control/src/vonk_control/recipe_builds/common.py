@@ -68,6 +68,7 @@ from ..source_bundles import (
 )
 from ..source_policy import SourcePolicyReport, inspect_build_source_policy
 from ..stored_json import read_row_column
+from ..stored_states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""
 
@@ -731,7 +732,7 @@ def _available_build_memory(
 
 def _valid_succeeded_receipt(build: RecipeBuild) -> bool:
     """Require complete immutable evidence before considering a cache hit."""
-    return build.state == "succeeded" and _has_build_receipt(build)
+    return build.state == RecipeBuildState.SUCCEEDED and _has_build_receipt(build)
 
 
 def _has_build_receipt(build: RecipeBuild) -> bool:
@@ -754,7 +755,7 @@ def _reopen_build_attempt(build: RecipeBuild, *, now: datetime) -> None:
     leaving the contract documents to the caller.
     """
 
-    build.state = "planned"
+    build.state = RecipeBuildState.PLANNED.value
     build.image_digest = None
     build.oci_layout_sha256 = None
     build.image_bytes = None
