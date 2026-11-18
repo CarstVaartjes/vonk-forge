@@ -700,3 +700,13 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
     page, _, _ = service.list_page()
     assert page[0].artifact == verified and page[0].residue is not None
     engine.dispose()
+
+
+def test_an_invalid_recipe_document_is_a_verdict_with_the_validation_text() -> None:
+    from vonk_control.recipe_image_availability import (
+        RecipeImageAvailabilityInvalid,
+        _canonical_recipe,
+    )
+
+    with pytest.raises(RecipeImageAvailabilityInvalid, match="canonical Recipe.*:"):
+        _canonical_recipe({"not": "a recipe"})

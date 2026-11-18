@@ -365,7 +365,7 @@ def _refresh_authority(
         return _canonical_recipe(recipe), parsed
     except SecurityRefusalError:
         raise
-    except RecipeImageAvailabilityUnknown:
+    except (RecipeImageAvailabilityUnknown, RecipeImageAvailabilityInvalid):
         raise
     except Exception as error:
         raise RecipeImageAvailabilityUnknown(

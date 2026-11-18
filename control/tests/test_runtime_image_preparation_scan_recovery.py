@@ -475,3 +475,13 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
     assert fresh_result.image_digest == accepted_result.image_digest
     assert fresh_result.oci_archive_sha256 == accepted_result.oci_archive_sha256
     assert receipt_path.read_bytes() == published_receipt
+
+
+def test_an_invalid_recipe_document_is_a_verdict_with_the_validation_text() -> None:
+    from vonk_control.runtime_image_preparation import (
+        RuntimeImagePreparationInvalid,
+        _canonical_recipe,
+    )
+
+    with pytest.raises(RuntimeImagePreparationInvalid, match="recipe does not satisfy"):
+        _canonical_recipe({"not": "a recipe"})

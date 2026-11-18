@@ -463,20 +463,18 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value
     if not isinstance(value, Mapping):
-        raise RecipeImageAvailabilityUnknown(
+        raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.RECIPE_INVALID,
             "selected recipe is not a canonical RecipeDefinition",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     try:
         return read_recipe(value)
     except SecurityRefusalError:
         raise
     except Exception as error:
-        raise RecipeImageAvailabilityUnknown(
+        raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.RECIPE_INVALID,
-            "selected recipe is not a canonical RecipeDefinition",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            f"selected recipe is not a canonical RecipeDefinition: {str(error)[:400]}",
         ) from error
 
 

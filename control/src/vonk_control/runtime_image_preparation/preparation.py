@@ -32,6 +32,7 @@ from .contracts import (
     OCIImageTransport,
     RuntimeArchitecture,
     RuntimeImagePreparationError,
+    RuntimeImagePreparationInvalid,
     RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
@@ -371,16 +372,16 @@ def _canonical_recipe(
         return value
     raw = getattr(value, "document", value)
     if not isinstance(raw, Mapping):
-        raise RuntimeImagePreparationUnknown(
+        raise RuntimeImagePreparationInvalid(
             RuntimeImageCode.RECIPE_INVALID,
             "canonical RecipeDefinition document is unavailable",
         )
     try:
         return read_recipe(raw)
     except Exception as error:
-        raise RuntimeImagePreparationUnknown(
+        raise RuntimeImagePreparationInvalid(
             RuntimeImageCode.RECIPE_INVALID,
-            "recipe does not satisfy canonical RecipeDefinition",
+            f"recipe does not satisfy canonical RecipeDefinition: {str(error)[:400]}",
         ) from error
 
 
