@@ -35,6 +35,8 @@ from ..strict_json import read_stored_model
 if TYPE_CHECKING:
     from .service import AgentUpgradeService
 
+from vonk_agent_protocol.state_machines import NodeIdentityState
+
 from .constants import _ACTIVE_ROLLOUT_STATES, _ALREADY_CURRENT
 from .helpers import _summary
 from .stored import _stored_node_order, _stored_package, _stored_result, _stored_source
@@ -127,7 +129,11 @@ class DispatchMixin:
                 ),
             )
             return
-        failed = [operation for operation in operations if operation.state == "failed"]
+        failed = [
+            operation
+            for operation in operations
+            if operation.state == LifecycleState.FAILED
+        ]
         if failed:
             service._rollouts.fail(
                 parent,
@@ -258,7 +264,7 @@ class DispatchMixin:
             return False
         return bool(
             observed >= dispatched
-            and node.state == "active"
+            and node.state == NodeIdentityState.ACTIVE
             and node.revoked_at is None
             and contact.protocol_version == AGENT_PROTOCOL_VERSION
             and runtime_value(node, lambda identity: identity.architecture)

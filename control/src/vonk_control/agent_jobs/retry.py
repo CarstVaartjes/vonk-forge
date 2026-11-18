@@ -342,7 +342,11 @@ def _renew_distribution_grant(
     session.execute(
         update(ArtifactDistributionAssignment)
         .where(*conditions)
-        .values(state="active", expires_at=now + _GRANT_LIFETIME, updated_at=now)
+        .values(
+            state=DistributionAssignmentState.ACTIVE,
+            expires_at=now + _GRANT_LIFETIME,
+            updated_at=now,
+        )
     )
 
 
@@ -402,10 +406,10 @@ def agent_upgrade_in_flight(
         )
     )
     if attempt is None:
-        return operation.state == "running"
+        return operation.state == LifecycleState.RUNNING
     deadline = _aware(attempt.lease_deadline)
     current = _aware(now)
-    if operation.state == "running":
+    if operation.state == LifecycleState.RUNNING:
         return deadline + AGENT_UPGRADE_RECOVERY_FENCE > current
     if deadline <= current:
         return False

@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     AgentResultState,
     FailureCode,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
@@ -20,6 +21,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states
 from ..admission_locking import admission_attempts
@@ -195,7 +197,7 @@ def record_late_result(
             parent is None
             or operation is None
             or attempt is None
-            or node.state != "active"
+            or node.state != NodeIdentityState.ACTIVE
             or node.revoked_at is not None
             or self._target_scope(column_value(parent, "targets"))
             != scopes[operation_id][1]
@@ -254,7 +256,7 @@ def record_late_result(
             and operation.current_attempt == attempt.attempt
             and operation.state in agent_operation_states.RUNNING_OR_PARKED
             and (
-                attempt.state == "running"
+                attempt.state == LifecycleState.RUNNING
                 or agent_operation_states.attempt_lapsed(attempt)
             )
             and column_value(attempt, "result") is None
@@ -287,13 +289,13 @@ def record_late_result(
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
             return True
-        if attempt.state == "running" and (
+        if attempt.state == LifecycleState.RUNNING and (
             _aware(attempt.lease_deadline) <= _aware(now) or superseded_intent
         ):
             AgentOperationAdapter.expire_attempt(attempt)
             if (
                 operation.current_attempt == attempt.attempt
-                and operation.state == "running"
+                and operation.state == LifecycleState.RUNNING
             ):
                 lapse_reason = _lease_expiry_reason(operation, attempt, node, now)
                 adapter = AgentOperationAdapter(

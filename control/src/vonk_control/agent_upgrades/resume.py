@@ -80,10 +80,10 @@ class ResumeMixin:
                     reason=InvalidRequestReason.NOT_READY,
                 )
             failed_dispatch = (
-                parent.state == "failed"
+                parent.state == LifecycleState.FAILED
                 and parent.status_reason == UNSUPPORTED_DISPATCH
             )
-            stale_dispatch = parent.state == "running"
+            stale_dispatch = parent.state == LifecycleState.RUNNING
             if (
                 parent.state
                 not in job_states.words(
@@ -117,7 +117,10 @@ class ResumeMixin:
                     BookkeepingReason.ROW_INCOMPLETE,
                     "the worker dispatch audit of the rollout is missing",
                 )
-            if worker_attempt is not None and worker_attempt.state == "running":
+            if (
+                worker_attempt is not None
+                and worker_attempt.state == LifecycleState.RUNNING
+            ):
                 if _aware(worker_attempt.lease_deadline) > _aware(now):
                     raise InvalidValue(
                         "agent upgrade worker dispatch is still active",
@@ -126,7 +129,8 @@ class ResumeMixin:
                 service._rollouts.expire_worker_attempt(worker_attempt)
             if failed_dispatch or stale_dispatch:
                 if failed_dispatch and (
-                    worker_attempt is None or worker_attempt.state != "failed"
+                    worker_attempt is None
+                    or worker_attempt.state != LifecycleState.FAILED
                 ):
                     # The failed dispatch is the evidence that reopening is
                     # safe, and it is not there: reopening only projects the
@@ -243,7 +247,7 @@ class ResumeMixin:
             # Deferred (offline) Sparks are passed over while later ones
             # upgrade, so materialized operations need not form a prefix.
             for operation in active:
-                if operation.state == "queued":
+                if operation.state == LifecycleState.QUEUED:
                     if operation.current_attempt != 0:
                         service._retire_rollout(
                             parent, now, "stored agent upgrade attempt is invalid"
@@ -258,7 +262,10 @@ class ResumeMixin:
                     )
                     .with_for_update(of=AgentOperationAttempt)
                 )
-                if active_attempt is None or active_attempt.state != "running":
+                if (
+                    active_attempt is None
+                    or active_attempt.state != LifecycleState.RUNNING
+                ):
                     service._retire_rollout(
                         parent, now, "stored agent upgrade attempt is invalid"
                     )

@@ -388,7 +388,7 @@ def install_observations_routes(
                             )
                         continue
                     if node.state not in {RunState.RUNNING, RunState.FAILED} or (
-                        node.state == "failed"
+                        node.state == RunState.FAILED
                         and run.route_state != RouteState.WITHDRAWN
                     ):
                         # The start or recovery operation owns this rank now.
@@ -414,7 +414,7 @@ def install_observations_routes(
                         # Late first evidence cannot make the run routable, but
                         # its process result remains valid evidence for
                         # Controller-owned recovery.
-                        node.state = "failed"
+                        node.state = RunState.FAILED
                     else:
                         # Failure is an observation, not a latch: fresh live
                         # evidence can recover a rank still owned by this run.
@@ -439,7 +439,7 @@ def install_observations_routes(
                             )
                             else RunState.FAILED
                         )
-                        if unready and node.state == "failed":
+                        if unready and node.state == RunState.FAILED:
                             log_event(
                                 _LOGGER,
                                 "recipe.rank.unhealthy",

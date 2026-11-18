@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select
 from vonk_agent_protocol import AgentOperation, Disposition, WaitReason
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states as aos
 from ..admission_locking import (
@@ -370,7 +371,7 @@ def _sweep_gone_targets(self: AgentJobService, limit: int) -> bool:
                     StoredOperation.state.not_in(terminal),
                     or_(
                         AgentNode.node_id.is_(None),
-                        AgentNode.state != "active",
+                        AgentNode.state != NodeIdentityState.ACTIVE,
                         AgentNode.revoked_at.is_not(None),
                     ),
                 )
@@ -409,7 +410,11 @@ def _sweep_gone_targets(self: AgentJobService, limit: int) -> bool:
                     ),
                 )
                 nodes = rows["gone-target"]
-                if nodes and nodes[0].state == "active" and nodes[0].revoked_at is None:
+                if (
+                    nodes
+                    and nodes[0].state == NodeIdentityState.ACTIVE
+                    and nodes[0].revoked_at is None
+                ):
                     continue
                 orders = rows["gone-order"]
                 if not orders or orders[0].state in terminal:
