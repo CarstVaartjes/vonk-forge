@@ -268,7 +268,9 @@ def test_observer_corrects_stale_cached_rows_and_missing_objects(observed_cache)
 
 
 @pytest.mark.parametrize("slow", [False, True])
-def test_a_pass_checkpoints_by_elapsed_time_not_per_object(tmp_path, monkeypatch, slow):
+def test_a_pass_checkpoints_by_elapsed_time_not_per_object(
+    tmp_path, monkeypatch, frozen_pass_budgets, slow
+):
     """Catches a whole-checkpoint rewrite per object, quadratic in a set's files,
     while slow storage still persists every observed prefix."""
     service = ModelCacheService(
@@ -297,10 +299,14 @@ def test_a_pass_checkpoints_by_elapsed_time_not_per_object(tmp_path, monkeypatch
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(item)
     # A slow object check takes two seconds; a fast pass takes no time at all.
-    seconds = iter(range(0, 1000, 2))
-    monkeypatch.setattr(
-        observation, "monotonic", (lambda: next(seconds)) if slow else lambda: 0
-    )
+    if slow:
+        stored_object = service._stored_object
+
+        def slow_object(*args, **kwargs):
+            frozen_pass_budgets.advance(2)
+            return stored_object(*args, **kwargs)
+
+        monkeypatch.setattr(service, "_stored_object", slow_object)
     observer = service._storage_observer
     write = observer._write
     checkpoints: list[int] = []
