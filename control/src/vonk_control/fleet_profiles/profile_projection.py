@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -36,6 +37,7 @@ from ..models import (
 )
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
 from .assignment_assessment import _AssignmentRows
+from .contracts import _SelectedProfileSnapshot
 from .dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
     _LOGGER,
@@ -53,22 +55,73 @@ if TYPE_CHECKING:
     from .service import FleetProfileService as _FleetProfileService
 
 
+@dataclass(frozen=True)
+class _ProfilePageReads:
+    """What every profile on one read shares, read once rather than per row."""
+
+    selection: _SelectedProfileSnapshot | Residue | None
+    # Unrevoked Sparks in node order, with the name to show for each.
+    roster: tuple[tuple[str, str], ...]
+    model_titles: dict[tuple[str, str, str], str | None]
+
+
 class FleetProfileService:
+    def _page_reads(
+        self,
+        session: Session,
+        choices: Sequence[FleetProfileAssignmentInput],
+        *,
+        include_documents: bool = False,
+    ) -> _ProfilePageReads:
+        """Read the selection, roster, recipe heads and model titles in set queries."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        self._prefetch_recipe_documents(
+            session, choices, include_documents=include_documents
+        )
+        node_ids = tuple(
+            session.scalars(
+                select(AgentNode.node_id)
+                .where(AgentNode.revoked_at.is_(None))
+                .order_by(AgentNode.node_id)
+            )
+        )
+        display_names = {
+            node_id: display_name
+            for node_id, display_name in session.execute(
+                select(AgentNodeProfile.node_id, AgentNodeProfile.display_name).where(
+                    AgentNodeProfile.node_id.in_(node_ids)
+                )
+            )
+        }
+        return _ProfilePageReads(
+            selection=self._selected_profile_snapshot(session),
+            roster=tuple(
+                (node_id, display_names.get(node_id, node_id)) for node_id in node_ids
+            ),
+            model_titles=self._model_titles(session, choices),
+        )
+
     def _view(
-        self, session: Session, row: FleetProfile, *, observe: bool = True
+        self,
+        session: Session,
+        row: FleetProfile,
+        *,
+        observe: bool = True,
+        page: _ProfilePageReads | None = None,
     ) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         # Saves return the same typed projection with unobserved cache/live
         # fields unknown. Admission and full reads still observe exact assets;
         # a draft edit needs neither filesystem walks nor workload assessment.
         choices = self._choices(row)
-        self._prefetch_recipe_documents(session, choices)
+        if page is None:
+            page = self._page_reads(session, choices)
         assignments: list[FleetProfileAssignmentView] = []
         cache_cached = 0
         cache_missing = 0
         cache_unknown = 0
         warnings: list[str] = []
-        selection = self._selected_profile_snapshot(session)
+        selection = page.selection
         if isinstance(selection, Residue):
             # Preserve draft reads even if the selected receipt is damaged.
             # The application worker owns failing that receipt explicitly.
@@ -104,7 +157,7 @@ class FleetProfileService:
                 projections[selector] = self._recipe_projection(session, head[1])
             except ValueError as error:
                 head_errors[selector] = str(error)
-        model_names = self._model_titles(session, choices)
+        model_names = page.model_titles
         resolved_choices = (
             self._resolve_choices(
                 session,
@@ -300,28 +353,13 @@ class FleetProfileService:
                     recipe_update=recipe_update,
                 )
             )
-        roster = tuple(
-            session.scalars(
-                select(AgentNode)
-                .where(AgentNode.revoked_at.is_(None))
-                .order_by(AgentNode.node_id)
-            )
-        )
-        display_names = {
-            item.node_id: item.display_name
-            for item in session.scalars(
-                select(AgentNodeProfile).where(
-                    AgentNodeProfile.node_id.in_([node.node_id for node in roster])
-                )
-            )
-        }
         fleet = [
             FleetNodeView(
-                selector=node.node_id,
-                display_name=display_names.get(node.node_id, node.node_id),
-                state="Assigned" if node.node_id in assigned_nodes else "Idle",
+                selector=node_id,
+                display_name=display_name,
+                state="Assigned" if node_id in assigned_nodes else "Idle",
             )
-            for node in roster
+            for node_id, display_name in page.roster
         ]
         document = _profile_document(row)
         loaded_revision = (

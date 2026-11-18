@@ -24,6 +24,7 @@ from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetNodeView,
     FleetProfileApplicationView,
+    FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
     FleetProfileInput,
@@ -47,6 +48,7 @@ from .projection_support import (
 )
 
 if TYPE_CHECKING:
+    from .profile_projection import _ProfilePageReads
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
 
@@ -65,10 +67,22 @@ class FleetProfileService:
                     .limit(128)
                 )
             )
+            # Rows share the selection, roster and recipe reads: one set query
+            # each for the page, never one per row.
+            choices: list[FleetProfileAssignmentInput] = []
+            for row in rows:
+                try:
+                    choices.extend(self._choices(row))
+                except (TypeError, ValueError):
+                    continue  # _read_view shows this row as unavailable.
+            page = self._page_reads(session, choices, include_documents=True)
             return FleetProfileList(
                 generated_at=now,
                 # The list is the cheap overview; cache truth is read per profile.
-                profiles=[self._read_view(session, row, observe=False) for row in rows],
+                profiles=[
+                    self._read_view(session, row, observe=False, page=page)
+                    for row in rows
+                ],
                 next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
@@ -197,7 +211,12 @@ class FleetProfileService:
         )
 
     def _read_view(
-        self, session: Session, row: FleetProfile, *, observe: bool = True
+        self,
+        session: Session,
+        row: FleetProfile,
+        *,
+        observe: bool = True,
+        page: _ProfilePageReads | None = None,
     ) -> FleetProfileReadView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         try:
@@ -209,7 +228,7 @@ class FleetProfileService:
                 revision=row.revision,
                 projection_issue=self._definition_issue(),
             )
-        return self._view(session, row, observe=observe)
+        return self._view(session, row, observe=observe, page=page)
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""
