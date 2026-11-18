@@ -26,7 +26,8 @@ from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
     from .telemetry import NodeInventoryItemsSnapshot
-from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, machine_check
+from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..model_primitives import (
     Base,
@@ -67,6 +68,9 @@ class LoginSession(Base):
 
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
+    __table_args__ = (
+        CheckConstraint(machine_check(NodeIdentityState), name="ck_agent_nodes_state"),
+    )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     workload_intent_ordinal: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
