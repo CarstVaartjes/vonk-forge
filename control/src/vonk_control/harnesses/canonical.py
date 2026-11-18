@@ -364,8 +364,16 @@ def _metrics_args(slug: str, command: list[str]) -> list[str]:
     SGLang serves ``/metrics`` only with ``--enable-metrics`` (llama.cpp's
     switch is the ``LLAMA_ARG_ENDPOINT_METRICS`` telemetry environment). A
     recipe that already passes the flag is left as authored.
+
+    A recipe without ``--model-path`` launches through the creator's own
+    launcher, which builds the SGLang argv itself (and enables metrics there)
+    and rejects flags it does not know, so it gets nothing appended.
     """
-    if slug == EngineFormat.SGLANG and not _has_flag(command, "enable-metrics"):
+    if (
+        slug == EngineFormat.SGLANG
+        and _has_flag(command, "model-path")
+        and not _has_flag(command, "enable-metrics")
+    ):
         command.append("--enable-metrics")
     return command
 

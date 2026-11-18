@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from vonk_agent_protocol.telemetry import EngineFormat
@@ -128,7 +128,11 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
         (("HF_HUB_DISABLE_TELEMETRY", "1"), ("SGLANG_DISABLE_USAGE_REPORT", "1")),
     ),
     "tensorrt-llm": EngineTelemetryContract("unsupported", None),
-    "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
+    # llama.cpp serves /metrics only when asked; the platform always asks and a
+    # recipe cannot override it. SGLang's switch is an argument (_metrics_args).
+    EngineFormat.LLAMA_CPP: EngineTelemetryContract(
+        EngineFormat.LLAMA_CPP, "/metrics", (("LLAMA_ARG_ENDPOINT_METRICS", "1"),)
+    ),
     "ds4": EngineTelemetryContract(
         "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
@@ -167,18 +171,6 @@ _ENGINE_TELEMETRY = {
     )
     for _slug, _contract in _ENGINE_TELEMETRY.items()
 }
-
-# llama.cpp serves /metrics only when asked; the platform always asks, so a
-# recipe never carries (or can override) the switch. SGLang's switch is an
-# argument, added by the harness compiler (``_metrics_args``).
-_LLAMA_CPP_TELEMETRY = _ENGINE_TELEMETRY[EngineFormat.LLAMA_CPP]
-_ENGINE_TELEMETRY[EngineFormat.LLAMA_CPP] = replace(
-    _LLAMA_CPP_TELEMETRY,
-    environment=(
-        *_LLAMA_CPP_TELEMETRY.environment,
-        ("LLAMA_ARG_ENDPOINT_METRICS", "1"),
-    ),
-)
 
 # These names are paths rather than recipe tuning knobs. They are injected by
 # the platform; a recipe cannot repeat them, move them, or introduce a second
