@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, HTTPException, Path, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -124,15 +124,17 @@ def _refusal_detail(error: RequestValidationError) -> str:
 def install_authority_routes(
     agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
 ) -> None:
+    # Every route here except /renew/expired is unreachable without
+    # services: the auth middleware answers 401 first.
+    required = cast(AgentApiServices, services)
+
     def note_result(request: Request, refused: str | None) -> None:
         # A result refused on every delivery is shown as repeated evidence,
         # never acted on; the Spark's next accepted result clears it.
-        if services is None:
-            return
         identity = validated_agent_identity_from_scope(dict(request.scope))
         if identity is None:
             return
-        with suppress(SQLAlchemyError), services.sessions.begin() as session:
+        with suppress(SQLAlchemyError), required.sessions.begin() as session:
             if refused is None:
                 note_success(session, RESULT_REFUSALS, identity.node_id)
             else:
@@ -141,7 +143,7 @@ def install_authority_routes(
                     RESULT_REFUSALS,
                     identity.node_id,
                     Code.INVALID_REQUEST,
-                    now=services.clock(),
+                    now=required.clock(),
                     detail=refused,
                 )
 
@@ -167,7 +169,6 @@ def install_authority_routes(
     ) -> None:
         # A grant denied on every ask is shown as repeated evidence; the
         # answer itself is unchanged, and a granted ask clears it.
-        required = _require_services(services)
         with suppress(SQLAlchemyError), required.sessions.begin() as session:
             if denied is not None:
                 note_repeat(
@@ -230,7 +231,6 @@ def install_authority_routes(
     def attempt_evidence(fence: str) -> bool:
         # Inspect only availability after the authority's answer. This is no
         # independent authorization test and cannot mint or broaden a grant.
-        required = _require_services(services)
         with required.sessions() as session:
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
@@ -246,7 +246,6 @@ def install_authority_routes(
             )
 
     def activation_evidence(node_id: str) -> bool:
-        required = _require_services(services)
         with required.sessions() as session:
             return (
                 session.scalar(
@@ -261,25 +260,24 @@ def install_authority_routes(
             )
 
     def helper_identity(request: Request) -> AgentIdentity:
-        _require_services(services)
         return _authenticated_identity(request)
 
     def host_runtime_service() -> HostRuntimeAuthorityService:
-        required = services.host_runtime_authority if services is not None else None
-        if required is None:
+        authority = required.host_runtime_authority
+        if authority is None:
             raise HTTPException(
                 status_code=503, detail="host runtime authority unavailable"
             )
-        return required
+        return authority
 
     @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
     @operator_acceptance(ReceiptPolicy.AGENT_GRANT)
     def host_runtime_grant(body: HostRuntimeGrantRequest, request: Request) -> Response:
         identity = helper_identity(request)
-        required = host_runtime_service()
+        authority = host_runtime_service()
         grant = observe_grant(
             lambda: issue_host_runtime_grant(
-                required,
+                authority,
                 body,
                 node_id=identity.node_id,
                 certificate_serial=identity.certificate_serial,
@@ -315,7 +313,7 @@ def install_authority_routes(
         """
 
         identity = helper_identity(request)
-        required = host_runtime_service()
+        authority = host_runtime_service()
         binding = body.binding()
         if binding.run_id != run_id:
             raise RequestValidationError(
@@ -331,7 +329,7 @@ def install_authority_routes(
 
         def issue() -> SignedHostHelperGrant:
             try:
-                return required.issue_orphan_stop_grant(
+                return authority.issue_orphan_stop_grant(
                     node_id=identity.node_id,
                     certificate_serial=identity.certificate_serial,
                     run_id=run_id,
@@ -382,9 +380,9 @@ def install_authority_routes(
         body: AgentUpgradeGrantRequest, request: Request
     ) -> Response:
         identity = helper_identity(request)
-        required = host_runtime_service()
+        authority = host_runtime_service()
         grant = observe_grant(
-            lambda: required.issue_agent_upgrade_grant(
+            lambda: authority.issue_agent_upgrade_grant(
                 node_id=identity.node_id,
                 fence=body.fence,
                 package_sha256=body.package_sha256,
@@ -401,7 +399,6 @@ def install_authority_routes(
     @agent.post("/heartbeat", response_model=AgentDirective)
     @operator_acceptance(ReceiptPolicy.AGENT_HEARTBEAT)
     def heartbeat(body: AgentProgress, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         message = body
         _log_evidence_warnings(body, endpoint="heartbeat", node_id=identity.node_id)
@@ -445,7 +442,6 @@ def install_authority_routes(
 
     @operator_acceptance(ReceiptPolicy.AGENT_RESULT)
     def result(body: AgentResult, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         message = body
         _log_evidence_warnings(body, endpoint="result", node_id=identity.node_id)
@@ -559,7 +555,6 @@ def install_authority_routes(
     )
     @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
     def renew(body: RenewRequest, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
@@ -591,7 +586,6 @@ def install_authority_routes(
         Controller retires and CA-revokes the conflicting staged identity
         before issuing the durable pending CSR.
         """
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
@@ -617,7 +611,6 @@ def install_authority_routes(
     )
     @operator_acceptance(ReceiptPolicy.ENROLLMENT_ACTIVATE)
     def activate(body: ActivateRequest, request: Request) -> Response:
-        required = _require_services(services)
         identity = _authenticated_identity(request)
         _body_node_matches(body.node_id, identity)
         try:
