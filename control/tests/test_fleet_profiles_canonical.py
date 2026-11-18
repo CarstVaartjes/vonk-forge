@@ -1422,7 +1422,50 @@ def test_profile_read_observes_distinct_content_once(
     assert not any("FOR UPDATE" in query for query in queries)
 
 
-@pytest.mark.parametrize("endpoint", ["get", "list", "preview"])
+def test_profile_list_skips_cache_check_and_single_read_observes(
+    postgres_engine,
+):
+    """The list is the cheap overview; cache truth is read per profile."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _seed(sessions)
+    calls = []
+
+    def resolve(**kwargs):
+        calls.append(kwargs["exact_revision_id"])
+        return _resolution(kwargs["exact_revision_id"], recipe_cached=True)
+
+    service = FleetProfileService(sessions, clock=lambda: NOW, cache_resolver=resolve)
+    service.update_number(
+        1,
+        FleetProfileInput(
+            name="Overview",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                    assignment_name="slot",
+                )
+            ],
+        ),
+        actor="test",
+    )
+    calls.clear()
+    listed = service.list()
+    assert calls == []
+    assert listed.profiles
+    entries = [e for e in listed.profiles if isinstance(e, FleetProfileView)]
+    assert len(entries) == len(listed.profiles)
+    for entry in entries:
+        assert not any("retry this profile read" in w for w in entry.warnings)
+    assert entries[0].cache_summary.unknown == 1
+    read = service.read_number(1)
+    assert isinstance(read, FleetProfileView)
+    assert len(calls) == 1
+    assert read.cache_summary.unknown == 0
+
+
+@pytest.mark.parametrize("endpoint", ["get", "preview"])
 @pytest.mark.parametrize("asset", ["model", "image"])
 def test_profile_storage_wait_is_bounded_and_recovers(
     monkeypatch, postgres_engine, tmp_path, endpoint, asset, frozen_pass_budgets
@@ -1499,8 +1542,6 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     def read():
         if endpoint == "preview":
             return service.preview(saved.id)
-        if endpoint == "list":
-            return service.list().profiles[0]
         return service.read_number(1)
 
     from vonk_control import profile_read_observation

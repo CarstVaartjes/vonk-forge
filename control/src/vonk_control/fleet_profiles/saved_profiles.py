@@ -67,7 +67,8 @@ class FleetProfileService:
             )
             return FleetProfileList(
                 generated_at=now,
-                profiles=[self._read_view(session, row) for row in rows],
+                # The list is the cheap overview; cache truth is read per profile.
+                profiles=[self._read_view(session, row, observe=False) for row in rows],
                 next_after=rows[-1].number if len(rows) == 128 else None,
             )
 
@@ -195,7 +196,9 @@ class FleetProfileService:
             next_action="Restore the saved definition or explicitly import a complete replacement at the current revision.",
         )
 
-    def _read_view(self, session: Session, row: FleetProfile) -> FleetProfileReadView:
+    def _read_view(
+        self, session: Session, row: FleetProfile, *, observe: bool = True
+    ) -> FleetProfileReadView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         try:
             self._definition(row)
@@ -206,7 +209,7 @@ class FleetProfileService:
                 revision=row.revision,
                 projection_issue=self._definition_issue(),
             )
-        return self._view(session, row)
+        return self._view(session, row, observe=observe)
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""

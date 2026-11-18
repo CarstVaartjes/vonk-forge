@@ -484,9 +484,30 @@ export function LibraryProfilesView({
     if (message) toast.info(message);
   };
 
-  const selectedProfile = profiles
+  const listedProfile = profiles
     .filter(readableProfile)
     .find((profile) => sameNumber(profile.number, selectedNumber));
+  // The list is the cheap overview without cache truth; the selected profile's
+  // detail is read on its own and replaces the list entry once it arrives.
+  // The detail is kept with the list entry it was read for, so a refreshed
+  // entry (status changes without a revision bump) is never hidden by it.
+  const [detail, setDetail] = useState<{ source: FleetProfile; view: FleetProfile }>();
+  useEffect(() => {
+    if (listedProfile === undefined) {
+      setDetail(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    api.profile(listedProfile.number, controller.signal).then(
+      (result) => {
+        if (!controller.signal.aborted && readableProfile(result))
+          setDetail({ source: listedProfile, view: result });
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, [api, listedProfile]);
+  const selectedProfile = detail?.source === listedProfile ? detail?.view : listedProfile;
   const availableFleet = useMemo(
     () => fleetEntries(selectedProfile, fleet),
     [fleet, selectedProfile],
