@@ -191,7 +191,6 @@ def _profile(
                 terminal=lambda _: True,
                 deadline=deadline,
                 fetch_initial=True,
-                publish=False,
             )
             if current is predecessor:
                 break
