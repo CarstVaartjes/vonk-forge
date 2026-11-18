@@ -51,6 +51,14 @@ fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize
     }
 }
 
+/// Every workload runs with unlimited memlock (owner 2026-11-18): Docker's
+/// default 8 MiB breaks engines that pin memory. Host-network runs also name
+/// it in the signed argv; Docker takes the last repeated value. For every
+/// other workload the rule is helper-owned and outside the run identity
+/// digest: a run started before it is still adopted as is, and agent and
+/// helper upgrade in either order.
+const WORKLOAD_MEMLOCK: [&str; 2] = ["--ulimit", vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT];
+
 /// The exit a job reports when the helper itself ended it -- at its deadline or
 /// on the Controller's cancellation (the `timeout(1)` convention). Never a
 /// stand-in for an exit that was not observed.
@@ -235,7 +243,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // Helper-owned launch policy also covers accepted images built before
         // passwd adaptation. Keep files durable for delayed Docker starts.
         let identity_mounts = self.runtime_identity_mounts(validated.uid, validated.gid)?;
-        let launch_options = vec![
+        let mut launch_options: Vec<String> = WORKLOAD_MEMLOCK.map(str::to_owned).into();
+        launch_options.extend([
             WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),
             format!("ai.vonkforge.runtime-request-sha256={semantic_digest}"),
@@ -251,7 +260,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             format!("ai.vonkforge.run-generation={}", identity.run_generation),
             "--label".to_owned(),
             format!("ai.vonkforge.plan-digest={plan_digest}"),
-        ];
+        ]);
         // Options are spliced before the image while `image_index` still
         // names it; a later insert shifts it.
         compiled.splice(image_index..image_index, launch_options);

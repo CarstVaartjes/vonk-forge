@@ -2,6 +2,8 @@
 #[rustfmt::skip]
 pub mod compiled_execution_plan;
 pub mod compiled_oci;
+/// The one spelling of the unlimited memlock `--ulimit` value every workload runs with.
+pub const WORKLOAD_MEMLOCK_ULIMIT: &str = "memlock=-1:-1";
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }

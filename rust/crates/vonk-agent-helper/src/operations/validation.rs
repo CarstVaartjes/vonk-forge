@@ -165,7 +165,9 @@ pub(super) fn validate_docker_run_with_archive(
             "--ulimit" if !memlock || !stack => {
                 index += 1;
                 match arguments.get(index).map(String::as_str) {
-                    Some("memlock=-1:-1") if !memlock => memlock = true,
+                    Some(vonk_agent_protocol::WORKLOAD_MEMLOCK_ULIMIT) if !memlock => {
+                        memlock = true
+                    }
                     Some("stack=67108864:67108864") if !stack => stack = true,
                     _ => return Err(OperationError::InvalidOperation),
                 }
