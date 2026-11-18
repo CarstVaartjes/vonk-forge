@@ -12,11 +12,14 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_agent_protocol import LifecycleState, RecipeJobRunRequest
+from vonk_agent_protocol import RecipeJobRunRequest
 
-from ..models import AgentOperation
+from .. import artifact_job_states as ajs
+from ..models import AgentOperation, ArtifactJob, Job
 from ..stored_json import read_row_column
+from .agent_operation import is_artifact_owned
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,24 +79,33 @@ def owner_order(orders: Sequence[AgentOperation]) -> AgentOperation | None:
 
 
 def job_run_verdict(
-    orders: Sequence[AgentOperation], verdict: str | None
-) -> str | None:
-    """The parent's aggregate verdict, with a job on several Sparks its owner's.
+    session: Session,
+    parent: Job,
+    orders: Sequence[AgentOperation],
+    verdict: str | None,
+) -> tuple[str | None, str | None]:
+    """The parent's (verdict, reason) for a job on several Sparks: the artifact job's.
 
-    A companion stopped after the owner succeeded does not turn the job's
-    outcome into cancelled (the aggregate is worst-wins over every order).
+    The aggregate over the orders is worst-wins, so a companion that ends after
+    the job did (cancelled by the stop it was asked for, or failing on its own)
+    must not give the parent another outcome than the job. For such a parent
+    the end state and reason are the artifact job's own: no verdict (keep
+    waiting) until it has ended. Every other parent keeps the aggregate.
     """
 
-    if verdict != LifecycleState.CANCELLED.value:
-        return verdict
-    owner = resolve_owner(orders).owner
     if (
-        owner is not None
-        and owner.state == LifecycleState.SUCCEEDED.value
-        and all(order.kind == WireOperation.RECIPE_JOB_RUN.value for order in orders)
+        verdict not in ajs.ENDED
+        or len(orders) < 2
+        or not is_artifact_owned(parent)
+        or any(order.kind != WireOperation.RECIPE_JOB_RUN.value for order in orders)
     ):
-        return LifecycleState.SUCCEEDED.value
-    return verdict
+        return verdict, None
+    job = session.get(ArtifactJob, parent.owner_id)
+    if job is None:
+        return verdict, None
+    if not ajs.is_ended(job):
+        return None, None
+    return ajs.state_of(job), job.status_reason
 
 
 def fan_in_cancellation_key(parent_id: str) -> str:
