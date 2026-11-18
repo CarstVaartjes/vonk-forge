@@ -461,6 +461,62 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     assert result["id"] == "1" and observation.status == "complete"
 
 
+def test_profile_list_publishes_no_progress_snapshot():
+    class Listing:
+        def request(self, *_args, **_kwargs):
+            return {"profiles": [], "next_after": None}
+
+    args = cli._parser().parse_args(("profile", "list"))
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
+    result = _profile(args, cast(ControllerClient, Listing()), lambda: "fresh")
+    assert result["profiles"] == []
+    assert snapshots == []
+
+
+def test_a_followed_read_still_publishes_every_snapshot_to_the_final_one(
+    monkeypatch,
+):
+    from cluster_profiles.controller_cli.observation import _poll_path
+
+    clock = _Clock()
+    monkeypatch.setattr("time.monotonic", clock.monotonic)
+    monkeypatch.setattr("time.sleep", clock.sleep)
+    answers = iter(({"id": "0", "state": "running"}, {"id": "0", "state": "succeeded"}))
+
+    class Progress:
+        request_timeout_seconds = 1.0
+
+        def request(self, *_args, **_kwargs):
+            return next(answers)
+
+    args = cli._parser().parse_args(
+        ("profile", "progress", "--follow", "--timeout-seconds", "60")
+    )
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(snapshot["state"])
+    _poll_path(
+        cast(ControllerClient, Progress()),
+        "/api/profile/applications/0",
+        {},
+        args,
+        fetch_initial=True,
+    )
+    assert snapshots == ["running", "succeeded"]
+
+
+def test_a_one_shot_profile_read_publishes_no_progress_snapshot():
+    class Reading:
+        def request(self, *_args, **_kwargs):
+            return {"id": "1", "number": 1, "status": "draft"}
+
+    args = cli._parser().parse_args(("profile",))
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
+    _profile(args, cast(ControllerClient, Reading()), lambda: "fresh")
+    assert snapshots == []
+
+
 def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     monkeypatch,
 ):

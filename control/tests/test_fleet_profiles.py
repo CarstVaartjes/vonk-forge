@@ -3183,7 +3183,10 @@ def test_profile_create_is_server_owned_validated_and_digest_stable() -> None:
 
     assert created.definition == loaded.definition
     assert created.revision == loaded.revision
-    assert listed.profiles == [loaded]
+    # The list is the overview: same definition, cache truth not observed.
+    assert [p.id for p in listed.profiles] == [loaded.id]
+    assert listed.profiles[0].revision == loaded.revision
+    assert listed.profiles[0].definition == loaded.definition
     assert created.name == "Studio ready"
     assert created.assignments[0].recipe.name == "Synthetic Tiny build"
     assert created.assignments[0].spark_ids == [_node_id(1)]

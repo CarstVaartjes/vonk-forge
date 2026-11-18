@@ -90,7 +90,7 @@ const application = {
 beforeEach(forgetUnsavedProfileDrafts);
 
 function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {
-  return {
+  const api = {
     profiles: vi.fn(async () => ({ generated_at: "2026-09-10T00:00:00Z", profiles: [profile] })),
     previewProfile: vi.fn(async () => preview),
     autosaveProfile: vi.fn(async () => profile),
@@ -99,6 +99,17 @@ function apiFor(overrides: Partial<ControlApi> = {}): ControlApi {
     profileProgress: vi.fn(async () => application),
     ...overrides,
   } as unknown as ControlApi;
+  // By default the single read returns what the last list call held for that
+  // number, without consuming the list mock's own call sequence.
+  let listed: Awaited<ReturnType<ControlApi["profiles"]>> | undefined;
+  const list = api.profiles;
+  api.profiles = (async (...args: Parameters<ControlApi["profiles"]>) =>
+    (listed = await list(...args))) as ControlApi["profiles"];
+  api.profile ??= vi.fn(
+    async (number) =>
+      listed?.profiles.find((item) => String(item.number) === String(number)) ?? profile,
+  ) as unknown as ControlApi["profile"];
+  return api;
 }
 
 test("reads and loads a numbered profile without legacy status or application routes", async () => {
@@ -314,6 +325,17 @@ test("a saved profile shows the cache counts the server reports", async () => {
   expect(await screen.findByText("2 cached · 1 missing")).toBeVisible();
 });
 
+test("the detail panel shows the cache counts of the single profile read, not the list entry", async () => {
+  const detail = {
+    ...profile,
+    cache_summary: { cached: 3, missing: 0, unknown: 0 },
+  } as unknown as FleetProfile;
+  const api = apiFor({ profile: vi.fn(async () => detail) as unknown as ControlApi["profile"] });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  expect(await screen.findByText("3 cached")).toBeVisible();
+  expect(api.profile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
+});
+
 test("a load waiting for preparation is offered, and a waiting application says what it waits for", async () => {
   const user = userEvent.setup();
   const waitingPreview = {
@@ -409,7 +431,7 @@ test("a current profile shows no update notice", async () => {
   expect(screen.queryByRole("region", { name: "Recipe updates available" })).toBeNull();
 });
 
-test("a completed load refreshes the saved profile and shows the endpoint without a reload, even after a failed progress poll", async () => {
+test("a completed load refreshes the saved profile and shows the endpoint without a reload, even after a failed progress poll and a failed detail read", async () => {
   const user = userEvent.setup();
   const loaded = { ...profile, status: "loaded", loaded_revision: 4 } as unknown as FleetProfile;
   const profiles = vi
@@ -445,7 +467,14 @@ test("a completed load refreshes the saved profile and shows the endpoint withou
       },
     ],
   })) as unknown as ControlApi["profileEndpoints"];
+  // The first detail read returns the draft; once the list says loaded, the
+  // newer list entry must win even though every later detail read fails.
+  const detailRead = vi
+    .fn()
+    .mockResolvedValueOnce(profile)
+    .mockRejectedValue(new TypeError("detail unavailable"));
   const api = apiFor({
+    profile: detailRead as unknown as ControlApi["profile"],
     profiles,
     profileProgress: profileProgress as unknown as ControlApi["profileProgress"],
     profileEndpoints,
