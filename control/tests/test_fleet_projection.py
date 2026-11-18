@@ -3092,6 +3092,7 @@ def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> 
     assert "snap-repair" not in advice[HostCheck.SNAPD].commands[-1]
     assert "cups.path" not in advice[HostCheck.PRINTING].finding
     assert "15000" in advice[HostCheck.WATERMARK_BOOST].finding
+    assert "20" in advice[HostCheck.PROACTIVE_COMPACTION].finding
     # Measured: 78.7 of 116.7 GiB free in 2 MiB blocks.
     assert "78.7" in advice[HostCheck.MEMORY_FRAGMENTATION].finding
     assert "116.7" in advice[HostCheck.MEMORY_FRAGMENTATION].finding
@@ -3105,7 +3106,14 @@ def test_each_host_check_cites_its_reading_and_unknown_or_tuned_gives_none() -> 
     assert host_checks(None) == []
     assert host_checks(HostTuning()) == []
     assert (
-        host_checks(HostTuning(units=[], watermark_boost_factor=0, kernel_splash=False))
+        host_checks(
+            HostTuning(
+                units=[],
+                watermark_boost_factor=0,
+                compaction_proactiveness=0,
+                kernel_splash=False,
+            )
+        )
         == []
     )
 

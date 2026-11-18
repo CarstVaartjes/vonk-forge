@@ -104,6 +104,7 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "tensorfold": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "exllamav3": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-server": (*_COMMON_PATHS, *_PYTHON_PATHS),
+    "gr8": _COMMON_PATHS,
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
@@ -154,6 +155,9 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
 # The generic PyTorch server serves no engine-defined /metrics: the same contract
 # as ExLlamaV3, bound once rather than restated.
 _ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
+# gr8's front end serves vLLM-named /metrics, which the agent does not parse yet;
+# until it does, gr8 shares the generic server's contract.
+_ENGINE_TELEMETRY["gr8"] = _ENGINE_TELEMETRY["exllamav3"]
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
 # it for every runtime so recipes never carry it.
@@ -209,11 +213,15 @@ for _slug in (
     "pytorch-pipeline",
 ):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
-for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"):
+_HOME_NAMES = ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
+for _name in _HOME_NAMES:
     _ENGINE_ENVIRONMENT["llama-cpp"] = {
         **_ENGINE_ENVIRONMENT.get("llama-cpp", {}),
         _name: dict(_ENGINE_ENVIRONMENT["sglang"])[_name],
     }
+_ENGINE_ENVIRONMENT["gr8"] = {
+    _name: _ENGINE_ENVIRONMENT["ds4"][_name] for _name in _HOME_NAMES
+}
 
 _OPTIONAL_PATH_NAMES = frozenset(
     {

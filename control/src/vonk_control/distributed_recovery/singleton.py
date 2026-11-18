@@ -281,6 +281,7 @@ def _singleton_recovery_authority(
             compiled_execution_plan=WireCompiledExecutionPlan.parse(compiled_plan),
             master_address=None,
             master_port=None,
+            peer_addresses=(),
         )
     except (KeyError, RecipeStartPayloadError) as error:
         return _unproven(

@@ -35,6 +35,7 @@ class HostCheck(StrEnum):
     DGX_DASHBOARD = "dgx-dashboard"
     FIRMWARE_REFRESH = "firmware-refresh"
     WATERMARK_BOOST = "watermark-boost"
+    PROACTIVE_COMPACTION = "proactive-compaction"
     BOOT_SPLASH = "boot-splash"
     MEMORY_FRAGMENTATION = "memory-fragmentation"
 
@@ -125,6 +126,10 @@ _WATERMARK_COMMANDS = [
     "echo vm.watermark_boost_factor=0 | sudo tee /etc/sysctl.d/90-watermark-boost.conf",
     "sudo sysctl -p /etc/sysctl.d/90-watermark-boost.conf",
 ]
+_COMPACTION_COMMANDS = [
+    "echo vm.compaction_proactiveness=0 | sudo tee /etc/sysctl.d/90-no-proactive-compaction.conf",
+    "sudo sysctl -p /etc/sysctl.d/90-no-proactive-compaction.conf",
+]
 #: One command: edits only the GRUB files that set the exact word splash
 #: (/etc/default/grub or a /etc/default/grub.d drop-in; not splash=...), then
 #: regenerates the boot configuration.
@@ -166,6 +171,26 @@ def host_checks(tuning: HostTuning | None) -> list[HostCheckAdvice]:
                 undo=[
                     "sudo rm -f /etc/sysctl.d/90-watermark-boost.conf",
                     f"sudo sysctl -w vm.watermark_boost_factor={factor}",
+                ],
+            )
+        )
+    proactiveness = tuning.compaction_proactiveness
+    if proactiveness is not None and proactiveness > 0:
+        advice.append(
+            HostCheckAdvice(
+                check=HostCheck.PROACTIVE_COMPACTION,
+                finding=f"vm.compaction_proactiveness is {proactiveness}.",
+                explanation=(
+                    "The kernel compacts memory in the background. On a Spark a "
+                    "workload holds most of the unified memory, so this stalls the "
+                    "serving path and multi-Spark collectives. 0 stops only the "
+                    "background compaction, now and at every boot; compaction on "
+                    "demand and when loading starts still works."
+                ),
+                commands=_COMPACTION_COMMANDS,
+                undo=[
+                    "sudo rm -f /etc/sysctl.d/90-no-proactive-compaction.conf",
+                    f"sudo sysctl -w vm.compaction_proactiveness={proactiveness}",
                 ],
             )
         )

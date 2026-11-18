@@ -103,6 +103,10 @@ pub(super) fn ordered_environment(
     if let Some(port) = placement.master_port {
         add("VONK_MASTER_PORT", port.to_string())?;
     }
+    if let Some(peers) = &placement.peer_addresses {
+        let peers: Vec<String> = peers.iter().map(ToString::to_string).collect();
+        add("VONK_PEER_ADDRS", peers.join(","))?;
+    }
     if plan.runtime.placement.endpoint_address.is_some()
         && let Some(endpoint) = &plan.endpoint
     {

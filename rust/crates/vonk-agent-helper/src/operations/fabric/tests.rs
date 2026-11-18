@@ -306,6 +306,28 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
         .unwrap();
     worker.drain(endpoint - 1..=endpoint);
     assert!(validate_docker_run(&worker, &roots, None).is_ok());
+    let with_peers = |peers: &str| {
+        let mut peered = arguments.clone();
+        let listen = peered
+            .iter()
+            .position(|arg| arg == "VONK_LISTEN_PORT=8000")
+            .unwrap();
+        peered.splice(
+            listen - 1..listen - 1,
+            ["--env".to_owned(), format!("VONK_PEER_ADDRS={peers}")],
+        );
+        peered
+    };
+    assert!(
+        validate_docker_run(&with_peers("192.168.100.10,192.168.100.11"), &roots, None).is_ok()
+    );
+    for wrong in [
+        "192.168.100.11,192.168.100.10",
+        "192.168.100.10",
+        "192.168.100.10,not-an-address",
+    ] {
+        assert!(validate_docker_run(&with_peers(wrong), &roots, None).is_err());
+    }
     struct FabricRunner;
     impl CommandRunner for FabricRunner {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {

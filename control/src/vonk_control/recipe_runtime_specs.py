@@ -92,6 +92,11 @@ def recipe_topology(value: object) -> RecipeTopology:
     return _recipe(value).topology
 
 
+def recipe_engine(value: object) -> str:
+    """The runtime engine slug of a validated recipe."""
+    return _recipe(value).runtime.engine
+
+
 def _recipe(value: object) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value

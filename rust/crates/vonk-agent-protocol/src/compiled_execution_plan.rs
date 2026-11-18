@@ -524,6 +524,22 @@ impl CompiledRuntimePlacement {
         {
             return Err(WorkloadError::Invalid("placement"));
         }
+        // Absent is always valid: a run started before peers existed has none.
+        if let Some(peers) = &self.peer_addresses {
+            let own = self
+                .rank
+                .to_string()
+                .parse::<usize>()
+                .ok()
+                .and_then(|rank| peers.get(rank));
+            if self.world_size < 2
+                || self.world_size != peers.len() as u64
+                || own.copied() != self.local_address
+                || peers.first().copied() != self.master_address
+            {
+                return Err(WorkloadError::Invalid("placement"));
+            }
+        }
         Ok(())
     }
 }

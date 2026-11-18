@@ -224,6 +224,7 @@ _ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {
     "tensorfold": ("/opt/vonk/bin/tensorfold-serve",),
     "exllamav3": ("/opt/vonk/bin/exllamav3-serve",),
     "pytorch-server": ("/opt/vonk/bin/pytorch-server",),
+    "gr8": ("/opt/vonk/bin/gr8-serve",),
     "diffusers": ("/opt/vonk/bin/diffusers-job",),
     "comfyui": ("/opt/vonk/bin/comfyui-job",),
     "pytorch-pipeline": ("/opt/vonk/bin/pytorch-pipeline",),
@@ -249,6 +250,7 @@ def _validate_engine_launch(slug: str, command: tuple[str, ...]) -> None:
         "tensorfold",
         "exllamav3",
         "pytorch-server",
+        "gr8",
     }:
         if "--host" not in command or "--port" not in command:
             raise HarnessCompileError("serving harness launch lacks host and port")

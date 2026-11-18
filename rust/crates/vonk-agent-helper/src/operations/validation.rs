@@ -55,6 +55,7 @@ pub(super) fn validate_docker_run_with_archive(
     let mut world_size = None;
     let mut local_address = None;
     let mut master_address = None;
+    let mut peer_addresses: Option<Vec<Ipv4Addr>> = None;
     let mut caller_fabric_environment = false;
     let mut job_timeout_seconds = None;
     let mut gpu = false;
@@ -259,6 +260,16 @@ pub(super) fn validate_docker_run_with_archive(
                         if target.replace(parsed).is_some() {
                             return Err(OperationError::InvalidOperation);
                         }
+                    }
+                }
+                if let Some(value) = value.strip_prefix("VONK_PEER_ADDRS=") {
+                    let parsed = value
+                        .split(',')
+                        .map(str::parse::<Ipv4Addr>)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|_| OperationError::InvalidOperation)?;
+                    if peer_addresses.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
                     }
                 }
                 if let Some(value) = value.strip_prefix("VONK_LISTEN_PORT=") {
@@ -469,6 +480,16 @@ pub(super) fn validate_docker_run_with_archive(
             || rank >= world_size
             || caller_fabric_environment
             || endpoint_workload != (local == master)
+            || peer_addresses.as_ref().is_some_and(|peers| {
+                world_size != peers.len() as u64
+                    || rank
+                        .to_string()
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|rank| peers.get(rank))
+                        != Some(&local)
+                    || peers.first() != Some(&master)
+            })
         {
             return Err(OperationError::InvalidOperation);
         }

@@ -96,6 +96,78 @@ fn native_ranks_keep_host_addresses_without_docker_port_translation() {
     }
 }
 
+fn dual_rank(rank: u64, peers: Value) -> CompiledExecutionPlan {
+    let mut value = fixture();
+    let placement = &mut value["runtime"]["placement"];
+    placement["rank"] = json!(rank);
+    placement["role"] = json!(if rank == 0 { "entrypoint" } else { "worker" });
+    placement["world_size"] = json!(2);
+    placement["local_address"] = json!(format!("192.168.100.{}", 10 + rank));
+    placement["master_address"] = json!("192.168.100.10");
+    placement["master_port"] = json!(29500);
+    placement["endpoint_address"] = if rank == 0 {
+        json!("192.168.1.211")
+    } else {
+        json!(null)
+    };
+    if !peers.is_null() {
+        placement["peer_addresses"] = peers;
+    }
+    value["topology"] = json!({"name":"dual", "node_count":2});
+    value["security"]["network_mode"] = json!("host");
+    value["security"]["gpu"] = json!(true);
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn peer_addresses_render_in_rank_order_and_must_match_the_rank() {
+    let peers = json!(["192.168.100.10", "192.168.100.11"]);
+    for rank in [0, 1] {
+        let plan = dual_rank(rank, peers.clone());
+        plan.runtime.placement.validate_bound().unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert!(invocation.environment.iter().any(|entry| {
+            entry.name == "VONK_PEER_ADDRS" && entry.value == "192.168.100.10,192.168.100.11"
+        }));
+    }
+    let swapped = json!(["192.168.100.11", "192.168.100.10"]);
+    assert!(
+        dual_rank(0, swapped)
+            .runtime
+            .placement
+            .validate_bound()
+            .is_err()
+    );
+    let short = json!(["192.168.100.10"]);
+    assert!(
+        dual_rank(0, short)
+            .runtime
+            .placement
+            .validate_bound()
+            .is_err()
+    );
+}
+
+#[test]
+fn a_dual_plan_stored_before_peer_addresses_existed_still_validates() {
+    for rank in [0, 1] {
+        let plan = dual_rank(rank, Value::Null);
+        plan.runtime.placement.validate_bound().unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert!(
+            !invocation
+                .environment
+                .iter()
+                .any(|entry| entry.name == "VONK_PEER_ADDRS")
+        );
+        assert!(
+            !serde_json::to_string(&plan.runtime.placement)
+                .unwrap()
+                .contains("peer_addresses")
+        );
+    }
+}
+
 #[test]
 fn unauthorized_host_network_mode_is_rejected() {
     let mut value = fixture();

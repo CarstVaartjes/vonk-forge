@@ -134,6 +134,40 @@ def _distributed_tensorfold_recipe() -> dict[str, object]:
     return raw
 
 
+@pytest.mark.parametrize(
+    ("engine", "wrapper", "arguments"),
+    [
+        ("gr8", "gr8-serve", [{"name": "name", "value": "synthetic-tiny"}]),
+        ("ds4", "ds4-serve", [{"name": "ctx", "value": 32768}]),
+    ],
+)
+def test_distributed_environment_placed_engine_compiles_the_wrapper_arguments_only(
+    engine: str, wrapper: str, arguments: list[dict[str, object]]
+) -> None:
+    recipe = _distributed_tensorfold_recipe()
+    runtime = _json_object(recipe["runtime"])
+    runtime["engine"] = engine
+    runtime["entrypoint"] = [f"/opt/vonk/bin/{wrapper}"]
+    runtime["arguments"] = arguments
+    entrypoint = _compile(recipe)
+    worker = _compile(recipe, role="worker", rank=1)
+
+    commands = [
+        _json_array(_json_object(spec["runtime"])["entrypoint"])
+        for spec in (entrypoint, worker)
+    ]
+    assert commands[0] == commands[1]
+    assert not {
+        "--headless",
+        "--rank",
+        "--node-rank",
+        "--tp",
+        "--role",
+        "--tensor-parallel",
+        "--coordinator",
+    } & set(commands[0])
+
+
 def _option_value(command: list[object], name: str) -> object:
     return command[command.index(name) + 1]
 

@@ -647,6 +647,7 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
         master_address=None,
         master_port=None,
         world_size=1,
+        peer_addresses=(),
     )
     placement = WireCompiledExecutionPlan.parse(started).runtime.placement
     assert placement.endpoint_address == "192.0.2.10"
@@ -691,6 +692,7 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
         master_address="192.168.100.10",
         master_port=29500,
         world_size=2,
+        peer_addresses=(),
     )
     wire = WireCompiledExecutionPlan.parse(started)
     assert wire.security.network_mode == "host"

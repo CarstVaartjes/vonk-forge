@@ -16,6 +16,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from .failure_classification import error_detail
+from .harnesses.canonical import places_from_environment
 from .run_switch_contract import MemoryKind
 
 
@@ -29,6 +30,19 @@ def validate_distributed_start_timeout_seconds(value: object) -> int:
     if type(value) is not int or not 60 <= value <= 3600:
         raise RecipeStartPayloadError("distributed start timeout is invalid")
     return value
+
+
+def start_peer_addresses(
+    engine: str, world_size: int, fabric_addresses: Mapping[int, str | None]
+) -> tuple[str, ...]:
+    """Every rank's fabric address in rank order, or none for other engines."""
+
+    if world_size < 2 or not places_from_environment(engine):
+        return ()
+    addresses = tuple(fabric_addresses.get(rank) for rank in range(world_size))
+    if not all(isinstance(address, str) for address in addresses):
+        raise RecipeStartPayloadError("a rank's fabric address is unavailable")
+    return tuple(address for address in addresses if address is not None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +71,7 @@ def build_recipe_start_payload(
     compiled_execution_plan: WireCompiledExecutionPlan,
     master_address: str | None,
     master_port: int | None,
+    peer_addresses: tuple[str, ...],
     phase: str | None = None,
     start_deadline: str | None = None,
 ) -> dict[str, object]:
@@ -76,6 +91,7 @@ def build_recipe_start_payload(
                 master_address=master_address,
                 master_port=master_port,
                 world_size=world_size,
+                peer_addresses=peer_addresses,
             ),
         }
         payload["run_generation"] = run_generation
@@ -102,6 +118,7 @@ def _bind_compiled_execution_plan(
     master_address: str | None,
     master_port: int | None,
     world_size: int,
+    peer_addresses: tuple[str, ...],
 ) -> dict[str, object]:
     payload = json.loads(canonical_message(value))
     runtime = payload.get("runtime")
@@ -124,6 +141,8 @@ def _bind_compiled_execution_plan(
             "memory_floor_bytes": placement.memory_floor_bytes,
         }
     )
+    if peer_addresses:
+        compiled_placement["peer_addresses"] = list(peer_addresses)
     security = payload.get("security")
     if isinstance(security, dict):
         native_fabric = world_size > 1 and master_port is not None

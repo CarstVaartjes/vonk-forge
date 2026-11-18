@@ -3,10 +3,14 @@ from __future__ import annotations
 import copy
 import json
 from importlib.resources import files
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
-from vonk_control.harnesses.canonical import compile_canonical_harness
+from vonk_control.harnesses.canonical import (
+    _distributed_args,
+    compile_canonical_harness,
+)
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
@@ -33,6 +37,7 @@ BUILTINS = (
     "tensorfold",
     "exllamav3",
     "pytorch-server",
+    "gr8",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
@@ -47,6 +52,7 @@ OPENAI_BUILTINS = {
     "tensorfold",
     "exllamav3",
     "pytorch-server",
+    "gr8",
 }
 ENTRYPOINTS = {
     "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
@@ -57,6 +63,7 @@ ENTRYPOINTS = {
     "tensorfold": ["/opt/vonk/bin/tensorfold-serve"],
     "exllamav3": ["/opt/vonk/bin/exllamav3-serve"],
     "pytorch-server": ["/opt/vonk/bin/pytorch-server"],
+    "gr8": ["/opt/vonk/bin/gr8-serve"],
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
@@ -106,6 +113,10 @@ ARGS = {
         {"name": "port", "value": 8000},
         {"name": "max-model-len", "value": 16384},
     ],
+    "gr8": [
+        {"name": "host", "value": "0.0.0.0"},
+        {"name": "port", "value": 8000},
+    ],
     "diffusers": [
         {"name": "pipeline", "value": "text-to-image"},
         {"name": "output-mime", "value": "image/png"},
@@ -136,6 +147,23 @@ def test_every_registered_harness_produces_launch_authority() -> None:
         projection = _projection(metadata.slug, model=model)
         assert projection.command
         assert all(mount.read_only for mount in projection.model_mounts)
+
+
+def test_every_distributed_harness_places_its_ranks() -> None:
+    # Break caught: an engine declared distributed in its metadata (which the
+    # recipe library validates against) that the compiler then refuses.
+    for metadata in CANONICAL_HARNESSES:
+        if "distributed" not in metadata.topology_modes:
+            continue
+        recipe = SimpleNamespace(
+            runtime=SimpleNamespace(engine=metadata.slug),
+            topology=SimpleNamespace(
+                mode="distributed",
+                node_count=2,
+                parallelism=SimpleNamespace(tensor=2, pipeline=1, backend="mp"),
+            ),
+        )
+        _distributed_args(cast(Any, recipe), [], role="worker", rank=1)
 
 
 def test_invalid_metadata_cannot_replace_current_launch_authority() -> None:

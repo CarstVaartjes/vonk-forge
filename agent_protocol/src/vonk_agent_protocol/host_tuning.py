@@ -74,6 +74,8 @@ class HostTuning(WireModel):
     snaps: list[SnapName] | None = Field(default=None, max_length=MAX_REPORTED_SNAPS)
     # /proc/sys/vm/watermark_boost_factor.
     watermark_boost_factor: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    # /proc/sys/vm/compaction_proactiveness (kernel range 0..100).
+    compaction_proactiveness: int | None = Field(default=None, ge=0, le=100)
     # The kernel command line has the word ``splash``.
     kernel_splash: bool | None = None
     free_memory: FreeMemory | None = None

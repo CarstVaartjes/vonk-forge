@@ -46,6 +46,29 @@
     },
     {
       "advice": {
+        "check": "proactive-compaction",
+        "finding": "vm.compaction_proactiveness is 20.",
+        "explanation": "The kernel compacts memory in the background. On a Spark a workload holds most of the unified memory, so this stalls the serving path and multi-Spark collectives. 0 stops only the background compaction, now and at every boot; compaction on demand and when loading starts still works.",
+        "commands": [
+          "echo vm.compaction_proactiveness=0 | sudo tee /etc/sysctl.d/90-no-proactive-compaction.conf",
+          "sudo sysctl -p /etc/sysctl.d/90-no-proactive-compaction.conf"
+        ],
+        "undo": [
+          "sudo rm -f /etc/sysctl.d/90-no-proactive-compaction.conf",
+          "sudo sysctl -w vm.compaction_proactiveness=20"
+        ]
+      },
+      "lines": [
+        "vm.compaction_proactiveness is 20. The kernel compacts memory in the background. On a Spark a workload holds most of the unified memory, so this stalls the serving path and multi-Spark collectives. 0 stops only the background compaction, now and at every boot; compaction on demand and when loading starts still works.",
+        "echo vm.compaction_proactiveness=0 | sudo tee /etc/sysctl.d/90-no-proactive-compaction.conf",
+        "sudo sysctl -p /etc/sysctl.d/90-no-proactive-compaction.conf",
+        "Undo:",
+        "sudo rm -f /etc/sysctl.d/90-no-proactive-compaction.conf",
+        "sudo sysctl -w vm.compaction_proactiveness=20"
+      ]
+    },
+    {
+      "advice": {
         "check": "boot-splash",
         "finding": "The kernel command line has splash.",
         "explanation": "Cosmetic: the boot splash hides kernel messages on the console of a headless Spark. Low impact; the change applies at the next boot.",

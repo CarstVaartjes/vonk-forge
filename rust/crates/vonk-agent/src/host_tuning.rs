@@ -1,5 +1,6 @@
 //! The facts behind the host checks: which listed units run, the installed
-//! snaps, the watermark boost, the boot splash and free memory by block size.
+//! snaps, the watermark boost, proactive compaction, the boot splash and free
+//! memory by block size.
 //! Informative evidence only; each reading that fails is unknown on its own
 //! and never fails the inventory.
 use std::{fs, io::Read, path::Path, time::Duration};
@@ -69,6 +70,9 @@ pub fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> Hos
         watermark_boost_factor: read("proc/sys/vm/watermark_boost_factor")
             .and_then(|text| text.trim().parse().ok())
             .filter(|factor| *factor <= i32::MAX as u32),
+        compaction_proactiveness: read("proc/sys/vm/compaction_proactiveness")
+            .and_then(|text| text.trim().parse().ok())
+            .filter(|value| *value <= 100),
         kernel_splash: read("proc/cmdline")
             .map(|text| text.split_ascii_whitespace().any(|word| word == "splash")),
         free_memory: read("proc/buddyinfo")
