@@ -415,7 +415,7 @@ async fn a_loading_workload_is_dropped_until_it_is_ready() {
 }
 
 #[tokio::test]
-async fn a_host_that_refuses_the_drop_still_starts_its_workload_with_a_note() {
+async fn a_host_that_refuses_the_drop_still_starts_its_workload() {
     // Fault: the helper's sandbox refuses /proc/sys/vm/drop_caches.
     let (dropper, drops) = counting_dropper(Some(
         vonk_agent_protocol::generated::PageCacheDropProblem::NotPermitted,
