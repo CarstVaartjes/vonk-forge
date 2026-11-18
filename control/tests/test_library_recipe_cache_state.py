@@ -42,7 +42,7 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_control.stored_json import write_guard_mode
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_library_local_state_history import _cache_set, _operation
 from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
@@ -609,6 +609,39 @@ def test_image_presence_never_reads_a_builds_plan_or_policy(
         for item in build_reads
         if re.search(r'recipe_builds\."?(plan|policy_report)\b', item)
     ]
+
+
+def test_cache_resolution_reads_the_shared_catalog_parse_without_copying(
+    cache,  # noqa: F811
+    monkeypatch,
+):
+    """Resolution only reads recipe and model documents, so it copies none."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+    copies: list[str] = []
+    copy_model = RecipeDefinition.model_copy
+
+    def record(self, *args, **kwargs):
+        copies.append(type(self).__name__)
+        return copy_model(self, *args, **kwargs)
+
+    for definition in (RecipeDefinition, ModelDefinition):
+        monkeypatch.setattr(definition, "model_copy", record)
+    resolutions = [
+        service.resolve_latest_cached(
+            recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
+        )
+        for slug in ("resolver-recipe", "resolver-dual")
+    ]
+
+    assert [item.recipe.cached for item in resolutions] == [True, True]
+    assert copies == []
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(

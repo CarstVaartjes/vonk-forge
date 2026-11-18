@@ -381,8 +381,16 @@ def read_catalog_document(
 ) -> ModelDefinition | RecipeDefinition:
     """Parse one persisted published document; its digest is stored with it."""
 
+    return read_shared_catalog_document(revision).model_copy(deep=True)
+
+
+def read_shared_catalog_document(
+    revision: CatalogDocumentRevision,
+) -> ModelDefinition | RecipeDefinition:
+    """:func:`read_catalog_document` without the copy: never mutate the result."""
+
     try:
-        return cached_catalog_document(
+        return shared_catalog_document(
             revision.kind, revision.content_digest, revision.document
         )
     except CatalogRevisionContractError:
@@ -434,6 +442,7 @@ __all__ = [
     "read_catalog_document",
     "read_catalog_projection",
     "read_model_set",
+    "read_shared_catalog_document",
     "rederive_projection",
     "shared_catalog_document",
     "write_catalog_projection",

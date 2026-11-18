@@ -499,6 +499,25 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
     assert not changed, f"test retyped shared metadata columns: {changed}"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def shared_catalog_parses_unchanged() -> Iterator[None]:
+    """Readers share one parse per catalog content identity; none may mutate it."""
+    yield
+    from vonk_control import catalog_revision_contract as contract
+    from vonk_control.bounded_json import require_mapping
+    from vonk_forge_contracts import read_model, read_recipe
+
+    changed = [
+        f"{kind} {digest}"
+        for (kind, digest), entry in list(contract._document_cache.items())
+        if (read_model if kind == "model" else read_recipe)(
+            require_mapping(entry.source, "cached catalog source")
+        )
+        != entry.parsed
+    ]
+    assert not changed, f"a caller mutated a shared catalog parse: {changed}"
+
+
 @pytest.fixture
 def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
     """Fail the test when code touches a model-cache object on storage.
