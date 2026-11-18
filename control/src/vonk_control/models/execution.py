@@ -303,6 +303,7 @@ class RunNode(Base):
             name="ck_run_nodes_resources",
         ),
         CheckConstraint("length(role) BETWEEN 1 AND 64", name="ck_run_nodes_role"),
+        CheckConstraint(machine_check(RunState), name="ck_run_nodes_state"),
         CheckConstraint(
             "observed_run_generation IS NULL OR observed_run_generation>=1",
             name="ck_run_nodes_observed_run_generation",
