@@ -44,6 +44,7 @@ COMMAND_ACTIONS = {
         "configure",
         "export",
         "import",
+        "delete",
         "load",
         "cancel",
         "progress",
