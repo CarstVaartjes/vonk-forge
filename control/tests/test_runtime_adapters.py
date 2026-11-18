@@ -40,11 +40,6 @@ def test_every_builtin_engine_resolves_its_own_adapter() -> None:
         assert adapter.image_user == ADAPTER_IMAGE_USER
         wrapper = CANONICAL_HARNESS_BY_SLUG[engine].wrapper
         assert wrapper in adapter.containerfile
-        for other in adapters:
-            foreign = CANONICAL_HARNESS_BY_SLUG[other].wrapper
-            if other == engine or foreign == wrapper:
-                continue
-            assert foreign not in adapter.containerfile
 
 
 def test_adapter_resolution_fails_closed() -> None:

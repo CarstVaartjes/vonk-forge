@@ -226,6 +226,7 @@ _ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {
     "pytorch-server": ("/opt/vonk/bin/pytorch-server",),
     "gr8": ("/opt/vonk/bin/gr8-serve",),
     "diffusers": ("/opt/vonk/bin/diffusers-job",),
+    "vllm-omni": ("/opt/vonk/bin/vllm-omni-job",),
     "comfyui": ("/opt/vonk/bin/comfyui-job",),
     "pytorch-pipeline": ("/opt/vonk/bin/pytorch-pipeline",),
 }

@@ -42,6 +42,7 @@ BUILTINS = (
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
+    "vllm-omni",
 )
 
 OPENAI_BUILTINS = {
@@ -68,6 +69,7 @@ ENTRYPOINTS = {
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
+    "vllm-omni": ["/opt/vonk/bin/vllm-omni-job"],
 }
 ARGS = {
     "vllm": [
@@ -131,6 +133,7 @@ ARGS = {
         {"name": "entrypoint", "value": "/opt/vonk/source/pipelines/run.py"},
         {"name": "output-mime", "value": "model/gltf-binary"},
     ],
+    "vllm-omni": [],
 }
 
 
@@ -165,6 +168,18 @@ def test_every_distributed_harness_places_its_ranks() -> None:
             ),
         )
         _distributed_args(cast(Any, recipe), [], role="worker", rank=1)
+
+
+def test_vllm_omni_is_a_distributed_video_job_with_platform_owned_telemetry() -> None:
+    # Break caught: the harness accepting a service interface or a single Spark,
+    # or a job rank able to report usage stats from the host network.
+    metadata = next(item for item in CANONICAL_HARNESSES if item.slug == "vllm-omni")
+    assert metadata.adapters == ("video-job",)
+    assert metadata.topology_modes == ("distributed",)
+    assert ("VLLM_NO_USAGE_STATS", "1") in telemetry_contract("vllm-omni").environment
+    assert dict(effective_environment("vllm-omni", ()))["VLLM_CACHE_ROOT"] == (
+        "/outputs/cache/vllm"
+    )
 
 
 def test_invalid_metadata_cannot_replace_current_launch_authority() -> None:
