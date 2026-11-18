@@ -37,3 +37,11 @@ class LibrarySyncRunState(WireEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class ClusterMappingState(WireEnum):
+    """The standing of one cluster mapping of a recipe revision onto Sparks."""
+
+    PLANNED = "planned"
+    READY = "ready"
+    STALE = "stale"

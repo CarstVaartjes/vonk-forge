@@ -51,7 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,
@@ -223,7 +223,7 @@ class InstallAdmissionService(InstallPlanningService):
         revision = _active_recipe_revision(session, plan.recipe_revision_id)
         if (
             mapping is None
-            or mapping.state != "ready"
+            or mapping.state != ClusterMappingState.READY
             or revision is None
             or build is None
             or build.state != RecipeBuildState.SUCCEEDED

@@ -34,7 +34,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     split_option_choices,
 )
-from .stored_states import CatalogRevisionState
+from .stored_states import CatalogRevisionState, ClusterMappingState
 from .strict_json import StrictModel
 from .topology import Placement, TopologyError, validate_topology
 
@@ -268,7 +268,7 @@ class ClusterMappingService:
                 topology_name=plan.topology_name,
                 generation=plan.generation,
                 node_count=len(plan.nodes),
-                state="ready",
+                state=ClusterMappingState.READY.value,
                 parameters=validate_mapping_parameters(plan.parameters),
                 placement_digest=plan.placement_digest,
                 endpoint_owner_node_id=endpoint[0],

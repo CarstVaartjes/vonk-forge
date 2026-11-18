@@ -58,7 +58,7 @@ from ..runtime_preflight import (
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -118,7 +118,7 @@ class InstallPlanningService:
                     "recipe build evidence is unavailable",
                     reason=WaitReason.RECEIPT_MISSING,
                 )
-            if mapping.state != "ready":
+            if mapping.state != ClusterMappingState.READY:
                 raise InvalidValue(
                     "cluster mapping is not ready",
                     reason=InvalidRequestReason.NOT_READY,

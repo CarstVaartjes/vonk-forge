@@ -463,6 +463,12 @@ def test_build_state_admits_only_its_enum_words(catalog: Catalog) -> None:
         catalog.build(revision, state="waiting")
 
 
+def test_mapping_state_admits_only_its_enum_words(catalog: Catalog) -> None:
+    catalog.workload(catalog.revision("mapping-state", 1))
+    with pytest.raises(IntegrityError), catalog.sessions.begin() as session:
+        session.execute(update(ClusterMapping).values(state="waiting"))
+
+
 def test_superseded_unreferenced_revision_is_removed_after_the_grace_period(
     catalog: Catalog,
 ) -> None:

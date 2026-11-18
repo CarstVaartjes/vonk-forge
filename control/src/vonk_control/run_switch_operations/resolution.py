@@ -54,7 +54,7 @@ from ..run_switch_contract import (
     SparkGroup,
     SparkGroupNode,
 )
-from ..stored_states import RecipeBuildState
+from ..stored_states import ClusterMappingState, RecipeBuildState
 from .planning_helpers import _as_reason
 
 if TYPE_CHECKING:
@@ -171,7 +171,7 @@ class ResolutionMixin:
                 select(ClusterMapping)
                 .where(
                     ClusterMapping.recipe_revision_id == revision.id,
-                    ClusterMapping.state == "ready",
+                    ClusterMapping.state == ClusterMappingState.READY,
                 )
                 .order_by(ClusterMapping.generation.desc(), ClusterMapping.id)
             )
