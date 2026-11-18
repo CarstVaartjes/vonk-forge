@@ -29,11 +29,13 @@ _POOL = ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="profile-sto
 _LOCK = Lock()
 # Only live probes live here, so hung storage cannot create an unbounded queue.
 _IN_FLIGHT: dict[tuple[Any, ...], Future[Any]] = {}
-# Retain one completed result per I/O slot for five seconds. A read can collect
-# a probe that completed after its predecessor timed out, without extending the
-# freshness window or retaining an unbounded result cache.
+# Retain a bounded list of completed results for five seconds. A read can
+# collect a probe that completed after its predecessor timed out, without
+# extending the freshness window or retaining an unbounded result cache. The
+# list fits every choice of a large profile, not just one per I/O slot.
 _RECENT: OrderedDict[tuple[Any, ...], tuple[Future[Any], float]] = OrderedDict()
 _FRESH_SECONDS = 5.0
+_RECENT_LIMIT = 64
 
 
 def _finished(key: tuple[Any, ...], future: Future[Any]) -> None:
@@ -43,7 +45,7 @@ def _finished(key: tuple[Any, ...], future: Future[Any]) -> None:
         _IN_FLIGHT.pop(key)
         if not future.cancelled() and future.exception() is None:
             _RECENT[key] = (future, time.monotonic() + _FRESH_SECONDS)
-            while len(_RECENT) > _WORKERS:
+            while len(_RECENT) > _RECENT_LIMIT:
                 _RECENT.popitem(last=False)
 
 

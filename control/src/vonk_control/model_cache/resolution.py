@@ -59,6 +59,7 @@ from .errors import (
     ModelCacheSelectorAmbiguous,
     ModelCacheStorageUnknown,
 )
+from .model_artifact_cache import model_artifact_specs
 from .source_helpers import _model_selector
 
 if TYPE_CHECKING:
@@ -267,17 +268,19 @@ class ResolutionMixin:
                     slug=row.slug,
                     content_sha256=digest,
                 )
-            raw_artifacts = _canonical_model_artifacts(row)
             selected_ids = _recipe_model_file_ids(recipe_document, digest)
-            for raw in raw_artifacts:
-                if selected_ids is not None and raw.id not in selected_ids:
-                    continue
-                specs.append(
-                    cache._artifact_from_catalog(
-                        raw,
-                        model_content_sha256=digest,
-                    )
+            specs.extend(
+                spec
+                for spec in model_artifact_specs(
+                    row,
+                    fixture_sources=cache._fixture_sources,
+                    build=lambda built, digest=digest: tuple(
+                        cache._artifact_from_catalog(raw, model_content_sha256=digest)
+                        for raw in _canonical_model_artifacts(built)
+                    ),
                 )
+                if selected_ids is None or spec.artifact_id in selected_ids
+            )
         manifest = ArtifactSetManifest(
             model_content_sha256=model_digest,
             recipe_revision_sha256=recipe_digest,

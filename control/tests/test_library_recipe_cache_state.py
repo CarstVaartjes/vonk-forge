@@ -14,11 +14,13 @@ import copy
 import itertools
 import re
 import uuid
+from collections import OrderedDict
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, update
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
@@ -29,6 +31,7 @@ from vonk_control.catalog_revision_contract import (
 from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
+from vonk_control.model_cache import model_artifact_cache
 from vonk_control.models import (
     AgentNode,
     CatalogDocument,
@@ -609,6 +612,54 @@ def test_image_presence_never_reads_a_builds_plan_or_policy(
         for item in build_reads
         if re.search(r'recipe_builds\."?(plan|policy_report)\b', item)
     ]
+
+
+def _count_artifact_builds(service, monkeypatch) -> list[str]:
+    """Start from an empty derived-spec cache and record every spec built."""
+
+    monkeypatch.setattr(model_artifact_cache, "_cache", OrderedDict())
+    monkeypatch.setattr(model_artifact_cache, "_retained", 0)
+    built: list[str] = []
+    derive = service._artifact_from_catalog
+
+    def record(value, **kwargs):
+        built.append(value.id)
+        return derive(value, **kwargs)
+
+    monkeypatch.setattr(service, "_artifact_from_catalog", record)
+    return built
+
+
+@pytest.mark.parametrize(("models", "expected"), [(1, 1), (2, 2)])
+def test_a_model_content_identity_builds_its_artifact_specs_once(
+    cache,  # noqa: F811
+    monkeypatch,
+    models,
+    expected,
+):
+    """Each model digest derives its specs once; a hit equals a rebuild."""
+
+    service, sessions = cache
+    world = _World(sessions, count=models)
+    built = _count_artifact_builds(service, monkeypatch)
+
+    first = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+    second = service.resolve_artifact_set(recipe_revision_id=world.recipe_revision_id)
+
+    assert len(built) == expected
+    assert second == first
+    with sessions() as session:
+        row = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.content_digest == world.model_digests[0]
+            )
+        ).one()
+    specs = model_artifact_cache.model_artifact_specs(
+        row, fixture_sources=True, build=lambda _row: pytest.fail("rebuilt a hit")
+    )
+    assert isinstance(specs, tuple)
+    with pytest.raises(FrozenInstanceError):
+        specs[0].path = "elsewhere"  # type: ignore[misc]
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(
