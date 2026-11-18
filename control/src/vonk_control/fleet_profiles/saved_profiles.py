@@ -24,7 +24,6 @@ from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetNodeView,
     FleetProfileApplicationView,
-    FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
     FleetProfileInput,
@@ -69,12 +68,17 @@ class FleetProfileService:
             )
             # Rows share the selection, roster and recipe reads: one set query
             # each for the page, never one per row.
-            choices: list[FleetProfileAssignmentInput] = []
-            for row in rows:
-                try:
-                    choices.extend(self._choices(row))
-                except (TypeError, ValueError):
-                    continue  # _read_view shows this row as unavailable.
+            # An unreadable definition contributes nothing to the page reads;
+            # _read_view shows that row as unavailable.
+            choices = [
+                choice
+                for row in rows
+                if isinstance(
+                    definition := self._readable_definition(row),
+                    FleetProfileDefinition,
+                )
+                for choice in definition.assignments
+            ]
             page = self._page_reads(session, choices, include_documents=True)
             return FleetProfileList(
                 generated_at=now,
@@ -219,16 +223,24 @@ class FleetProfileService:
         page: _ProfilePageReads | None = None,
     ) -> FleetProfileReadView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        try:
-            self._definition(row)
-        except (TypeError, ValueError):
+        definition = self._readable_definition(row)
+        if isinstance(definition, SavedProfileProjectionIssue):
             return UnavailableFleetProfileView(
                 id=row.id,
                 number=row.number,
                 revision=row.revision,
-                projection_issue=self._definition_issue(),
+                projection_issue=definition,
             )
         return self._view(session, row, observe=observe, page=page)
+
+    def _readable_definition(
+        self, row: FleetProfile
+    ) -> FleetProfileDefinition | SavedProfileProjectionIssue:
+        """The saved definition, or the typed issue that it cannot be read."""
+        try:
+            return self._definition(row)
+        except (TypeError, ValueError):
+            return self._definition_issue()
 
     def definition_number(self, number: int) -> FleetProfileDefinitionView:
         """Read authoring intent without consulting catalog, cache, or runtime."""
