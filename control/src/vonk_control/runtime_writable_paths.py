@@ -155,7 +155,8 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
 # The generic PyTorch server serves no engine-defined /metrics: the same contract
 # as ExLlamaV3, bound once rather than restated.
 _ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
-# gr8's front end serves no engine-defined /metrics either.
+# gr8's front end serves vLLM-named /metrics, which the agent does not parse yet;
+# until it does, gr8 shares the generic server's contract.
 _ENGINE_TELEMETRY["gr8"] = _ENGINE_TELEMETRY["exllamav3"]
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
@@ -207,16 +208,15 @@ for _slug in (
     "tensorfold",
     "exllamav3",
     "pytorch-server",
-    "gr8",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
 ):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
-for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"):
-    _ENGINE_ENVIRONMENT["llama-cpp"] = {
-        **_ENGINE_ENVIRONMENT.get("llama-cpp", {}),
-        _name: dict(_ENGINE_ENVIRONMENT["sglang"])[_name],
+for _slug in ("llama-cpp", "gr8"):
+    _ENGINE_ENVIRONMENT[_slug] = {
+        _name: _ENGINE_ENVIRONMENT["sglang"][_name]
+        for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR")
     }
 
 _OPTIONAL_PATH_NAMES = frozenset(
