@@ -29,6 +29,7 @@ from .settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
 _ROW_LOCK_ORDER = (
+    "fleet_profiles",
     "agent_nodes",
     "catalog_document_revisions",
     "cluster_mappings",

@@ -75,10 +75,14 @@ class FleetProfileService:
         selection = session.get(FleetProfileSelection, 1)
         if selection is None:
             return None
+        selected_id = selection.application_id
+        selected_profile_id = selection.profile_id
+        if selected_id is None or selected_profile_id is None:
+            return None  # the loaded profile was deleted; only the counter stays
 
         def read() -> _SelectedProfileSnapshot | Damaged:
-            application = session.get(FleetProfileApplication, selection.application_id)
-            if application is None or application.profile_id != selection.profile_id:
+            application = session.get(FleetProfileApplication, selected_id)
+            if application is None or application.profile_id != selected_profile_id:
                 return Damaged("selected profile application is unavailable")
             if application.selection_generation != selection.generation:
                 return Damaged("selected profile generation is inconsistent")
@@ -100,9 +104,9 @@ class FleetProfileService:
             return _SelectedProfileSnapshot(
                 wait=read_wait(selection),
                 generation=selection.generation,
-                profile_id=selection.profile_id,
+                profile_id=selected_profile_id,
                 profile_revision=selection.profile_revision,
-                application_id=selection.application_id,
+                application_id=selected_id,
                 roster_node_ids=tuple(intended.scope.node_ids),
                 roster_digest=selection.roster_digest,
                 actor=application.actor,
@@ -112,7 +116,7 @@ class FleetProfileService:
 
         return read_or_rebuild(
             kind="profile-selection",
-            subject=str(selection.application_id),
+            subject=selected_id,
             read=read,
         )
 

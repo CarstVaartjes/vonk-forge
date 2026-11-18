@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from vonk_agent_protocol import InvalidRequestReason
 
 from .. import fleet_profile_states
+from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
@@ -21,6 +22,7 @@ from ..models import (
     FleetProfileRecipe,
     FleetProfileSelection,
 )
+from ..persisted_waits import schedule_wait
 from .contracts import FleetProfileInvalid
 
 if TYPE_CHECKING:
@@ -45,7 +47,8 @@ class FleetProfileService:
         Their stop is driven by the worker, so while any application is not yet
         ended the answer is ``cancelling`` and nothing is removed; the same
         request sent again finishes the delete. Nothing running is stopped or
-        changed by the delete itself, and the loaded-profile pointer clears.
+        changed by the delete itself, and the loaded-profile pointer clears (the selection row and its
+        generation stay).
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -80,10 +83,22 @@ class FleetProfileService:
                 # Already ended, already cancelling, or gone: nothing to cancel.
                 continue
 
-        with self._sessions.begin() as session:
-            row = session.get(FleetProfile, profile_id, with_for_update=True)
-            if row is None:
+        # The one profile lock a load also takes closes the load-vs-delete
+        # race; contention is the existing busy answer, retried by the caller.
+        with self._admission_session(actor) as session:
+            found = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "profile",
+                        FleetProfile,
+                        select(FleetProfile).where(FleetProfile.id == profile_id),
+                    ),
+                ),
+            )["profile"]
+            if not found:
                 return FleetProfileDeletion(number=number, outcome="already-gone")
+            row = found[0]
             _stale(expected_revision, row.revision)
             unfinished = session.scalar(
                 select(FleetProfileApplication.id)
@@ -95,12 +110,19 @@ class FleetProfileService:
             )
             if unfinished is not None:
                 return FleetProfileDeletion(number=number, outcome="cancelling")
-            # Explicit, in order: no database cascade is relied on.
-            session.execute(
-                delete(FleetProfileSelection).where(
+            # The selection row owns the generation Sparks fence clock and swap
+            # on: it is kept and only its pointer clears (no profile loaded).
+            selection = session.scalar(
+                select(FleetProfileSelection).where(
                     FleetProfileSelection.profile_id == profile_id
                 )
             )
+            if selection is not None:
+                selection.profile_id = None
+                selection.application_id = None
+                schedule_wait(selection, None)
+                session.flush()
+            # Explicit, in order: no database cascade is relied on.
             session.execute(
                 delete(FleetProfileApplication).where(
                     FleetProfileApplication.profile_id == profile_id

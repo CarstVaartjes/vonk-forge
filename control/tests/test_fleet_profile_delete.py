@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +20,7 @@ from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import (
     NOW,
     _database,
+    _follow_profile_retry,
     _input,
     _seed,
     _SwitchAdapter,
@@ -25,14 +28,36 @@ from .test_fleet_profiles import (
 )
 
 
-def _service() -> tuple[
-    FleetProfileService, sessionmaker[Session], _SwitchAdapter, str
-]:
+def _service(
+    now: list[datetime] | None = None,
+) -> tuple[FleetProfileService, sessionmaker[Session], _SwitchAdapter, str]:
+    clock = now or [NOW]
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     adapter = _SwitchAdapter()
-    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    service = FleetProfileService(
+        sessions, clock=lambda: clock[0], switch_adapter=adapter
+    )
     return service, sessions, adapter, revision_id
+
+
+def _run_to_success(
+    service: FleetProfileService, application_id: str, now: list[datetime]
+) -> None:
+    """Drive the worker until the load ends, as production does."""
+    for _ in range(12):
+        _follow_profile_retry(service, application_id, now)
+        service.tick()
+        if service.application(application_id).state == "succeeded":
+            return
+    raise AssertionError("the load did not finish")
+
+
+def _selection(sessions: sessionmaker[Session]) -> FleetProfileSelection:
+    with sessions() as session:
+        row = session.get(FleetProfileSelection, 1)
+        assert row is not None
+        return row
 
 
 def _count(sessions: sessionmaker[Session], model: type) -> int:
@@ -77,7 +102,8 @@ def test_expected_revision_refuses_a_stale_delete() -> None:
 
 
 def test_delete_while_loading_cancels_through_the_cancel_path() -> None:
-    service, sessions, adapter, revision_id = _service()
+    now = [NOW]
+    service, sessions, adapter, revision_id = _service(now)
     profile = service.create(_input(revision_id), actor="admin")
     application = service.load(profile.number, actor="admin", request_key=_uuid(901))
 
@@ -87,30 +113,50 @@ def test_delete_while_loading_cancels_through_the_cancel_path() -> None:
     assert [item[0] for item in adapter.cancellation_requests] == [application.id]
     assert _count(sessions, FleetProfile) == 1
 
-    with sessions.begin() as session:
-        row = session.get(FleetProfileApplication, application.id)
-        assert row is not None
-        row.state = "cancelled"
-    assert service.delete_number(profile.number, actor="admin").outcome == "deleted"
+    for _ in range(12):
+        service.tick()
+        outcome = service.delete_number(profile.number, actor="admin").outcome
+        if outcome == "deleted":
+            break
+    assert outcome == "deleted"
     assert _count(sessions, FleetProfileApplication) == 0
-    assert _count(sessions, FleetProfileSelection) == 0
+    assert _selection(sessions).application_id is None
 
 
 def test_deleting_the_loaded_profile_touches_no_running_workload() -> None:
-    service, sessions, adapter, revision_id = _service()
+    now = [NOW]
+    service, sessions, adapter, revision_id = _service(now)
     profile = service.create(_input(revision_id), actor="admin")
     application = service.load(profile.number, actor="admin", request_key=_uuid(902))
-    with sessions.begin() as session:
-        row = session.get(FleetProfileApplication, application.id)
-        assert row is not None
-        row.state = "succeeded"
+    _run_to_success(service, application.id, now)
+    before = _selection(sessions)
+    assert before.profile_id == profile.id and before.application_id == application.id
     stops = list(adapter.cancellations)
 
     assert service.delete_number(profile.number, actor="admin").outcome == "deleted"
-    # Nothing was cancelled or stopped, and the loaded pointer is gone.
+    # Nothing was cancelled or stopped; the pointer cleared, the counter stayed.
     assert adapter.cancellations == stops and not adapter.cancellation_requests
-    assert _count(sessions, FleetProfileSelection) == 0
+    after = _selection(sessions)
+    assert after.profile_id is None and after.application_id is None
+    assert after.generation == before.generation
     assert _count(sessions, FleetProfileApplication) == 0
+
+
+def test_selection_generation_never_goes_backwards_across_a_delete() -> None:
+    now = [NOW]
+    service, sessions, _adapter, revision_id = _service(now)
+    first = service.create(_input(revision_id), actor="admin")
+    second = service.create(_input(revision_id, name="Other"), actor="admin")
+    loaded = service.load(first.number, actor="admin", request_key=_uuid(903))
+    _run_to_success(service, loaded.id, now)
+    generation = _selection(sessions).generation
+
+    assert service.delete_number(first.number, actor="admin").outcome == "deleted"
+    reloaded = service.load(second.number, actor="admin", request_key=_uuid(904))
+    _run_to_success(service, reloaded.id, now)
+    selection = _selection(sessions)
+    assert selection.application_id == reloaded.id
+    assert selection.generation > generation
 
 
 def test_delete_route_is_administrator_only_and_idempotent() -> None:
