@@ -30,7 +30,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import Disposition, WaitOwnerKind
+from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
 
 from .. import job_states
 from ..agent_operation_facts import aware
@@ -268,7 +268,10 @@ class AgentUpgradeAdapter:
     def new_rollout(*, allowed: bool, **fields: Any) -> Job:
         """A new rollout: ``queued``, or ``succeeded`` when no Spark needs it."""
 
-        return Job(state="queued" if allowed else "succeeded", **fields)
+        return Job(
+            state=LifecycleState.QUEUED if allowed else LifecycleState.SUCCEEDED,
+            **fields,
+        )
 
 
 __all__ = [

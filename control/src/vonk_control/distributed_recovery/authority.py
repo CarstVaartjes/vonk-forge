@@ -473,7 +473,7 @@ def _enqueue_recovery_stop(
     parent = parent.model_copy(update={"workload_intent_ordinal": start_ordinal})
     job_payload = controller_recipe_document(parent)
     job = JobAdapter.new_job(
-        state="running",
+        state=LifecycleState.RUNNING,
         id=job_id,
         request_id=request_id,
         kind="recipe.stop",
