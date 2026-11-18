@@ -16,6 +16,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from .failure_classification import error_detail
+from .harnesses.canonical import places_from_environment
 from .run_switch_contract import MemoryKind
 
 
@@ -31,17 +32,12 @@ def validate_distributed_start_timeout_seconds(value: object) -> int:
     return value
 
 
-# Engines whose wrapper reads every rank's fabric address from VONK_PEER_ADDRS.
-# Every other engine's start carries no peer list.
-PEER_ADDRESS_ENGINES = frozenset({"gr8"})
-
-
 def start_peer_addresses(
     engine: str, world_size: int, fabric_addresses: Mapping[int, str | None]
 ) -> tuple[str, ...]:
     """Every rank's fabric address in rank order, or none for other engines."""
 
-    if world_size < 2 or engine not in PEER_ADDRESS_ENGINES:
+    if world_size < 2 or not places_from_environment(engine):
         return ()
     addresses = tuple(fabric_addresses.get(rank) for rank in range(world_size))
     if not all(isinstance(address, str) for address in addresses):

@@ -348,9 +348,23 @@ def _model_mounts(
     return tuple(selected)
 
 
-# Engines whose own wrapper reads the platform's VONK_* placement environment, so
-# the compiler adds no rank arguments for them.
-_PLACEMENT_FROM_ENVIRONMENT = frozenset({"ds4", "gr8"})
+# Distributed engines whose arguments the compiler adds itself (see
+# `_distributed_args`); every other distributed engine takes its placement from
+# the platform's VONK_* environment through its own wrapper.
+_RANK_ARGUMENT_ENGINES = frozenset({"sglang", "vllm", "tensorfold"})
+
+
+def places_from_environment(engine: str) -> bool:
+    """Whether the engine's wrapper reads the platform's VONK_* placement.
+
+    The compiler adds no rank arguments for such an engine, and its start carries
+    every rank's fabric address.
+    """
+
+    return (
+        engine not in _RANK_ARGUMENT_ENGINES
+        and "distributed" in canonical_harness(engine).topology_modes
+    )
 
 
 def _distributed_args(
@@ -410,7 +424,7 @@ def _distributed_args(
         if not has("master-port"):
             command.extend(("--master-port", "VONK_MASTER_PORT"))
         return command
-    if recipe.runtime.engine in _PLACEMENT_FROM_ENVIRONMENT:
+    if places_from_environment(recipe.runtime.engine):
         return command
     raise HarnessCompileError(
         f"distributed topology is not supported by the {recipe.runtime.engine} harness"

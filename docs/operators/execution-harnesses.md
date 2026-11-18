@@ -47,8 +47,8 @@ compiler, structural qualification, and Fleet admission must agree.
 A distributed rank receives its placement as environment variables: `VONK_RANK`,
 `VONK_WORLD_SIZE`, `VONK_LOCAL_ADDR`, `VONK_MASTER_ADDR` and `VONK_MASTER_PORT`
 (fabric addresses; the port is the platform's reserved rendezvous port). For an
-engine whose wrapper needs every rank's address (the engines in
-`PEER_ADDRESS_ENGINES`, today `gr8`), the start also carries
+engine whose wrapper needs every rank's address (the engines that take their
+placement from this environment, today `gr8` and `ds4`), the start also carries
 `VONK_PEER_ADDRS`: all fabric addresses in rank order, comma separated,
 including this rank's own. The first is `VONK_MASTER_ADDR` and the one at this
 rank's index is `VONK_LOCAL_ADDR`. Other engines never receive it, and a run
