@@ -199,15 +199,14 @@ class StartMixin:
                     "it is recorded and the next preparation installs afresh"
                 )
             compiled_plans = loaded_plans
-            start_order = _topology_order(
-                read_row_column(revision, "document"), "start_order"
-            )
+            document = read_row_column(revision, "document")
+            if isinstance(document, Residue):
+                raise RecipeRetryLater("recipe topology is invalid")
+            start_order = _topology_order(document, "start_order")
             if start_order is None:
                 raise RecipeRetryLater("recipe topology is invalid")
-            topology = recipe_topology(read_row_column(revision, "document"))
-            distributed_readiness = _canonical_distributed_readiness(
-                read_row_column(revision, "document")
-            )
+            topology = recipe_topology(document)
+            distributed_readiness = _canonical_distributed_readiness(document)
             two_phase_start = (
                 world_size > 1 and topology.distributed and distributed_readiness
             )
@@ -225,7 +224,7 @@ class StartMixin:
             run.updated_at = now
             recipe_digest = revision.content_digest
             assert recipe_digest is not None
-            engine = recipe_engine(read_row_column(revision, "document"))
+            engine = recipe_engine(document)
             fabric_by_rank = {item.rank: item.fabric_address for item in plan.nodes}
 
             def start_payload(node: RunNodePlan) -> tuple[str, RecipeStartPayload]:
