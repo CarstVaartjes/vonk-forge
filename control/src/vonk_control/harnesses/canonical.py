@@ -350,7 +350,7 @@ def _model_mounts(
 
 # Engines whose own wrapper reads the platform's VONK_* placement environment, so
 # the compiler adds no rank arguments for them.
-_PLACEMENT_FROM_ENVIRONMENT = frozenset({"gr8"})
+_PLACEMENT_FROM_ENVIRONMENT = frozenset({"ds4", "gr8"})
 
 
 def _distributed_args(
