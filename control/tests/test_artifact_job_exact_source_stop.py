@@ -627,6 +627,12 @@ def test_a_run_stop_reaches_two_jobs_on_one_spark(tmp_path) -> None:
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
 
+    # The ended job does not block fresh work on the run.
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000302"),
+    )
+    assert fresh.id != first.id
     second = submitted_artifact_job(service, run_id, request_suffix=128)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
