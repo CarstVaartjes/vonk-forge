@@ -202,10 +202,17 @@ a `vllm-omni` Start grant alone carries `peer_secret` (`peer_secret.py`:
 never blocks another workload's grant, and outside every identity: plan digest,
 request digest, label, compile-cache key). The helper adds it after those are
 fixed as `--env VONK_PEER_SECRET` by name, the value only in the docker child's
-environment; no argv, label, DB row, log or API field ever holds it, and a plan
-or recipe cannot name `VONK_PEER_SECRET`. A Spark on an older helper refuses the
-unknown grant field or the wrapper exits 2 (fail closed); deploy Controller,
-then agents, then the recipe;
+environment. Only the agent's mTLS grant response (the `peer_secret` field of the
+signed grant) carries it; no argv, label, DB row, log, operator API field or
+receipt holds it, `scripts/check-added-lines` flags the name outside the owning
+files (`peer_secret_names.py`), the generated Rust field type
+(`vonk_agent_protocol::secret::Secret`) redacts `Debug`, and a plan or recipe
+cannot name `VONK_PEER_SECRET`. An agent older than protocol 4.6 parses the
+grant response strictly, fails that parse (`ClientError::Protocol`, an
+`Observe` disposition), and reports the Start unconfirmed; the Controller then
+observes it (`OBSERVE_BUDGET`, then `LOST_OBSERVATION_BOUND`) and ends the job
+failed with the effect unknown. Agent and helper ship in one package. Deploy
+Controller, then agents, then the recipe;
 run admission reserves the rendezvous port on the owner of a multi-node job. A job submitted to a multi-node run is one order per rank in one
 phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
 own binder); `lifecycle/job_ranks.py` names the owner's order, the job's

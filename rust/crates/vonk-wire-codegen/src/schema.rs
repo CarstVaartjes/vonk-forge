@@ -58,8 +58,13 @@ pub(super) fn prepare(value: &mut Value) {
                 object.remove(key);
             }
             if object.get("type").and_then(Value::as_str) == Some("string") {
+                // A secret value keeps its marker so its generated type redacts Debug.
+                let secret = object.get("format").and_then(Value::as_str) == Some("vonk-secret");
                 for key in ["pattern", "minLength", "maxLength", "format"] {
                     object.remove(key);
+                }
+                if secret {
+                    object.insert("format".into(), json!("vonk-secret"));
                 }
                 if ip {
                     object.insert("format".into(), json!("ip"));

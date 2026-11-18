@@ -26,6 +26,7 @@ from . import (
     lifecycle_sets,
     locked_io,
     model_set_first_requester,
+    peer_secret_names,
     raw_barriers,
     repeated_parse,
     request_path_scans,
@@ -106,6 +107,7 @@ MODES = (
     "future-workers",
     "locked-io",
     "scratch-names",
+    "peer-secret-names",
     "capacity-refusals",
     "agent-422",
     "docker-listings",
@@ -2542,6 +2544,17 @@ def check_source(
     ):
         hits.extend(
             (line, bare_savepoints.KIND) for line in bare_savepoints.scan_source(source)
+        )
+    if (
+        not is_test
+        and "peer-secret-names" in modes
+        and peer_secret_names.in_scope(path)
+    ):
+        hits.extend(
+            (line, peer_secret_names.KIND)
+            for line in peer_secret_names.scan_source(
+                source, rust_test_lines(source) if path.endswith(".rs") else set()
+            )
         )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(

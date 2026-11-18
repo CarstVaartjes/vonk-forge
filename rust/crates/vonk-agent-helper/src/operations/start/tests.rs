@@ -1091,3 +1091,22 @@ fn the_peer_secret_reaches_only_the_docker_childs_environment() {
     stripped.drain(at - 1..=at);
     assert_eq!(&stripped, without);
 }
+
+/// A launch that fails with the secret in hand reports a cause that never
+/// holds it: what the helper prints to stderr and keeps as evidence is
+/// formatted from this error.
+#[test]
+fn a_failed_launch_reports_no_peer_secret() {
+    const SECRET: &str = "Gj3LimhJaTIm5nvdTza8cCMCE9Bclfa_3nOuDUgoGfM";
+    let (signed, result, calls, _) = launch_with_secret(
+        recipe_start_plan_for_authority(1),
+        None,
+        RunAnswer::Deadline,
+        None,
+        false,
+        &[Some(SECRET)],
+    );
+    let error = result.err().expect("the launch failed");
+    let rendered = format!("{error}{error:?}{signed:?}{calls:?}");
+    assert!(!rendered.contains(SECRET), "{rendered}");
+}

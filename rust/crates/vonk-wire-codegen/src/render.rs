@@ -60,6 +60,12 @@ pub fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
         ]
         .into_iter(),
     );
+    // A secret string is a hand-written type whose Debug never prints it.
+    settings.with_conversion(
+        serde_json::from_value(json!({"type":"string","format":"vonk-secret"}))?,
+        "crate::secret::Secret",
+        [].into_iter(),
+    );
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
         "::chrono::DateTime<::chrono::FixedOffset>",

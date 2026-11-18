@@ -2291,6 +2291,54 @@ def test_private_or_classified_scratch_names_pass(path: str, source: str) -> Non
     assert not check_source(path, source, lines, modes=("scratch-names",))
 
 
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            "control/src/vonk_control/api/jobs.py",
+            'log_event("granted", peer_secret=value)\n',
+        ),
+        (
+            "rust/crates/vonk-agent/src/executor/start.rs",
+            'eprintln!("{}", operation.peer_secret);\n',
+        ),
+        ("deploy/compose/compose.yaml", "      VONK_PEER_SECRET: x\n"),
+    ],
+)
+def test_the_peer_secret_name_outside_its_owners_is_flagged(
+    path: str, source: str
+) -> None:
+    assert check_source(path, source, {1}, modes=("peer-secret-names",))
+    assert not check_source(path, source, set(), modes=("peer-secret-names",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            "control/src/vonk_control/host_helper_authority.py",
+            "grant = derive_peer_secret(key, job)\n",
+        ),
+        (
+            "rust/crates/vonk-agent-helper/src/operations/start.rs",
+            "child.push((PEER_SECRET_ENVIRONMENT, secret));\n",
+        ),
+        ("control/tests/test_x.py", "assert op.peer_secret is None\n"),
+        ("docs/operators/execution-harnesses.md", "`VONK_PEER_SECRET` is reserved\n"),
+        ("agent_protocol/fixtures/vector.json", '{"peer_secret": "x"}\n'),
+        (
+            "rust/crates/vonk-agent-helper/src/main.rs",
+            "#[cfg(test)]\nmod tests {\n    fn f() {\n        peer_secret: None,\n    }\n}\n",
+        ),
+    ],
+)
+def test_the_peer_secret_name_in_its_owners_tests_and_documents_passes(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("peer-secret-names",))
+
+
 _SAVEPOINT_PATH = "control/src/vonk_control/admission_locking.py"
 
 

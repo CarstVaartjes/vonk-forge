@@ -77,6 +77,8 @@ fn peer_secret_vector_round_trips_and_is_a_start_only_field() {
             panic!("the vector is a runtime request");
         };
         assert_eq!(parsed.peer_secret.is_some(), key == "with");
+        // Debug is what a log line or an error would print.
+        assert!(!format!("{operation:?}").contains("Gj3LimhJaTIm5nvdTza8cCMCE9Bclfa_3nOuDUgoGfM"));
     }
     for refused in [
         serde_json::json!({"peer_secret": "short"}),

@@ -283,7 +283,11 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     # It is outside every identity (plan, request, label, cache key): the helper
     # puts it in the container's environment by name and never in argv.
     peer_secret: Annotated[str, Field(pattern=PEER_SECRET_PATTERN)] | None = Field(
-        default=None, exclude_if=lambda value: value is None, repr=False
+        default=None,
+        exclude_if=lambda value: value is None,
+        repr=False,
+        # The generated Rust type prints no value in Debug (secret.rs).
+        json_schema_extra={"format": "vonk-secret"},
     )
 
     @model_validator(mode="after")

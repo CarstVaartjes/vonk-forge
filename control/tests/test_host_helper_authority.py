@@ -1934,5 +1934,30 @@ def test_an_unreadable_key_refuses_only_the_peer_secret_start(failure) -> None:
     service = _peer_secret_service("vllm-omni", None if failure is None else key)
     with pytest.raises(HostRuntimeEvidenceUnavailable) as refused:
         _start_grant(service)
-    assert "k" * 8 not in str(refused.value)
+    from vonk_control.peer_secret import derive_peer_secret
+
+    derived = derive_peer_secret(PEER_KEY, "20000000-0000-4000-8000-000000000002")
+    assert derived not in str(refused.value) + repr(refused.value)
     assert _start_grant(_peer_secret_service("diffusers", None)) is not None
+
+
+def test_an_unreadable_recipe_projection_leaves_the_start_ungranted() -> None:
+    # Break caught: a Start granted (or refused for good) when the engine that
+    # decides the secret cannot be read; the agent asks again.
+    service = _peer_secret_service("vllm-omni")
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    with service._sessions.begin() as session:
+        session.execute(
+            sa_update(CatalogDocumentRevision).values(
+                projected={"unreadable": True}, document={"unreadable": True}
+            )
+        )
+    with pytest.raises(HostRuntimeEvidenceUnavailable):
+        service.issue_grant(
+            node_id="spk_" + "1" * 32,
+            fence=FENCE,
+            action=ContainerRuntimeAction.START,
+            request_sha256="e" * 64,
+            certificate_serial="certificate-1",
+            **binding,
+        )

@@ -80,8 +80,8 @@ The `vllm-omni` harness also gets a per-job peer secret in its signed Start
 grant, for the wrapper to authenticate its own ranks: derived from the parent
 job and the Controller's `token-signing-key`, never stored, and delivered to the
 container's environment by name only (`VONK_PEER_SECRET`, reserved for the
-platform). Upgrade the Controller first, then the agents; a Spark on an older
-helper fails that job closed.
+platform). Upgrade the Controller first, then the agents; a Spark whose agent is
+older than protocol 4.6 cannot read the grant, and that job ends failed.
 
 ## Acceptance evidence
 

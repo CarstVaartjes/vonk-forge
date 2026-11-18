@@ -429,15 +429,15 @@ def test_llama_cpp_metrics_switch_is_platform_owned(model: ModelDefinition) -> N
         _projection("llama-cpp", recipe=raw, model=model)
 
 
-@pytest.mark.parametrize("slug", BUILTINS)
 def test_no_recipe_can_set_the_platform_delivered_peer_secret(
-    slug: str, model: ModelDefinition
+    model: ModelDefinition,
 ) -> None:
-    # Break caught: a recipe fixing the per-job secret the grant delivers.
-    raw = _recipe(slug)
+    # Break caught: a recipe fixing the per-job secret the grant delivers. The
+    # reserved-name check is engine-independent, so one engine proves it.
+    raw = _recipe("vllm-omni")
     raw["runtime"]["environment"] = [{"name": "VONK_PEER_SECRET", "value": "x" * 43}]
     with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
-        _projection(slug, recipe=raw, model=model)
+        _projection("vllm-omni", recipe=raw, model=model)
 
 
 @pytest.mark.parametrize("slug", BUILTINS)

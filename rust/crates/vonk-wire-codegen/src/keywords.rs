@@ -50,7 +50,7 @@ const EXTENSIONS: &[&str] = &[
 /// Formats the validator checks (`date-time`, `uuid`, and `ip` through its
 /// registered checker), and integer width hints whose bounds are
 /// `minimum`/`maximum`.
-const FORMATS: &[&str] = &["date-time", "uuid", "ip", "int64", "uint8"];
+const FORMATS: &[&str] = &["date-time", "uuid", "ip", "int64", "uint8", "vonk-secret"];
 
 /// Refuse a schema that uses a keyword neither translated nor enforced.
 pub(super) fn check(schema: &Value) -> Result<(), String> {
