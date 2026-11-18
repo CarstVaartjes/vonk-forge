@@ -203,16 +203,15 @@ def _cancel_order(
     now: datetime,
     *,
     request_id: str | None = None,
-    reason: str | None = SupersedeCode.SUPERSEDED_BY_INTENT,
+    reason: str = SupersedeCode.SUPERSEDED_BY_INTENT,
 ) -> None:
     """Cancel one live order under the workload intent ``ordinal``.
 
     ``request_id`` names a cancellation no workload intent owns: a rank of a
     multi-rank job ended, so its siblings are cancelled (``job_ranks``), and
-    ``reason`` is then that rank's own reason. ``None`` means the job's owner
-    ended: its unissued siblings are withdrawn and the job's recorded outcome
-    stays its own (a receipt cannot carry a cancellation); a running sibling
-    only computes and ends its order with its own receipt.
+    ``reason`` is then that rank's own reason, or the typed reason the job's
+    scope ended with its owner. Its running siblings are asked to stop through
+    the parent's cancellation, and the job's own outcome stays its own.
 
     The one cancellation both the Spark-wide supersession and a run's own
     Stop (``request_run_job_cancellation_in_session``) apply: the request is
@@ -232,8 +231,6 @@ def _cancel_order(
                 CancelRequested(reason=reason),
                 now,
             )
-    if reason is None:
-        return
     if any(
         child.state in agent_operation_states.RUNNING_OR_PARKED for child in children
     ):
@@ -250,7 +247,7 @@ def _cancel_order(
                 or str(uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")),
                 "cancel_actor": "controller",
                 "cancel_requested_at": _aware(now).isoformat(),
-                **({} if reason is None else {"reason": str(reason)}),
+                "reason": str(reason),
             }
         elif superseded_cancellation_deadline(previous) is None:
             # A repeated cancellation path must repair a result that

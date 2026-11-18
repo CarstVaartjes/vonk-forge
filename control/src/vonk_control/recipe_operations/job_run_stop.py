@@ -570,7 +570,9 @@ class JobRunStopMixin:
             plan_digest=stop_plan_digest,
             actor=actor,
             request_id=request_id,
-            node_payloads=tuple(item for phase in phases for item in phase),
+            node_payloads=tuple(
+                {node: payload for phase in phases for node, payload in phase}.items()
+            ),
             phases=phases,
             authority_digest=rows[0][1].recipe_content_sha256,
             now=now,

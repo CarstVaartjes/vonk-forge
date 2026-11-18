@@ -64,7 +64,6 @@ from vonk_agent_protocol import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
-    RecipeJobRunRequest,
     RecipeJobRunResult,
     RunDegradedReason,
     WaitOwnerKind,
@@ -103,7 +102,7 @@ from .agent_operation import (
     set_parent_state,
 )
 from .core import transition
-from .job_ranks import fan_in_cancellation_key, owner_order
+from .job_ranks import fan_in_cancellation_key, resolve_owner
 from .reconciler import settle
 from .types import (
     Effect,
@@ -250,8 +249,9 @@ class ArtifactJobAdapter:
             )
         )
         # A multi-rank job's lifecycle is its owner's order; the companions
-        # only end it early (``cancel_siblings``).
-        operation = owner_order(orders) or (orders[0] if orders else None)
+        # only end it early (``fan_in``). An owner that cannot be resolved yet
+        # is no order: the job waits and is observed again, never guessed.
+        operation = resolve_owner(orders).owner
         attempt = (
             None
             if operation is None
@@ -916,10 +916,10 @@ class ArtifactJobAdapter:
         parent = session.get(Job, job.operation_id)
         if parent is None or len(orders) < 2:
             return False
-        owner = owner_order(orders)
-        request = None if owner is None else read_row_column(owner, "payload")
+        resolved = resolve_owner(orders)
+        owner, request = resolved.owner, resolved.request
         if (
-            not isinstance(request, RecipeJobRunRequest)
+            request is None
             or request.compiled_execution_plan.runtime.placement.world_size < 2
         ):
             # Not a multi-rank job with a resolved owner: nothing to fan in.
@@ -964,10 +964,11 @@ class ArtifactJobAdapter:
                 0,
                 now,
                 request_id=fan_in_cancellation_key(parent.id),
-                # The siblings stop for the rank's own reason, or for none when
-                # the owner ended: a job that succeeded is not "superseded".
+                # The siblings stop for the broken rank's own reason, or because
+                # the job's scope ended with its owner: never "superseded", so a
+                # succeeded job keeps its outcome.
                 reason=(
-                    None
+                    WaitReason.SCOPE_CHANGED
                     if broken is None
                     else broken.status_reason or FailureCode.RECIPE_JOB_RUN_FAILED
                 ),

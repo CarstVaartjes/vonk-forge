@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 
-from .. import artifact_job_states
+from .. import agent_operation_states, artifact_job_states
 from ..agent_jobs import (
     superseded_cancellation_deadline,
 )
@@ -96,6 +96,21 @@ def _jobrun_effect_may_remain(
 
     issued = _issued_orders_off_link(adapter.session, artifact)
     if len(issued) > 1:
+        return True
+    # A job on several Sparks has one order per rank: any rank still live may
+    # hold its Spark, whichever rank owns the job.
+    if artifact.operation_id is not None and (
+        adapter.session.scalar(
+            select(AgentOperation.id)
+            .where(
+                AgentOperation.parent_job_id == artifact.operation_id,
+                AgentOperation.current_attempt > 0,
+                AgentOperation.state.in_(agent_operation_states.LIVE),
+            )
+            .limit(1)
+        )
+        is not None
+    ):
         return True
     if issued:
         session = adapter.session

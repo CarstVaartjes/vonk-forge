@@ -599,3 +599,43 @@ def test_a_frozen_job_relinked_to_another_issued_order_re_plans_the_stop(
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000171"),
     )
     assert fresh.id != submitted.id
+
+
+def test_a_run_stop_reaches_two_jobs_on_one_spark(tmp_path) -> None:
+    """An ended job whose scope may remain and a running one share the Spark."""
+
+    sessions, _operations, service, run_id, node_id, agent_jobs, clock, stop = _service(
+        tmp_path
+    )
+    first = submitted_artifact_job(service, run_id, request_suffix=118)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+    clock.advance(seconds=31)
+    agent_jobs.reconcile_orders()
+    service.cancel(
+        first.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000301",
+        reason="lost job",
+    )
+    for _ in range(60):
+        if service.get(first.id).state == ajs.CANCELLED:
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    ended = service.get(first.id)
+    assert ended.state == ajs.CANCELLED
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
+
+    second = submitted_artifact_job(service, run_id, request_suffix=128)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop()
+    _receipt_cancel(agent_jobs, claim, second)
+
+    # Both jobs may hold the one Spark: the Stop queues its exact Stops instead
+    # of being refused for the repeated node.
+    stopping = stop()
+    assert stopping.state not in {"succeeded", "failed", "cancelled"}
+    assert _run_state(sessions, run_id) == "stopping"

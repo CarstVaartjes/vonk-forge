@@ -426,6 +426,12 @@ class ArtifactJobService(InputService):
             )
         )
         owner = owner_order(orders)
+        if len(orders) > 1 and owner is None:
+            # Which rank owns the job is not readable yet: wait, never guess.
+            raise ArtifactJobUnavailableError(
+                "artifact job owner observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         if len(orders) > 1 and (owner is None or owner.id != operation.id):
             # A companion rank owns no outputs and judges nothing: its order
             # ending is all the job learns (``fan_in`` ends the job on a failure).
