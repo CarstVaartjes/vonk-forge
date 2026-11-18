@@ -918,11 +918,10 @@ def test_profile_view_projects_the_loaded_assignment_state(monkeypatch) -> None:
     assert service.get(profile.id).assignments[0].observed_state == "Not loaded"
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_a_first_load_reads_its_own_progress_and_plan_once(monkeypatch) -> None:
-    """A load that reviewed itself is its own root: one read of each document."""
+def test_an_endpoint_read_parses_a_first_loads_documents_once(monkeypatch) -> None:
+    """A load that reviewed itself is its own root: no second parse of its documents."""
 
-    from vonk_control.fleet_profiles import application_projection
+    from vonk_control.fleet_profiles import persistence
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -935,25 +934,22 @@ def test_a_first_load_reads_its_own_progress_and_plan_once(monkeypatch) -> None:
         ),
     )
     profile = service.create(_input(revision_id), actor="admin")
-    application = service.apply(profile.id, request_key=_uuid(441), actor="admin")
-    reads: list[str] = []
-    for name in ("_stored_progress", "_persisted_profile_plan"):
-        original = getattr(application_projection, name)
-        monkeypatch.setattr(
-            application_projection,
-            name,
-            lambda row, _name=name, _read=original: reads.append(_name) or _read(row),
-        )
+    service.apply(profile.id, request_key=_uuid(441), actor="admin")
+    parsed: list[str] = []
+    original = persistence.read_row_column
+
+    def counting(row, column):
+        parsed.append(column)
+        return original(row, column)
+
+    monkeypatch.setattr(persistence, "read_row_column", counting)
     with sessions() as session:
-        row = session.get(FleetProfileApplication, application.id)
-        assert row is not None
-        intended = service._intended_profile(row, session=session)
+        service.endpoint_intent(session, profile.number)
 
-    assert not isinstance(intended, Residue)
-    assert intended.reviewed_application_id == application.id
-    assert sorted(reads) == ["_persisted_profile_plan", "_stored_progress"]
+    assert (parsed.count("progress"), parsed.count("plan")) == (2, 1)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
