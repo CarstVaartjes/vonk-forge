@@ -40,6 +40,12 @@ WAITING_OR_FAILED: tuple[str, ...] = stored_words(
 )
 
 
+#: An operation that settled: succeeded or failed.
+COMPLETED: tuple[str, ...] = stored_words(
+    SUBJECT, (LifecycleState.SUCCEEDED, LifecycleState.FAILED)
+)
+
+
 def words(*states: LifecycleState) -> tuple[str, ...]:
     """Every stored word that means one of ``states``."""
 

@@ -75,8 +75,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
 
+from .. import agent_operation_states, job_states
 from .. import agent_operation_states as aos
-from .. import job_states
 from ..agent_operation_facts import (
     AGENT_ORDER_RECOVERY_BUDGET,
     AGENT_UPGRADE_RECOVERY_FENCE,
@@ -889,7 +889,7 @@ class AgentOperationAdapter:
         of the queue's.
         """
 
-        if operation.state in {"succeeded", "failed", "cancelled"}:
+        if operation.state in agent_operation_states.FINISHED:
             if not replaces_report:
                 keep_recorded_outcome(
                     "agent-operation", operation.id, operation.state, outcome.value

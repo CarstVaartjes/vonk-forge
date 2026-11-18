@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
 
+from .. import job_states
 from ..agent_contacts import record_contact
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
@@ -106,7 +107,7 @@ def _active(
     if (
         parent is None
         or (
-            parent.state not in {"queued", "running"}
+            parent.state not in job_states.IN_FLIGHT
             and (operation is None or not is_deferred_stop(parent, operation))
         )
         or node.node_id not in column_value(parent, "targets")

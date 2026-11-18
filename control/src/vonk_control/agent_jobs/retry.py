@@ -363,7 +363,7 @@ def schedule_agent_upgrade_retry(
     session = object_session(operation)
     assert session is not None
     adapter = AgentOperationAdapter(session)
-    if operation.state in {"succeeded", "failed"}:
+    if operation.state in agent_operation_states.COMPLETED:
         # A helper acknowledgement (or a failure the owner treats as retryable)
         # is not the end of an upgrade: only authenticated contact that proves
         # the target is.  The order is reopened so the core can schedule it.

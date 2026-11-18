@@ -73,6 +73,32 @@ def order_is_parked(stored: str | None) -> bool:
     return is_state(ORDER, stored, *_WAIT)
 
 
+#: An order that is queued or running (not backing off, observed or parked).
+IN_FLIGHT: tuple[str, ...] = stored_words(
+    ORDER, (LifecycleState.QUEUED, LifecycleState.RUNNING)
+)
+#: An order that ended on its own: succeeded, failed or cancelled.
+FINISHED: tuple[str, ...] = stored_words(
+    ORDER,
+    (LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED),
+)
+#: An order that settled, one way or the other: succeeded or failed.
+COMPLETED: tuple[str, ...] = stored_words(
+    ORDER, (LifecycleState.SUCCEEDED, LifecycleState.FAILED)
+)
+#: An order a parent's cancellation settles: ended, or waiting.
+FINISHED_OR_PARKED: tuple[str, ...] = (*FINISHED, *PARKED)
+#: An order that is parked, or ended unsuccessfully (failed or cancelled).
+PARKED_OR_UNSUCCESSFUL: tuple[str, ...] = stored_words(
+    ORDER, (*_WAIT, LifecycleState.CANCELLED, LifecycleState.FAILED)
+)
+#: An attempt that can still be answered: running, failed or observing.
+ATTEMPT_REPORTABLE: tuple[str, ...] = stored_words(
+    ATTEMPT,
+    (LifecycleState.RUNNING, LifecycleState.FAILED, LifecycleState.OBSERVING),
+)
+
+
 # -- attempts ----------------------------------------------------------------
 
 #: An attempt that ended with no definite answer.

@@ -60,7 +60,7 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
 )
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -257,7 +257,7 @@ class FleetProfileAdapter:
             state = State.SUCCEEDED
         elif stored == "failed":
             state = State.FAILED
-        elif stored in {"cancelled", SUPERSEDED}:
+        elif stored in fleet_profile_states.CANCELLED_OR_SUPERSEDED:
             # A superseded application is a definite, non-failed end: the core
             # sees a cancelled intent whose work a successor continues.
             state = State.CANCELLED
@@ -448,7 +448,7 @@ class FleetProfileAdapter:
                 "running"
                 if after.cancel_requested
                 else application.state
-                if application.state in {"queued", "running"}
+                if application.state in fleet_profile_states.IN_FLIGHT
                 else state
             )
         if visible is not None and not after.terminal:
