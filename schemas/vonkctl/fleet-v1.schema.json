@@ -251,7 +251,7 @@
           "items": {
             "$ref": "#/$defs/HostCheckAdvice"
           },
-          "maxItems": 8,
+          "maxItems": 9,
           "title": "Host Checks",
           "type": "array"
         },
@@ -821,6 +821,7 @@
         "dgx-dashboard",
         "firmware-refresh",
         "watermark-boost",
+        "proactive-compaction",
         "boot-splash",
         "memory-fragmentation"
       ],
@@ -952,6 +953,20 @@
     "HostTuning": {
       "description": "The measured host settings the host checks explain.",
       "properties": {
+        "compaction_proactiveness": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compaction Proactiveness"
+        },
         "free_memory": {
           "anyOf": [
             {
