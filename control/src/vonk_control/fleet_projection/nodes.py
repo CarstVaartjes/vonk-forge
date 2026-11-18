@@ -18,6 +18,7 @@ from vonk_agent_protocol.gpu_clock import (
     GpuClockRange,
 )
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 
 from ..agent_contacts import last_seen as last_seen_at
@@ -388,9 +389,9 @@ def _connection(
     # Contact is Controller-stamped: capture latency or clock rollback can
     # make it newer than current without indicating a lost connection.
     age = None if last_seen is None else max(0.0, (current - last_seen).total_seconds())
-    if value.state == "revoked" or value.revoked_at is not None:
+    if value.revoked_at is not None:
         offline_reason: NodeOfflineReason | None = NodeOfflineReason.AGENT_REVOKED
-    elif value.state != "active":
+    elif value.state != NodeIdentityState.ACTIVE:
         offline_reason = NodeOfflineReason.AGENT_INACTIVE
     elif certificate_state != "valid":
         offline_reason = _CERTIFICATE_OFFLINE_REASONS[certificate_state]
