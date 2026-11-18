@@ -42,16 +42,12 @@ def resolve_owner(orders: Sequence[AgentOperation]) -> OwnerResolution:
     parsed = [(order, _request_of(order)) for order in orders]
     if len(parsed) == 1:
         return OwnerResolution(*parsed[0])
-    owners = [
-        (order, request)
-        for order, request in parsed
-        if request is not None and request.endpoint_owner
-    ]
-    if any(request is None for _order, request in parsed):
+    known = [(order, request) for order, request in parsed if request is not None]
+    if len(known) != len(parsed):
         return OwnerResolution(None, None)
+    owners = [(order, request) for order, request in known if request.endpoint_owner]
     if len(owners) > 1 and all(
-        request is not None
-        and request.compiled_execution_plan.runtime.placement.world_size == 1
+        request.compiled_execution_plan.runtime.placement.world_size == 1
         for _order, request in owners
     ):
         # A single-node job beside siblings no Spark was handed: the order that

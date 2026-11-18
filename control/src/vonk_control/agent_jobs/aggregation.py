@@ -20,6 +20,7 @@ from ..lifecycle.agent_operation import (
     set_parent_state,
 )
 from ..lifecycle.artifact_job import ArtifactJobAdapter
+from ..lifecycle.job_ranks import resolve_owner
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -115,6 +116,15 @@ def _aggregate_parent_state(
         [(operation.state, operation in retrying) for operation in operations],
         cancel_requested=cancel_requested,
     )
+    if verdict == "cancelled" and all(
+        operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+        for operation in operations
+    ):
+        # A job on several Sparks is its owner's: a companion stopped after the
+        # owner succeeded does not turn the job's outcome into cancelled.
+        owner = resolve_owner(operations).owner
+        if owner is not None and owner.state == "succeeded":
+            verdict = "succeeded"
     if verdict == "queued":
         set_parent_state(job, "queued", retrying[0].status_reason, self._clock())
         return

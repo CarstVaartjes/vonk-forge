@@ -2821,7 +2821,10 @@ def test_a_newer_submit_fences_every_unissued_order_of_a_two_rank_job(tmp_path) 
     assert service.get(first.id).state == "cancelled"
 
 
-def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -> None:
+@pytest.mark.parametrize("failing_rank", ["companion", "owner"])
+def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(
+    tmp_path, failing_rank: str
+) -> None:
     (
         sessions,
         recipe_operations,
@@ -2832,12 +2835,15 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         (owner_node, owner),
         (companion_node, companion),
         nodes,
-    ) = _two_rank_claims(tmp_path, 118)
+    ) = _two_rank_claims(tmp_path, 118 if failing_rank == "companion" else 178)
+    failing, surviving = (
+        (companion, owner) if failing_rank == "companion" else (owner, companion)
+    )
     agent_jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
                 {
-                    "fence": str(companion.fence),
+                    "fence": str(failing.fence),
                     "state": "failed",
                     "result": {
                         "kind": "failed",
@@ -2849,17 +2855,19 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         )
     )
     assert service.get(submitted.id).state == "failed"
-    # The surviving rank is told to stop: nothing waits on it.
-    directive = agent_jobs.heartbeat(owner, OperationProgress(phase="running"), 30)
+    # The surviving rank is told to stop: nothing waits on it. The owner
+    # receipts its stop; a surviving companion stays live until the run's Stop.
+    directive = agent_jobs.heartbeat(surviving, OperationProgress(phase="running"), 30)
     assert directive.cancel_requested is True
-    agent_jobs.record_result(
-        cancellation_result(
-            owner,
-            submitted,
-            state="cancelled",
-            reason="controller cancellation requested",
+    if failing_rank == "companion":
+        agent_jobs.record_result(
+            cancellation_result(
+                owner,
+                submitted,
+                state="cancelled",
+                reason="controller cancellation requested",
+            )
         )
-    )
 
     # The run's Stop removes the job's container on each Spark: one exact Stop
     # per rank, each naming the job, and the run is stopped once both receipt.
@@ -2879,6 +2887,17 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(tmp_path) -
         )
 
     assert stop().state not in {"succeeded", "failed", "cancelled"}
+    if failing_rank == "owner":
+        # The companion's Spark answers its cancel directive with its receipt,
+        # then the Stop removes each rank's container.
+        agent_jobs.record_result(
+            cancellation_result(
+                companion,
+                submitted,
+                state="cancelled",
+                reason="controller cancellation requested",
+            )
+        )
     # Sequential phases: each rank's exact Stop is claimed in turn.
     stopped: set[str] = set()
     serials = {node_id: f"serial-{index}" for index, node_id in enumerate(nodes)}
@@ -2980,12 +2999,13 @@ def test_a_companion_receipt_without_files_never_ends_the_job_and_the_owner_does
         assert parent.status_reason != "superseded_by_intent"
 
 
+@pytest.mark.parametrize("companion_ends", ["cancelled", "exits-zero"])
 @pytest.mark.parametrize("owner_outcome", ["succeeded", "failed"])
 def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
-    tmp_path, owner_outcome: str
+    tmp_path, owner_outcome: str, companion_ends: str
 ) -> None:
     (
-        _sessions,
+        sessions,
         _recipe_operations,
         service,
         agent_jobs,
@@ -2994,7 +3014,7 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
         (owner_node, owner),
         (_companion_node, companion),
         _nodes,
-    ) = _two_rank_claims(tmp_path, 148)
+    ) = _two_rank_claims(tmp_path, 148 if companion_ends == "cancelled" else 168)
     if owner_outcome == "succeeded":
         from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
 
@@ -3047,19 +3067,51 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
             )
         )
     assert service.get(submitted.id).state == owner_outcome
+
+    def parent_outcome() -> tuple[str, str | None]:
+        with sessions() as session:
+            parent = session.get(Job, service.get(submitted.id).operation_id)
+            assert parent is not None
+            return parent.state, parent.status_reason
+
     # The companion is still running its rank: it is told to stop, so the
-    # Spark is free for the next job, and the ended job keeps its outcome.
+    # Spark is free for the next job.
     directive = agent_jobs.heartbeat(companion, OperationProgress(phase="running"), 30)
     assert directive.cancel_requested is True
-    agent_jobs.record_result(
-        cancellation_result(
-            companion,
-            submitted,
-            state="cancelled",
-            reason="controller cancellation requested",
+    owner_reason = "rank 0 exited" if owner_outcome == "failed" else None
+    if companion_ends == "cancelled":
+        agent_jobs.record_result(
+            cancellation_result(
+                companion,
+                submitted,
+                state="cancelled",
+                reason="controller cancellation requested",
+            )
         )
-    )
+    else:
+        from vonk_agent_protocol import RecipeJobEvidence, RecipeJobOutputManifest
+
+        agent_jobs.succeed(
+            companion,
+            RecipeJobRunResult(
+                job_id=submitted.id,
+                run_id=run_id,
+                exit_code=0,
+                output_manifest=RecipeJobOutputManifest(
+                    schema_version=1,
+                    total_bytes=0,
+                    files=(),
+                    manifest_sha256=recipe_job_manifest_sha256(()),
+                ),
+                evidence=RecipeJobEvidence(
+                    elapsed_milliseconds=100, peak_memory_bytes=None
+                ),
+            ),
+        )
+    # The ended job and its parent keep the owner's outcome, whichever way and
+    # whenever the companion ends.
     assert service.get(submitted.id).state == owner_outcome
+    assert parent_outcome() == (owner_outcome, owner_reason)
     # A fresh job on the same run is admitted.
     fresh = submitted_artifact_job(service, run_id, request_suffix=158)
     assert fresh.id != submitted.id and fresh.state not in ajs.ENDED
