@@ -26,6 +26,8 @@ from vonk_control.models import (
     JobAttempt,
 )
 
+from .test_catalog_revision_collection import Catalog
+
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
 NODE = "spk_" + "5" * 32
 #: A word an older build stored and nothing writes now.
@@ -164,3 +166,15 @@ def test_startup_adds_the_state_checks_and_never_refuses(
         assert {name: _constraint(connection, name) for name in CHECKS.values()} == (
             first
         )
+
+
+def test_run_node_state_admits_only_run_state_words(postgres_engine):
+    """A rank's state is checked against RunState, as its run's is."""
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    catalog.workload(catalog.revision("run-node-state", 1))
+    with postgres_engine.begin() as connection:
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            _set_state(connection, "run_nodes", RETIRED)
+        _set_state(connection, "run_nodes", "stopped")
