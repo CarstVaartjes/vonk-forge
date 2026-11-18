@@ -206,7 +206,9 @@ test("host checks list the Controller's advice with each command, and none hides
     for (const command of lines.slice(1))
       if (command !== "Undo:") expect(within(section).getByText(command)).toBeVisible();
   }
-  expect(within(section).getAllByText("Undo:")).toHaveLength(3);
+  expect(within(section).getAllByText("Undo:")).toHaveLength(
+    vectors.cases.filter((item) => item.lines.includes("Undo:")).length,
+  );
   fireEvent.click(within(section).getAllByRole("button", { name: "Copy command" })[0]);
   expect(write).toHaveBeenCalledWith(vectors.cases[0].lines[1]);
   expect(screen.queryByText("needs attention")).toBeNull();

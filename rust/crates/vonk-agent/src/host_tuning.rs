@@ -1,5 +1,6 @@
 //! The facts behind the host checks: which listed units run, the installed
-//! snaps, the watermark boost, the boot splash and free memory by block size.
+//! snaps, the watermark boost, proactive compaction, the boot splash and free
+//! memory by block size.
 //! Informative evidence only; each reading that fails is unknown on its own
 //! and never fails the inventory.
 use std::{fs, io::Read, path::Path, time::Duration};
