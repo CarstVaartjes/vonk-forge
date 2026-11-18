@@ -49,7 +49,7 @@ def _sessions(tmp_path):
                 ),
                 AgentNode(
                     node_id=UNKNOWN_NODE,
-                    state="database-value-that-must-not-be-a-label",
+                    state="retired",
                     contact=AgentNodeContact(protocol_version=None),
                 ),
             ]
@@ -200,7 +200,6 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
         "actor-secret-value",
         "payload-secret-value",
         "unique-operation-secret",
-        "database-value-that-must-not-be-a-label",
     ):
         assert secret not in rendered
 

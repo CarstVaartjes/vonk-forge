@@ -309,7 +309,7 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
         session.add(
             AgentNode(
                 node_id=NODE_A,
-                state="revoked",
+                state=NodeIdentityState.RETIRED,
                 revoked_at=NOW,
                 contact=AgentNodeContact(last_seen_at=NOW),
             )
@@ -391,7 +391,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
-                    state="revoked",
+                    state=NodeIdentityState.RETIRED,
                     revoked_at=NOW,
                     inventory_snapshot=inventory_items_fixture(
                         EXTRA_NODE,
@@ -876,13 +876,13 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
             [
                 AgentNode(
                     node_id=node_ids[1],
-                    state="revoked",
+                    state=NodeIdentityState.RETIRED,
                     revoked_at=NOW,
                     contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
                     node_id=node_ids[2],
-                    state="pending",
+                    state=NodeIdentityState.RETIRED,
                     contact=AgentNodeContact(last_seen_at=NOW),
                 ),
                 AgentNode(
@@ -980,7 +980,7 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
         )
         for node in snapshot.nodes
     ] == [
-        ("pending", "revoked", "offline", "agent-inactive"),
+        ("retired", "revoked", "offline", "agent-inactive"),
         ("active", "missing", "offline", "certificate-missing"),
         ("active", "revoked", "offline", "certificate-revoked"),
         ("active", "inactive", "offline", "certificate-inactive"),
@@ -1522,7 +1522,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_B)
         assert node is not None
-        node.state = "revoked"
+        node.state = NodeIdentityState.RETIRED
         node.revoked_at = NOW
 
     registered_visible = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
