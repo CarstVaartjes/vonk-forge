@@ -80,8 +80,26 @@ def revision_images(
     if not documents:
         return {}
     by_document: dict[str, list[tuple[str, str, RevisionImage]]] = {}
-    for build, document_id in session.execute(
-        select(RecipeBuild, CatalogDocumentRevision.document_id)
+    # Only the columns an image is: a build's plan and policy report are large
+    # JSON documents no reader of images needs.
+    for (
+        build_id,
+        build_revision_id,
+        build_source,
+        image_digest,
+        archive_sha256,
+        image_bytes,
+        document_id,
+    ) in session.execute(
+        select(
+            RecipeBuild.id,
+            RecipeBuild.recipe_revision_id,
+            RecipeBuild.source_bundle_sha256,
+            RecipeBuild.image_digest,
+            RecipeBuild.oci_layout_sha256,
+            RecipeBuild.image_bytes,
+            CatalogDocumentRevision.document_id,
+        )
         .join(
             CatalogDocumentRevision,
             CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id,
@@ -95,18 +113,18 @@ def revision_images(
         )
         .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
     ):
-        assert build.image_digest is not None
-        assert build.oci_layout_sha256 is not None
-        assert build.image_bytes is not None
+        assert image_digest is not None
+        assert archive_sha256 is not None
+        assert image_bytes is not None
         by_document.setdefault(document_id, []).append(
             (
-                build.source_bundle_sha256,
-                build.recipe_revision_id,
+                build_source,
+                build_revision_id,
                 RevisionImage(
-                    archive_sha256=build.oci_layout_sha256,
-                    image_digest=build.image_digest,
-                    image_bytes=build.image_bytes,
-                    build_id=build.id,
+                    archive_sha256=archive_sha256,
+                    image_digest=image_digest,
+                    image_bytes=image_bytes,
+                    build_id=build_id,
                 ),
             )
         )
@@ -157,8 +175,13 @@ def revision_images(
         # is the digest this revision pins is an image this revision runs.
         # Both sides state that digest; the recipe that asked first is not it.
         shared: dict[str, list[RevisionImage]] = {}
-        for build in session.scalars(
-            select(RecipeBuild)
+        for build_id, image_digest, archive_sha256, image_bytes in session.execute(
+            select(
+                RecipeBuild.id,
+                RecipeBuild.image_digest,
+                RecipeBuild.oci_layout_sha256,
+                RecipeBuild.image_bytes,
+            )
             .where(
                 RecipeBuild.image_digest.in_(sorted(set(pinned.values()))),
                 RecipeBuild.state == LifecycleState.SUCCEEDED.value,
@@ -167,15 +190,15 @@ def revision_images(
             )
             .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         ):
-            assert build.image_digest is not None
-            assert build.oci_layout_sha256 is not None
-            assert build.image_bytes is not None
-            shared.setdefault(build.image_digest, []).append(
+            assert image_digest is not None
+            assert archive_sha256 is not None
+            assert image_bytes is not None
+            shared.setdefault(image_digest, []).append(
                 RevisionImage(
-                    archive_sha256=build.oci_layout_sha256,
-                    image_digest=build.image_digest,
-                    image_bytes=build.image_bytes,
-                    build_id=build.id,
+                    archive_sha256=archive_sha256,
+                    image_digest=image_digest,
+                    image_bytes=image_bytes,
+                    build_id=build_id,
                 )
             )
         for revision_id, digest in pinned.items():
