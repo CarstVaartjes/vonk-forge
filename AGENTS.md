@@ -201,7 +201,12 @@ phase (`recipe_start_payloads.bind_compiled_execution_plan`, the service start's
 own binder); `lifecycle/job_ranks.py` names the owner's order, the job's
 lifecycle is the owner's (`ArtifactJobAdapter.order_of`), and `fan_in` ends the job
 with the first failed companion's reason and cancels every live sibling (and
-all companions when the owner ends) through the supersession cancellation. The
+all companions when the owner ends) through the supersession cancellation. A
+run's Stop and a cancelled job's cleanup build one exact Stop per issued rank
+(`_exact_jobrun_sources`; target key `(node_id, artifact_job_id)`); a rank on a
+Spark outside the Stop's scope never holds the others, two orders on one Spark
+still hold (nothing is stopped on a guess), and the job and its parent are
+confirmed stopped only when every rank's Stop is proven. The
 host firewall is told the owner of a job serves no endpoint
 port by passing `0` instead of one. Decide an intent fence by kind
 (`fencing_intent`), never by a stored ordinal alone. Admission still locks target nodes

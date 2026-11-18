@@ -167,16 +167,31 @@ class JobRunCompletionMixin:
             else set(authorization.reachable_node_ids)
         )
         reason = WaitReason.SCOPE_CHANGED
+        # A job on several Sparks is proven absent only when every one of its
+        # ranks' Stops is: until then the job and its parent keep waiting.
+        proven_orders = {operation.id for *_rest, operation in proven}
+        whole = {
+            artifact_id
+            for artifact_id in {
+                target.artifact_job_id for target in authorization.targets
+            }
+            if all(
+                target.source_operation_id in proven_orders
+                for target in authorization.targets
+                if target.artifact_job_id == artifact_id
+            )
+        }
         for _target, artifact, source_job, source_operation in proven:
             # The exact Stop receipt proves the runtime absent: a definite,
             # confirmed cancellation of every row still live.  A row that
             # already ended keeps its recorded outcome; for the job the receipt
             # resolves only what it may have left on the Spark.
-            ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
-            if not job_states.means(source_job.state, *TERMINAL_LIFECYCLE_STATES):
-                RecipeOperationAdapter().cancelled(
-                    source_job, now, reason=reason, keep=False
-                )
+            if artifact.id in whole:
+                ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
+                if not job_states.means(source_job.state, *TERMINAL_LIFECYCLE_STATES):
+                    RecipeOperationAdapter().cancelled(
+                        source_job, now, reason=reason, keep=False
+                    )
             if source_operation.state in aos.LIVE:
                 AgentOperationAdapter(session).record_outcome(
                     source_operation,
