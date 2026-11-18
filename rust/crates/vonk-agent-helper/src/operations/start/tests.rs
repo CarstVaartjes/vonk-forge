@@ -401,6 +401,24 @@ fn a_job_workload_is_launched_as_the_oom_victim() {
     assert_workload_is_the_oom_victim(&launched_run(job_plan(recipe_start_plan_for_authority(1))));
 }
 
+/// Every workload, bridge service or job, runs with unlimited memlock, named
+/// once; the signed argv (and so the identity label) is untouched.
+#[test]
+fn every_workload_is_launched_with_unlimited_memlock() {
+    for plan in [
+        recipe_start_plan_for_authority(1),
+        job_plan(recipe_start_plan_for_authority(1)),
+    ] {
+        let run = launched_run(plan);
+        let image = image_after_intact_options(&run);
+        let named = run[..image]
+            .windows(2)
+            .filter(|pair| pair[0] == "--ulimit" && pair[1] == "memlock=-1:-1")
+            .count();
+        assert_eq!(named, 1, "{run:?}");
+    }
+}
+
 /// Unified memory: GPU allocations are not charged to the container's memory
 /// cgroup, so the workload runs without a container memory limit. The signed
 /// argv, and so the identity label, still names it: a run launched before
