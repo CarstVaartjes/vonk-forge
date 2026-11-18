@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallAdmissionCode,
+    InvalidRequestError,
     InvalidRequestReason,
     UnknownOutcomeError,
     WaitReason,
@@ -235,8 +236,12 @@ class InstallPlanningService:
                     compiled_plan_error = str(error)[:512]
                     compiled_plan_unsettled = True
                     compiled_execution_plans = {}
+                except InvalidRequestError as error:
+                    compiled_plan_error = str(error)[:512]
+                    compiled_execution_plans = {}
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence
                     compiled_plan_error = str(error)[:512]
+                    compiled_plan_unsettled = True
                     compiled_execution_plans = {}
             compiled_plan_by_node = dict(compiled_execution_plans or {})
             # Build input identity belongs to build resolution; current-revision

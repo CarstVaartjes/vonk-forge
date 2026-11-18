@@ -576,8 +576,10 @@ def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> Non
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
+    from vonk_control.execution_plan_service import ExecutionPlanCompilationError
+
     def invalid(**_unused: object) -> dict[str, dict[str, object]]:
-        raise ValueError("compiled launch payload is invalid")
+        raise ExecutionPlanCompilationError("compiled launch payload is invalid")
 
     plan = _service(
         sessions, compiled_plan_provider=invalid, inventory_max_age=300
@@ -591,6 +593,23 @@ def test_deterministic_compile_error_is_a_verdict_with_its_text(tmp_path) -> Non
     )
     assert repaired.allowed
     require_admissible(repaired)
+
+
+def test_an_unexpected_provider_error_waits(tmp_path) -> None:
+    from vonk_control.install_admission import InstallAdmissionBusy, require_admissible
+
+    sessions, now, _node, mapping_id, build = setup(tmp_path)
+
+    def flaky(**_unused: object) -> dict[str, dict[str, object]]:
+        raise OSError("database connection reset")
+
+    plan = _service(
+        sessions, compiled_plan_provider=flaky, inventory_max_age=300
+    ).plan_install(mapping_id, build, now=now)
+
+    assert plan.allowed is False
+    with pytest.raises(InstallAdmissionBusy):
+        require_admissible(plan)
 
 
 @pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])
