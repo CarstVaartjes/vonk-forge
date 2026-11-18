@@ -368,7 +368,11 @@ class CoreMixin:
         )
         row = session.get(ModelCacheSet, set_digest)
         if row is not None and not sibling_work:
-            row.state = "cached" if coverage_complete else "incomplete"
+            row.state = (
+                ModelCacheSetState.CACHED
+                if coverage_complete
+                else ModelCacheSetState.INCOMPLETE
+            )
             row.verified_bytes = verified_bytes
             row.updated_at = now
             if coverage_complete:

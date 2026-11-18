@@ -23,6 +23,7 @@ from ..lifecycle import Reported, State
 from ..logging import redact_text
 from ..model_cache_contract import (
     ModelCacheMissingSourceObservation,
+    ModelCacheSetState,
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
@@ -137,7 +138,11 @@ class FailureMixin:
             )
             if row is not None:
                 row.verified_bytes = verified_bytes
-                row.state = "cached" if all_valid else "needs-repair"
+                row.state = (
+                    ModelCacheSetState.CACHED
+                    if all_valid
+                    else ModelCacheSetState.NEEDS_REPAIR
+                )
                 row.updated_at = now
                 row.last_error = detail[:512]
             operation = (

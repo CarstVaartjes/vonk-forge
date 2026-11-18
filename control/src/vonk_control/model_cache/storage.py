@@ -365,9 +365,9 @@ class StorageMixin:
             ModelCacheSetState.VERIFYING,
         }:
             row.state = (
-                "cached"
+                ModelCacheSetState.CACHED
                 if cache._manifest_coverage_complete(manifest)
-                else "needs-repair"
+                else ModelCacheSetState.NEEDS_REPAIR
             )
 
     def _object_key(self, digest: str) -> str:
