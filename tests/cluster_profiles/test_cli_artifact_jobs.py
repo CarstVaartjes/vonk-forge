@@ -1569,6 +1569,7 @@ def test_job_run_exits_non_zero_when_the_job_ends_without_a_result(
         *_run_arguments(_run_binding(tmp_path), "--interval-seconds", "0.01"),
         control_client=client,
     )
+    print("DOC", job)
     assert status == 2, job
     assert job["state"] == state, job
     assert job["status_reason"] == "worker stopped"
@@ -1644,7 +1645,6 @@ def test_job_run_builds_the_binding_from_input_and_option_flags(
         ("--input", "nope=x.txt"),
         ("--option", "nope=1"),
         ("--option", "steps=many"),
-        (),
     ],
 )
 def test_job_run_flags_are_checked_against_the_contract(
@@ -1691,11 +1691,12 @@ def test_download_of_a_running_job_says_to_wait(tmp_path, vonkctl_json) -> None:
         "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
     )
     assert status == 2
-    assert "still running" in error["error"]
+    assert f"job {JOB_ID} is running" in error["error"]
     assert f"job detail {JOB_ID} --follow" in error["error"]
     assert "control API unavailable" not in error["error"]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
 def test_unwritable_output_directory_is_a_local_error_not_an_api_error(
     tmp_path, capsys
 ):

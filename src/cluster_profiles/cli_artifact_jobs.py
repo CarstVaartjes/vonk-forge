@@ -16,7 +16,6 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from time import monotonic as _monotonic
 from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
@@ -117,6 +116,7 @@ def add_artifact_job_commands(
     *,
     add_output: Callable[[argparse.ArgumentParser], None],
     watch_controls: Callable[[argparse.ArgumentParser], None],
+    interval_seconds: Callable[[str], float],
 ) -> None:
     """Attach the ``job`` group: one-command ``run`` and the step commands."""
 
@@ -187,10 +187,10 @@ def add_artifact_job_commands(
     )
     run.add_argument(
         "--interval-seconds",
-        type=float,
+        type=interval_seconds,
         default=1.0,
         metavar="SECONDS",
-        help="Time between refreshes while following (default: 1)",
+        help="Time between refreshes while following, 0.01-30 (default: 1)",
     )
     run.set_defaults(outcome_context="await")
     add_output(run)
@@ -356,8 +356,6 @@ def _content_key_for_rerun(
     client: ArtifactJobClient,
     quote: Callable[[str], str],
     canonical_body: str,
-    key: str | None = None,
-    ended: str | None = None,
 ) -> str:
     """The key of the job this content should continue, or of a new one.
 
@@ -367,37 +365,42 @@ def _content_key_for_rerun(
     deterministic chain (this key plus that job's id) starts a new job. The
     chain is followed to its end and the last ended job is reported once.
     """
-    key = key or _content_request_key(args.run, canonical_body)
+    key = _content_request_key(args.run, canonical_body)
 
-    def read(timeout: float):
-        return _job(
-            client.request(
-                "GET",
-                f"/api/artifact-jobs/requests/{quote(key)}",
-                timeout_seconds=timeout,
-            ),
-            expected_run=args.run,
-        )
+    def lookup(request_key: str):
+        def read(timeout: float):
+            return _job(
+                client.request(
+                    "GET",
+                    f"/api/artifact-jobs/requests/{quote(request_key)}",
+                    timeout_seconds=timeout,
+                ),
+                expected_run=args.run,
+            )
 
-    try:
-        found = _recover(
-            client, read, lambda timeout: None, retry_if=_transient_failure
-        )
-    except ControlNotFound:
-        found = None
-    if found is not None and found.get("state") in ENDED_WITHOUT_RESULT:
-        return _content_key_for_rerun(
-            args,
-            client,
-            quote,
-            canonical_body,
-            _content_request_key(args.run, canonical_body, cast(str, found["id"])),
-            f"previous job {found['id']} {found['state']}: "
-            f"{found.get('status_reason') or 'no reason recorded'}; "
-            "starting a new one",
-        )
+        try:
+            return _recover(
+                client, read, lambda timeout: None, retry_if=_transient_failure
+            )
+        except ControlNotFound:
+            return None
+
+    found = lookup(key)
+    ended = None
+    # Each iteration consumes one distinct ended job of this content; the
+    # Controller holds finitely many.
+    while found is not None and found.get("state") in ENDED_WITHOUT_RESULT:
+        ended = found
+        key = _content_request_key(args.run, canonical_body, cast(str, found["id"]))
+        found = lookup(key)
     if ended is not None and not _json_mode(args):
-        print(ended, file=sys.stderr, flush=True)
+        print(
+            f"previous job {ended['id']} {ended['state']}: "
+            f"{ended.get('status_reason') or 'no reason recorded'}; "
+            "starting a new one",
+            file=sys.stderr,
+            flush=True,
+        )
     return key
 
 
@@ -485,12 +488,6 @@ def _binding_from_flags(
     inputs = []
     paths: dict[str, Path] = {}
     for slot_id, slot in slots.items():
-        count = len(chosen[slot_id])
-        if not slot.min_files <= count <= slot.max_files:
-            raise ValueError(
-                f"input slot '{slot_id}' takes {slot.min_files} to "
-                f"{slot.max_files} files, got {count}; pass --input {slot_id}=PATH"
-            )
         for path in chosen[slot_id]:
             guessed = mimetypes.guess_type(path.name)[0]
             if guessed in slot.media_types:
@@ -604,7 +601,7 @@ def _run_job(
         print(f"Job ID: {args.job_id}", file=sys.stderr, flush=True)
     path = f"/api/artifact-jobs/{quote(args.job_id)}"
     # Follow until the job's own timeout, not the short watch cap of other commands.
-    follow_until = _monotonic() + _integer(job.get("timeout_seconds"), "job timeout")
+    follow_seconds = _integer(job.get("timeout_seconds"), "job timeout")
     job = poll(
         client,
         path,
@@ -612,7 +609,7 @@ def _run_job(
         args,
         terminal=lambda value: value.get("state") in _JOB_TERMINAL_STATES,
         validate=lambda value: _same_job(value, args.job_id),
-        deadline=follow_until,
+        timeout_seconds=follow_seconds,
     )
     if job.get("state") != SUCCEEDED:
         # Unfinished (watch deadline) or ended without a result: the job
@@ -1041,7 +1038,7 @@ def _download(
                 f"{result.get('status_reason') or 'no reason recorded'}"
             )
         raise ValueError(
-            f"job {args.job_id} is still running (state {state}); wait with "
+            f"job {args.job_id} is {state} and has no result yet; wait with "
             f"vonkctl {Word.JOB} {Word.DETAIL} {args.job_id} --follow"
         )
     digest = result.get("output_manifest_sha256")

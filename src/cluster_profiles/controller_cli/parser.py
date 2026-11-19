@@ -20,6 +20,7 @@ from .common import (
     _add_verbose,
     _add_yes,
     _filters,
+    _interval_seconds,
     _line_limit,
     _option_flag,
     _profile_edit_flags,
@@ -425,7 +426,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         _add_output(progress)
 
     add_artifact_job_commands(
-        commands, add_output=_add_output, watch_controls=_watch_controls
+        commands,
+        add_output=_add_output,
+        watch_controls=_watch_controls,
+        interval_seconds=_interval_seconds,
     )
 
     profile = commands.add_parser(
