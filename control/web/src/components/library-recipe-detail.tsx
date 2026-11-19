@@ -34,7 +34,7 @@ export function LibraryRecipeAlternatives({
       </header>
       <ul className="library-alternatives">
         {alternatives.map((item) => {
-          const href = recipeLibraryPath(item.selector);
+          const href = recipeLibraryPath(item);
           return (
             <li key={item.selector}>
               <a href={href} onClick={(event) => onNavigate?.(event, href)}>

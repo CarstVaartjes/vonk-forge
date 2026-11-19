@@ -59,7 +59,7 @@ test("each recipe row shows its published status and newest evidence; none is no
   );
   const pane = screen.getByLabelText("Recipes matching selected Model");
   const row = (index: number) =>
-    pane.querySelector<HTMLElement>(`a[href="${recipeLibraryPath(recipes[index]!.recipe_id)}"]`)!;
+    pane.querySelector<HTMLElement>(`a[href="${recipeLibraryPath(recipes[index]!)}"]`)!;
 
   expect(row(0).querySelector('[data-badge="qualification"]')).toHaveTextContent("Working");
   expect(within(row(0)).getByText(/Last passed/)).toHaveTextContent(/on 2 Sparks$/);
