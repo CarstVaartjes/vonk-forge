@@ -7,8 +7,13 @@ import json
 import pytest
 
 from cluster_profiles import cli, cli_artifact_jobs
+from cluster_profiles.cli_render.artifact_jobs import contract_knob_fields
 from cluster_profiles.cli_states_generated import JobContractState
 from cluster_profiles.control_client import ControlNotFound
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse,
+)
+from cluster_profiles.generated_control.types import Unset
 
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 REVISION_ID = "00000000-0000-4000-8000-000000000007"
@@ -178,3 +183,44 @@ def test_contract_needs_exactly_one_key(vonkctl_json, flags) -> None:
     assert status == 2
     assert controller.paths == []
     assert error["recovery_actions"] == ["vonkctl job contract --help"]
+
+
+def test_contract_knob_fields_are_only_what_the_knob_sets() -> None:
+    document = _contract_document()
+    contract = document["contract"]
+    assert isinstance(contract, dict)
+    knobs = [
+        {
+            "name": "steps",
+            "type": "integer",
+            "default": 31,
+            "minimum": 2,
+            "maximum": 51,
+            "step": 1,
+            "label": "Inference steps",
+            "unit": "steps",
+            "description": "More steps, finer detail.",
+            "allowed_values": [],
+        },
+        {"name": "frames", "type": "enum", "default": 49, "allowed_values": [49, 97]},
+    ]
+    contract["parameters"] = knobs
+    parsed = ArtifactJobContractResponse.from_dict(document)
+    assert not isinstance(parsed.contract, Unset | None)
+    ranged, enum = (contract_knob_fields(k) for k in parsed.contract.parameters)
+
+    assert dict(ranged) == {
+        "Knob": "steps",
+        "Knob label": "Inference steps",
+        "Knob type": "integer",
+        "Knob default": 31,
+        "Knob range": "2 to 51 in steps of 1",
+        "Knob unit": "steps",
+        "Knob description": "More steps, finer detail.",
+    }
+    assert dict(enum) == {
+        "Knob": "frames",
+        "Knob type": "enum",
+        "Knob default": 49,
+        "Knob allowed values": "49, 97",
+    }

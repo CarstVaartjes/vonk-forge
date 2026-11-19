@@ -1658,6 +1658,82 @@ def test_job_run_flags_are_checked_against_the_contract(
     assert not [c for c in client.calls if c[0] == "POST"]
 
 
+def _typed_knobs_contract() -> dict[str, object]:
+    document = _contract_for_flags()
+    contract = document["contract"]
+    assert isinstance(contract, dict)
+    contract["parameters"] = [
+        {
+            "name": "steps",
+            "type": "integer",
+            "default": 31,
+            "minimum": 2,
+            "maximum": 51,
+            "step": 1,
+            "allowed_values": [],
+        },
+        {
+            "name": "scale",
+            "type": "float",
+            "default": 1.5,
+            "minimum": 0.5,
+            "maximum": 4.0,
+            "allowed_values": [],
+        },
+        {
+            "name": "frames",
+            "type": "enum",
+            "default": 49,
+            "allowed_values": [49, 97],
+        },
+    ]
+    return document
+
+
+def test_job_run_options_are_typed_from_the_contract(tmp_path, vonkctl_json) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _typed_knobs_contract()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("a")
+    status, _ = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={prompt}",
+        "--option",
+        "frames=97",
+        "--option",
+        "scale=2.5",
+        "--option",
+        "steps=10",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 0
+    body, _ = _create_call(client)
+    assert body["parameters"] == {"frames": 97, "scale": 2.5, "steps": 10}
+
+
+@pytest.mark.parametrize(
+    ("option", "message"),
+    [
+        ("frames=50", "one of: 49, 97"),
+    ],
+)
+def test_job_run_option_refusal_names_the_allowed_values_before_any_upload(
+    vonkctl_json, option, message
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _typed_knobs_contract()
+    status, error = vonkctl_json(
+        "job", "run", "image", "--option", option, "--no-wait", control_client=client
+    )
+    assert status == 2
+    assert message in json.dumps(error)
+    assert not [c for c in client.calls if c[0] == "POST"]
+
+
 def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
     tmp_path, vonkctl_json
 ) -> None:

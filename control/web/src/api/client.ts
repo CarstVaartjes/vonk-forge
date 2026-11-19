@@ -56,6 +56,7 @@ import type {
   VisualFleetSnapshot,
   ArtifactJob,
   ArtifactJobCapabilities,
+  ArtifactJobContractRead,
   ArtifactJobCreateInput,
   ArtifactJobInputFile,
   ArtifactJobList,
@@ -1003,6 +1004,10 @@ export class ApiClient implements ControlApi {
 
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities> {
     return this.request("/api/artifact-jobs/capabilities", { signal });
+  }
+
+  artifactJobContract(runId: string, signal?: AbortSignal): Promise<ArtifactJobContractRead> {
+    return this.request(`/api/artifact-jobs/contract/run/${encodeURIComponent(runId)}`, { signal });
   }
 
   createArtifactJob(

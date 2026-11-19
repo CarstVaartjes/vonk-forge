@@ -20,6 +20,7 @@ from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
 from .cli_json_contract import Word
+from .cli_render.artifact_jobs import Knob
 from .cli_select import SelectorError
 from .cli_states import (
     ARTIFACT_JOB_STATES,
@@ -48,6 +49,10 @@ from .generated_control.media_types import canonical_media_types
 from .generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
+from .generated_control.models.boolean_parameter import BooleanParameter
+from .generated_control.models.enum_parameter import EnumParameter
+from .generated_control.models.float_parameter import FloatParameter
+from .generated_control.models.integer_parameter import IntegerParameter
 from .generated_control.types import Unset
 
 _UUID = re.compile(
@@ -166,7 +171,7 @@ def add_artifact_job_commands(
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="A knob of the recipe's job contract (repeatable)",
+        help="A knob of the recipe's job contract; see `vonkctl job contract` for its type, range and allowed values (repeatable)",
     )
     run.add_argument(
         "--output",
@@ -515,7 +520,7 @@ def _binding_from_flags(
             raise ValueError(
                 f"unknown option '{key}'; this recipe takes: " + ", ".join(knobs)
             )
-        parameters[key] = _knob_value(key, knobs[key].type_, raw_value)
+        parameters[key] = _knob_value(knobs[key], raw_value)
     transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
     limits = contract.output_limits
     output_limits = {
@@ -545,18 +550,31 @@ def _binding_from_flags(
     return create, paths
 
 
-def _knob_value(name: str, kind: str, raw: str) -> object:
+def _knob_value(knob: Knob, raw: str) -> object:
+    """The typed value of ``--option``. An enum names its allowed values when the
+    text matches none; range and step stay with the Controller."""
+    if isinstance(knob, EnumParameter):
+        for member in knob.allowed_values:
+            if str(member) == raw:
+                return member
+        listed = ", ".join(str(member) for member in knob.allowed_values)
+        raise ValueError(f"option '{knob.name}' takes one of: {listed}; got '{raw}'")
     try:
-        if kind == "integer":
+        if isinstance(knob, IntegerParameter):
             return int(raw)
-        if kind == "float":
-            return float(raw)
-        if kind == "boolean":
-            if raw.lower() in {"true", "false"}:
-                return raw.lower() == "true"
-            raise ValueError(raw)
+        if isinstance(knob, FloatParameter):
+            value = float(raw)
+            if not math.isfinite(value):
+                raise ValueError(raw)
+            return value
+        if isinstance(knob, BooleanParameter):
+            if raw.lower() not in {"true", "false"}:
+                raise ValueError(raw)
+            return raw.lower() == "true"
     except ValueError:
-        raise ValueError(f"option '{name}' takes a {kind} value, got '{raw}'") from None
+        raise ValueError(
+            f"option '{knob.name}' takes a {knob.type_} value, got '{raw}'"
+        ) from None
     return raw
 
 
