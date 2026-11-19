@@ -20,6 +20,7 @@ from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
 from .cli_json_contract import Word
+from .cli_render.artifact_jobs import declared, knob_range
 from .cli_select import SelectorError
 from .cli_states import (
     ARTIFACT_JOB_STATES,
@@ -166,7 +167,7 @@ def add_artifact_job_commands(
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="A knob of the recipe's job contract (repeatable)",
+        help="A knob of the recipe's job contract; see `vonkctl job contract` for its type, range and allowed values (repeatable)",
     )
     run.add_argument(
         "--output",
@@ -515,7 +516,7 @@ def _binding_from_flags(
             raise ValueError(
                 f"unknown option '{key}'; this recipe takes: " + ", ".join(knobs)
             )
-        parameters[key] = _knob_value(key, knobs[key].type_, raw_value)
+        parameters[key] = _knob_value(knobs[key], raw_value)
     transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
     limits = contract.output_limits
     output_limits = {
@@ -545,19 +546,50 @@ def _binding_from_flags(
     return create, paths
 
 
-def _knob_value(name: str, kind: str, raw: str) -> object:
+def _knob_value(knob: Any, raw: str) -> object:
+    """The typed value of ``--option``, checked against what the contract
+    declares (enum members, range and step) so a refusal names the allowed
+    values before anything is uploaded. The Controller stays the authority."""
+    name, kind = knob.name, knob.type_
+    if kind == "enum":
+        allowed = list(declared(knob.allowed_values) or ())
+        for member in allowed:
+            if str(member) == raw:
+                return member
+        listed = ", ".join(str(member) for member in allowed)
+        raise ValueError(f"option '{name}' takes one of: {listed}; got '{raw}'")
     try:
         if kind == "integer":
-            return int(raw)
-        if kind == "float":
-            return float(raw)
-        if kind == "boolean":
-            if raw.lower() in {"true", "false"}:
-                return raw.lower() == "true"
-            raise ValueError(raw)
+            value: object = int(raw)
+        elif kind == "float":
+            value = float(raw)
+            if not math.isfinite(value):
+                raise ValueError(raw)
+        elif kind == "boolean":
+            if raw.lower() not in {"true", "false"}:
+                raise ValueError(raw)
+            return raw.lower() == "true"
+        else:
+            return raw
     except ValueError:
         raise ValueError(f"option '{name}' takes a {kind} value, got '{raw}'") from None
-    return raw
+    low, high, step = (
+        declared(getattr(knob, field)) for field in ("minimum", "maximum", "step")
+    )
+    number = cast(float, value)
+    if (
+        low is not None
+        and number < low
+        or high is not None
+        and number > high
+        or step is not None
+        and low is not None
+        and (number - low) % step
+    ):
+        raise ValueError(
+            f"option '{name}' must be {knob_range(low, high, step)}; got {raw}"
+        )
+    return value
 
 
 def _run_job(

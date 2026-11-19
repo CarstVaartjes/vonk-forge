@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
+from typing import Any
 
 from ..cli_json_contract import Word
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
@@ -174,18 +175,54 @@ def _contract_slots(label: str, slots: list[ArtifactSlotContract]) -> None:
         _field(f"{label} max total size", _bytes(slot.max_total_bytes))
 
 
+def knob_range(low: object, high: object, step: object) -> str:
+    """The range and step a numeric knob declares, in words."""
+    if low is not None and high is not None:
+        text = f"{low} to {high}"
+    else:
+        text = f"at least {low}" if low is not None else f"at most {high}"
+    return f"{text} in steps of {step}" if step is not None else text
+
+
+def contract_knob_fields(knob: Any) -> list[tuple[str, object]]:
+    """One knob's printed fields: only what its definition sets."""
+    low, high, step = (
+        declared(getattr(knob, field)) for field in ("minimum", "maximum", "step")
+    )
+    allowed = declared(knob.allowed_values)
+    fields: list[tuple[str, object | None]] = [
+        ("Knob", knob.name),
+        ("Knob label", declared(knob.label)),
+        ("Knob type", knob.type_),
+        ("Knob default", knob.default),
+        (
+            "Knob range",
+            knob_range(low, high, step)
+            if low is not None or high is not None
+            else None,
+        ),
+        (
+            "Knob allowed values",
+            ", ".join(str(value) for value in allowed) if allowed else None,
+        ),
+        ("Knob unit", declared(knob.unit)),
+        ("Knob description", declared(knob.description)),
+    ]
+    return [(label, value) for label, value in fields if value is not None]
+
+
 def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     contract = answer.contract
     if contract is None or isinstance(contract, Unset):
         raise ControlMalformedResponse("job contract observation is unavailable")
-    _field("Recipe", _set(answer.recipe))
-    _field("Recipe revision", _set(answer.recipe_revision_id))
-    run_id = _set(answer.run_id)
+    _field("Recipe", declared(answer.recipe))
+    _field("Recipe revision", declared(answer.recipe_revision_id))
+    run_id = declared(answer.run_id)
     if run_id is not None:
         _field("Run", run_id)
-        _field("Alias", _set(answer.alias))
+        _field("Alias", declared(answer.alias))
     _field("Interface", contract.interface)
-    _field("Contract SHA-256", _set(answer.contract_sha256))
+    _field("Contract SHA-256", declared(answer.contract_sha256))
     _field("Max job timeout", f"{contract.max_timeout_seconds} seconds")
     _field("Input required", "yes" if contract.input_.required else "no")
     _field("Input max bytes", _bytes(contract.input_.max_bytes))
@@ -193,9 +230,8 @@ def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     _field("Output max bytes", _bytes(contract.output.max_total_bytes))
     _contract_slots("Output slot", contract.output.slots)
     for knob in contract.parameters:
-        _field("Knob", knob.name)
-        _field("Knob type", knob.type_)
-        _field("Knob default", knob.default)
+        for label, value in contract_knob_fields(knob):
+            _field(label, value)
     _field(
         "Next",
         f"vonkctl job create --run {shlex.quote(run_id or '<run>')} "
@@ -203,7 +239,7 @@ def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     )
 
 
-def _set[T](value: T | Unset) -> T | None:
+def declared[T](value: T | Unset) -> T | None:
     """A generated optional field, absent as ``None``."""
     return None if isinstance(value, Unset) else value
 

@@ -3,6 +3,8 @@ import type {
   ArtifactJob,
   ArtifactJobCapabilities,
   ArtifactJobCreateInput,
+  ArtifactJobParameter,
+  ArtifactJobParameterValue,
   ArtifactJobFile,
   ArtifactJobInputFile,
   ArtifactJobInterface,
@@ -76,15 +78,9 @@ function isCancelling(job: ArtifactJob): boolean {
 type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
 type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
 type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
-type Scalar = NonNullable<
-  Extract<JobRecipeDocument["settings"], { kind: "job" }>["knobs"]
->[string]["value"];
-type RecipeParameter = {
-  name: string;
-  description: string;
-  type: "boolean" | "integer" | "string";
-  default: Scalar;
-};
+// A knob value as the form holds it: typed, or the text being edited while it is not yet valid.
+type Scalar = ArtifactJobParameterValue;
+type RecipeParameter = ArtifactJobParameter;
 type InputPayload = { declaration: ArtifactJobInputFile; blob: Blob };
 type CancelRecovery = {
   jobId: string;
@@ -251,31 +247,46 @@ function fileMediaType(slot: RecipeInputSlot, file: File): string {
   return slot.media_types.length === 1 ? slot.media_types[0] : file.type;
 }
 
+function scalarText(value: Scalar): string {
+  return isWireNumber(value) ? formatWire(value) : String(value);
+}
+
 function parameterDefaults(parameters: RecipeParameter[]): Record<string, Scalar> {
   return Object.fromEntries(parameters.map((parameter) => [parameter.name, parameter.default]));
 }
 
-function parameterError(parameter: RecipeParameter, value: Scalar): string | undefined {
-  if (value === null) return undefined;
-  if (parameter.type === "integer") {
-    if (!contractType(value, ["integer"])) return "Enter a whole number.";
-  }
-  return undefined;
+function parameterRange(parameter: RecipeParameter): string | undefined {
+  if (parameter.type !== "integer" && parameter.type !== "float") return undefined;
+  const { minimum, maximum, step } = parameter;
+  const bounds =
+    minimum != null && maximum != null
+      ? `${scalarText(minimum)} to ${scalarText(maximum)}`
+      : minimum != null
+        ? `at least ${scalarText(minimum)}`
+        : maximum != null
+          ? `at most ${scalarText(maximum)}`
+          : "";
+  if (!bounds) return undefined;
+  return step != null ? `${bounds}, in steps of ${scalarText(step)}` : bounds;
 }
 
-function recipeParameters(document: JobRecipeDocument): RecipeParameter[] {
-  if (document.settings.kind !== "job") return [];
-  return Object.entries(document.settings.knobs ?? {}).map(([name, setting]) => ({
-    name,
-    description: "Declared runtime setting.",
-    type:
-      typeof setting.value === "boolean"
-        ? "boolean"
-        : contractType(setting.value, ["integer"])
-          ? "integer"
-          : "string",
-    default: setting.value,
-  }));
+// A hint only: the Controller validates the job and stays the authority.
+function parameterError(parameter: RecipeParameter, value: Scalar): string | undefined {
+  if (parameter.type !== "integer" && parameter.type !== "float") return undefined;
+  if (parameter.type === "integer" && !contractType(value, ["integer"]))
+    return "Enter a whole number.";
+  const number = isWireNumber(value) ? Number(formatWire(value)) : Number(String(value).trim());
+  if (typeof value === "string" && (value.trim() === "" || !Number.isFinite(number)))
+    return "Enter a number.";
+  const range = parameterRange(parameter);
+  const { minimum, maximum } = parameter;
+  if (
+    range &&
+    ((minimum != null && number < Number(formatWire(minimum))) ||
+      (maximum != null && number > Number(formatWire(maximum))))
+  )
+    return `Use a value ${range}.`;
+  return undefined;
 }
 
 function OutputPreview({
@@ -481,7 +492,9 @@ export function ArtifactJobWorkspace({
       "state" in run &&
       run.state === "running",
   );
-  const parameters = useMemo(() => recipeParameters(document), [document]);
+  const [contract, setContract] = useState<RecipeParameter[]>();
+  const [contractError, setContractError] = useState("");
+  const parameters = useMemo(() => contract ?? [], [contract]);
   const input = jobInterface?.input ?? null;
   const inputSlots = useMemo<RecipeInputSlot[]>(() => {
     if (!input) return [];
@@ -571,6 +584,27 @@ export function ArtifactJobWorkspace({
     void loadCapabilities(controller.signal);
     return () => controller.abort();
   }, [jobInterface, loadCapabilities]);
+  const activeRunId = activeRun?.run_id;
+  useEffect(() => {
+    setContract(undefined);
+    setContractError("");
+    if (!activeRunId) return;
+    const controller = new AbortController();
+    api
+      .artifactJobContract(activeRunId, controller.signal)
+      .then((read) => {
+        if (controller.signal.aborted) return;
+        if (read.contract) setContract(read.contract.parameters);
+        else setContractError(read.detail ?? "This run has no job contract.");
+      })
+      .catch((value: unknown) => {
+        if (!controller.signal.aborted)
+          setContractError(
+            value instanceof Error ? value.message.slice(0, 256) : "Unable to load recipe settings",
+          );
+      });
+    return () => controller.abort();
+  }, [api, activeRunId]);
   useEffect(() => () => submissionController.current?.abort(), []);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -725,7 +759,7 @@ export function ArtifactJobWorkspace({
     ...inputErrors,
   ];
   const canSubmit =
-    Boolean(activeRun && capabilities) &&
+    Boolean(activeRun && capabilities && contract) &&
     !phase &&
     preflightErrors.length === 0 &&
     cancelRecovery?.source !== "upload";
@@ -1033,7 +1067,8 @@ export function ArtifactJobWorkspace({
       const createParameters: ArtifactJobCreateInput["parameters"] = {};
       for (const parameter of parameters) {
         const value = values[parameter.name] ?? parameter.default;
-        createParameters[parameter.name] = value;
+        createParameters[parameter.name] =
+          parameter.type === "float" && typeof value === "string" ? Number(value) : value;
       }
       const body: ArtifactJobCreateInput = {
         interface: adapter,
@@ -1283,6 +1318,11 @@ export function ArtifactJobWorkspace({
               </p>
             </div>
           )}
+          {contractError && (
+            <p className="artifact-job-field-error" role="alert">
+              Recipe settings are unavailable: {contractError}
+            </p>
+          )}
           {parameters.length > 0 && (
             <fieldset className="artifact-job-parameters">
               <legend>Recipe settings</legend>
@@ -1290,6 +1330,12 @@ export function ArtifactJobWorkspace({
                 const value = values[parameter.name] ?? parameter.default;
                 const error = parameterErrors.find((item) => item.name === parameter.name)?.error;
                 const describedBy = `${parameter.name}-help${error ? ` ${parameter.name}-error` : ""}`;
+                const label = parameter.label ?? humanizeIdentifier(parameter.name);
+                const unit = parameter.unit ? ` (${parameter.unit})` : "";
+                const help = [parameter.description, parameterRange(parameter)]
+                  .filter(Boolean)
+                  .join(" ");
+                const id = `artifact-job-${parameter.name}`;
                 if (parameter.type === "boolean")
                   return (
                     <label className="artifact-job-check" key={parameter.name}>
@@ -1304,20 +1350,49 @@ export function ArtifactJobWorkspace({
                         }
                       />
                       <span>
-                        <strong>{humanizeIdentifier(parameter.name)}</strong>
-                        <small id={`${parameter.name}-help`}>{parameter.description}</small>
+                        <strong>{label}</strong>
+                        <small id={`${parameter.name}-help`}>{help}</small>
                       </span>
                     </label>
                   );
-                return (
-                  <label key={parameter.name} htmlFor={`artifact-job-${parameter.name}`}>
-                    <span>{humanizeIdentifier(parameter.name)}</span>
+                const control =
+                  parameter.type === "enum" ? (
+                    <select
+                      id={id}
+                      value={scalarText(value)}
+                      aria-label={label}
+                      aria-describedby={describedBy}
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          [parameter.name]:
+                            parameter.allowed_values.find(
+                              (item) => scalarText(item) === event.target.value,
+                            ) ?? parameter.default,
+                        }))
+                      }
+                    >
+                      {parameter.allowed_values.map((item) => (
+                        <option key={scalarText(item)} value={scalarText(item)}>
+                          {scalarText(item)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
                     <input
-                      id={`artifact-job-${parameter.name}`}
-                      type="text"
-                      inputMode={parameter.type === "integer" ? "numeric" : undefined}
-                      value={isWireNumber(value) ? formatWire(value) : String(value)}
-                      aria-label={humanizeIdentifier(parameter.name)}
+                      id={id}
+                      type={parameter.type === "string" ? "text" : "number"}
+                      min={parameter.minimum != null ? scalarText(parameter.minimum) : undefined}
+                      max={parameter.maximum != null ? scalarText(parameter.maximum) : undefined}
+                      step={
+                        parameter.type === "integer"
+                          ? scalarText(parameter.step ?? 1)
+                          : parameter.type === "float"
+                            ? "any"
+                            : undefined
+                      }
+                      value={scalarText(value)}
+                      aria-label={label}
                       aria-invalid={Boolean(error)}
                       aria-describedby={describedBy}
                       onChange={(event) =>
@@ -1330,7 +1405,15 @@ export function ArtifactJobWorkspace({
                         }))
                       }
                     />
-                    <small id={`${parameter.name}-help`}>{parameter.description}</small>
+                  );
+                return (
+                  <label key={parameter.name} htmlFor={id}>
+                    <span>
+                      {label}
+                      {unit}
+                    </span>
+                    {control}
+                    <small id={`${parameter.name}-help`}>{help}</small>
                     {error && (
                       <small className="artifact-job-field-error" id={`${parameter.name}-error`}>
                         {error}

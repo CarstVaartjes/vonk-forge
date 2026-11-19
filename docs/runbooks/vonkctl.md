@@ -601,7 +601,10 @@ Sparks is one candidate.
 
 Describe the job with `--input SLOT=PATH` (repeatable) and `--option KEY=VALUE`
 (repeatable), which the CLI checks against the run's `job contract`: slot names
-and file counts, knob names and types. Or pass a binding `--file` (described
+and file counts, knob names, types, enum members, range and step. A value off
+the declared choices or range is refused before any upload, naming what is
+allowed (the Controller stays the authority). An enum takes the allowed value's
+text, so `--option num-frames=141` works for an integer enum. Or pass a binding `--file` (described
 below); the two forms cannot be combined.
 
 The create request key is derived from the run and the job's content (the
@@ -626,7 +629,8 @@ vonkctl job detail JOB_UUID --follow
 
 `job contract` reads what a running recipe accepts before any job
 exists: its input and output slots (ids, media types, extensions, file counts and
-size limits), its knobs with defaults, and the maximum job timeout. It is the
+size limits), its knobs (label, type, default, range and step or allowed values, unit and
+description, each only when the recipe sets it), and the maximum job timeout. It is the
 same compiled contract `job create` validates against. Name the run (its id is in `vonkctl fleet`) or an exact recipe
 revision (which needs no run):
 
