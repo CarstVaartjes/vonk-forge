@@ -38,13 +38,13 @@ def test_a_dependabot_pull_request_schedules_no_runner() -> None:
     assert DEPENDABOT_SKIP in scope["if"]
     for path in sorted(WORKFLOWS.glob("*.yml")):
         workflow = yaml.safe_load(path.read_text())
-        if "pull_request" not in workflow[True]:
+        if not {"pull_request", "pull_request_target"} & set(workflow[True]):
             continue
         for name, job in workflow["jobs"].items():
             if job.get("uses") == "./.github/workflows/ci-scope.yml":
                 continue
             condition = str(job.get("if", ""))
-            if "github.event_name == 'push'" in condition:
+            if "github.event_name == 'push'" in condition and "||" not in condition:
                 continue
-            if "needs" not in job or "always()" in condition:
+            if "needs" not in job or "always()" in condition or "cancelled()" in condition:
                 assert DEPENDABOT_SKIP in condition, (path.name, name)
