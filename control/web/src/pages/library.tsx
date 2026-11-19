@@ -302,8 +302,8 @@ export function LibraryPage({
     return () => controller.abort();
   }, [api, fleetAttempt]);
   useEffect(() => {
-    const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
-    if (!recipeId) {
+    const selector = route.kind === "recipe" ? route.selector : undefined;
+    if (!selector) {
       setDetail(undefined);
       setDetailError("");
       setDetailLoading(false);
@@ -313,7 +313,7 @@ export function LibraryPage({
     setDetailLoading(true);
     setDetailError("");
     void api
-      .recipeDetail(recipeId, controller.signal)
+      .recipeDetail(selector, controller.signal)
       .then((value) => {
         if (!controller.signal.aborted) {
           setDetail(viewRecipeDetail(value));
@@ -370,7 +370,7 @@ export function LibraryPage({
   const refresh = useCallback(
     async (signal: AbortSignal) => {
       if (route.kind === "recipe")
-        await api.recipeDetail(route.recipeId, signal).then((value) => {
+        await api.recipeDetail(route.selector, signal).then((value) => {
           if (!signal.aborted) setDetail(viewRecipeDetail(value));
         });
       if (!signal.aborted) {
