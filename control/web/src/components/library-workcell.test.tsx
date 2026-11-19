@@ -14,7 +14,7 @@ import {
 } from "./library-workcell";
 import { cacheRemovalReview } from "../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../test-fixtures/library";
-import { recipeLibraryPath, modelKey } from "../lib/library-route";
+import { LibraryPath, recipeLibraryPath, modelKey } from "../lib/library-route";
 import { formatBytes } from "../lib/fleet";
 
 test("renders every selected model's own recipe identities", () => {
@@ -27,7 +27,7 @@ test("renders every selected model's own recipe identities", () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(model.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(model.model) }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -84,7 +84,7 @@ test("keeps URL-selected Models in the paired right pane", () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: key }}
+      route={{ kind: LibraryPath.MODELS, modelKey: key }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -125,7 +125,7 @@ test("removes a recipe only after an explicit model choice", async () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -168,7 +168,7 @@ test("refreshes the whole cached recipe set with an explicit scope", async () =>
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -191,7 +191,7 @@ test("offers the same recipe filters as vonkctl recipe library", () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(model.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(model.model) }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -235,7 +235,7 @@ test("offers to cache the missing models when downloading a recipe", () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={snapshot}
     />,
   );
@@ -265,7 +265,7 @@ test("keeps same-Model Recipe variants together and shows creator attribution", 
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: key }}
+      route={{ kind: LibraryPath.MODELS, modelKey: key }}
       snapshot={libraryViewSnapshot}
     />,
   );
@@ -350,7 +350,7 @@ test("a recipe row shows engine, creator and Spark count badges", () => {
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={snapshot}
     />,
   );
@@ -422,7 +422,7 @@ test("fleet fit is read from the URL as --fits-fleet, keeps unknown verdicts, an
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={snapshot}
     />,
   );
@@ -454,7 +454,7 @@ function renderWithRoleMemory(memory: { load_peak_bytes?: number; minimum_swap_b
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={snapshot}
     />,
   );
