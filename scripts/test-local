@@ -216,4 +216,4 @@ fi
 echo "Running Linux-marked repository and Controller tests in OrbStack VM vonk-ci"
 printf -v guest_root '%q' "$root"
 orb -m vonk-ci bash -lc \
-    "cd $guest_root && export CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/test-local"
+    "cd $guest_root && export CARGO_BUILD_RUSTC_WRAPPER= CARGO_TARGET_DIR=\"\$HOME/target-vonk-ci-infra\" UV_CACHE_DIR=\"\$HOME/.cache/vonk-ci-infra-uv\" UV_CONTROL_PROJECT_ENVIRONMENT=\"\$HOME/venv-vonk-ci-infra-control\" VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") VONK_TEST_LOCAL_MARKERS=$(printf %q "$linux_markers") && scripts/test-local"
