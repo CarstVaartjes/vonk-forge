@@ -58,10 +58,6 @@ export function countFleetFit(
   for (const rank of best.values()) byRank[rank] += 1;
   return { ...NO_VERDICTS, fits: byRank[2]!, unknown: byRank[1]!, nonFit: byRank[0]! };
 }
-/** Placement state (not qualification): the one predicate for "assessed" in the header and the fit button. */
-export function hasPlacementVerdict(records: LibraryRecipeRecord[]): boolean {
-  return records.some((record) => record.recipe?.assessment);
-}
 type FacetOption = { value: string; label: string; count: number };
 
 function countBy(
@@ -200,7 +196,8 @@ export function LibrarySetupStrip({
   }));
   const anyCount = countBy(records, openSparks, query, noun);
   const fit = countFleetFit(records, filters, query, noun);
-  const assessed = hasPlacementVerdict(records);
+  // Placement state (not qualification): only ready or blocked are verdicts; "unavailable" is unknown.
+  const assessed = fit.fits + fit.nonFit > 0;
   return (
     <section className="library-setup" aria-label="Start from your fleet">
       <header>

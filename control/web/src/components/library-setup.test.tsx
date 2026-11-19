@@ -305,8 +305,8 @@ test("header and button agree when every verdict is unavailable", () => {
       onFiltersChange={() => undefined}
     />,
   );
-  expect(screen.queryByText(/has not assessed placement/)).toBeNull();
-  expect(screen.getByRole("button", { name: /^Fits my fleet now/ })).not.toHaveTextContent(
+  expect(screen.getByText(/has not assessed placement/)).toBeVisible();
+  expect(screen.getByRole("button", { name: /^Fits my fleet now/ })).toHaveTextContent(
     "Fit not assessed",
   );
 });
@@ -314,22 +314,23 @@ test("header and button agree when every verdict is unavailable", () => {
 test("a recipe used by several models is counted once", () => {
   const first = records.find((record) => record.recipe)!;
   const doubled = [...records, { ...first, key: `${first.key}:again`, modelKey: "other-model" }];
-  const total = (list: typeof records) => uniqueRecipes(list).size;
-  render(
-    <LibrarySetupStrip
-      records={doubled}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      query=""
-      noun="recipes"
-      onFiltersChange={() => undefined}
-    />,
-  );
-  expect(
-    within(screen.getByRole("group", { name: "Sparks per recipe" })).getByRole("button", {
-      name: `Any Spark count: ${total(doubled)} recipes`,
-    }),
-  ).toBeVisible();
-  expect(total(doubled)).toBe(total(records));
+  const anyTile = (list: typeof records) => {
+    const { unmount } = render(
+      <LibrarySetupStrip
+        records={list}
+        filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+        query=""
+        noun="recipes"
+        onFiltersChange={() => undefined}
+      />,
+    );
+    const label = within(screen.getByRole("group", { name: "Sparks per recipe" }))
+      .getByRole("button", { name: /^Any Spark count:/ })
+      .getAttribute("aria-label");
+    unmount();
+    return label;
+  };
+  expect(anyTile(doubled)).toBe(anyTile(records));
 });
 
 test("the header gives the online Sparks' total and free memory with the fleet bar, and says what it covers", () => {
