@@ -43,7 +43,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - image-janitor-state:/state
     healthcheck:
-      test: [CMD, python, -c, "import os,time; assert time.time()-os.stat('/state/unused.json').st_mtime < 7200"]
+      # The hourly sweep and the 30-second repair loop must both be alive.
+      test: [CMD, python, -c, "import os,time; assert time.time()-os.stat('/state/unused.json').st_mtime < 7200 and time.time()-os.stat('/state/network-tick-ok').st_mtime < 900"]
       interval: 5m
       timeout: 5s
       retries: 1
@@ -316,7 +317,10 @@ services:
       control-api: {condition: service_started, required: false, restart: true}
       registry: {condition: service_started}
     healthcheck:
-      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8082/healthz"]
+      # The loopback listener is independent of every network; the default
+      # route exists only while `ingress` (the one non-internal network) is
+      # attached, so a half-attached Caddy shows unhealthy.
+      test: [CMD-SHELL, "wget -q -O /dev/null http://127.0.0.1:8082/healthz && ip route | grep -q '^default'"]
       interval: 10s
       timeout: 5s
       retries: 12

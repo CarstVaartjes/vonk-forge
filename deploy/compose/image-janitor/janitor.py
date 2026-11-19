@@ -5,6 +5,10 @@ repair loop that re-attaches project containers to networks they lost (a
 network recreated under them, or an endpoint the network no longer lists).
 `compose up` and restarts reuse such a container: a stopped one is started
 as-is, and only a running one is checked for missing networks.
+
+The networks a service must have come from the rendered bundle, not from the
+container's own record: Docker can lose the network and drop it from the record
+together, and a healer that trusts the record sees nothing wrong.
 """
 
 from __future__ import annotations
@@ -35,11 +39,67 @@ NETWORK_INTERVAL = 30
 MAX_REPAIR_BACKOFF = 300
 PROJECT_LABEL = "com.docker.compose.project"
 SERVICE_LABEL = "com.docker.compose.service"
+NETWORK_LABEL = "com.docker.compose.network"
+HASH_LABEL = "com.docker.compose.config-hash"
+RECREATED = "janitor-recreated"
 ONEOFF_LABEL = "com.docker.compose.oneoff"
 # The services the rendered bundle defines; empty (unrendered) retires nothing.
 COMPOSE_SERVICES = frozenset(
     name for name in os.environ.get("VONK_COMPOSE_SERVICES", "").split(",") if name
 )
+
+
+class NetworkDefinition(TypedDict):
+    Name: str
+    Driver: str
+    Internal: bool
+    Labels: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Topology:
+    """The networks the rendered bundle declares: per service, and which are internal."""
+
+    services: dict[str, tuple[str, ...]]
+    internal: frozenset[str]
+
+    @classmethod
+    def parse(cls, raw: str) -> Topology:
+        if not raw:
+            return cls({}, frozenset())  # Unrendered: each container's record.
+        try:
+            document = json.loads(raw)
+            return cls(
+                {str(k): tuple(map(str, v)) for k, v in document["services"].items()},
+                frozenset(map(str, document["internal"])),
+            )
+        except (ValueError, KeyError, TypeError, AttributeError) as error:
+            # The service keeps running on records alone, but never silently.
+            log(Reason.TOPOLOGY_INVALID, detail=str(error))
+            return cls({}, frozenset())
+
+    def declared(self, project: str, service: str) -> tuple[str, ...]:
+        return tuple(f"{project}_{n}" for n in self.services.get(service, ()))
+
+    def definition(self, project: str, name: str) -> NetworkDefinition | None:
+        """The Compose definition of a declared network, else None."""
+        short = name.removeprefix(f"{project}_")
+        if name == short or not any(short in n for n in self.services.values()):
+            return None
+        return {
+            "Name": name,
+            "Driver": "bridge",
+            "Internal": short in self.internal,
+            # A hash Compose never computes: the next `compose up` sees the
+            # network as diverged and recreates it from the bundle.
+            "Labels": {
+                PROJECT_LABEL: project,
+                NETWORK_LABEL: short,
+                HASH_LABEL: RECREATED,
+            },
+        }
+
+
 # A redeploy that adds a service creates it while the previous janitor, with its
 # older list, still runs; only containers older than this process are retired.
 STARTED = time.time()
@@ -56,6 +116,8 @@ REPOSITORIES = frozenset(
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 STATE = Path("/state/unused.json")
 REPAIRING = Path("/state/repairing.json")
+# Touched by every repair pass that completed; the health check reads its age.
+REPAIR_PASSED = Path("/state/network-tick-ok")
 LOGGER = logging.getLogger("image-janitor")
 
 
@@ -87,6 +149,8 @@ class Reason(StrEnum):
     NO_PROJECT = "not-in-a-compose-project"
     RETIRED = "retired-service-container-removed"
     MARKS_INVALID = "repair-journal-invalid-reset"
+    NETWORK_CREATED = "declared-network-recreated"
+    TOPOLOGY_INVALID = "declared-networks-invalid-blind"
 
 
 @dataclass(frozen=True)
@@ -322,6 +386,8 @@ class SharedMode(StrEnum):
 class Network:
     identity: str
     members: frozenset[str]
+    # Created by this janitor, not (yet) by a `compose up` of the bundle.
+    recreated: bool = False
 
     @classmethod
     def inspect(cls, docker: Docker, name: str) -> Network | None:
@@ -329,7 +395,12 @@ class Network:
             row = docker.request("GET", f"/networks/{quote(name, safe='')}")
         except DockerNotFound:
             return None
-        return cls(str(row["Id"]), frozenset(row.get("Containers") or {}))
+        labels = row.get("Labels") or {}
+        return cls(
+            str(row["Id"]),
+            frozenset(row.get("Containers") or {}),
+            labels.get(HASH_LABEL) == RECREATED,
+        )
 
 
 class Action(StrEnum):
@@ -353,6 +424,7 @@ class Container:
     # State.StartedAt: tells a restarted container from the one inspected.
     started: str
     created: float
+    service: str
     # Network name -> (recorded network ID, recorded aliases).
     networks: dict[str, tuple[str, tuple[str, ...]]]
 
@@ -377,6 +449,9 @@ class Container:
             mode=str(row["HostConfig"]["NetworkMode"]),
             started=str(row["State"].get("StartedAt") or ""),
             created=datetime.fromisoformat(row["Created"]).timestamp(),
+            service=str(
+                ((row.get("Config") or {}).get("Labels") or {}).get(SERVICE_LABEL, "")
+            ),
             networks=networks,
         )
 
@@ -424,9 +499,21 @@ def decide(
 ) -> Action:
     """The one transition: observed container and network facts -> action.
 
-    `broken` is None while a network to attach does not exist (Compose owns
-    networks), else the networks whose attachment is lost or still owed by a
-    `pending` repair. `held_until` is the backoff of the planned repair.
+    `broken` is None while a network to attach does not exist and the bundle
+    does not declare it, else the networks whose attachment is lost, declared
+    but missing from the container, or still owed by a `pending` repair.
+    `held_until` is the backoff of the planned repair.
+
+    State -> action (first match; a planned action inside its backoff waits):
+      docker-owned state              -> WAIT_STATE
+      network unknown and undeclared  -> WAIT_NETWORK (Compose creates it)
+      any network broken              -> REATTACH
+      not running, should run         -> START
+      created, never started          -> WAIT_CREATED, then START
+      otherwise                       -> NONE
+    A declared network that does not exist counts as broken, never unknown;
+    its REATTACH, journalled and backed off, first recreates the network
+    (`Reconciler.recreate`) from the bundle's definition.
     """
     if container.state in DOCKER_OWNED:
         return Action.WAIT_STATE
@@ -502,9 +589,12 @@ class Reconciler:
         *,
         clock: Callable[[], float] = time.time,
         jitter: Callable[[], float] = random.random,
+        topology: Topology | None = None,
     ) -> None:
         self.docker = docker
         self.journal = journal
+        self.topology = topology or Topology({}, frozenset())
+        self.project = ""
         self.clock = clock
         self.backoff = Backoff(jitter)
 
@@ -573,6 +663,7 @@ class Reconciler:
         selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
         rows = self.docker.request("GET", f"/containers/json?all=1&filters={selector}")
         rows = self.retire(rows, services)
+        self.project = project
         # One inspect per network per tick, shared by every container.
         networks: dict[str, Network | None] = {}
         for row in rows:
@@ -603,41 +694,69 @@ class Reconciler:
         pending: Pending | None,
         networks: dict[str, Network | None],
     ) -> list[str] | None:
-        """Networks to (re-)attach, or None while one of them does not exist.
+        """Networks to (re-)attach, or None while an undeclared one does not exist.
 
-        The container's own network entries are the declared set: the daemon
-        keeps them until an explicit disconnect, even when the network or the
-        endpoint is gone. An entry is broken when it names an older network ID
-        (the network was recreated) or, while running, when the network lists
-        no endpoint for it. A pending repair also owes the networks it
-        disconnected and has not yet seen attached again.
+        A network the bundle declares for the container's service that does not
+        exist is broken whatever the record says: the daemon can lose a network
+        and drop it from the record together. One that exists but is missing
+        from the record is Compose's to attach (a redeploy may be mid-way),
+        unless a pending repair owes it or this janitor recreated the network. A recorded entry is broken when it
+        names an older network ID (the network was recreated) or, while
+        running, when the network lists no endpoint for it. A pending repair
+        also owes the networks it disconnected and has not yet seen attached.
         """
-        owed = [
-            n
-            for n in (pending.networks if pending else {})
-            if n not in container.networks
-        ]
+        owed = [n for n in (pending.networks if pending else {})]
+        declared = self.topology.declared(self.project, container.service)
+        names = dict.fromkeys([*container.networks, *owed, *declared])
         broken = []
-        for name in [*container.networks, *owed]:
-            if name not in networks:
-                networks[name] = Network.inspect(self.docker, name)
-            network = networks[name]
+        for name in names:
+            network = self.network(name, networks)
             if network is None:
-                return None
-            if name not in owed and self.detached(container, name, network):
+                if self.topology.definition(self.project, name) is None:
+                    return None
+                broken.append(name)
+                continue
+            if name not in container.networks:
+                # Compose's to attach, unless a repair owes it: journalled, or
+                # a network this janitor recreated for the declared service.
+                if name in owed or (network.recreated and name in declared):
+                    broken.append(name)
+                continue
+            if self.detached(container, name, network):
                 # The snapshot is shared by the tick and may predate this
                 # container joining; condemn only on a fresh read, and only if
                 # the container is still in the state it was observed in.
                 network = networks[name] = Network.inspect(self.docker, name)
                 if network is None:
-                    return None
+                    if self.topology.definition(self.project, name) is None:
+                        return None
+                    broken.append(name)
+                    continue
                 if not (
                     self.detached(container, name, network) and self.observed(container)
                 ):
                     continue
-            if name in owed or self.detached(container, name, network):
                 broken.append(name)
         return broken
+
+    def network(self, name: str, networks: dict[str, Network | None]) -> Network | None:
+        if name not in networks:
+            networks[name] = Network.inspect(self.docker, name)
+        return networks[name]
+
+    def recreate(self, missing: list[str], networks: dict[str, Network | None]) -> None:
+        """Recreate declared networks that vanished (the daemon lost its store).
+
+        Only from a journalled repair. Compose is still the owner: the network
+        carries a config hash Compose never computes, so the next `compose up`
+        recreates it from the bundle.
+        """
+        for name in missing:
+            definition = self.topology.definition(self.project, name)
+            if definition is not None:
+                self.docker.request("POST", "/networks/create", definition)
+                log(Reason.NETWORK_CREATED, network=name)
+                networks[name] = Network.inspect(self.docker, name)
 
     @staticmethod
     def detached(container: Container, name: str, network: Network) -> bool:
@@ -721,8 +840,14 @@ class Reconciler:
         # name resolvable on the re-attached network.
         owed = dict(pending.networks) if pending else {}
         for network in broken or []:
-            owed.setdefault(network, container.networks.get(network, ("", ()))[1])
+            owed.setdefault(
+                network,
+                container.networks.get(
+                    network, ("", (container.name, container.service))
+                )[1],
+            )
         self.record(identity, Pending(start, owed))
+        self.recreate([n for n in broken or [] if networks.get(n) is None], networks)
         try:
             if container.state == State.RUNNING:
                 self.docker.request("POST", f"{target}/stop?t=10")
@@ -774,7 +899,11 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     signal.signal(signal.SIGTERM, terminate)
     docker = Docker()
-    reconciler = Reconciler(docker, REPAIRING)
+    reconciler = Reconciler(
+        docker,
+        REPAIRING,
+        topology=Topology.parse(os.environ.get("VONK_COMPOSE_NETWORKS", "")),
+    )
     scheduler = sched.scheduler()
 
     def network_tick() -> None:
@@ -784,6 +913,7 @@ def main() -> None:
                 log(Reason.NO_PROJECT, next_attempt=time.time() + NETWORK_INTERVAL)
             else:
                 reconciler.tick(project, COMPOSE_SERVICES)
+            REPAIR_PASSED.touch()
         except (
             DockerError,
             OSError,
