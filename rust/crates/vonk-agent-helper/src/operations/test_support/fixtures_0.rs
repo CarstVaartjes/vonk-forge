@@ -614,7 +614,7 @@ pub(in crate::operations) fn job_runtime_arguments(
     roots: &ManagedRoots,
     model: PathBuf,
 ) -> Vec<String> {
-    let mut arguments = runtime_arguments(roots, &[(model, "/models", true)]);
+    let mut arguments = runtime_arguments(roots, &[(model, "/models/model", true)]);
     arguments.remove(
         arguments
             .iter()

@@ -56,7 +56,7 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
         let (_temp, roots) = runtime_fixture();
         let model = artifact_path(&roots, 'a');
         fs::create_dir_all(&model).unwrap();
-        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
         let network = arguments.iter().position(|value| value == "none").unwrap();
         arguments[network] = "bridge".to_owned();
         let image = arguments
@@ -124,7 +124,7 @@ fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
         let (temp, roots) = runtime_fixture();
         let model = artifact_path(&roots, 'a');
         fs::create_dir_all(&model).unwrap();
-        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
         let network = arguments.iter().position(|value| value == "none").unwrap();
         arguments[network] = "host".to_owned();
         let image = arguments
@@ -210,7 +210,7 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
     let (temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
     let network = arguments.iter().position(|value| value == "none").unwrap();
     arguments[network] = "host".to_owned();
     let image = arguments
