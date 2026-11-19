@@ -28,6 +28,12 @@ from pydantic import (
 
 from .contracts import AgentProtocolError
 from .host_helper import MAX_ARGV_BYTES
+from .job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -389,10 +395,10 @@ class CompiledJobInputSlot(_Strict):
     description: StrictStr = Field(min_length=1, max_length=256)
     media_types: list[StrictStr] = Field(min_length=1, max_length=16)
     extensions: list[StrictStr] = Field(max_length=16)
-    min_files: StrictInt = Field(ge=0, le=32)
-    max_files: StrictInt = Field(ge=1, le=32)
-    max_file_bytes: StrictInt = Field(ge=1, le=512 * 1024**2)
-    max_total_bytes: StrictInt = Field(ge=1, le=1024**3)
+    min_files: StrictInt = Field(ge=0, le=MAX_INPUT_FILES)
+    max_files: StrictInt = Field(ge=1, le=MAX_INPUT_FILES)
+    max_file_bytes: StrictInt = Field(ge=1, le=MAX_INPUT_FILE_BYTES)
+    max_total_bytes: StrictInt = Field(ge=1, le=MAX_INPUT_TOTAL_BYTES)
 
     @model_validator(mode="after")
     def limits_are_consistent(self) -> CompiledJobInputSlot:
@@ -418,9 +424,9 @@ class CompiledJobInput(_Strict):
 
     required: StrictBool
     media_types: list[StrictStr] = Field(min_length=1, max_length=16)
-    max_bytes: StrictInt = Field(ge=1, le=1024**3)
+    max_bytes: StrictInt = Field(ge=1, le=MAX_INPUT_TOTAL_BYTES)
     slots: list[CompiledJobInputSlot] | None = Field(
-        default=None, min_length=1, max_length=32
+        default=None, min_length=1, max_length=MAX_INPUT_FILES
     )
 
     @field_validator("media_types")
@@ -458,7 +464,7 @@ class CompiledJob(_Strict):
     ]
     input: CompiledJobInput | None
     # Maximum inactivity since Docker start or its latest timestamped job output.
-    timeout_seconds: int = Field(ge=1, le=3600)
+    timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
 
 
 class CompiledExecutionPlan(_Strict):
