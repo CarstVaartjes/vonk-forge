@@ -20,7 +20,7 @@ from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
 from .cli_json_contract import Word
-from .cli_render.artifact_jobs import declared, knob_range
+from .cli_render.artifact_jobs import Knob
 from .cli_select import SelectorError
 from .cli_states import (
     ARTIFACT_JOB_STATES,
@@ -49,6 +49,10 @@ from .generated_control.media_types import canonical_media_types
 from .generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
+from .generated_control.models.boolean_parameter import BooleanParameter
+from .generated_control.models.enum_parameter import EnumParameter
+from .generated_control.models.float_parameter import FloatParameter
+from .generated_control.models.integer_parameter import IntegerParameter
 from .generated_control.types import Unset
 
 _UUID = re.compile(
@@ -546,50 +550,32 @@ def _binding_from_flags(
     return create, paths
 
 
-def _knob_value(knob: Any, raw: str) -> object:
-    """The typed value of ``--option``, checked against what the contract
-    declares (enum members, range and step) so a refusal names the allowed
-    values before anything is uploaded. The Controller stays the authority."""
-    name, kind = knob.name, knob.type_
-    if kind == "enum":
-        allowed = list(declared(knob.allowed_values) or ())
-        for member in allowed:
+def _knob_value(knob: Knob, raw: str) -> object:
+    """The typed value of ``--option``. An enum names its allowed values when the
+    text matches none; range and step stay with the Controller."""
+    if isinstance(knob, EnumParameter):
+        for member in knob.allowed_values:
             if str(member) == raw:
                 return member
-        listed = ", ".join(str(member) for member in allowed)
-        raise ValueError(f"option '{name}' takes one of: {listed}; got '{raw}'")
+        listed = ", ".join(str(member) for member in knob.allowed_values)
+        raise ValueError(f"option '{knob.name}' takes one of: {listed}; got '{raw}'")
     try:
-        if kind == "integer":
-            value: object = int(raw)
-        elif kind == "float":
+        if isinstance(knob, IntegerParameter):
+            return int(raw)
+        if isinstance(knob, FloatParameter):
             value = float(raw)
             if not math.isfinite(value):
                 raise ValueError(raw)
-        elif kind == "boolean":
+            return value
+        if isinstance(knob, BooleanParameter):
             if raw.lower() not in {"true", "false"}:
                 raise ValueError(raw)
             return raw.lower() == "true"
-        else:
-            return raw
     except ValueError:
-        raise ValueError(f"option '{name}' takes a {kind} value, got '{raw}'") from None
-    low, high, step = (
-        declared(getattr(knob, field)) for field in ("minimum", "maximum", "step")
-    )
-    number = cast(float, value)
-    if (
-        low is not None
-        and number < low
-        or high is not None
-        and number > high
-        or step is not None
-        and low is not None
-        and (number - low) % step
-    ):
         raise ValueError(
-            f"option '{name}' must be {knob_range(low, high, step)}; got {raw}"
-        )
-    return value
+            f"option '{knob.name}' takes a {knob.type_} value, got '{raw}'"
+        ) from None
+    return raw
 
 
 def _run_job(

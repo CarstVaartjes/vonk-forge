@@ -5,7 +5,6 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from typing import Any
 
 from ..cli_json_contract import Word
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
@@ -15,8 +14,21 @@ from ..generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
 from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
+from ..generated_control.models.boolean_parameter import BooleanParameter
+from ..generated_control.models.enum_parameter import EnumParameter
+from ..generated_control.models.float_parameter import FloatParameter
+from ..generated_control.models.integer_parameter import IntegerParameter
+from ..generated_control.models.string_parameter import StringParameter
 from ..generated_control.types import Unset
 from .common import _bytes, _field, _records, _text, _time
+
+type Knob = (
+    StringParameter
+    | IntegerParameter
+    | FloatParameter
+    | BooleanParameter
+    | EnumParameter
+)
 
 
 class ResultFiles(StrEnum):
@@ -184,10 +196,12 @@ def knob_range(low: object, high: object, step: object) -> str:
     return f"{text} in steps of {step}" if step is not None else text
 
 
-def contract_knob_fields(knob: Any) -> list[tuple[str, object]]:
+def contract_knob_fields(knob: Knob) -> list[tuple[str, object]]:
     """One knob's printed fields: only what its definition sets."""
     low, high, step = (
-        declared(getattr(knob, field)) for field in ("minimum", "maximum", "step")
+        declared(knob.minimum),
+        declared(knob.maximum),
+        declared(knob.step),
     )
     allowed = declared(knob.allowed_values)
     fields: list[tuple[str, object | None]] = [
@@ -232,11 +246,11 @@ def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     for knob in contract.parameters:
         for label, value in contract_knob_fields(knob):
             _field(label, value)
-    _field(
-        "Next",
-        f"vonkctl job create --run {shlex.quote(run_id or '<run>')} "
-        "--file <binding.json>",
-    )
+    alias = declared(answer.alias)
+    parts = ["vonkctl job run", shlex.quote(alias or "<alias>")]
+    parts += [f"--input {slot.id}=<path>" for slot in contract.input_.slots[:1]]
+    parts += [f"--option {knob.name}=<value>" for knob in contract.parameters[:1]]
+    _field("Next", " ".join(parts))
 
 
 def declared[T](value: T | Unset) -> T | None:

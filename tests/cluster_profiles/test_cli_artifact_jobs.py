@@ -1719,8 +1719,6 @@ def test_job_run_options_are_typed_from_the_contract(tmp_path, vonkctl_json) -> 
     ("option", "message"),
     [
         ("frames=50", "one of: 49, 97"),
-        ("steps=52", "2 to 51 in steps of 1"),
-        ("scale=0.1", "0.5 to 4.0"),
     ],
 )
 def test_job_run_option_refusal_names_the_allowed_values_before_any_upload(

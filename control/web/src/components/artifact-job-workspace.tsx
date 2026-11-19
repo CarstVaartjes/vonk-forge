@@ -81,6 +81,10 @@ type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
 // A knob value as the form holds it: typed, or the text being edited while it is not yet valid.
 type Scalar = ArtifactJobParameterValue;
 type RecipeParameter = ArtifactJobParameter;
+type ContractState =
+  | { kind: "loading" }
+  | { kind: "ready"; parameters: RecipeParameter[] }
+  | { kind: "unavailable"; detail: string };
 type InputPayload = { declaration: ArtifactJobInputFile; blob: Blob };
 type CancelRecovery = {
   jobId: string;
@@ -270,22 +274,16 @@ function parameterRange(parameter: RecipeParameter): string | undefined {
   return step != null ? `${bounds}, in steps of ${scalarText(step)}` : bounds;
 }
 
-// A hint only: the Controller validates the job and stays the authority.
+// Only whether the text parses; range and step are the Controller's to refuse.
 function parameterError(parameter: RecipeParameter, value: Scalar): string | undefined {
-  if (parameter.type !== "integer" && parameter.type !== "float") return undefined;
   if (parameter.type === "integer" && !contractType(value, ["integer"]))
     return "Enter a whole number.";
-  const number = isWireNumber(value) ? Number(formatWire(value)) : Number(String(value).trim());
-  if (typeof value === "string" && (value.trim() === "" || !Number.isFinite(number)))
-    return "Enter a number.";
-  const range = parameterRange(parameter);
-  const { minimum, maximum } = parameter;
   if (
-    range &&
-    ((minimum != null && number < Number(formatWire(minimum))) ||
-      (maximum != null && number > Number(formatWire(maximum))))
+    parameter.type === "float" &&
+    typeof value === "string" &&
+    (value.trim() === "" || !Number.isFinite(Number(value)))
   )
-    return `Use a value ${range}.`;
+    return "Enter a number.";
   return undefined;
 }
 
@@ -492,9 +490,11 @@ export function ArtifactJobWorkspace({
       "state" in run &&
       run.state === "running",
   );
-  const [contract, setContract] = useState<RecipeParameter[]>();
-  const [contractError, setContractError] = useState("");
-  const parameters = useMemo(() => contract ?? [], [contract]);
+  const [contract, setContract] = useState<ContractState>({ kind: "loading" });
+  const parameters = useMemo(
+    () => (contract.kind === "ready" ? contract.parameters : []),
+    [contract],
+  );
   const input = jobInterface?.input ?? null;
   const inputSlots = useMemo<RecipeInputSlot[]>(() => {
     if (!input) return [];
@@ -548,12 +548,14 @@ export function ArtifactJobWorkspace({
   }, [interfaceIndex, jobInterfaces.length]);
   useEffect(() => {
     setValues(parameterDefaults(parameters));
+  }, [parameters]);
+  useEffect(() => {
     setPrompt("");
     setFilesBySlot({});
     setSubmitError("");
     setRetryNotice("");
     setCancellationNotice("");
-  }, [jobInterface, parameters]);
+  }, [jobInterface]);
   const loadCapabilities = useCallback(
     async (signal?: AbortSignal) => {
       setCapabilitiesLoading(true);
@@ -585,26 +587,34 @@ export function ArtifactJobWorkspace({
     return () => controller.abort();
   }, [jobInterface, loadCapabilities]);
   const activeRunId = activeRun?.run_id;
-  useEffect(() => {
-    setContract(undefined);
-    setContractError("");
-    if (!activeRunId) return;
-    const controller = new AbortController();
-    api
-      .artifactJobContract(activeRunId, controller.signal)
-      .then((read) => {
-        if (controller.signal.aborted) return;
-        if (read.contract) setContract(read.contract.parameters);
-        else setContractError(read.detail ?? "This run has no job contract.");
-      })
-      .catch((value: unknown) => {
-        if (!controller.signal.aborted)
-          setContractError(
+  const loadContract = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!activeRunId) return;
+      setContract({ kind: "loading" });
+      try {
+        const read = await api.artifactJobContract(activeRunId, signal);
+        if (signal?.aborted) return;
+        setContract(
+          read.state === "available" && read.contract
+            ? { kind: "ready", parameters: read.contract.parameters }
+            : { kind: "unavailable", detail: read.detail ?? read.state },
+        );
+      } catch (value) {
+        if (signal?.aborted) return;
+        setContract({
+          kind: "unavailable",
+          detail:
             value instanceof Error ? value.message.slice(0, 256) : "Unable to load recipe settings",
-          );
-      });
+        });
+      }
+    },
+    [api, activeRunId],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadContract(controller.signal);
     return () => controller.abort();
-  }, [api, activeRunId]);
+  }, [loadContract]);
   useEffect(() => () => submissionController.current?.abort(), []);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -759,7 +769,8 @@ export function ArtifactJobWorkspace({
     ...inputErrors,
   ];
   const canSubmit =
-    Boolean(activeRun && capabilities && contract) &&
+    Boolean(activeRun && capabilities) &&
+    contract.kind === "ready" &&
     !phase &&
     preflightErrors.length === 0 &&
     cancelRecovery?.source !== "upload";
@@ -1318,11 +1329,6 @@ export function ArtifactJobWorkspace({
               </p>
             </div>
           )}
-          {contractError && (
-            <p className="artifact-job-field-error" role="alert">
-              Recipe settings are unavailable: {contractError}
-            </p>
-          )}
           {parameters.length > 0 && (
             <fieldset className="artifact-job-parameters">
               <legend>Recipe settings</legend>
@@ -1514,6 +1520,20 @@ export function ArtifactJobWorkspace({
               </button>
             </div>
           )}
+          {contract.kind === "unavailable" && (
+            <div className="artifact-job-error" role="alert">
+              <strong>Recipe settings unavailable</strong>
+              <p>{contract.detail}</p>
+              <p>Submission stays disabled until the controller can report the job contract.</p>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void loadContract()}
+              >
+                Retry recipe settings
+              </button>
+            </div>
+          )}
           <section
             className={`artifact-job-preflight${preflightErrors.length ? " has-errors" : ""}`}
             aria-label="Job preflight"
@@ -1604,11 +1624,15 @@ export function ArtifactJobWorkspace({
             </div>
           )}
           <button type="submit" disabled={!canSubmit}>
-            {capabilities
-              ? "Submit artifact job"
-              : capabilitiesError
-                ? "Storage preflight required"
-                : "Checking controller capacity…"}
+            {activeRun && contract.kind === "loading"
+              ? "Loading recipe settings…"
+              : contract.kind === "unavailable"
+                ? "Recipe settings required"
+                : capabilities
+                  ? "Submit artifact job"
+                  : capabilitiesError
+                    ? "Storage preflight required"
+                    : "Checking controller capacity…"}
           </button>
         </form>
         <section className="artifact-job-history" aria-label="Artifact job history">

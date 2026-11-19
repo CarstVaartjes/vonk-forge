@@ -601,9 +601,9 @@ Sparks is one candidate.
 
 Describe the job with `--input SLOT=PATH` (repeatable) and `--option KEY=VALUE`
 (repeatable), which the CLI checks against the run's `job contract`: slot names
-and file counts, knob names, types, enum members, range and step. A value off
-the declared choices or range is refused before any upload, naming what is
-allowed (the Controller stays the authority). An enum takes the allowed value's
+and file counts, knob names, types and enum members. A value off the declared
+choices is refused before any upload, naming what is allowed; range and step
+are checked by the Controller. An enum takes the allowed value's
 text, so `--option num-frames=141` works for an integer enum. Or pass a binding `--file` (described
 below); the two forms cannot be combined.
 
