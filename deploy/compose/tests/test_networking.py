@@ -278,7 +278,10 @@ def test_caddy_has_readiness_checks() -> None:
 
     assert services["caddy"]["healthcheck"]["test"] == [
         "CMD-SHELL",
-        "wget -q -O /dev/null http://127.0.0.1:8082/healthz",
+        (
+            "wget -q -O /dev/null http://127.0.0.1:8082/healthz"
+            " && ip route | grep -q '^default'"
+        ),
     ]
 
 
