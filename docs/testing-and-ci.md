@@ -318,6 +318,12 @@ guarded by `tests/test_cli_dependencies_platform.py`). A `No module named
 linked; it is no longer possible without `VONK_CLI_DEPENDENCY_ENV` pointing at
 one.
 
+Cargo also reads config files from a checkout's parent directories, so a worktree
+under the Mac home would hand the host `~/.cargo/config.toml` (a macOS
+`rustc-wrapper`) to cargo in the VM, which breaks clippy's
+`env!("CARGO_BIN_EXE_*")`. Every script that runs cargo in `vonk-ci` exports
+`CARGO_BUILD_RUSTC_WRAPPER=` (guarded by `tests/scripts/test_vm_cargo_hook.py`).
+
 Use a writable, task-specific uv cache. Replace `vonk-example-change` in these
 cache paths with the task name. Run from the active task worktree:
 

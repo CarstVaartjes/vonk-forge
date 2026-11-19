@@ -268,3 +268,18 @@ def test_vm_cleanup_failure_does_not_block_current_or_fresh_checkout(
         fresh
     )
     assert (cache / helper.target_key(gone)).is_dir()
+
+
+def test_every_vm_cargo_entry_point_ignores_the_host_rustc_wrapper() -> None:
+    # Worktrees under the Mac home inherit ~/.cargo/config.toml from their
+    # ancestors; its macOS rustc-wrapper breaks clippy inside the VM.
+    markers = ("orb -m vonk-ci bash -lc", '"orb", "-m", "vonk-ci"')
+    texts = {
+        path.name: path.read_text(errors="ignore")
+        for path in (ROOT / "scripts").iterdir()
+        if path.is_file()
+    }
+    entry_points = [n for n, t in texts.items() if any(m in t for m in markers)]
+    assert entry_points
+    for name in entry_points:
+        assert "CARGO_BUILD_RUSTC_WRAPPER=" in texts[name], name

@@ -51,6 +51,10 @@ def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
     script = (
         f"cd {shlex.quote(str(ROOT))} && "
         f'export CARGO_TARGET_DIR="$HOME/target-vonk-ci/{target_key}" && '
+        # Cargo reads config files from the checkout's ancestors; a worktree under
+        # the Mac home inherits the host ~/.cargo/config.toml rustc-wrapper, which
+        # breaks clippy's env!(CARGO_BIN_EXE_*). The VM never uses a wrapper.
+        "export CARGO_BUILD_RUSTC_WRAPPER= && "
         "export CARGO_BUILD_JOBS=2 && "
         f"exec timeout --signal=TERM --kill-after={grace:.3f}s "
         f"{remaining - grace:.3f}s "
