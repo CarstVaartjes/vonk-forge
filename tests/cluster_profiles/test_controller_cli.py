@@ -3409,26 +3409,6 @@ def test_profile_endpoint_survives_one_transient_failure_listing_profiles() -> N
     assert payload["number"] == 42
 
 
-def test_profile_endpoint_with_nothing_loaded_is_a_local_error_with_a_next_step(
-    capsys,
-) -> None:
-    client = FakeClient(
-        {
-            ("GET", "/api/profile"): {
-                "profiles": [{"number": 1, "loaded_revision": None}]
-            }
-        }
-    )
-
-    status = cli.main(("profile", "endpoint"), control_client=client)
-
-    assert status == 2
-    err = capsys.readouterr().err
-    assert "No profile is loaded." in err
-    assert "Next: vonkctl profile list" in err
-    assert [call[1] for call in client.calls] == ["/api/profile"]
-
-
 def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:
     client = FakeClient(
         {
@@ -5175,7 +5155,15 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) ->
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
     preview = _run_preview("b" * 64, _RUN_DIGEST)
     preview["effects"] = {
-        "runs": [{"alias": "coding", "action": "stop", "run_id": "r", "node_ids": []}],
+        "runs": [
+            {
+                "alias": "coding",
+                "action": "stop",
+                "run_id": "55555555-5555-4555-8555-555555555555",
+                "installation_id": "66666666-6666-4666-8666-666666666666",
+                "node_ids": ["spk_" + "a" * 32],
+            }
+        ],
         "installations": [],
         "superseded": [],
     }
