@@ -24,8 +24,13 @@ from pydantic import (
 )
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
-from vonk_forge_contracts import RecipeDefinition
-from vonk_forge_contracts.recipe import RecipeFileSlot, RecipeJobInterface
+from vonk_forge_contracts import RecipeDefinition, RecipeDisplay
+from vonk_forge_contracts.recipe import (
+    RecipeFileSlot,
+    RecipeJobInterface,
+    RecipeJobKnob,
+    RecipeSetting,
+)
 
 from .strict_json import StrictJSONModel
 
@@ -204,6 +209,12 @@ class _ArtifactParameterBase(ArtifactContractModel):
     name: ParameterName
     minimum: int | float | None = None
     maximum: int | float | None = None
+    step: int | None = Field(default=None, ge=1)
+    # Wording from the recipe's display document: it never changes execution
+    # identity, so ``CompiledArtifactContract.sha256`` leaves it out.
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, min_length=1, max_length=256)
+    unit: str | None = Field(default=None, min_length=1, max_length=16)
     # Required on the abstract base so each concrete parameter states its own
     # empty default. A base default that a subclass removes is a legal Pydantic
     # override but is not something a dataclass-based checker can accept, and
@@ -243,6 +254,7 @@ class _ArtifactParameterBase(ArtifactContractModel):
 class StringParameter(_ArtifactParameterBase):
     type: Literal["string"]
     default: str
+    step: None = None
     minimum: None = None
     maximum: None = None
     allowed_values: tuple[ParameterScalar, ...] = Field(
@@ -270,6 +282,7 @@ class IntegerParameter(_ArtifactParameterBase):
 class FloatParameter(_ArtifactParameterBase):
     type: Literal["float"]
     default: float | int
+    step: None = None
     minimum: float | int | None = None
     maximum: float | int | None = None
     allowed_values: tuple[ParameterScalar, ...] = Field(
@@ -287,6 +300,7 @@ class FloatParameter(_ArtifactParameterBase):
 class BooleanParameter(_ArtifactParameterBase):
     type: Literal["boolean"]
     default: bool
+    step: None = None
     minimum: None = None
     maximum: None = None
     allowed_values: tuple[ParameterScalar, ...] = Field(
@@ -297,6 +311,7 @@ class BooleanParameter(_ArtifactParameterBase):
 class EnumParameter(_ArtifactParameterBase):
     type: Literal["enum"]
     default: ParameterScalar
+    step: None = None
     minimum: None = None
     maximum: None = None
     allowed_values: tuple[ParameterScalar, ...] = Field(min_length=1, max_length=128)
@@ -361,7 +376,14 @@ class CompiledArtifactContract(ArtifactContractModel):
         return self.model_dump(mode="json")
 
     def sha256(self) -> str:
-        return hashlib.sha256(canonical_message(self.to_mapping())).hexdigest()
+        """The execution identity: display wording (label, description, unit)
+        is not part of it, so a wording fix never changes a job's digest."""
+        mapping = self.model_dump(mode="json")
+        mapping["parameters"] = [
+            item.model_dump(mode="json", exclude={"label", "description", "unit"})
+            for item in self.parameters
+        ]
+        return hashlib.sha256(canonical_message(mapping)).hexdigest()
 
 
 def _slot(item: RecipeFileSlot) -> ArtifactSlotContract:
@@ -417,10 +439,27 @@ def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
     )
 
 
-def _parameter(name: str, value: ParameterScalar) -> ParameterDefinition:
-    """One recipe knob, as the parameter an artifact job may override."""
+def _job_knob(setting: RecipeSetting) -> RecipeJobKnob:
+    """A job knob; a plain setting declares only its default."""
 
-    if isinstance(value, bool):
+    if isinstance(setting, RecipeJobKnob):
+        return setting
+    return RecipeJobKnob(value=setting.value, change_effect=setting.change_effect)
+
+
+def _parameter(
+    name: str, knob: RecipeJobKnob, display: RecipeDisplay | None
+) -> ParameterDefinition:
+    """One recipe knob, as the parameter an artifact job may override.
+
+    The type is the JSON type of the default (``allowed_values`` makes it an
+    enum); limits come from the recipe, wording from its display document.
+    """
+
+    value = knob.value
+    if knob.allowed_values is not None:
+        kind = "enum"
+    elif isinstance(value, bool):
         kind = "boolean"
     elif isinstance(value, int):
         kind = "integer"
@@ -428,21 +467,28 @@ def _parameter(name: str, value: ParameterScalar) -> ParameterDefinition:
         kind = "float"
     else:
         kind = "string"
+    words = display.knobs.get(name) if display is not None else None
     return validate_parameter_definition(
         {
             "name": name,
             "type": kind,
             "default": value,
-            "minimum": None,
-            "maximum": None,
-            "allowed_values": [],
+            "minimum": knob.minimum,
+            "maximum": knob.maximum,
+            "step": knob.step,
+            "allowed_values": list(knob.allowed_values or ()),
             "pattern": None,
+            "label": words.label if words else None,
+            "description": words.description if words else None,
+            "unit": words.unit if words else None,
         }
     )
 
 
 def compile_artifact_contract(
-    recipe: RecipeDefinition, interface_name: str
+    recipe: RecipeDefinition,
+    interface_name: str,
+    display: RecipeDisplay | None = None,
 ) -> CompiledArtifactContract:
     interface = next(
         (
@@ -459,8 +505,8 @@ def compile_artifact_contract(
         parameters = tuple(
             sorted(
                 (
-                    _parameter(name, setting.value)
-                    for name, setting in recipe.settings.knobs.items()
+                    _parameter(name, _job_knob(knob), display)
+                    for name, knob in recipe.settings.knobs.items()
                 ),
                 key=lambda item: item.name,
             )
