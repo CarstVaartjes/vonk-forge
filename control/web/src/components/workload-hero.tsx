@@ -57,14 +57,14 @@ export function WorkloadHero({
   const queue = queueText(reads.running, reads.waiting, unit.alias);
   // A job recipe takes jobs, not chat requests: its jobs replace the engine figures. Until the recipe has
   // been read nothing is claimed about the workload.
-  if (jobs.kind !== "model")
+  if (jobs.kind === "job" || (jobs.kind === "unknown" && !jobs.error))
     return (
       <div className="workload-hero">
         <WorkloadHeader unit={unit} />
         {jobs.kind === "job" ? (
           <WorkloadJobs revision={jobs.revision} adapter={jobs.interface} jobs={jobs.jobs} />
         ) : (
-          <WorkloadChecking error={jobs.error} />
+          <WorkloadChecking />
         )}
       </div>
     );
@@ -72,6 +72,7 @@ export function WorkloadHero({
   return (
     <div className="workload-hero">
       <WorkloadHeader unit={unit} />
+      {jobs.kind === "unknown" && <WorkloadChecking error={jobs.error} />}
       <div className="hero-body">
         <div className="hero-read">
           {spec && value !== null ? (

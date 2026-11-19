@@ -14,7 +14,6 @@ import {
   addWire,
   compareWire,
   contractType,
-  displayRatio,
   formatWire,
   isWireNumber,
   materialize,
@@ -25,19 +24,21 @@ import {
 import {
   createJobTitle,
   isTerminal,
+  jobElapsed,
   jobInterfacesOf,
   jobTone,
   phaseOf,
   type JobRecipeInterface,
 } from "../lib/artifact-job";
 
-type JobRecipeDocument = RecipeDefinition;
 import { formatBytes } from "../lib/fleet";
 import { humanizeIdentifier, TechnicalDetails } from "./library-technical-details";
 import { StatusPill } from "./status-pill";
 import { Time } from "./time";
 import { hashArtifactBlob } from "./artifact-hash";
 import "./artifact-job-workspace.css";
+
+type JobRecipeDocument = RecipeDefinition;
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
@@ -365,9 +366,7 @@ function JobHistory({
           {job.result_evidence.elapsed_milliseconds != null && (
             <>
               <dt>Elapsed</dt>
-              <dd>
-                {displayRatio(job.result_evidence.elapsed_milliseconds, 1000).toLocaleString()} s
-              </dd>
+              <dd>{jobElapsed(job, Date.now())}</dd>
             </>
           )}
           {job.result_evidence.peak_memory_bytes != null && (

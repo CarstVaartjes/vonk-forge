@@ -54,3 +54,22 @@ export function createJobTitle(adapter: ArtifactJobInterface): string {
   };
   return `Create ${noun[adapter]}`;
 }
+
+/** Minutes and seconds ("15m 16s"), or seconds alone under a minute. */
+export function elapsedText(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return whole < 60 ? `${whole}s` : `${Math.floor(whole / 60)}m ${whole % 60}s`;
+}
+
+/**
+ * How long a job took or has taken: a settled job uses the result's own elapsed time when it has one,
+ * else its last change minus its start; any other job runs from its start until `now`.
+ */
+export function jobElapsed(job: ArtifactJob, now: number): string {
+  const start = Date.parse(job.created_at);
+  if (!isTerminal(job)) return Number.isNaN(start) ? "" : elapsedText((now - start) / 1000);
+  const measured = job.result_evidence?.elapsed_milliseconds;
+  if (measured != null) return elapsedText(Number(measured) / 1000);
+  const end = Date.parse(job.updated_at);
+  return Number.isNaN(start) || Number.isNaN(end) ? "" : elapsedText((end - start) / 1000);
+}

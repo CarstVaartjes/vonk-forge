@@ -174,16 +174,18 @@ test("a chat recipe keeps the engine figures", async () => {
   expect(screen.queryByText(/takes jobs/)).toBeNull();
 });
 
-test("an unreadable recipe claims nothing, then resolves when a retry reads it", async () => {
+test("before the first read nothing is claimed; after a failed read the model hero stays, and a retry resolves it", async () => {
   vi.useFakeTimers();
   try {
     const api = new FakeApi("video-job");
     api.failures = 1;
-    mount(api);
+    const view = mount(api);
+    expect(screen.getByRole("status")).toHaveTextContent("Reading what this recipe serves");
+    expect(view.container.querySelector(".hero-body")).toBeNull();
     await act(async () => {});
+    // The read failed: the speed tiles stay, with one retry line.
     expect(screen.getByRole("status")).toHaveTextContent("Recipe unavailable");
-    expect(screen.queryByText("Requests")).toBeNull();
-    expect(screen.queryByText("Not reported")).toBeNull();
+    expect(view.container.querySelector(".hero-body")).not.toBeNull();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });

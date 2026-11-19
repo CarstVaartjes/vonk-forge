@@ -1,21 +1,8 @@
 import type { ArtifactJob, ArtifactJobInterface } from "../api/types";
-import { createJobTitle, isTerminal, jobTone, phaseOf } from "../lib/artifact-job";
+import { createJobTitle, jobElapsed, jobTone, phaseOf } from "../lib/artifact-job";
 import { recipeLibraryPath } from "../lib/library-route";
 import { humanizeIdentifier } from "./library-technical-details";
 import { StatusPill } from "./status-pill";
-
-/** Minutes and seconds ("15m 16s"), or seconds alone under a minute. */
-export function elapsedText(seconds: number): string {
-  const whole = Math.max(0, Math.floor(seconds));
-  return whole < 60 ? `${whole}s` : `${Math.floor(whole / 60)}m ${whole % 60}s`;
-}
-
-/** A job's age: running so far until it settles, then start to last change. */
-function elapsed(job: ArtifactJob, now: number): string {
-  const start = Date.parse(job.created_at);
-  const end = isTerminal(job) ? Date.parse(job.updated_at) : now;
-  return Number.isNaN(start) || Number.isNaN(end) ? "" : elapsedText((end - start) / 1000);
-}
 
 /**
  * What a job workload shows in place of engine figures: one line that engine metrics do not apply, the
@@ -55,7 +42,7 @@ export function WorkloadJobs({
               </StatusPill>{" "}
               <strong>{humanizeIdentifier(job.interface)}</strong>
               {" · "}
-              {elapsed(job, now)}
+              {jobElapsed(job, now)}
               {job.status_reason ? ` · ${job.status_reason}` : ""}
               {" · "}
               <a href={page}>Open</a>
