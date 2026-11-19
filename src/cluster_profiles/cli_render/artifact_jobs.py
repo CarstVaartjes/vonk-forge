@@ -6,6 +6,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 
+from ..cli_json_contract import Word
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
@@ -212,9 +213,16 @@ def _artifact_job(payload: Mapping[str, object], action: str) -> None:
         _artifact_job_contract(ArtifactJobContractResponse.from_dict(dict(payload)))
     elif action == "list":
         _artifact_job_list(payload)
-    elif action == "download" or (action == "run" and "job_id" in payload):
+    elif action == Word.DOWNLOAD or (action == Word.RUN and "job_id" in payload):
         _artifact_job_download(payload)
-    elif action in {"detail", "create", "upload", "submit", "cancel", "run"}:
+    elif action in {
+        Word.DETAIL,
+        Word.CREATE,
+        Word.UPLOAD,
+        Word.SUBMIT,
+        Word.CANCEL,
+        Word.RUN,
+    }:
         _artifact_job_record(payload, action)
     else:
         _field("Observation", ENDPOINT_UNAVAILABLE)

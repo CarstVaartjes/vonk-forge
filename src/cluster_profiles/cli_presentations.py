@@ -1,5 +1,6 @@
 """Registered presentations for every Controller command response."""
 
+from .cli_json_contract import Word
 from .cli_render import render_payload
 
 COMMAND_ACTIONS = {
@@ -49,17 +50,17 @@ COMMAND_ACTIONS = {
         "progress",
         "endpoint",
     ),
-    "job": (
+    Word.JOB: (
         None,
-        "run",
-        "contract",
-        "list",
-        "create",
-        "upload",
-        "submit",
-        "detail",
-        "cancel",
-        "download",
+        Word.RUN,
+        Word.CONTRACT,
+        Word.LIST,
+        Word.CREATE,
+        Word.UPLOAD,
+        Word.SUBMIT,
+        Word.DETAIL,
+        Word.CANCEL,
+        Word.DOWNLOAD,
     ),
     "key": (None, "create", "list", "roll", "revoke"),
     "run": (None,),

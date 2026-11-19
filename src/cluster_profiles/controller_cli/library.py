@@ -165,7 +165,7 @@ def _job(
     args: argparse.Namespace,
     client: ControllerClient,
     factory: Callable[[], str],
-) -> dict[str, object]:
+):
     if not isinstance(client, ArtifactJobClient):
         raise ControlClientError(
             "artifact byte transfer is unavailable in this CLI client"

@@ -15,9 +15,10 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
+from .cli_json_contract import Word
 from .cli_states import (
     ARTIFACT_JOB_STATES,
     CANCELLED,
@@ -27,7 +28,7 @@ from .cli_states import (
     SUCCEEDED,
     preparation,
 )
-from .cli_states_generated import JobContractState
+from .cli_states_generated import RUN_RUNNING, JobContractState
 from .control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -60,6 +61,7 @@ _CREATE_FIELDS = {
 _INPUT_FIELDS = {"slot", "name", "media_type"}
 _JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, NEEDS_OPERATOR}
 _RECOVERY_ATTEMPTS = 3
+_MAX_RERUN_CHAIN = 32
 _RUN_KEY_NAMESPACE = uuid.UUID("7d0c9a64-3f0e-5b1a-8c52-1f0b6a9e2d41")
 
 
@@ -122,7 +124,7 @@ def add_artifact_job_commands(
     actions = job.add_subparsers(dest="job_action", parser_class=type(job))
 
     run = actions.add_parser(
-        "run",
+        Word.RUN,
         help="Create, upload, submit, follow and download one job",
         description="Resolve the running workload, create the job and deliver its "
         "inputs, submit it, follow it to the end and download its result files. "
@@ -250,7 +252,7 @@ def run_artifact_job(
     poll: Callable[..., dict[str, object]],
 ) -> dict[str, object]:
     action = getattr(args, "job_action", None)
-    if action == "run":
+    if action == Word.RUN:
         return _run_job(args, client, request_id_factory, request_key, quote, poll)
     if action == "list":
 
@@ -309,12 +311,54 @@ def run_artifact_job(
     raise ValueError(f"unsupported job action: {action}")
 
 
-def _content_request_key(run_id: str, body: Mapping[str, object]) -> str:
+def _content_request_key(run_id: str, canonical_body: str, previous: str = "") -> str:
     """One key per run and job content: the canonical create body already
     carries the sha256 of every input file, so equal content resumes the same
-    job and any change makes a new one."""
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
-    return str(uuid.uuid5(_RUN_KEY_NAMESPACE, f"{run_id}\n{canonical}"))
+    job and any change makes a new one. ``previous`` chains the next key after
+    a job with this content ended failed or cancelled."""
+    name = f"{run_id}\n{canonical_body}\n{previous}"
+    return str(uuid.uuid5(_RUN_KEY_NAMESPACE, name))
+
+
+def _content_key_for_rerun(
+    args: argparse.Namespace,
+    client: ArtifactJobClient,
+    quote: Callable[[str], str],
+    canonical_body: str,
+) -> str:
+    """The key of the job this content should continue, or a new one.
+
+    A job still in progress, or one that succeeded, is resumed (reconnect, no
+    duplicate work). One that ended failed or cancelled was the answer to an
+    earlier request; running the command again is a new request, so the next
+    key in a deterministic chain (this key plus that job's id) starts a new job.
+    """
+    key = _content_request_key(args.run, canonical_body)
+    for _ in range(_MAX_RERUN_CHAIN):
+        try:
+            found = _job(
+                client.request("GET", f"/api/artifact-jobs/requests/{quote(key)}"),
+                expected_run=args.run,
+            )
+        except ControlNotFound:
+            return key
+        if found.get("state") not in {FAILED, CANCELLED}:
+            return key
+        if not _json_mode(args):
+            print(
+                f"previous job {found['id']} {found['state']}: "
+                f"{found.get('status_reason') or 'no reason recorded'}; "
+                "starting a new one",
+                file=sys.stderr,
+                flush=True,
+            )
+        key = _content_request_key(args.run, canonical_body, cast(str, found["id"]))
+    return key
+
+
+class _LoadedRun(NamedTuple):
+    alias: str | None
+    recipe_id: str | None
 
 
 def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
@@ -337,24 +381,23 @@ def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
     nodes = fleet.get("nodes")
     if not isinstance(nodes, list):
         raise ControlMalformedResponse("fleet membership is unavailable")
-    running: dict[str, Mapping[str, object]] = {}
+    running: dict[str, _LoadedRun] = {}
     for node in nodes:
         for run in node.get("loaded") or () if isinstance(node, Mapping) else ():
             if (
                 isinstance(run, Mapping)
-                and run.get("run_state") == "running"
+                and run.get("run_state") == RUN_RUNNING
                 and isinstance(run.get("run_id"), str)
             ):
-                running.setdefault(cast(str, run["run_id"]), run)
+                running.setdefault(
+                    cast(str, run["run_id"]),
+                    _LoadedRun(run.get("alias"), run.get("recipe_id")),
+                )
 
-    def label(run_id: str, run: Mapping[str, object]) -> str:
-        return f"{run.get('alias') or run.get('recipe_id')} ({run_id})"
+    def label(run_id: str, names: _LoadedRun) -> str:
+        return f"{names.alias or names.recipe_id} ({run_id})"
 
-    matches = [
-        run_id
-        for run_id, run in running.items()
-        if selector in {run.get("alias"), run.get("recipe_id")}
-    ]
+    matches = [run_id for run_id, names in running.items() if selector in names]
     if len(matches) == 1:
         return matches[0]
     if matches:
@@ -363,7 +406,7 @@ def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
             + ", ".join(label(run_id, running[run_id]) for run_id in matches)
             + "; pass --run ID to choose one"
         )
-    candidates = ", ".join(label(run_id, run) for run_id, run in running.items())
+    candidates = ", ".join(label(run_id, names) for run_id, names in running.items())
     raise ValueError(
         f"no running workload matches '{selector}'"
         + (f"; running: {candidates}" if candidates else "; nothing is running")
@@ -377,8 +420,8 @@ def _run_job(
     request_id_factory: Callable[[], str],
     request_key: Callable[[argparse.Namespace, Callable[[], str]], str],
     quote: Callable[[str], str],
-    poll: Callable[..., dict[str, object]],
-) -> dict[str, object]:
+    poll: Callable[..., Any],
+):
     """Create, deliver, submit, follow and download through the step functions.
 
     The create key is derived from the job's content, so running the same
@@ -387,7 +430,7 @@ def _run_job(
     args.run = args.run or _resolve_run(client, args.selector)
     args.artifact_job_run = True
     rerun = shlex.join(
-        ["vonkctl", "job", "run", *([args.selector] if args.selector else [])]
+        ["vonkctl", Word.JOB, Word.RUN, *([args.selector] if args.selector else [])]
         + ["--file", args.file, "--run", args.run]
     )
     args.artifact_job_reconcile = rerun
@@ -450,7 +493,7 @@ def _create(
     )
     body = _canonical_create(binding, declarations, capabilities)
     key = (
-        _content_request_key(args.run, body)
+        _content_key_for_rerun(args, client, quote, json.dumps(body, sort_keys=True))
         if content_key
         else _stable_request_key(args, request_id_factory, request_key)
     )

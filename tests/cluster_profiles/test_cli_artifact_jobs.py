@@ -1396,12 +1396,25 @@ def _loaded(alias: str, run_id: str, recipe_id: str = "vonk-forge/image") -> dic
 class RunClient(ArtifactJobClient):
     """The job client plus a fleet whose nodes carry the loaded runs."""
 
-    def __init__(self, *loaded: dict, succeed: bool = False) -> None:
+    def __init__(
+        self, *loaded: dict, succeed: bool = False, end_first_key: str | None = None
+    ) -> None:
         super().__init__()
         self.loaded = list(loaded)
         self.succeed = succeed
+        self.end_first_key = end_first_key
+        self.ended_key: str | None = None
 
     def request(self, method, path, payload=None, **kwargs):
+        if path.startswith("/api/artifact-jobs/requests/") and self.end_first_key:
+            key = path.rsplit("/", 1)[1]
+            if self.ended_key in (None, key):
+                self.ended_key = key
+                ended = _job(state=self.end_first_key)
+                ended["status_reason"] = "boom"
+                return ended
+            if self.job is None:
+                raise ControlNotFound(404, "artifact draft not found")
         if path == "/api/fleet":
             return {"nodes": [{"id": "n1", "loaded": self.loaded}]}
         result = super().request(method, path, payload, **kwargs)
@@ -1532,3 +1545,26 @@ def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
     assert status == 2
     assert "control API unavailable" not in error["error"]
     assert "local filesystem" in error["error"]
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled"])
+def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
+    tmp_path, capsys, state
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), end_first_key=state)
+    binding = _run_binding(tmp_path)
+    assert (
+        cli.main(
+            ("job", "run", "image", "--file", str(binding), "--no-wait"),
+            control_client=client,
+        )
+        == 0
+    )
+    err = capsys.readouterr().err
+    assert f"previous job {JOB_ID} {state}: boom; starting a new one" in err
+    post = next(
+        c for c in client.calls if c[0] == "POST" and c[1].endswith("/artifact-jobs")
+    )
+    headers = post[3]
+    assert isinstance(headers, dict)
+    assert headers["X-Request-ID"] != client.ended_key

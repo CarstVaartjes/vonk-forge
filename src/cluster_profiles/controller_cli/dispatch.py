@@ -6,6 +6,7 @@ import argparse
 from collections.abc import Callable
 
 from ..cli_files import PrivateOutput
+from ..cli_json_contract import Word
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .fleet import _fleet
@@ -33,7 +34,7 @@ def run_controller(
         return _model(args, client, request_id_factory)
     if command == "recipe":
         return _recipe(args, client, request_id_factory)
-    if command == "job":
+    if command == Word.JOB:
         return _job(args, client, request_id_factory)
     if command == "profile":
         return _profile(args, client, request_id_factory)

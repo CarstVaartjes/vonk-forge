@@ -25,7 +25,7 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
-from .cli_json_contract import CliErrorType, failure_document, stamp_document
+from .cli_json_contract import CliErrorType, Word, failure_document, stamp_document
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -398,10 +398,10 @@ def _control_error(
             result["downloaded_file_count"] = len(downloaded)
             result["expected_file_count"] = total_files
     if (
-        getattr(args, "command", None) == "job"
+        getattr(args, "command", None) == Word.JOB
         and isinstance(request_key, str)
         and request_key
-        and getattr(args, "job_action", None) == "create"
+        and getattr(args, "job_action", None) == Word.CREATE
     ):
         result["reconcile"] = {
             "operation": shlex.join(
@@ -424,7 +424,7 @@ def _control_error(
                 else {}
             ),
         }
-    artifact_job_command = getattr(args, "command", None) == "job"
+    artifact_job_command = getattr(args, "command", None) == Word.JOB
     artifact_job_action = (
         getattr(args, "job_action", None) if artifact_job_command else None
     )
@@ -447,8 +447,8 @@ def _control_error(
         elif artifact_job_action in {"create", "upload", "submit", "cancel"}:
             if isinstance(artifact_job_id, str):
                 result["reconcile"] = {
-                    "operation": shlex.join(
-                        ["vonkctl", "job", "detail", artifact_job_id]
+                    Word.OPERATION: shlex.join(
+                        ["vonkctl", Word.JOB, Word.DETAIL, artifact_job_id]
                     )
                 }
             else:
@@ -576,7 +576,7 @@ def _emit(
             ),
             artifact_job_action=(
                 getattr(args, "job_action", None)
-                if getattr(args, "command", None) == "job"
+                if getattr(args, "command", None) == Word.JOB
                 else None
             ),
         )

@@ -590,9 +590,12 @@ results into `--output` (default `./<job-id>`, created if missing). Nothing
 matching, or several matches, is refused with the candidates listed; pass
 `--run ID` (from `vonkctl fleet`) to choose. The create request key is derived
 from the run and the job's content (the binding plus the SHA-256 of every input
-file), so running the same command again resumes the same job, and a changed
-binding or input file makes a new job. A job that failed shows its reason and
-the command exits non-zero; change the binding or input to start a new one.
+file), so running the same command again reconnects to the same job while it is in
+progress and returns its result once it succeeded, and a changed binding or
+input file makes a new job. If the job for that content ended `failed` or
+`cancelled`, running the command again is a new request: it says
+`previous job ID failed: REASON; starting a new one` and creates a new job. A
+job that fails shows its reason and the command exits non-zero.
 `--no-wait` stops after submit and prints the job id (with `--json`, the job
 document); `--timeout-seconds` bounds how long this command watches, and
 running it again continues. The binding file is described below.

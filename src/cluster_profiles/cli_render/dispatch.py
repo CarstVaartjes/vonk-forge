@@ -6,6 +6,7 @@ import json
 import shlex
 from collections.abc import Mapping
 
+from ..cli_json_contract import Word
 from ..cli_platform_render import render_platform
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
@@ -140,7 +141,7 @@ def render_payload(
                     )
             else:
                 _field("Observation", ENDPOINT_UNAVAILABLE)
-        elif noun == "job" and artifact_job_action is not None:
+        elif noun == Word.JOB and artifact_job_action is not None:
             _artifact_job(payload, artifact_job_action)
         elif noun == "recipe" and action == "sync-status":
             _catalog_sync(payload)
