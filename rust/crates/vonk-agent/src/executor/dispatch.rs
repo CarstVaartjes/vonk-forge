@@ -27,34 +27,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         };
         // The one place a compiled plan is validated; parse stays structural so
         // journal re-observation survives upgrades that tighten the rules.
-        let invalid = match &request {
-            RecipeOperationRequest::Install(value) => {
-                value.compiled_execution_plan.validate().err().map(|error| {
-                    (
-                        "compiled execution plan is invalid",
-                        FailureStage::Unknown,
-                        error,
-                    )
-                })
-            }
-            RecipeOperationRequest::Start(value) => {
-                value.compiled_execution_plan.validate().err().map(|error| {
-                    (
-                        "compiled execution plan is invalid",
-                        FailureStage::Unknown,
-                        error,
-                    )
-                })
-            }
-            RecipeOperationRequest::JobRun(value) => value
-                .compiled_execution_plan
-                .validate()
-                .err()
-                .map(|error| ("job invocation is invalid", FailureStage::JobState, error)),
-            _ => None,
-        };
-        if let Some((reason, stage, error)) = invalid {
-            return failed_stage_owned(reason, stage, error.to_string());
+        if let Some(refusal) = refuse_invalid_plan(&request) {
+            return refusal;
         }
         match request {
             RecipeOperationRequest::RuntimePreflight(request) => {

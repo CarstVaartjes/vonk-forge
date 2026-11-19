@@ -4389,6 +4389,16 @@ def test_compiled_plan_validation_is_refused_outside_its_owners():
     assert check_source(
         base + "oci/lifecycle.rs", source, {1}, modes=("plan-validation",)
     )
+    assert check_source(
+        "rust/crates/vonk-agent-protocol/src/compiled_oci/projection.rs",
+        source,
+        {1},
+        modes=("plan-validation",),
+    )
+    split = "fn f() {\n    request\n        .compiled_execution_plan\n        .validate()?;\n}\n"
+    assert check_source(
+        base + "oci/lifecycle.rs", split, {4}, modes=("plan-validation",)
+    )
     assert not check_source(
-        base + "executor/dispatch.rs", source, {1}, modes=("plan-validation",)
+        base + "executor/plans.rs", source, {1}, modes=("plan-validation",)
     )

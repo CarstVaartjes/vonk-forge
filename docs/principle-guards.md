@@ -10,9 +10,12 @@ security refusals outside authentication, authorization and byte-verification
 ingress owners fail. Existing wait, read, remedy, retention, test-principle and
 coordination detectors also inspect added lines. Bounded waits remain valid.
 The `plan-validation` guard refuses an added `.validate()` on a compiled
-plan in `rust/crates/vonk-agent/src` outside `executor/dispatch.rs` (request
-ingress), `oci/custody.rs` and `oci/observation.rs` (disk read-back): a plan is
-validated once where it enters, never again by its consumers.
+plan (also the rustfmt split-line shape) in `rust/crates/vonk-agent/src` and
+`rust/crates/vonk-agent-protocol/src/compiled_oci/` outside
+`executor/plans.rs` (`refuse_invalid_plan` at dispatch; its
+`parse_compiled_execution_plan` is the probe/test parser). `oci/custody.rs` and
+`oci/observation.rs` re-validate persisted copies read back from disk; removing
+those is a known follow-up. A plan is validated once where it enters.
 No count ledger, baseline regeneration, category assignment or before/after
 report is required. Untouched old findings cannot block a change.
 

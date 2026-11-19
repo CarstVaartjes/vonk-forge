@@ -1724,28 +1724,45 @@ def check_source(
     if (
         "plan-validation" in modes
         and not is_test
-        and path.startswith("rust/crates/vonk-agent/src/")
+        and path.startswith(
+            (
+                "rust/crates/vonk-agent/src/",
+                "rust/crates/vonk-agent-protocol/src/compiled_oci/",
+            )
+        )
         and path.endswith(".rs")
         and path
         not in {
-            "rust/crates/vonk-agent/src/executor/dispatch.rs",
+            "rust/crates/vonk-agent/src/executor/plans.rs",
             "rust/crates/vonk-agent/src/oci/custody.rs",
             "rust/crates/vonk-agent/src/oci/observation.rs",
         }
     ):
-        # A compiled plan is validated once at dispatch (request ingress) and
-        # once where it is read back from disk. Another call repeats a rule.
+        # A compiled plan is validated once, by `refuse_invalid_plan` (plans.rs)
+        # at dispatch. Another call repeats a rule. Added lines only; the
+        # rustfmt split shape (`.validate()` on its own line after the plan
+        # expression) counts too.
         test_lines = rust_test_lines(source)
-        noexit_hits.extend(
-            f"{path}:{line}: compiled plan validated again; dispatch owns it"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added
-            and line not in test_lines
-            and re.search(
-                r"\b(?:plan|spec|invocation|compiled_execution_plan)\s*\.validate\(\)",
-                text,
-            )
-        )
+        owner = r"\b(?:plan|spec|invocation|compiled_execution_plan)\s*"
+        lines = source.splitlines()
+        previous = ""
+        for line, text in enumerate(lines, 1):
+            if (
+                line in added
+                and line not in test_lines
+                and (
+                    re.search(owner + r"\.validate\(\)", text)
+                    or (
+                        text.lstrip().startswith(".validate()")
+                        and re.search(owner + r"$", previous)
+                    )
+                )
+            ):
+                noexit_hits.append(
+                    f"{path}:{line}: compiled plan validated again; dispatch owns it"
+                )
+            if text.strip():
+                previous = text.rstrip()
     if (
         "locks" in modes
         and not is_test

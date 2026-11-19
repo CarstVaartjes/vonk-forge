@@ -371,9 +371,6 @@ impl StateStore {
         Ok(())
     }
 
-    /// Restore a disposable local journal after proven stored-state damage.
-    /// The Controller remains the authority for claims and observes exact
-    /// effects before reissuing work. Keep the damaged journal for diagnostics.
     /// Delete rows an agent from before 2026-10-20 wrote without their
     /// accepted claim: they cannot be observed, replayed or finished, so they
     /// are unreadable and dropped (never refused). Run once per process start;
@@ -384,6 +381,9 @@ impl StateStore {
         Ok(())
     }
 
+    /// Restore a disposable local journal after proven stored-state damage.
+    /// The Controller remains the authority for claims and observes exact
+    /// effects before reissuing work. Keep the damaged journal for diagnostics.
     pub fn open_recovered(path: &Path, node_id: &str) -> Result<Self, StateError> {
         // A crash while moving WAL companions must never reopen the original
         // main database without its committed pages. Finish the durable repair

@@ -2,11 +2,39 @@
 
 use super::*;
 
-/// Parse and validate one compiled execution plan document.
+/// Parse and validate one compiled execution plan document. This is the
+/// parser of probes and tests; production plans enter through dispatch.
 pub fn parse_compiled_execution_plan(document: &[u8]) -> Result<CompiledExecutionPlan, OciError> {
     let plan: CompiledExecutionPlan = serde_json::from_slice(document)?;
     plan.validate()?;
     Ok(plan)
+}
+
+/// Validate the compiled plan of an Install, Start or JobRun request. The one
+/// validation of a plan entering the agent: dispatch and the wire probes call
+/// it right after `RecipeOperationRequest::parse`. A refusal carries the rule.
+pub fn refuse_invalid_plan(request: &RecipeOperationRequest) -> Option<ExecutionResult> {
+    let (reason, stage, plan) = match request {
+        RecipeOperationRequest::Install(value) => (
+            "compiled execution plan is invalid",
+            FailureStage::Unknown,
+            &value.compiled_execution_plan,
+        ),
+        RecipeOperationRequest::Start(value) => (
+            "compiled execution plan is invalid",
+            FailureStage::Unknown,
+            &value.compiled_execution_plan,
+        ),
+        RecipeOperationRequest::JobRun(value) => (
+            "job invocation is invalid",
+            FailureStage::JobState,
+            &value.compiled_execution_plan,
+        ),
+        _ => return None,
+    };
+    plan.validate()
+        .err()
+        .map(|error| failed_stage_owned(reason, stage, error.to_string()))
 }
 
 pub(super) fn exact_stop_plan_from_claim(
