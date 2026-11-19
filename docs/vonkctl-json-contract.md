@@ -22,8 +22,8 @@ number belongs to the document kind, not to the vonkctl release.
 | `profile-endpoints` | `profile endpoint` | `FleetProfileEndpointsView` | 1 | `profile-endpoints-v1.schema.json` |
 | `recipe-library` | `recipe`, `recipe library` | `RecipeLibraryResponse` | 3 | `recipe-library-v3.schema.json` |
 | `recipe-detail` | `recipe detail` | `RecipeDetailResponse` | 3 | `recipe-detail-v3.schema.json` |
-| `artifact-job` | `recipe job create`, `detail`, `submit`, `cancel` | `ArtifactJobResponse` | 1 | `artifact-job-v1.schema.json` |
-| `artifact-download` | `recipe job download` | `ArtifactDownloadDocument` | 1 | `artifact-download-v1.schema.json` |
+| `artifact-job` | `job create`, `detail`, `submit`, `cancel`, `run --no-wait` (and `run` when the job did not succeed) | `ArtifactJobResponse` | 1 | `artifact-job-v1.schema.json` |
+| `artifact-download` | `job download`, `job run` (finished) | `ArtifactDownloadDocument` | 1 | `artifact-download-v1.schema.json` |
 | `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 3 | `observation-v3.schema.json` |
 | `error` | any failure | `ErrorDocument` | 3 | `error-v3.schema.json` |
 

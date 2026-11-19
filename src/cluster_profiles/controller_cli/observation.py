@@ -176,6 +176,7 @@ def _poll_path(
     fetch_initial: bool = False,
     fetch: Callable[[float], object] | None = None,
     attempts: int | None = None,
+    timeout_seconds: float | None = None,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
@@ -198,7 +199,8 @@ def _poll_path(
             current = {}
             fetch_initial = True
     started = time.monotonic()
-    timeout = _bounded_timeout(args)
+    # The receipt states the time actually allowed.
+    timeout = _bounded_timeout(args) if timeout_seconds is None else timeout_seconds
     observation = Observation(
         path,
         _reconnect_command(args, path),

@@ -1,4 +1,4 @@
-"""``vonkctl recipe job contract`` reads a recipe's job contract before a job."""
+"""``vonkctl job contract`` reads a recipe's job contract before a job."""
 
 from __future__ import annotations
 
@@ -107,9 +107,7 @@ class _Controller:
 def test_contract_json_is_the_controllers_typed_document(capsys, flags, path) -> None:
     controller = _Controller(_contract_document())
 
-    status = cli.main(
-        ("--json", "recipe", "job", "contract", *flags), control_client=controller
-    )
+    status = cli.main(("--json", "job", "contract", *flags), control_client=controller)
 
     assert status == 0
     assert controller.paths == [path]
@@ -143,7 +141,7 @@ def test_contract_that_cannot_be_given_is_typed_with_a_next_step_after_one_read(
     controller = _Controller(_unavailable(state))
 
     status = cli.main(
-        ("--json", "recipe", "job", "contract", "--run", RUN_ID),
+        ("--json", "job", "contract", "--run", RUN_ID),
         control_client=controller,
     )
 
@@ -161,7 +159,7 @@ def test_contract_of_an_unknown_run_is_not_found_after_one_read(capsys) -> None:
     controller = _Controller(ControlNotFound(404, "run does not exist"))
 
     status = cli.main(
-        ("--json", "recipe", "job", "contract", "--run", RUN_ID),
+        ("--json", "job", "contract", "--run", RUN_ID),
         control_client=controller,
     )
 
@@ -175,10 +173,8 @@ def test_contract_of_an_unknown_run_is_not_found_after_one_read(capsys) -> None:
 def test_contract_needs_exactly_one_key(vonkctl_json, flags) -> None:
     controller = _Controller(_contract_document())
 
-    status, error = vonkctl_json(
-        "recipe", "job", "contract", *flags, control_client=controller
-    )
+    status, error = vonkctl_json("job", "contract", *flags, control_client=controller)
 
     assert status == 2
     assert controller.paths == []
-    assert error["recovery_actions"] == ["vonkctl recipe job contract --help"]
+    assert error["recovery_actions"] == ["vonkctl job contract --help"]

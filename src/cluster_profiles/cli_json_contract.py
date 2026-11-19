@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from enum import StrEnum
+from typing import TypedDict
 
 
 class DocumentKind(StrEnum):
@@ -37,7 +38,7 @@ class DocumentKind(StrEnum):
 
 
 #: The command words a kind is chosen by (``argparse`` destinations' values).
-class _Word(StrEnum):
+class Word(StrEnum):
     FLEET = "fleet"
     PROFILE = "profile"
     RECIPE = "recipe"
@@ -49,11 +50,19 @@ class _Word(StrEnum):
     LIBRARY = "library"
     DETAIL = "detail"
     JOB = "job"
+    RUN = "run"
+    CONTRACT = "contract"
     DOWNLOAD = "download"
     CREATE = "create"
     UPLOAD = "upload"
     SUBMIT = "submit"
     RESULT = "result"
+
+
+class Reconcile(TypedDict):
+    """The command that reconnects to an operation (``reconcile`` in a result)."""
+
+    operation: str
 
 
 class CliErrorType(StrEnum):
@@ -92,9 +101,9 @@ DOCUMENT_VERSIONS: Mapping[DocumentKind, int] = {
     DocumentKind.ERROR: 3,
 }
 
-_PROFILE_APPLICATION_ACTIONS = frozenset({_Word.LOAD, _Word.PROGRESS, _Word.CANCEL})
+_PROFILE_APPLICATION_ACTIONS = frozenset({Word.LOAD, Word.PROGRESS, Word.CANCEL})
 _ARTIFACT_JOB_ACTIONS = frozenset(
-    {_Word.CREATE, _Word.UPLOAD, _Word.SUBMIT, _Word.DETAIL, _Word.CANCEL}
+    {Word.CREATE, Word.UPLOAD, Word.SUBMIT, Word.DETAIL, Word.CANCEL}
 )
 
 
@@ -110,38 +119,45 @@ def document_kind(
     if getattr(args, "check_connection", False):
         return DocumentKind.CONNECTION
     # A followed command's wrapper holds ``result`` beside an ``observation`` receipt.
-    if DocumentKind.OBSERVATION in document and _Word.RESULT in document:
+    if DocumentKind.OBSERVATION in document and Word.RESULT in document:
         return DocumentKind.OBSERVATION
     command = getattr(args, "command", None)
-    if command == _Word.FLEET:
+    if command == Word.FLEET:
         return (
             DocumentKind.FLEET if getattr(args, "fleet_action", None) is None else None
         )
-    if command == _Word.PROFILE:
+    if command == Word.PROFILE:
         action = getattr(args, "profile_action", None)
         if action is None:
             return DocumentKind.PROFILE
-        if action == _Word.LIST:
+        if action == Word.LIST:
             return DocumentKind.PROFILE_LIST
-        if action == _Word.ENDPOINT:
+        if action == Word.ENDPOINT:
             return DocumentKind.PROFILE_ENDPOINTS
-        if action == _Word.LOAD and getattr(args, "dry_run", False):
+        if action == Word.LOAD and getattr(args, "dry_run", False):
             return DocumentKind.PROFILE_REVIEW
         if action in _PROFILE_APPLICATION_ACTIONS:
             return DocumentKind.PROFILE_APPLICATION
         return None
-    if command == _Word.RECIPE:
+    if command == Word.RECIPE:
         action = getattr(args, "recipe_action", None)
-        if action in (None, _Word.LIBRARY):
+        if action in (None, Word.LIBRARY):
             return DocumentKind.RECIPE_LIBRARY
-        if action == _Word.DETAIL:
+        if action == Word.DETAIL:
             return DocumentKind.RECIPE_DETAIL
-        if action == _Word.JOB:
-            job_action = getattr(args, "recipe_job_action", None)
-            if job_action == _Word.DOWNLOAD:
-                return DocumentKind.ARTIFACT_DOWNLOAD
-            if job_action in _ARTIFACT_JOB_ACTIONS:
-                return DocumentKind.ARTIFACT_JOB
+    if command == Word.JOB:
+        job_action = getattr(args, "job_action", None)
+        if job_action == Word.DOWNLOAD:
+            return DocumentKind.ARTIFACT_DOWNLOAD
+        if job_action == Word.RUN:
+            # `run` ends in the downloaded files, or in the job it stopped at.
+            return (
+                DocumentKind.ARTIFACT_DOWNLOAD
+                if "job_id" in document
+                else DocumentKind.ARTIFACT_JOB
+            )
+        if job_action in _ARTIFACT_JOB_ACTIONS:
+            return DocumentKind.ARTIFACT_JOB
     return None
 
 
@@ -172,9 +188,9 @@ def stamp_document(
     kind = document_kind(args, document, error=error)
     if kind not in (DocumentKind.OBSERVATION, DocumentKind.ERROR):
         return stamp(document, kind)
-    if _Word.RESULT not in document:
+    if Word.RESULT not in document:
         return stamp(document, kind)
-    inner = document[_Word.RESULT]
+    inner = document[Word.RESULT]
     inner_kind = document_kind(args, inner, error=False)
     if inner_kind is None or inner_kind in _NO_RESULT_KINDS:
         return document

@@ -63,16 +63,12 @@ def test_job_and_download_documents_match_their_schemas(tmp_path, capsys) -> Non
 
     _validate(
         DocumentKind.ARTIFACT_JOB,
-        _run(client, capsys, "recipe", "job", "detail", JOB_ID),
+        _run(client, capsys, "job", "detail", JOB_ID),
     )
-    download = _run(
-        client, capsys, "recipe", "job", "download", JOB_ID, "--output", str(output)
-    )
+    download = _run(client, capsys, "job", "download", JOB_ID, "--output", str(output))
     _validate(DocumentKind.ARTIFACT_DOWNLOAD, download)
     assert download["files"][0]["state"] == "downloaded"
-    reused = _run(
-        client, capsys, "recipe", "job", "download", JOB_ID, "--output", str(output)
-    )
+    reused = _run(client, capsys, "job", "download", JOB_ID, "--output", str(output))
     _validate(DocumentKind.ARTIFACT_DOWNLOAD, reused)
     assert reused["files"][0]["state"] == "reused"
 
@@ -83,7 +79,6 @@ def test_job_create_document_matches_its_schema(tmp_path, capsys) -> None:
     created = _run(
         client,
         capsys,
-        "recipe",
         "job",
         "create",
         "--run",
@@ -108,16 +103,13 @@ def test_job_upload_submit_and_cancel_documents_match_their_schema(
     client = ArtifactJobClient()
     binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
     client.job = _job(declarations=_declarations({"input.png": b"x"}))
-    uploaded = _run(
-        client, capsys, "recipe", "job", "upload", JOB_ID, "--file", str(binding)
-    )
+    uploaded = _run(client, capsys, "job", "upload", JOB_ID, "--file", str(binding))
     _validate(DocumentKind.ARTIFACT_JOB, uploaded)
 
     client.job = _job(state="ready")
     submitted = _run(
         client,
         capsys,
-        "recipe",
         "job",
         "submit",
         JOB_ID,
@@ -129,7 +121,6 @@ def test_job_upload_submit_and_cancel_documents_match_their_schema(
     cancelled = _run(
         client,
         capsys,
-        "recipe",
         "job",
         "cancel",
         JOB_ID,
@@ -182,13 +173,13 @@ def test_every_kind_is_reachable_from_a_command() -> None:
             (("profile", "endpoint"), False),
             (("recipe",), False),
             (("recipe", "detail", "x"), False),
-            (("recipe", "job", "detail", JOB_ID), False),
-            (("recipe", "job", "download", JOB_ID, "--output", "x"), False),
+            (("job", "detail", JOB_ID), False),
+            (("job", "download", JOB_ID, "--output", "x"), False),
             (("fleet",), True),
             (("profile", "cancel", JOB_ID), False),
-            (("recipe", "job", "upload", JOB_ID, "--file", "x"), False),
-            (("recipe", "job", "submit", JOB_ID), False),
-            (("recipe", "job", "cancel", JOB_ID), False),
+            (("job", "upload", JOB_ID, "--file", "x"), False),
+            (("job", "submit", JOB_ID), False),
+            (("job", "cancel", JOB_ID), False),
         )
     } | {
         document_kind(

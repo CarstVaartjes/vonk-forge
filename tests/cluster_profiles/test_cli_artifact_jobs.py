@@ -13,8 +13,10 @@ from collections.abc import Mapping
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from test_cli_job_contract import _contract_document
 from test_control_client_requests import (
     _artifact_job_response,
     _Response,
@@ -410,7 +412,6 @@ def test_installed_cli_process_exposes_the_complete_artifact_job_surface() -> No
             sys.executable,
             "-c",
             "from cluster_profiles.cli import main; raise SystemExit(main())",
-            "recipe",
             "job",
             "--help",
         ],
@@ -488,7 +489,7 @@ def test_unreadable_submit_reply_reconciles_exact_acceptance_and_fresh_request(
     )
     assert (
         cli.main(
-            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
+            ("--json", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
             control_client=client,
         )
         == 0
@@ -502,7 +503,7 @@ def test_unreadable_submit_reply_reconciles_exact_acceptance_and_fresh_request(
     fresh_key = "00000000-0000-4000-8000-000000000007"
     assert (
         cli.main(
-            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", fresh_key),
+            ("--json", "job", "submit", JOB_ID, "--request-key", fresh_key),
             control_client=client,
         )
         == 0
@@ -560,7 +561,7 @@ def test_unreadable_upload_reply_reconciles_verified_bytes_and_fresh_upload(
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    arguments = ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding))
+    arguments = ("--json", "job", "upload", JOB_ID, "--file", str(binding))
     assert cli.main(arguments, control_client=client) == 0
     assert backend.upload_calls == ["input.png"]
     assert backend.job["input_files"] == _declarations({"input.png": b"x"})
@@ -579,7 +580,6 @@ def test_cli_create_reconciles_lost_receipt_and_never_submits(
 
     result = cli.main(
         (
-            "recipe",
             "job",
             "create",
             "--run",
@@ -624,7 +624,6 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
     uncertain = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "create",
             "--run",
@@ -644,7 +643,6 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
     retried = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "create",
             "--run",
@@ -679,7 +677,7 @@ def test_cli_interrupted_upload_preserves_draft_and_resumes_only_missing_input(
     client.fail_input_name = "b.png"
 
     first = cli.main(
-        ("--json", "recipe", "job", "create", "--run", RUN_ID, "--file", str(binding)),
+        ("--json", "job", "create", "--run", RUN_ID, "--file", str(binding)),
         control_client=client,
         request_id_factory=lambda: CREATE_KEY,
     )
@@ -694,7 +692,7 @@ def test_cli_interrupted_upload_preserves_draft_and_resumes_only_missing_input(
     )
 
     resumed = cli.main(
-        ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding)),
+        ("--json", "job", "upload", JOB_ID, "--file", str(binding)),
         control_client=client,
     )
     resumed_output = capsys.readouterr().out
@@ -721,7 +719,6 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     status = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "create",
             "--run",
@@ -743,7 +740,7 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     (tmp_path / "input.png").write_bytes(b"b")
 
     status = cli.main(
-        ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding)),
+        ("--json", "job", "upload", JOB_ID, "--file", str(binding)),
         control_client=client,
     )
 
@@ -752,7 +749,7 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     (tmp_path / "input.png").write_bytes(b"a")
     assert (
         cli.main(
-            ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding)),
+            ("--json", "job", "upload", JOB_ID, "--file", str(binding)),
             control_client=client,
         )
         == 0
@@ -770,7 +767,7 @@ def test_cli_rejects_a_nonregular_input_without_opening_a_second_draft(
     client = ArtifactJobClient()
 
     status = cli.main(
-        ("--json", "recipe", "job", "create", "--run", RUN_ID, "--file", str(binding)),
+        ("--json", "job", "create", "--run", RUN_ID, "--file", str(binding)),
         control_client=client,
     )
 
@@ -788,7 +785,7 @@ def test_cli_submit_and_remote_cancel_reconcile_with_the_same_caller_keys(
     client.lose_submit_response = True
 
     submitted = cli.main(
-        ("--json", "recipe", "job", "submit", JOB_ID),
+        ("--json", "job", "submit", JOB_ID),
         control_client=client,
         request_id_factory=lambda: SUBMIT_KEY,
     )
@@ -808,7 +805,7 @@ def test_cli_submit_and_remote_cancel_reconcile_with_the_same_caller_keys(
     client.job["state"] = "queued"
     client.lose_cancel_response = True
     cancelled = cli.main(
-        ("--json", "recipe", "job", "cancel", JOB_ID, "--yes", "--reason", "stop now"),
+        ("--json", "job", "cancel", JOB_ID, "--yes", "--reason", "stop now"),
         control_client=client,
         request_id_factory=lambda: CANCEL_KEY,
     )
@@ -837,7 +834,6 @@ def test_cli_submit_rejects_a_receipt_owned_by_another_request_key() -> None:
     status = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "submit",
             JOB_ID,
@@ -854,7 +850,7 @@ def test_cli_submit_rejects_a_receipt_owned_by_another_request_key() -> None:
     client.ignore_submit_key_mismatch = False
     assert (
         cli.main(
-            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
+            ("--json", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
             control_client=client,
         )
         == 0
@@ -867,17 +863,14 @@ def test_cli_job_list_rejects_a_job_owned_by_another_run() -> None:
     client.job["run_id"] = "00000000-0000-4000-8000-000000000099"
 
     status = cli.main(
-        ("--json", "recipe", "job", "list", "--run", RUN_ID),
+        ("--json", "job", "list", "--run", RUN_ID),
         control_client=client,
     )
 
     assert status == 2
     client.job["run_id"] = RUN_ID
     assert (
-        cli.main(
-            ("--json", "recipe", "job", "list", "--run", RUN_ID), control_client=client
-        )
-        == 0
+        cli.main(("--json", "job", "list", "--run", RUN_ID), control_client=client) == 0
     )
 
 
@@ -891,19 +884,18 @@ def test_cli_lists_follows_and_downloads_only_manifest_named_verified_files(
     client.job = _succeeded_job()
 
     listed = cli.main(
-        ("--json", "recipe", "job", "list", "--run", RUN_ID),
+        ("--json", "job", "list", "--run", RUN_ID),
         control_client=client,
     )
     list_document = json.loads(capsys.readouterr().out)
     followed = cli.main(
-        ("--json", "recipe", "job", "detail", JOB_ID, "--follow"),
+        ("--json", "job", "detail", JOB_ID, "--follow"),
         control_client=client,
     )
     detail_document = json.loads(capsys.readouterr().out)
     downloaded = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -928,7 +920,6 @@ def test_cli_lists_follows_and_downloads_only_manifest_named_verified_files(
     reused = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -981,7 +972,6 @@ def test_cli_checks_output_filename_aliases_on_the_destination_before_download(
     status = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -1021,7 +1011,6 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     rejected = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -1047,7 +1036,6 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     reserved_name = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -1088,7 +1076,6 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     (output_directory / "b.png").symlink_to(outside)
 
     partial, partial_document = vonkctl_json(
-        "recipe",
         "job",
         "download",
         JOB_ID,
@@ -1119,7 +1106,6 @@ def test_cli_refuses_to_replace_an_existing_result_file(
     status = cli.main(
         (
             "--json",
-            "recipe",
             "job",
             "download",
             JOB_ID,
@@ -1140,7 +1126,6 @@ def test_cli_refuses_to_replace_an_existing_result_file(
         cli.main(
             (
                 "--json",
-                "recipe",
                 "job",
                 "download",
                 JOB_ID,
@@ -1175,7 +1160,7 @@ def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
 
     monkeypatch.setattr(client, "request", request)
     started = artifact_clock[0]
-    arguments = ("recipe", "job", "detail", JOB_ID)
+    arguments = ("job", "detail", JOB_ID)
     assert vonkctl_json(*arguments, control_client=client)[0] == 2
     assert len(timeouts) == (1 if long_backoff else 3)
     assert all(0 < timeout <= client.request_timeout_seconds for timeout in timeouts)
@@ -1200,7 +1185,7 @@ def test_pure_read_repeats_only_after_a_transient_fault(
         raise ControlHTTPError(status, "refused")
 
     client.request = request
-    arguments = ("recipe", "job", "list", "--run", RUN_ID)
+    arguments = ("job", "list", "--run", RUN_ID)
     assert vonkctl_json(*arguments, control_client=client)[0] == 2
     assert len(calls) == attempts
     client.request = original
@@ -1215,7 +1200,6 @@ def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(tmp_path
     storage["remaining_bytes"] = 0
     arguments = (
         "--json",
-        "recipe",
         "job",
         "create",
         "--run",
@@ -1275,7 +1259,7 @@ def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
 
     monkeypatch.setattr(client, "request", request)
     key = SUBMIT_KEY if action == "submit" else CANCEL_KEY
-    arguments = ["--json", "recipe", "job", action, JOB_ID, "--request-key", key]
+    arguments = ["--json", "job", action, JOB_ID, "--request-key", key]
     if action == "cancel":
         arguments += ["--yes", "--reason", "stop now"]
     assert cli.main(arguments, control_client=client) == 2
@@ -1322,7 +1306,6 @@ def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
     monkeypatch.setattr(client, "request", request)
     arguments = (
         "--json",
-        "recipe",
         "job",
         "cancel",
         JOB_ID,
@@ -1347,7 +1330,7 @@ def test_damaged_verified_download_preserves_old_bytes_and_recovers_content(
     directory.mkdir()
     client = ArtifactJobClient()
     client.job = _succeeded_job()
-    arguments = ("recipe", "job", "download", JOB_ID, "--output", str(directory))
+    arguments = ("job", "download", JOB_ID, "--output", str(directory))
     assert vonkctl_json(*arguments, control_client=client)[0] == 0
     previous = directory / "result.png"
     previous.write_bytes(b"damaged")
@@ -1386,7 +1369,6 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
     )
     arguments = (
         "--json",
-        "recipe",
         "job",
         "download",
         JOB_ID,
@@ -1402,3 +1384,341 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
     assert len(reads) == 4
     assert cli.main(arguments, control_client=client) == 0
     assert len(reads) == 4
+
+
+RECIPE_ID = "00000000-0000-4000-8000-000000000008"
+
+
+def _loaded(alias: str, run_id: str) -> dict:
+    return {
+        "alias": alias,
+        "recipe_id": RECIPE_ID,
+        "run_id": run_id,
+        "run_state": "running",
+    }
+
+
+class RunClient(ArtifactJobClient):
+    """The job client plus a fleet whose nodes carry the loaded runs.
+
+    ``ended`` makes the first N distinct request keys answer an ended job (each
+    with its own id); ``finish_state`` makes the job end that way on the detail
+    read that follows submit.
+    """
+
+    def __init__(
+        self,
+        *loaded: dict,
+        succeed: bool = False,
+        ended: int = 0,
+        ended_state: str = "failed",
+        finish_state: str | None = None,
+        nodes: int = 1,
+    ) -> None:
+        super().__init__()
+        self.loaded = list(loaded)
+        self.succeed = succeed
+        self.ended = ended
+        self.ended_state = ended_state
+        self.finish_state = finish_state
+        self.nodes = nodes
+        self.ended_keys: list[str] = []
+        self.contract: dict[str, object] | None = None
+
+    def request(self, method, path, payload=None, **kwargs):
+        kwargs.pop("retry", None)
+        if path.startswith("/api/artifact-jobs/requests/") and self.ended:
+            key = path.rsplit("/", 1)[1]
+            if key in self.ended_keys or len(self.ended_keys) < self.ended:
+                if key not in self.ended_keys:
+                    self.ended_keys.append(key)
+                ended = _job(state=self.ended_state)
+                ended["id"] = (
+                    f"00000000-0000-4000-8000-{self.ended_keys.index(key):012d}"
+                )
+                ended["status_reason"] = "boom"
+                return ended
+            if self.job is None:
+                raise ControlNotFound(404, "artifact draft not found")
+        if path == "/api/fleet":
+            return {
+                "nodes": [
+                    {"id": f"n{n}", "loaded": self.loaded} for n in range(self.nodes)
+                ]
+            }
+        if path.startswith("/api/artifact-jobs/contract/run/"):
+            return copy.deepcopy(self.contract)
+        if (
+            self.finish_state
+            and method == "GET"
+            and path == f"/api/artifact-jobs/{JOB_ID}"
+            and self.job is not None
+            and self.job.get("operation_id")
+        ):
+            self.job["state"] = self.finish_state
+            self.job["status_reason"] = "worker stopped"
+        result = super().request(method, path, payload, **kwargs)
+        if self.succeed and path.endswith("/submit") and self.job is not None:
+            done = _succeeded_job()
+            self.job.update(
+                {k: done[k] for k in ("output_files", "output_manifest_sha256")}
+                | {"state": "succeeded", "output_limits": done["output_limits"]}
+            )
+            result = copy.deepcopy(self.job)
+        return result
+
+
+def _create_call(client: ArtifactJobClient) -> tuple[Any, Any]:
+    """The body and headers of the first create POST the client received."""
+    call = next(
+        c for c in client.calls if c[0] == "POST" and c[1].endswith("/artifact-jobs")
+    )
+    return cast(Any, call[2]), cast(Any, call[3])
+
+
+def _run_binding(tmp_path: Path, content: bytes = b"a") -> Path:
+    return _binding(tmp_path / "job.json", {"in.png": content})
+
+
+def _run_arguments(binding: Path, *extra: str) -> tuple[str, ...]:
+    return ("job", "run", "image", "--file", str(binding), *extra)
+
+
+def test_job_run_resolves_the_one_matching_alias(tmp_path, vonkctl_json) -> None:
+    client = RunClient(_loaded("image", RUN_ID), _loaded("other", JOB_ID))
+    status, job = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+    )
+    assert status == 0
+    assert job["id"] == JOB_ID
+    assert any(
+        call[:2] == ("POST", f"/api/recipe/runs/{RUN_ID}/artifact-jobs")
+        for call in client.calls
+    )
+
+
+def test_a_run_on_two_sparks_is_one_candidate(tmp_path, vonkctl_json) -> None:
+    client = RunClient(_loaded("image", RUN_ID), nodes=2)
+    status, _ = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+    )
+    assert status == 0
+
+
+@pytest.mark.parametrize(
+    "loaded",
+    [
+        [_loaded("video", RUN_ID)],
+        [_loaded("image", RUN_ID), _loaded("image", JOB_ID)],
+    ],
+)
+def test_job_run_refuses_none_or_several_matches_with_candidates(
+    tmp_path, vonkctl_json, loaded
+) -> None:
+    client = RunClient(*loaded)
+    status, error = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path)), control_client=client
+    )
+    assert status == 2
+    assert len(error["candidates"]) == len(loaded)
+    assert not [call for call in client.calls if call[0] == "POST"]
+
+
+def test_job_run_again_resumes_the_same_job_and_changed_input_is_new(
+    tmp_path, vonkctl_json
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    binding = _run_binding(tmp_path)
+    arguments = ("job", "run", "--run", RUN_ID, "--file", str(binding), "--no-wait")
+    assert vonkctl_json(*arguments, control_client=client)[0] == 0
+    assert vonkctl_json(*arguments, control_client=client)[0] == 0
+    posts = [
+        c for c in client.calls if c[1].endswith("/artifact-jobs") and c[0] == "POST"
+    ]
+    assert posts[0][3] == posts[1][3]
+    assert sum(c[1].endswith("/submit") for c in client.calls) == 1
+    (tmp_path / "in.png").write_bytes(b"b")
+    changed = RunClient()
+    vonkctl_json(*arguments, control_client=changed)
+    other = next(
+        c for c in changed.calls if c[1].endswith("/artifact-jobs") and c[0] == "POST"
+    )
+    assert other[3] != posts[0][3]
+
+
+def test_job_run_follows_and_downloads_into_a_created_directory(
+    tmp_path, vonkctl_json
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), succeed=True)
+    output = tmp_path / "deep" / "results"
+    status, result = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--output", str(output)),
+        control_client=client,
+    )
+    assert status == 0
+    assert result["job_id"] == JOB_ID
+    assert (output / "result.png").read_bytes() == b"x"
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled", "needs-operator"])
+def test_job_run_exits_non_zero_when_the_job_ends_without_a_result(
+    tmp_path, vonkctl_json, state
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), finish_state=state)
+    status, job = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--interval-seconds", "0.01"),
+        control_client=client,
+    )
+    assert status == 2, job
+    assert job["state"] == state, job
+    assert job["status_reason"] == "worker stopped"
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled"])
+def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
+    tmp_path, state
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), ended=1, ended_state=state)
+    assert (
+        cli.main(
+            _run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+        )
+        == 0
+    )
+    _, headers = _create_call(client)
+    assert headers["X-Request-ID"] not in client.ended_keys
+
+
+def test_the_rerun_chain_has_no_cap(tmp_path) -> None:
+    client = RunClient(_loaded("image", RUN_ID), ended=40)
+    assert (
+        cli.main(
+            _run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+        )
+        == 0
+    )
+    _, headers = _create_call(client)
+    assert len(client.ended_keys) == 40
+    assert headers["X-Request-ID"] not in client.ended_keys
+
+
+def _contract_for_flags() -> dict[str, object]:
+    document = _contract_document()
+    document["run_id"] = RUN_ID
+    contract = document["contract"]
+    assert isinstance(contract, dict)
+    contract["output_limits"] = dict(OUTPUT_LIMITS)
+    contract["max_timeout_seconds"] = 1
+    return document
+
+
+def test_job_run_builds_the_binding_from_input_and_option_flags(
+    tmp_path, vonkctl_json
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _contract_for_flags()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("a")
+    status, _ = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={prompt}",
+        "--option",
+        "steps=4",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 0
+    body, _ = _create_call(client)
+    assert body["parameters"] == {"steps": 4}
+    assert [(i["slot"], i["name"], i["media_type"]) for i in body["inputs"]] == [
+        ("prompt", "prompt.txt", "text/plain")
+    ]
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ("--input", "nope=x.txt"),
+        ("--option", "nope=1"),
+        ("--option", "steps=many"),
+    ],
+)
+def test_job_run_flags_are_checked_against_the_contract(
+    tmp_path, vonkctl_json, flags
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _contract_for_flags()
+    status, _ = vonkctl_json(
+        "job", "run", "image", *flags, "--no-wait", control_client=client
+    )
+    assert status == 2
+    assert not [c for c in client.calls if c[0] == "POST"]
+
+
+def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
+    tmp_path, vonkctl_json
+) -> None:
+    client = ArtifactJobClient()
+    client.job = _succeeded_job()
+    made = tmp_path / "a" / "b"
+    status, _ = vonkctl_json(
+        "job", "download", JOB_ID, "--output", str(made), control_client=client
+    )
+    assert status == 0 and made.is_dir()
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    status, error = vonkctl_json(
+        "job",
+        "download",
+        JOB_ID,
+        "--output",
+        str(blocker / "sub"),
+        control_client=client,
+    )
+    assert status == 2
+    assert "control API unavailable" not in error["error"]
+    assert "local filesystem" in error["error"]
+
+
+def test_download_of_a_running_job_says_to_wait(tmp_path, vonkctl_json) -> None:
+    client = ArtifactJobClient()
+    client.job = _job(state="running")
+    status, error = vonkctl_json(
+        "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
+    )
+    assert status == 2
+    assert f"job {JOB_ID} is running" in error["error"]
+    assert f"job detail {JOB_ID} --follow" in error["error"]
+    assert "control API unavailable" not in error["error"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+def test_unwritable_output_directory_is_a_local_error_not_an_api_error(
+    tmp_path, capsys
+):
+    """Catches a local temp-file failure being retried as a control API outage."""
+    directory = tmp_path / "outputs"
+    directory.mkdir()
+    digest = hashlib.sha256(b"x").hexdigest()
+
+    def opener(request, *, timeout):
+        if "/results/" in request.full_url:
+            return _StreamResponse(b"x", media_type="image/png", sha256=digest)
+        return _Response(200, _succeeded_job())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    directory.chmod(0o500)
+    try:
+        status = cli.main(
+            ("--json", "job", "download", JOB_ID, "--output", str(directory)),
+            control_client=client,
+        )
+    finally:
+        directory.chmod(0o700)
+    assert status == 2
+    assert "local filesystem" in json.loads(capsys.readouterr().out)["error"]

@@ -77,7 +77,7 @@ def test_every_group_help_is_a_map_of_its_commands() -> None:
 
 
 def test_a_nested_group_without_a_command_shows_its_commands(vonkctl_json) -> None:
-    for path in (("fleet", "enrollment"), ("recipe", "job"), ("completion",)):
+    for path in (("fleet", "enrollment"), ("job",), ("completion",)):
         status, document = vonkctl_json(*path)
         assert status == 0
         assert " ".join(("vonkctl", *path)) in document["help"]

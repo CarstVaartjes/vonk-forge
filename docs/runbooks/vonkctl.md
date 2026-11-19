@@ -27,10 +27,10 @@ configuration:
 vonkctl update --apply
 ```
 
-`vonkctl` is the local, authenticated CLI for the Controller. It has four
-singular operator areas: Fleet, Model, Recipe, and Profile. The CLI uses the
+`vonkctl` is the local, authenticated CLI for the Controller. It has five
+operator areas: Fleet, Model, Recipe, Job, and Profile. The CLI uses the
 same current Controller routes as the operator API: `/api/fleet*`,
-`/api/model/*`, `/api/recipe/*`, and `/api/profile*`. Machine-facing agent
+`/api/model/*`, `/api/recipe/*`, `/api/artifact-jobs/*`, and `/api/profile*`. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
 ## Connect
@@ -66,7 +66,7 @@ flags. A group run on its own shows its current state: `vonkctl fleet`,
 `vonkctl model`, `vonkctl recipe`, `vonkctl profile` and `vonkctl key` are
 overviews. Groups
 without a view of their own (`fleet enrollment`, `recipe installation`,
-`recipe job`, `completion`) print their help. A mistyped command gets a
+`job`, `completion`) print their help. A mistyped command gets a
 suggestion (`unknown command 'detal' for 'vonkctl fleet'. Did you mean
 'detail'?`), a missing argument gets the usage line, and both name the help
 command to run next. With `--json` the error document carries `usage` and
@@ -574,25 +574,59 @@ one of those digests instead of retrying the ambiguous name.
 
 ### Artifact jobs
 
-Artifact jobs collect files for an existing recipe run and make its verified
-outputs available for download. Use the run UUID to list jobs and the job UUID
+Artifact jobs send files to a running recipe and collect its verified outputs.
+They live under `vonkctl job` (there is no `vonkctl recipe job`). The normal
+flow is one command; the step commands further down are the advanced path.
+
+```bash
+vonkctl job run image --input prompt=prompt.txt --option steps=4 --output results
+vonkctl job run image --file artifact-job.json --output results
+```
+
+`job run ALIAS` does everything in order: it picks the running workload of the
+loaded fleet that has that alias (`vonkctl profile endpoint` lists aliases), or
+the run named by `--run ID`; creates the job and uploads its inputs; submits
+it; follows it until it ends (up to the job's own `timeout_seconds`, printing a
+line whenever its state changes); and downloads the verified results into
+`--output` (default `./<job-id>`, created if missing). No match, or several
+matches, is refused with the candidates listed (`candidates` with `--json`);
+pass `--run ID` (from `vonkctl fleet`) to choose. A run spread over several
+Sparks is one candidate.
+
+Describe the job with `--input SLOT=PATH` (repeatable) and `--option KEY=VALUE`
+(repeatable), which the CLI checks against the run's `job contract`: slot names
+and file counts, knob names and types. Or pass a binding `--file` (described
+below); the two forms cannot be combined.
+
+The create request key is derived from the run and the job's content (the
+binding plus the SHA-256 of every input file). Running the same command again
+reconnects to the same job while it is in progress and returns its result once
+it succeeded; a changed binding or input file makes a new job. If the job for
+that content ended `failed` or `cancelled`, running the command again is a new
+request: it says `previous job ID failed: REASON; starting a new one` and
+creates a new job. A job that fails or needs an operator shows its reason and
+the command exits non-zero. `--no-wait` stops after submit and prints the job
+id (with `--json`, the job document); `job download` on a job that is still
+running says to wait with `job detail ID --follow`.
+
+Step commands: use the run UUID to list jobs and the job UUID
 to inspect, resume, submit, cancel, or retrieve one job:
 
 ```bash
-vonkctl recipe job list --run RUN_UUID
-vonkctl recipe job detail JOB_UUID
-vonkctl recipe job detail JOB_UUID --follow
+vonkctl job list --run RUN_UUID
+vonkctl job detail JOB_UUID
+vonkctl job detail JOB_UUID --follow
 ```
 
-`recipe job contract` reads what a running recipe accepts before any job
+`job contract` reads what a running recipe accepts before any job
 exists: its input and output slots (ids, media types, extensions, file counts and
 size limits), its knobs with defaults, and the maximum job timeout. It is the
-same compiled contract `recipe job create` validates against. Name the run (its id is in `vonkctl fleet`) or an exact recipe
+same compiled contract `job create` validates against. Name the run (its id is in `vonkctl fleet`) or an exact recipe
 revision (which needs no run):
 
 ```bash
-vonkctl --json recipe job contract --run RUN_UUID
-vonkctl recipe job contract --revision RECIPE_REVISION_UUID
+vonkctl --json job contract --run RUN_UUID
+vonkctl job contract --revision RECIPE_REVISION_UUID
 ```
 
 A key that names nothing is an error (`vonkctl fleet` lists runs). Otherwise the
@@ -602,7 +636,7 @@ code `job_contract.<state>` and the next command.
 `vonkctl recipe detail RECIPE_REVISION_UUID` also accepts an exact recipe
 revision id, including one that is no longer the newest.
 
-`recipe job create` takes a bounded JSON binding file. Its top-level keys are
+`job create` takes a bounded JSON binding file. Its top-level keys are
 exactly `create` and `input_paths`. The `create` object contains the canonical
 artifact-job request fields: `interface`, optional `parameters`, optional
 `inputs`, `output_limits`, and `timeout_seconds`. Each input declaration has
@@ -646,9 +680,9 @@ SHA-256 before creating the draft and rechecks the bytes before upload, so keep
 the binding and its input files unchanged when retrying.
 
 ```bash
-vonkctl recipe job create --run RUN_UUID --file artifact-job.json --request-key REQUEST_UUID
-vonkctl recipe job upload JOB_UUID --file artifact-job.json
-vonkctl recipe job submit JOB_UUID --request-key SUBMIT_UUID
+vonkctl job create --run RUN_UUID --file artifact-job.json --request-key REQUEST_UUID
+vonkctl job upload JOB_UUID --file artifact-job.json
+vonkctl job submit JOB_UUID --request-key SUBMIT_UUID
 ```
 
 Create reserves a draft using the request key, uploads declared files, and
@@ -664,7 +698,7 @@ same run, binding, input bytes, and request key. The CLI looks up that key and
 reconciles the original intent before replaying it. Do not start a replacement
 job with a new key while the original create is uncertain. If input delivery
 fails after draft creation, retain the draft UUID and binding file, then run
-`recipe job upload` for that UUID. It verifies the binding against the draft,
+`job upload` for that UUID. It verifies the binding against the draft,
 skips complete inputs already accepted by the Controller, uploads missing
 files, and finalizes when they are all present. Recovery is at complete-file
 granularity; the CLI does not promise byte-offset or range resume for an
@@ -679,8 +713,8 @@ also refuses results belonging to another run. Cancellation requires `--yes`; `-
 `Operator requested cancellation with vonkctl`:
 
 ```bash
-vonkctl recipe job cancel JOB_UUID --yes --reason "No longer needed" --request-key CANCEL_UUID
-vonkctl recipe job detail JOB_UUID --follow
+vonkctl job cancel JOB_UUID --yes --reason "No longer needed" --request-key CANCEL_UUID
+vonkctl job detail JOB_UUID --follow
 ```
 
 Cancellation can remain `observing` (the job shows `cancel_requested_at`) while the
@@ -693,11 +727,12 @@ stopped, the job ends `cancelled` after a bounded number of checks, with
 `result_evidence.active_scope_may_remain: true` recording that the job's scope
 may still hold memory; it never waits for a person. A job whose agent stopped
 reporting is `observing` first; if it still cannot be confirmed it shows
-`needs-operator` with `supported_actions: ["stop"]`, and `recipe job
-cancel` is that Stop. A job never waits for an operator without that action.
+`needs-operator` with `supported_actions: ["stop"]`, and `job cancel` is that Stop. A job never waits for an operator without that action.
 
-Download only works for a succeeded job. The destination must already be an
-existing, non-symlink directory. The CLI checks result names and declared
+Download only works for a succeeded job. The destination directory is created
+if missing (`mkdir -p`); an existing path must be a non-symlink directory, and
+a local filesystem problem is reported as such, never as the control API being
+unavailable. The CLI checks result names and declared
 limits, then verifies each file's size and SHA-256 and publishes it atomically.
 It reuses an existing file only when that file matches the result manifest;
 symlinks, mismatched files, and overwrites are refused. If a collection fails
@@ -706,8 +741,7 @@ download after resolving the failure to reuse matching files and fetch the
 rest.
 
 ```bash
-mkdir -p artifact-results
-vonkctl recipe job download JOB_UUID --output artifact-results
+vonkctl job download JOB_UUID --output artifact-results
 ```
 
 ## Profile

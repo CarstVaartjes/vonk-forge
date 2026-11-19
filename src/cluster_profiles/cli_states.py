@@ -41,6 +41,8 @@ __all__ = [
 # -- artifact jobs ---------------------------------------------------------------
 
 ENDED_STATES = frozenset({SUCCEEDED, FAILED, CANCELLED})
+#: Ended and left no result: running the same request again starts a new job.
+ENDED_WITHOUT_RESULT = frozenset({FAILED, CANCELLED})
 #: Every lifecycle state an artifact job may report.
 ARTIFACT_JOB_STATES = frozenset(
     {QUEUED, RUNNING, BACKOFF, OBSERVING, NEEDS_OPERATOR, *ENDED_STATES}
