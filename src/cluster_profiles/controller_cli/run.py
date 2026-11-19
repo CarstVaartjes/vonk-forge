@@ -49,6 +49,7 @@ def _run(
     _request_key(args, factory)
     deadline = time.monotonic() + args.timeout_seconds
     spark_names = list(args.spark)
+    names: dict[str, str] = {}
 
     def roster():
         fleet = client.request(
@@ -63,6 +64,13 @@ def _run(
             not isinstance(node.get("id"), str) or not node["id"] for node in nodes
         ):
             raise ControlMalformedResponse("fleet membership is not yet observed")
+        names.update(
+            {
+                str(node["id"]): str(node["display_name"])
+                for node in nodes
+                if isinstance(node.get("display_name"), str) and node["display_name"]
+            }
+        )
         return [str(node["id"]) for node in nodes]
 
     # The library scan and the fleet roster are independent reads.
@@ -105,7 +113,9 @@ def _run(
             number,
             question=f"Start {selector} on profile {number} with this reviewed plan?",
             review_when_confirmed=True,
-            lead=lambda preview: _review_lead(number, spark_names, preview),
+            lead=lambda preview: _review_lead(
+                number, [names.get(name, name) for name in spark_names], preview
+            ),
         )
     except ActionDeclined as declined:
         raise ActionDeclined(
@@ -137,14 +147,20 @@ def _review_lead(
     """The three facts to read before the plan: where, on what, and what stops."""
 
     effects = preview.get("effects")
-    runs = effects.get("runs") if isinstance(effects, Mapping) else None
-    stopping = sorted(
-        {
-            str(run.get("alias"))
-            for run in runs or ()
-            if isinstance(run, Mapping) and run.get("action") == "stop"
-        }
-    )
+    effects = effects if isinstance(effects, Mapping) else {}
+    stops = [
+        run
+        for run in effects.get("runs") or ()
+        if isinstance(run, Mapping) and run.get("action") == "stop"
+    ]
+    for adopted in effects.get("adopted") or ():
+        if isinstance(adopted, Mapping):
+            stops += [
+                stop["effect"]
+                for stop in adopted.get("stops") or ()
+                if isinstance(stop, Mapping) and isinstance(stop.get("effect"), Mapping)
+            ]
+    stopping = sorted({str(run.get("alias")) for run in stops})
     return [
         f"Profile edited: {number} ({_text(preview.get('profile_name'))})",
         f"Sparks selected: {_words(spark_names)}",

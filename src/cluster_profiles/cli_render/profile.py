@@ -173,6 +173,10 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         payload.get("projection_issue"),
         payload.get("assignments"),
     )
+    if payload.get("number") is None:
+        print("No profile is loaded.")
+        print("Next: vonkctl profile list")
+        return
     if listing is EndpointListing.NOT_LOADED:
         print(f"Profile {payload.get('number')} has no loaded application.")
         print("Saved profile edits do not publish routes until the profile is loaded.")
@@ -192,7 +196,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         return
     if listing is EndpointListing.EMPTY:
         print("The loaded application has no endpoint assignments.")
-        print("Next: vonkctl recipe job --help")
+        print("Job recipes have no endpoint; see vonkctl recipe job --help")
         return
     assignments = _records(payload, "assignments")
     _serving_now(

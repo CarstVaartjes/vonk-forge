@@ -125,7 +125,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="N",
-        help="Profile number for profile commands (default: 1)",
+        help="Profile number; required to change a profile",
     )
     parser.add_argument(
         "--no-input",

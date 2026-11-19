@@ -53,7 +53,8 @@ terminal, one compact line when it is piped (the same document either way).
 The documents clients consume carry a `schema_version` and have published JSON
 Schemas: see the [`--json` client contract](../vonkctl-json-contract.md).
 Use `--profile N` to select a
-stable numbered Profile for that invocation; the default is Profile 1.
+stable numbered Profile for that invocation. Profile views default to
+Profile 1 and `profile endpoint` to the loaded profile.
 Profile edits, loads and `run` require an explicit `--profile N`; there is no
 saved selection. `profile endpoint` without it answers for the loaded profile.
 

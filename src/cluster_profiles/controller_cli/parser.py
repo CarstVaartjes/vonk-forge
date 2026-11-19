@@ -577,7 +577,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     # It is accepted before the command (`vonkctl --profile 2 profile load`)
     # and after it (`vonkctl profile load --profile 2`).
     for selecting in (profile, *profile_actions.choices.values()):
-        _add_profile_selection(selecting)
+        _add_profile_selection(
+            selecting,
+            default_help="the loaded profile" if selecting is profile_endpoint else "1",
+        )
 
     key = commands.add_parser(
         "key",

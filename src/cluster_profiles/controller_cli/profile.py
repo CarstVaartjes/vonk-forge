@@ -6,7 +6,6 @@ import argparse
 import shlex
 import time
 from collections.abc import Callable, Mapping
-from typing import cast
 
 from ..cli_outcome import (
     operation_state,
@@ -14,7 +13,6 @@ from ..cli_outcome import (
 from ..control_client import (
     ControlClientError,
     ControlMalformedResponse,
-    ControlNotFound,
     validate_control_document,
 )
 from .common import ControllerClient, _profile_number, _quoted, _request_key
@@ -57,21 +55,16 @@ def _list_profiles(client: ControllerClient, remaining: float) -> dict[str, obje
     return {**page, "profiles": profiles}
 
 
-def _loaded_profile_number(client: ControllerClient, args: argparse.Namespace) -> int:
-    """The profile that is loaded now; no profile named means the loaded one."""
+def _loaded_profile_number(listing: object) -> int | None:
+    """The profile that is loaded now, from a profile listing; None when none is."""
 
-    listing = _list_profiles(client, _bounded_timeout(args))
-    for row in cast(list[object], listing["profiles"]):
+    rows = listing.get("profiles") if isinstance(listing, Mapping) else None
+    for row in rows if isinstance(rows, list) else ():
         if isinstance(row, Mapping) and row.get("loaded_revision") is not None:
             number = row.get("number")
             if type(number) is int and number >= 1:
                 return number
-    raise ControlNotFound(
-        404,
-        "No profile is loaded.",
-        code="profile.none_loaded",
-        recovery=("vonkctl profile list",),
-    )
+    return None
 
 
 def _profile(
@@ -81,7 +74,23 @@ def _profile(
 ) -> dict[str, object]:
     action = getattr(args, "profile_action", None)
     if action == "endpoint" and getattr(args, "profile_number", None) is None:
-        number = _loaded_profile_number(client, args)
+        # No profile named: answer for the loaded one, read with the same
+        # bounded retry as every other observation.
+        profiles = _poll_path(
+            client,
+            "/api/profile",
+            {},
+            args,
+            fetch_initial=True,
+            fetch=lambda remaining: _list_profiles(client, remaining),
+            terminal=lambda _: True,
+        )
+        if args.observation.status != "complete":
+            return profiles
+        loaded = _loaded_profile_number(profiles)
+        if loaded is None:
+            return {"number": None, "application_id": None, "assignments": None}
+        number = loaded
     else:
         number = _profile_number(args)
     if action == "list":

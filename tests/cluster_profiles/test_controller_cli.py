@@ -3388,7 +3388,30 @@ def test_profile_endpoint_without_a_profile_answers_for_the_loaded_one() -> None
     assert client.calls[-1][1] == "/api/profile/42/endpoints"
 
 
-def test_profile_endpoint_with_nothing_loaded_points_to_the_profile_list() -> None:
+def test_profile_endpoint_survives_one_transient_failure_listing_profiles() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): [
+                ControlHTTPError(503, "unavailable"),
+                {"profiles": [{"number": 42, "name": "Video", "loaded_revision": 3}]},
+            ],
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+
+
+def test_profile_endpoint_with_nothing_loaded_says_so_and_points_to_the_list(
+    capsys,
+) -> None:
     client = FakeClient(
         {
             ("GET", "/api/profile"): {
@@ -3397,10 +3420,12 @@ def test_profile_endpoint_with_nothing_loaded_points_to_the_profile_list() -> No
         }
     )
 
-    status, payload = run(("profile", "endpoint", "--json"), client)
+    status = cli.main(("profile", "endpoint"), control_client=client)
 
-    assert status == 2
-    assert payload["recovery_actions"] == ["vonkctl profile list"]
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "No profile is loaded." in out
+    assert "Next: vonkctl profile list" in out
     assert [call[1] for call in client.calls] == ["/api/profile"]
 
 
@@ -5145,6 +5170,36 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) ->
     assert _effects(client) == [("PUT", "/api/profile/1")]
     assert "saved draft" in prompt.transcript
     assert "control.api_error" not in prompt.transcript
+
+
+def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
+    preview = _run_preview("b" * 64, _RUN_DIGEST)
+    preview["effects"] = {
+        "runs": [{"alias": "coding", "action": "stop", "run_id": "r", "node_ids": []}],
+        "installations": [],
+        "superseded": [],
+    }
+    client = FakeClient(
+        {**_run_responses(), ("POST", "/api/profile/1/preview"): preview}
+    )
+    prompt = _Prompt(monkeypatch, "no")
+
+    cli.main(
+        ("--profile", "1", "run", "Qwen Code"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    lines = [
+        prompt.transcript.index(text)
+        for text in (
+            "Profile edited: 1 (Default)",
+            "Sparks selected: Atlas",
+            "Will stop: coding",
+            "Ready for review",
+        )
+    ]
+    assert lines == sorted(lines)
 
 
 @pytest.mark.parametrize(
