@@ -1569,7 +1569,6 @@ def test_job_run_exits_non_zero_when_the_job_ends_without_a_result(
         *_run_arguments(_run_binding(tmp_path), "--interval-seconds", "0.01"),
         control_client=client,
     )
-    print("DOC", job)
     assert status == 2, job
     assert job["state"] == state, job
     assert job["status_reason"] == "worker stopped"
