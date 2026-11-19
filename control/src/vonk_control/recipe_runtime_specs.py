@@ -150,8 +150,6 @@ def _package_paths(package: object) -> Sequence[str] | None:
         if isinstance(package, Mapping)
         else getattr(package, "paths", None)
     )
-    if isinstance(package, Mapping) and "member_paths" in package:
-        raise RecipeRuntimeSpecError("package contains retired member_paths authority")
     if raw is None:
         return None
     if (

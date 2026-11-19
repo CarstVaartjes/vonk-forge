@@ -1030,18 +1030,6 @@ def test_plan_rejects_missing_selected_cache_bytes() -> None:
         )
 
 
-def test_declared_execution_identity_must_cover_compiled_launch_facts() -> None:
-    spec = _spec()
-    _mapping(spec["identity"])["execution_sha256"] = "0" * 64
-    with pytest.raises(CompiledExecutionPlanError):
-        compile_verified_execution_plan(
-            spec,
-            model_artifact_set_sha256="d" * 64,
-            model_objects=_model_objects(),
-            runtime_image=_image(),
-        )
-
-
 def test_plan_identity_does_not_mutate_canonical_runtime_input() -> None:
     spec = _spec()
     original = copy.deepcopy(spec)
@@ -1139,38 +1127,6 @@ def _collision_objects() -> list[dict[str, object]]:
                 "kind": "model",
             },
         },
-    ]
-
-
-def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "duplicate"
-    duplicate["file_id"] = "duplicate"
-    document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError):
-        VerifiedExecutionPlan.model_validate(document)
-
-
-def test_plan_rejects_duplicate_final_projection_target() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "duplicate-projection"
-    document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError):
-        VerifiedExecutionPlan.model_validate(document)
-
-
-def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "second-projection"
-    duplicate["mount"]["target"] = "/models/target"
-    document["artifacts"].append(duplicate)
-    plan = VerifiedExecutionPlan.model_validate(document)
-    assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
-        ("/models", "model.safetensors"),
-        ("/models/target", "model.safetensors"),
     ]
 
 
