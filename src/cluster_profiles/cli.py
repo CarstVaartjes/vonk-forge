@@ -398,17 +398,15 @@ def _control_error(
             result["downloaded_file_count"] = len(downloaded)
             result["expected_file_count"] = total_files
     if (
-        getattr(args, "command", None) == "recipe"
-        and getattr(args, "recipe_action", None) == "job"
+        getattr(args, "command", None) == "job"
         and isinstance(request_key, str)
         and request_key
-        and getattr(args, "recipe_job_action", None) == "create"
+        and getattr(args, "job_action", None) == "create"
     ):
         result["reconcile"] = {
             "operation": shlex.join(
                 [
                     "vonkctl",
-                    "recipe",
                     "job",
                     "create",
                     "--run",
@@ -426,12 +424,9 @@ def _control_error(
                 else {}
             ),
         }
-    artifact_job_command = (
-        getattr(args, "command", None) == "recipe"
-        and getattr(args, "recipe_action", None) == "job"
-    )
+    artifact_job_command = getattr(args, "command", None) == "job"
     artifact_job_action = (
-        getattr(args, "recipe_job_action", None) if artifact_job_command else None
+        getattr(args, "job_action", None) if artifact_job_command else None
     )
     artifact_job_id = getattr(args, "artifact_job_id", None)
     artifact_reconcile = getattr(args, "artifact_job_reconcile", None)
@@ -453,7 +448,7 @@ def _control_error(
             if isinstance(artifact_job_id, str):
                 result["reconcile"] = {
                     "operation": shlex.join(
-                        ["vonkctl", "recipe", "job", "detail", artifact_job_id]
+                        ["vonkctl", "job", "detail", artifact_job_id]
                     )
                 }
             else:
@@ -580,9 +575,8 @@ def _emit(
                 else None
             ),
             artifact_job_action=(
-                getattr(args, "recipe_job_action", None)
-                if getattr(args, "command", None) == "recipe"
-                and getattr(args, "recipe_action", None) == "job"
+                getattr(args, "job_action", None)
+                if getattr(args, "command", None) == "job"
                 else None
             ),
         )

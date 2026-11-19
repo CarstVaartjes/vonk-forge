@@ -9,7 +9,7 @@ from ..cli_files import PrivateOutput
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .fleet import _fleet
-from .library import _model, _recipe
+from .library import _job, _model, _recipe
 from .metrics import _metrics
 from .profile import _profile
 from .run import _run
@@ -33,6 +33,8 @@ def run_controller(
         return _model(args, client, request_id_factory)
     if command == "recipe":
         return _recipe(args, client, request_id_factory)
+    if command == "job":
+        return _job(args, client, request_id_factory)
     if command == "profile":
         return _profile(args, client, request_id_factory)
     if command == "key":

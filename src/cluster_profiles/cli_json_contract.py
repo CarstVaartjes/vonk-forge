@@ -49,6 +49,7 @@ class _Word(StrEnum):
     LIBRARY = "library"
     DETAIL = "detail"
     JOB = "job"
+    RUN = "run"
     DOWNLOAD = "download"
     CREATE = "create"
     UPLOAD = "upload"
@@ -136,12 +137,19 @@ def document_kind(
             return DocumentKind.RECIPE_LIBRARY
         if action == _Word.DETAIL:
             return DocumentKind.RECIPE_DETAIL
-        if action == _Word.JOB:
-            job_action = getattr(args, "recipe_job_action", None)
-            if job_action == _Word.DOWNLOAD:
-                return DocumentKind.ARTIFACT_DOWNLOAD
-            if job_action in _ARTIFACT_JOB_ACTIONS:
-                return DocumentKind.ARTIFACT_JOB
+    if command == _Word.JOB:
+        job_action = getattr(args, "job_action", None)
+        if job_action == _Word.DOWNLOAD:
+            return DocumentKind.ARTIFACT_DOWNLOAD
+        if job_action == _Word.RUN:
+            # `run` ends in the downloaded files, or in the job it stopped at.
+            return (
+                DocumentKind.ARTIFACT_DOWNLOAD
+                if "job_id" in document
+                else DocumentKind.ARTIFACT_JOB
+            )
+        if job_action in _ARTIFACT_JOB_ACTIONS:
+            return DocumentKind.ARTIFACT_JOB
     return None
 
 
