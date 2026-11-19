@@ -226,8 +226,6 @@ def _control_error(
     code = getattr(error, "code", None) or "control.api_error"
     detail = getattr(error, "detail", str(error))
     message = _plain_language_error(code, detail)
-    if isinstance(error, (ControlNotConfigured, ControlTransportUnsupported)):
-        detail = None  # the message already says it; never print it twice
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
@@ -237,7 +235,7 @@ def _control_error(
         message,
         CliErrorType.CONTROL_API,
         code=code,
-        detail=_sanitize_text(detail) if detail is not None else None,
+        detail=_sanitize_text(detail),
         recovery_actions=list(getattr(error, "recovery", ()) or ()),
         retryable=getattr(error, "retryable", False) is True,
         retry_time=getattr(error, "retry_time", None),
@@ -540,6 +538,8 @@ def _emit(
         code = safe.get("code")
         if isinstance(safe.get("detail"), str):
             safe["detail"] = _plain_language_error(code, safe["detail"])
+            if safe["detail"] == safe.get("error"):
+                del safe["detail"]  # never print the same sentence twice
     else:
         safe = cast(dict[str, object], _plain_language_document(safe))
     preview = (
@@ -717,7 +717,7 @@ def _main(
             )
             cache_update_notice(result)
             status = 0
-        except (CliUpdateError, OSError) as error:
+        except (CliUpdateError, ControlClientError, OSError) as error:
             result = failure_document(_sanitize_text(error), CliErrorType.UPDATE)
             status = 2
         if args.global_json or getattr(args, "json", False):

@@ -159,13 +159,16 @@ class ControlTransportUnsupported(ControlClientError):
 
     code = ClientCode.TRANSPORT_UNSUPPORTED.value
     recovery = (
-        "Unset ALL_PROXY for this command, or set NO_PROXY to the Controller host",
+        (
+            "Unset the proxy variable for this command, or set NO_PROXY to the "
+            "Controller host"
+        ),
     )
 
     def __init__(self) -> None:
         super().__init__(
-            "A SOCKS proxy is set in ALL_PROXY, and this build cannot use it. "
-            "Unset it for this command or set NO_PROXY for the Controller host."
+            "A SOCKS proxy is set (ALL_PROXY or HTTPS_PROXY) and this build "
+            "cannot use it."
         )
 
 

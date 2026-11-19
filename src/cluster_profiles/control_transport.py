@@ -140,19 +140,12 @@ class HTTPSResponse(io.BufferedIOBase):
                 verify=True,
                 trust_env=trust_env,
             )
-        except ImportError as error:
-            # A proxy scheme the installed transport lacks a package for: say so
-            # plainly instead of a traceback. Imported here to avoid a cycle.
-            from .control_client.errors import (
-                ControlClientError,
-                ControlTransportUnsupported,
-            )
+        except ImportError:
+            # A proxy scheme whose package is missing: a typed error, not a
+            # traceback. Imported here to avoid an import cycle.
+            from .control_client.errors import ControlTransportUnsupported
 
-            if "socks" in str(error).lower():
-                raise ControlTransportUnsupported from None
-            raise ControlClientError(
-                "this build cannot start its network transport"
-            ) from None
+            raise ControlTransportUnsupported from None
         data = request.data
         content: bytes | AsyncIterator[bytes] | None
         if data is None or isinstance(data, bytes):

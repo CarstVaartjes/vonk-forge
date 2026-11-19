@@ -223,7 +223,6 @@ def test_missing_configuration_names_each_step_once(capsys, monkeypatch) -> None
     _validate(DocumentKind.ERROR, document)
     assert document["code"] == "client.not_configured"
     assert document["recovery_actions"]
-    assert "detail" not in document
 
 
 def test_unusable_socks_proxy_is_an_error_document_not_a_traceback(
@@ -234,10 +233,15 @@ def test_unusable_socks_proxy_is_an_error_document_not_a_traceback(
     token.chmod(0o600)
     monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
     monkeypatch.setenv("VONK_CONTROL_TOKEN_FILE", str(token))
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
     monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:1")
     monkeypatch.setitem(sys.modules, "socksio", None)
     assert cli.main(("--json", "fleet")) == 2
     document = json.loads(capsys.readouterr().out)
     _validate(DocumentKind.ERROR, document)
+    assert document["code"] == "client.transport_unsupported"
     assert "SOCKS" in document["error"]
     assert document["recovery_actions"]
+    assert cli.main(("fleet",)) == 2
+    assert len(capsys.readouterr().err.splitlines()) == 3
