@@ -81,6 +81,7 @@ from .contracts import (
     _JobLaunch,
     _JobRank,
     _read_input_manifest,
+    _recipe_display,
     _record_unservable_run,
 )
 
@@ -699,7 +700,9 @@ class ArtifactJobService:
             )
             if resolved is None:
                 return None
-            compiled = _compile_contract(resolved[1], job.interface)
+            compiled = _compile_contract(
+                resolved[1], job.interface, _recipe_display(session, resolved[0])
+            )
             return (
                 compiled
                 if not isinstance(compiled, Damaged)

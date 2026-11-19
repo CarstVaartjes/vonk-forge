@@ -12,6 +12,8 @@ from typing import TypedDict
 import pytest
 from vonk_agent_protocol import LifecycleState
 
+from scripts.canary_package import canary_package_path
+
 ENTRY_POINT = Path(__file__).parent / "acceptance/test_spark_lifecycle.py"
 
 
@@ -526,7 +528,9 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     specification.loader.exec_module(program)
     index_path = Path(library) / "tests/fixtures/canonical-synthetic-canary/index.json"
     index = json.loads(index_path.read_text())
-    package = (Path(library) / index["recipes"][0]["package"]["path"]).read_bytes()
+    package = canary_package_path(
+        index_path, index["recipes"][0]["package"]["path"]
+    ).read_bytes()
     digest = index["recipes"][0]["package"]["sha256"]
     archive = program._cache_package(tmp_path / "packages", package, digest)
     assert archive == tmp_path / "packages" / digest[:2] / f"{digest}.tar.gz"

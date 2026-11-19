@@ -56,6 +56,7 @@ from cluster_profiles.serving_execution import (
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
+from scripts.canary_package import canary_package_path
 from scripts.development_slice_client import (
     MAXIMUM_RESPONSE_BYTES,
     Client,
@@ -373,19 +374,11 @@ def _canary_index_path(library_root: Path) -> Path:
 def _package_archive_path(
     library_root: Path, index_path: Path, package_path: PurePosixPath
 ) -> Path:
-    candidates = {
-        candidate.resolve()
-        for candidate in (
-            library_root / Path(*package_path.parts),
-            index_path.parent / Path(*package_path.parts),
-        )
-        if candidate.is_file()
-    }
-    if len(candidates) != 1:
+    archive = canary_package_path(index_path, package_path.as_posix()).resolve()
+    if not archive.is_file():
         raise LifecycleError(
             "canonical synthetic canary package archive is unavailable"
         )
-    archive = candidates.pop()
     if not archive.is_relative_to(library_root):
         raise LifecycleError("synthetic canary package escapes the recipe library")
     return archive

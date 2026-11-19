@@ -6,6 +6,8 @@ contract it returns is proven to be the one ``create`` validates against.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -19,10 +21,20 @@ from vonk_control.artifact_jobs import (
     ArtifactJobService,
     JobContractNotFound,
     JobContractState,
+    _effective_parameters,
 )
+from vonk_control.artifact_jobs.contracts import ArtifactJobInvalid
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.models import RecipeInstallation, RecipeRun
+from vonk_control.compiled_artifact_contract import CompiledArtifactContract
+from vonk_control.models import (
+    CatalogDocument,
+    CatalogDocumentRevision,
+    RecipeInstallation,
+    RecipeRun,
+)
+from vonk_control.recipe_runtime_specs import _compiled_arguments
 from vonk_control.strict_json import ControllerAPIRoute
+from vonk_forge_contracts import read_recipe
 
 from cluster_profiles.control_client import validate_control_document
 from cluster_profiles.generated_control.models.artifact_job_contract_response import (
@@ -248,3 +260,116 @@ def test_a_viewer_bearer_token_reads_the_contract_through_create_app(tmp_path) -
     assert read.status_code == 200, read.text
     assert read.json()["state"] == "available"
     assert read.json()["run_id"] == run_id
+
+
+def _typed_knobs(document: Any) -> None:
+    knobs = document["settings"]["knobs"]
+    knobs["num-frames"] = {
+        "value": 124,
+        "change_effect": "none",
+        "minimum": 124,
+        "maximum": 345,
+        "step": 17,
+    }
+    knobs["flow-shift"] = {
+        "value": 12.0,
+        "change_effect": "none",
+        "minimum": 1.0,
+        "maximum": 20.0,
+    }
+    knobs["style"] = {
+        "value": 1,
+        "change_effect": "none",
+        "allowed_values": [1, 2],
+    }
+    document["runtime"]["arguments"].extend(
+        {"name": name, "value": None, "setting": name}
+        for name in ("num-frames", "flow-shift", "style")
+    )
+
+
+def _show_wording(sessions, run_id: str) -> None:
+    """Publish a display for the run's recipe, as a catalog sync stores it."""
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        document = session.get(CatalogDocument, revision.document_id)
+        assert document is not None
+        document.display = {
+            "kind": "recipe-display",
+            "identity": {"publisher": document.publisher, "slug": document.slug},
+            "title": "Typed",
+            "description": "Typed knobs",
+            "tags": [],
+            "knobs": {"num-frames": {"label": "Frames", "unit": "frames"}},
+        }
+
+
+def test_typed_knobs_compile_enforce_and_show_display_wording(tmp_path) -> None:
+    sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
+        tmp_path, recipe_transform=_typed_knobs
+    )
+    before = service.job_contract(run_id=run_id)
+    _show_wording(sessions, run_id)
+    after = service.job_contract(run_id=run_id)
+    assert before.contract is not None and after.contract is not None
+
+    # Wording is joined from the display row and is not execution identity.
+    assert after.contract_sha256 == before.contract_sha256
+    frames = {item.name: item for item in after.contract.parameters}["num-frames"]
+    assert (frames.label, frames.unit) == ("Frames", "frames")
+    assert {item.name: item.label for item in before.contract.parameters}[
+        "num-frames"
+    ] is None
+
+    definitions = after.contract.parameters
+    flow = {item.name: item for item in definitions}["flow-shift"]
+    assert flow.type == "float" and isinstance(flow.default, float)
+    assert _effective_parameters(definitions, {"num-frames": 141})["num-frames"] == 141
+    assert (
+        _effective_parameters(definitions, {"flow-shift": 12.5})["flow-shift"] == 12.5
+    )
+    for bad in (
+        {"num-frames": 130},
+        {"num-frames": 346},
+        {"flow-shift": 20.5},
+        {"style": True},
+        {"style": 3},
+    ):
+        with pytest.raises(ArtifactJobInvalid):
+            _effective_parameters(definitions, bad)
+    with pytest.raises(ArtifactJobInvalid, match="124..345 in steps of 17"):
+        _effective_parameters(definitions, {"num-frames": 130})
+
+
+def test_contract_stored_before_typed_knobs_still_parses(tmp_path) -> None:
+    _sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
+        tmp_path, recipe_transform=_typed_knobs
+    )
+    contract = service.job_contract(run_id=run_id).contract
+    assert contract is not None
+    stored: Any = contract.to_mapping()
+    for item in stored["parameters"]:
+        for key in ("step", "label", "description", "unit"):
+            del item[key]
+    assert CompiledArtifactContract.parse(stored).parameters[0].step is None
+
+
+def test_a_supplied_knob_reaches_the_adapter_argument(tmp_path) -> None:
+    sessions, _operations, _queue, _service, run_id, _node = running_artifact_service(
+        tmp_path, recipe_transform=_typed_knobs
+    )
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        recipe = read_recipe(revision.document)
+    arguments = _compiled_arguments(recipe, {"num-frames": 141})
+    assert ("num-frames", 141) in [(item.name, item.value) for item in arguments]

@@ -53,7 +53,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Published Model and Recipe | `vonk_forge_contracts.ModelDefinition` and `RecipeDefinition`, in `vonk-forge-recipes/contracts/src` | Catalog importer, Controller, compiler, authoring tools |
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
-| Compiled artifact-job contract | `CompiledArtifactContract` in `compiled_artifact_contract.py` | Compiler, stored job, runtime handoff, artifact-job API |
+| Compiled artifact-job contract | `CompiledArtifactContract` in `compiled_artifact_contract.py` | Compiler, stored job, runtime handoff, artifact-job API; knob type and limits (`minimum`, `maximum`, `step`, `allowed_values`) come from the recipe's `RecipeJobKnob`, knob `label`/`description`/`unit` from its display `knobs`; `sha256()` leaves the wording out, and job create refuses a value off the declared range, step grid or allowed values (422) |
 | Lifecycle operation results | `RecipeLifecycleResult` in `recipe_lifecycle_contract.py`, composed from shared protocol evidence | Lifecycle producers, stored results and recipe API |
 | Model-cache operation results | `ModelCacheDownloadResult` and `ModelCacheEvictionResult` | Cache workers, stored results, cache API and Run/Switch receipts |
 | Fleet and Run/Switch progress/results | `fleet_profile_contract/` and `run_switch_contract/` | Orchestration, restart/replay reads, Library projections and APIs |

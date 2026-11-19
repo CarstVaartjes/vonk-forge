@@ -39,6 +39,7 @@ from vonk_control.recipe_packages import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
 
+from scripts.canary_package import canary_package_path
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
@@ -108,7 +109,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     index_path = ROOT / "tests/fixtures/canonical-synthetic-canary/index.json"
     index = publish_displays(json.loads(index_path.read_text(encoding="utf-8")))
     row = index["recipes"][0]
-    package = (ROOT / row["package"]["path"]).read_bytes()
+    package = canary_package_path(index_path, row["package"]["path"]).read_bytes()
     assert row["source_path"] == (
         "tests/fixtures/canonical-synthetic-canary/recipe.json"
     )

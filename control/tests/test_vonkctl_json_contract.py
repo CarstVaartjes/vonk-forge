@@ -356,6 +356,32 @@ def test_incompatible_schema_edits_are_detected() -> None:
     )
 
 
+def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() -> None:
+    def doc(target: str, extra: dict) -> dict:
+        return {
+            "properties": {"knob": {"$ref": f"#/$defs/{target}"}},
+            "$defs": {
+                "Setting": {"properties": {"value": {"type": "string"}}},
+                target: {"properties": {"value": {"type": "string"}, **extra}},
+            },
+        }
+
+    old = doc("Setting", {})
+    assert incompatibilities(old, doc("Knob", {"step": {"type": "integer"}})) == []
+    # A recursive definition renamed (Node to Node2) terminates as compatible.
+    node = {"properties": {"next": {"$ref": "#/$defs/Node"}}}
+    node2 = {"properties": {"next": {"$ref": "#/$defs/Node2"}}}
+    tree = {"properties": {"root": {"$ref": "#/$defs/Node"}}, "$defs": {"Node": node}}
+    renamed = {
+        "properties": {"root": {"$ref": "#/$defs/Node2"}},
+        "$defs": {"Node2": node2},
+    }
+    assert incompatibilities(tree, renamed) == []
+    dropped = doc("Knob", {})
+    dropped["$defs"]["Knob"] = {"properties": {}}
+    assert incompatibilities(old, dropped)
+
+
 def test_schema_version_is_required_and_owned_by_one_model() -> None:
     for kind in DOCUMENTS:
         schema = json.loads(schema_text(kind))
