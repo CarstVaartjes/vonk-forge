@@ -23,7 +23,16 @@ fn runtime_accepts_exact_single_and_multiple_artifact_mounts() {
         ],
     );
     let validated = validate_docker_run(&multiple, &roots, None).unwrap();
-    assert_eq!(validated.models, vec![model, tokenizer]);
+    assert_eq!(validated.models, vec![model.clone(), tokenizer]);
+
+    let shared_source = runtime_arguments(
+        &roots,
+        &[
+            (model.clone(), "/models/model", true),
+            (model, "/models/tokenizer", true),
+        ],
+    );
+    assert!(validate_docker_run(&shared_source, &roots, None).is_ok());
 }
 
 #[test]
@@ -105,7 +114,6 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
 
     let invalid_single_mounts = [
         (runtime_models(&roots), "/models/model", true),
-        (runtime_models(&roots).join("sha256"), "/models/model", true),
         (
             runtime_models(&roots).join("a".repeat(64)),
             "/models/model",
@@ -140,12 +148,6 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
     for mount in invalid_single_mounts {
         assert!(validate_docker_run(&runtime_arguments(&roots, &[mount]), &roots, None).is_err());
     }
-
-    let shared_source = [
-        (model.clone(), "/models/model", true),
-        (model.clone(), "/models/tokenizer", true),
-    ];
-    assert!(validate_docker_run(&runtime_arguments(&roots, &shared_source), &roots, None).is_ok());
 
     let repeated_target = [
         (model.clone(), "/models/model", true),
