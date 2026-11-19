@@ -34,7 +34,8 @@ tag=$(basename "$work")
 orb -m vonk-ci bash -lc "
     set -euo pipefail
     cd $guest_repo
-    export UV_CACHE_DIR=\"\$HOME/.cache/vonk-vm-lane-uv\" \
+    export CARGO_BUILD_RUSTC_WRAPPER= \
+        UV_CACHE_DIR=\"\$HOME/.cache/vonk-vm-lane-uv\" \
         UV_PROJECT_ENVIRONMENT=\"\$HOME/venv-$tag\" \
         VONK_CLI_DEPENDENCY_ENV=\"\$HOME/cli-deps-$tag\" \
         VONK_RECIPE_LIBRARY_ROOT=$(printf %q "$recipe_root") \

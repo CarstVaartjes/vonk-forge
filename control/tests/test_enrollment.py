@@ -974,7 +974,7 @@ def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_vali
         assert replacement_row is not None and replacement_row.state == "staged"
 
 
-def test_recovery_retires_conflicting_staged_csr_before_reissuing(
+def test_renew_supersedes_a_different_staged_csr_and_replays_idempotently(
     service,
 ) -> None:
     enrollment, sessions, _clock, authority = service
@@ -983,9 +983,9 @@ def test_recovery_retires_conflicting_staged_csr_before_reissuing(
     assert isinstance(obsolete, IssuedCertificate)
     pending_csr = csr()
 
-    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    recovered = enrollment.renew(NODE_ID, source.serial, pending_csr)
     assert isinstance(recovered, IssuedCertificate)
-    replay = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    replay = enrollment.renew(NODE_ID, source.serial, pending_csr)
     assert isinstance(replay, IssuedCertificate)
 
     assert recovered == replay
@@ -1016,7 +1016,7 @@ def test_recovery_conflict_revocation_is_durable_across_response_loss(
     pending_csr = csr()
     authority.revoke_failures.add(obsolete.serial)
 
-    enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    enrollment.renew(NODE_ID, source.serial, pending_csr)
     with sessions() as session:
         old_staged = session.get(AgentCertificate, obsolete.serial)
         intent = session.get(AgentCertificateRotation, NODE_ID)
@@ -1032,10 +1032,10 @@ def test_recovery_conflict_revocation_is_durable_across_response_loss(
             select(AgentIssuedCertificateRevocation.serial)
         )
     assert enrollment.reconcile_revocations()
-    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    recovered = enrollment.renew(NODE_ID, source.serial, pending_csr)
     assert isinstance(recovered, IssuedCertificate)
     restarted = EnrollmentService(sessions, authority, clock=_clock)
-    assert restarted.recover_rotation(NODE_ID, source.serial, pending_csr) == recovered
+    assert restarted.renew(NODE_ID, source.serial, pending_csr) == recovered
     # The ended recovery binding is revoked by serial too, signed or not; the
     # recovered credential has its own serial and is never revoked.
     assert authority.revocations == [obsolete.serial] * 5 + [ended_serial]
@@ -1063,7 +1063,7 @@ def test_recovery_replaces_unbound_issuance_and_releases_its_gate(service) -> No
             )
         )
 
-    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    recovered = enrollment.renew(NODE_ID, source.serial, pending_csr)
     assert isinstance(recovered, IssuedCertificate)
     assert len(authority.renew_request_ids) == 1
     enrollment.activate(NODE_ID, recovered.serial, recovered.generation)

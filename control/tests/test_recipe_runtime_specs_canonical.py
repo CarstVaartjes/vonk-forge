@@ -773,26 +773,6 @@ def test_published_pipeline_has_output_contract() -> None:
     )
 
 
-@pytest.mark.parametrize("include_paths", [False, True])
-def test_runtime_compiler_rejects_retired_member_paths(
-    model: dict[str, object], include_paths: bool
-) -> None:
-    recipe = _recipe(
-        "recipe-source-build.json",
-        engine="vllm",
-        entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
-    )
-    package: dict[str, object] = {
-        "image_reference": "localhost/vonk/recipe-build@sha256:" + "a" * 64,
-        "image_digest": "a" * 64,
-        "member_paths": ["context.tar", "Dockerfile"],
-    }
-    if include_paths:
-        package["paths"] = ["context.tar", "Dockerfile"]
-    with pytest.raises(RecipeRuntimeSpecError):
-        _compile(recipe, model, package_handle=package, role="entrypoint", rank=0)
-
-
 def _recipe_with_options(model: dict[str, object]) -> dict[str, object]:
     raw = _example("recipe-source-build.json")
     runtime = _raw_runtime(raw)

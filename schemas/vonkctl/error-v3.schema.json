@@ -20687,7 +20687,6 @@
       "enum": [
         "401",
         "403",
-        "agent.certificate.rotation.conflict",
         "agent.enrollment.submit.rejected",
         "agent.expired_renewal_refused",
         "agent.expired_renewal_grace_exhausted",

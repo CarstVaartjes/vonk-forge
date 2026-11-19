@@ -226,7 +226,6 @@ def _fail_child(sessions, pending, now, *, reason, result):
         "controller.request_rejected",
         "controller.fleet.enrollment_denied",
         "agent.enrollment.submit.rejected",
-        "agent.certificate.rotation.conflict",
         "local.identity_expired",
     ],
 )
