@@ -259,9 +259,10 @@ class ControllerExecutionPlanService:
             model_objects: Sequence[VerifiedModelObject] = verified_model_receipts(
                 self._model_cache, artifact_set_sha256, manifest
             )
-        except (UnknownOutcomeError, SecurityRefusalError):
+        except (UnknownOutcomeError, SecurityRefusalError, InvalidRequestError):
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
             # owner observes it again instead of reading a verdict on the plan.
+            # A deterministic refusal keeps its type too: it is the verdict.
             raise
         except Exception as error:
             raise ExecutionPlanEvidenceUnknown(
