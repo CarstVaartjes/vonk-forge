@@ -43,6 +43,11 @@ struct ExitedServing {
     exited_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Docker states of a container whose process has ended and is never restarted.
+pub(super) fn is_ended_state(state: &str) -> bool {
+    matches!(state, "exited" | "dead")
+}
+
 /// An exited serving container, or `None` for anything else (running, a job,
 /// unreadable or not exactly labelled).
 fn parse_exited_serving(id: &str, line: &str) -> Option<ExitedServing> {
@@ -55,7 +60,7 @@ fn parse_exited_serving(id: &str, line: &str) -> Option<ExitedServing> {
     let [state, finished, name, managed, run, target, installation] = fields.as_slice() else {
         return None;
     };
-    if !matches!(*state, "exited" | "dead")
+    if !is_ended_state(state)
         || *managed != "true"
         || run != target
         || *name != format!("/vonk-{target}")

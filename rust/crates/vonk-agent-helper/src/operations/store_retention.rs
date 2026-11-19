@@ -2,6 +2,7 @@
 //! Missing fences are safe: START reconstructs them only through a fresh
 //! authenticated installation-intent challenge, never through an old grant.
 use super::*;
+use std::collections::HashMap;
 use std::time::SystemTime;
 use vonk_agent_protocol::store_retention::{Collector, GRACE, STORES, Store, StoreRoot};
 
@@ -18,6 +19,7 @@ struct Owners {
 // one `docker container inspect` answer for many containers and be read as a
 // stream; Docker's unrelated inspection fields need no parallel wire model.
 pub(super) const OWNERS_FORMAT: &str = "{{.Id}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}--{{println}}";
+pub(super) const LISTING_STATE_FORMAT: &str = "{{.ID}}\t{{.State}}";
 const OWNER_RECORD_END: &str = "--";
 /// Containers per `docker container inspect`: a pass costs one listing,
 /// `ceil(n / 100)` inspections and at most one re-listing, whatever `n` is.
@@ -214,7 +216,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // Whatever the outcome (a missing container makes Docker exit 1
             // after answering for the others), only complete records count;
             // the containers without one are judged below.
-            let _ = self.run_docker_lines(&arguments, timeout, &mut |line| records.line(line));
+            if let Err(error) =
+                self.run_docker_lines(&arguments, timeout, &mut |line| records.line(line))
+            {
+                // Records read before the failure still count; the rest stay
+                // unproven and are judged below, never assumed to own nothing.
+                eprintln!("vonk-agent-helper: owner inspection ended early: {error}");
+            }
             for (id, installation, runtime, mounts) in records.done {
                 if batch.contains(&id) && proven.insert(id) {
                     owners.installations.insert(installation);
@@ -225,14 +233,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let mut unproven: Vec<&String> = ids.iter().filter(|id| !proven.contains(*id)).collect();
         if !unproven.is_empty() {
-            // One re-listing tells the gone from the unreadable.
-            let listed = self.managed_container_ids(deadline, Duration::from_secs(10))?;
-            let listed: HashSet<_> = listed.iter().collect();
-            unproven.retain(|id| listed.contains(*id));
-        }
-        if !unproven.is_empty() {
-            let ended = self.ended_container_ids(deadline, Duration::from_secs(10))?;
-            unproven.retain(|id| !ended.contains(*id));
+            // One re-listing tells the gone and the ended (never restarted)
+            // from the unreadable that may still run.
+            let listed = self.managed_container_states(deadline, Duration::from_secs(10))?;
+            unproven.retain(|id| {
+                listed
+                    .get(*id)
+                    .is_some_and(|state| !super::exited_serving::is_ended_state(state))
+            });
         }
         if unproven.is_empty() {
             return Ok(owners);
@@ -249,33 +257,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Err(OperationError::InstallationReconciliationBusy)
     }
 
-    /// The ids of managed containers that have ended (exited or dead).
-    fn ended_container_ids(
+    /// Every managed container still listed, with its state, in one listing.
+    fn managed_container_states(
         &self,
         deadline: Instant,
         cap: Duration,
-    ) -> Result<HashSet<String>, OperationError> {
-        let mut ids = HashSet::new();
+    ) -> Result<HashMap<String, String>, OperationError> {
+        let mut states = HashMap::new();
+        let mut malformed = false;
         let output = self.run_docker_lines(
             &[
                 "container",
                 "ls",
                 "--all",
-                "--quiet",
                 "--no-trunc",
                 "--filter",
                 "label=ai.vonkforge.managed=true",
-                "--filter",
-                "status=exited",
-                "--filter",
-                "status=dead",
+                "--format",
+                LISTING_STATE_FORMAT,
             ]
             .map(str::to_owned),
             time_left(deadline, cap)?,
-            &mut |line| {
-                if lower_hex(line, 64) {
-                    ids.insert(line.to_owned());
+            &mut |line| match line.split_once('\t') {
+                Some((id, state)) if lower_hex(id, 64) && !state.is_empty() => {
+                    states.insert(id.to_owned(), state.to_owned());
                 }
+                _ => malformed = true,
             },
         )?;
         if !output.success {
@@ -283,7 +290,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 cause: CommandFailure::exit(&output),
             });
         }
-        Ok(ids)
+        if malformed {
+            return Err(OperationError::InvalidArtifact);
+        }
+        Ok(states)
     }
 
     /// The ids of every managed container, in any state, read as a stream.
