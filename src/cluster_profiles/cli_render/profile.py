@@ -192,6 +192,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         return
     if listing is EndpointListing.EMPTY:
         print("The loaded application has no endpoint assignments.")
+        print("Next: vonkctl recipe job --help")
         return
     assignments = _records(payload, "assignments")
     _serving_now(

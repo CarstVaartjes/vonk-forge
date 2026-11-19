@@ -10,6 +10,7 @@ from typing import cast
 from ..cli_outcome import (
     operation_state,
 )
+from ..cli_render.common import _text, _words
 from ..cli_select import SelectorError
 from ..control_client import (
     ControlMalformedResponse,
@@ -104,6 +105,7 @@ def _run(
             number,
             question=f"Start {selector} on profile {number} with this reviewed plan?",
             review_when_confirmed=True,
+            lead=lambda preview: _review_lead(number, spark_names, preview),
         )
     except ActionDeclined as declined:
         raise ActionDeclined(
@@ -127,6 +129,28 @@ def _run(
         "state": application_state,
         "endpoints": endpoints,
     }
+
+
+def _review_lead(
+    number: int, spark_names: list[str], preview: Mapping[str, object]
+) -> list[str]:
+    """The three facts to read before the plan: where, on what, and what stops."""
+
+    effects = preview.get("effects")
+    runs = effects.get("runs") if isinstance(effects, Mapping) else None
+    stopping = sorted(
+        {
+            str(run.get("alias"))
+            for run in runs or ()
+            if isinstance(run, Mapping) and run.get("action") == "stop"
+        }
+    )
+    return [
+        f"Profile edited: {number} ({_text(preview.get('profile_name'))})",
+        f"Sparks selected: {_words(spark_names)}",
+        f"Will stop: {', '.join(stopping) if stopping else 'nothing'}",
+        "",
+    ]
 
 
 def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:

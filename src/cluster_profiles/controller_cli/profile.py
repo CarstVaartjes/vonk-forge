@@ -6,6 +6,7 @@ import argparse
 import shlex
 import time
 from collections.abc import Callable, Mapping
+from typing import cast
 
 from ..cli_outcome import (
     operation_state,
@@ -13,6 +14,7 @@ from ..cli_outcome import (
 from ..control_client import (
     ControlClientError,
     ControlMalformedResponse,
+    ControlNotFound,
     validate_control_document,
 )
 from .common import ControllerClient, _profile_number, _quoted, _request_key
@@ -26,44 +28,66 @@ from .profile_load import _load_profile
 from .submission import _submit_idempotent_request
 
 
+def _list_profiles(client: ControllerClient, remaining: float) -> dict[str, object]:
+    """Every saved profile, paged."""
+
+    page = client.request("GET", "/api/profile", timeout_seconds=remaining, retry=False)
+    entries = page.get("profiles")
+    if not isinstance(entries, list):
+        raise ControlMalformedResponse("profile listing is unreadable")
+    profiles = list(entries)
+    previous = 0
+    after = page.get("next_after")
+    while after is not None:
+        if type(after) is not int or after <= previous:
+            raise ControlMalformedResponse("profile listing cursor did not advance")
+        previous = after
+        page = client.request(
+            "GET",
+            "/api/profile",
+            query={"after": after},
+            timeout_seconds=remaining,
+            retry=False,
+        )
+        entries = page.get("profiles")
+        if not isinstance(entries, list):
+            raise ControlMalformedResponse("profile listing is unreadable")
+        profiles.extend(entries)
+        after = page.get("next_after")
+    return {**page, "profiles": profiles}
+
+
+def _loaded_profile_number(client: ControllerClient, args: argparse.Namespace) -> int:
+    """The profile that is loaded now; no profile named means the loaded one."""
+
+    listing = _list_profiles(client, _bounded_timeout(args))
+    for row in cast(list[object], listing["profiles"]):
+        if isinstance(row, Mapping) and row.get("loaded_revision") is not None:
+            number = row.get("number")
+            if type(number) is int and number >= 1:
+                return number
+    raise ControlNotFound(
+        404,
+        "No profile is loaded.",
+        code="profile.none_loaded",
+        recovery=("vonkctl profile list",),
+    )
+
+
 def _profile(
     args: argparse.Namespace,
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    number = _profile_number(args)
     action = getattr(args, "profile_action", None)
+    if action == "endpoint" and getattr(args, "profile_number", None) is None:
+        number = _loaded_profile_number(client, args)
+    else:
+        number = _profile_number(args)
     if action == "list":
 
         def listing(remaining: float):
-            page = client.request(
-                "GET", "/api/profile", timeout_seconds=remaining, retry=False
-            )
-            entries = page.get("profiles")
-            if not isinstance(entries, list):
-                raise ControlMalformedResponse("profile listing is unreadable")
-            profiles = list(entries)
-            previous = 0
-            after = page.get("next_after")
-            while after is not None:
-                if type(after) is not int or after <= previous:
-                    raise ControlMalformedResponse(
-                        "profile listing cursor did not advance"
-                    )
-                previous = after
-                page = client.request(
-                    "GET",
-                    "/api/profile",
-                    query={"after": after},
-                    timeout_seconds=remaining,
-                    retry=False,
-                )
-                entries = page.get("profiles")
-                if not isinstance(entries, list):
-                    raise ControlMalformedResponse("profile listing is unreadable")
-                profiles.extend(entries)
-                after = page.get("next_after")
-            return {**page, "profiles": profiles}
+            return _list_profiles(client, remaining)
 
         return _poll_path(
             client,

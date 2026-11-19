@@ -3364,6 +3364,46 @@ def test_profile_endpoint_uses_scoped_current_controller_projection() -> None:
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 
 
+def test_profile_endpoint_without_a_profile_answers_for_the_loaded_one() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): {
+                "profiles": [
+                    {"number": 1, "name": "Default", "loaded_revision": None},
+                    {"number": 42, "name": "Video", "loaded_revision": 3},
+                ]
+            },
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+    assert client.calls[-1][1] == "/api/profile/42/endpoints"
+
+
+def test_profile_endpoint_with_nothing_loaded_points_to_the_profile_list() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): {
+                "profiles": [{"number": 1, "loaded_revision": None}]
+            }
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 2
+    assert payload["recovery_actions"] == ["vonkctl profile list"]
+    assert [call[1] for call in client.calls] == ["/api/profile"]
+
+
 def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:
     client = FakeClient(
         {
