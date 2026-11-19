@@ -1387,16 +1387,15 @@ export function ArtifactJobWorkspace({
                   ) : (
                     <input
                       id={id}
-                      type={parameter.type === "string" ? "text" : "number"}
-                      min={parameter.minimum != null ? scalarText(parameter.minimum) : undefined}
-                      max={parameter.maximum != null ? scalarText(parameter.maximum) : undefined}
-                      step={
+                      type="text"
+                      inputMode={
                         parameter.type === "integer"
-                          ? scalarText(parameter.step ?? 1)
+                          ? "numeric"
                           : parameter.type === "float"
-                            ? "any"
+                            ? "decimal"
                             : undefined
                       }
+                      pattern={parameter.type === "integer" ? "-?[0-9]*" : undefined}
                       value={scalarText(value)}
                       aria-label={label}
                       aria-invalid={Boolean(error)}
