@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   ArtifactJob,
@@ -382,10 +382,8 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
 
   expect(await screen.findByText("No artifact jobs yet")).toBeInTheDocument();
-  const steps = await screen.findByRole("spinbutton", { name: "Inference steps" });
-  expect(steps).toHaveValue(24);
-  expect(steps).toHaveAttribute("min", "1");
-  expect(steps).toHaveAttribute("max", "100");
+  const steps = await screen.findByRole("textbox", { name: "Inference steps" });
+  expect(steps).toHaveValue("24");
   expect(screen.getByText(/More steps, finer detail\. 1 to 100/)).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Negative Prompt" })).toHaveValue("");
   expect(screen.getByText(/optional visual reference.*image\/png/i)).toBeInTheDocument();
@@ -1320,10 +1318,10 @@ test("keeps a wide integer recipe setting exact through editing and durable requ
   );
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
   await screen.findByText("No artifact jobs yet");
-  const setting = await screen.findByRole("spinbutton", { name: "Steps" });
+  const setting = await screen.findByRole("textbox", { name: "Steps" });
   expect(setting).toHaveAttribute("value", "9007199254740993");
-  // userEvent.type models a number field through a float; a browser keeps the typed text.
-  fireEvent.change(setting, { target: { value: "9007199254740995" } });
+  await user.clear(setting);
+  await user.type(setting, "9007199254740995");
   await user.type(screen.getByRole("textbox", { name: "Prompt" }), "Keep the exact integer");
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalled());
@@ -1405,8 +1403,8 @@ test("renders an enum as a select and a bounded float input", async () => {
       .map((item) => item.textContent),
   ).toEqual(["49", "97"]);
   await user.selectOptions(frames, "97");
-  const scale = screen.getByRole("spinbutton", { name: "Scale" });
-  expect(scale).toHaveAttribute("min", "0.5");
+  const scale = screen.getByRole("textbox", { name: "Scale" });
+  expect(screen.getByText("0.5 to 4")).toBeInTheDocument();
   await user.clear(scale);
   await user.type(scale, "2.5");
   await user.type(screen.getByRole("textbox", { name: "Prompt" }), "x");
@@ -1437,7 +1435,7 @@ test("keeps the typed prompt and picked file when the contract arrives", async (
   );
   arrive(contractRead(contractParameters));
 
-  await screen.findByRole("spinbutton", { name: "Inference steps" });
+  await screen.findByRole("textbox", { name: "Inference steps" });
   expect(screen.getByRole("textbox", { name: "Prompt" })).toHaveValue("kept");
   expect(screen.getByRole("button", { name: "Submit artifact job" })).toBeEnabled();
 });

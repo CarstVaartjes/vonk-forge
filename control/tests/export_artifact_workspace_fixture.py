@@ -13,6 +13,10 @@ from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
 from vonk_control.artifact_job_api import ArtifactJobCreate
 from vonk_control.artifact_jobs import ArtifactJobListResponse
+from vonk_control.artifact_jobs.job_contract import (
+    ArtifactJobContractResponse,
+    JobContractState,
+)
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.fleet_projection import FleetProjection, RunPresence
@@ -109,6 +113,13 @@ def export(output: Path) -> None:
             "revision_id": revision.id,
             "content_sha256": revision.content_digest,
             "capabilities_json": canonical_message(service.capabilities()).decode(),
+            "contract_json": canonical_message(
+                ArtifactJobContractResponse(
+                    state=JobContractState.AVAILABLE,
+                    contract=compiled,
+                    contract_sha256=compiled.sha256(),
+                )
+            ).decode(),
             "jobs_json": canonical_message(ArtifactJobListResponse(jobs=[])).decode(),
             "refusal": {
                 "status": refusal.status_code,
