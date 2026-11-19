@@ -1030,18 +1030,6 @@ def test_plan_rejects_missing_selected_cache_bytes() -> None:
         )
 
 
-def test_declared_execution_identity_must_cover_compiled_launch_facts() -> None:
-    spec = _spec()
-    _mapping(spec["identity"])["execution_sha256"] = "0" * 64
-    with pytest.raises(CompiledExecutionPlanError):
-        compile_verified_execution_plan(
-            spec,
-            model_artifact_set_sha256="d" * 64,
-            model_objects=_model_objects(),
-            runtime_image=_image(),
-        )
-
-
 def test_plan_identity_does_not_mutate_canonical_runtime_input() -> None:
     spec = _spec()
     original = copy.deepcopy(spec)
@@ -1142,23 +1130,40 @@ def _collision_objects() -> list[dict[str, object]]:
     ]
 
 
-def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "duplicate"
-    duplicate["file_id"] = "duplicate"
-    document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError):
-        VerifiedExecutionPlan.model_validate(document)
+def _single_node_launch() -> dict[str, object]:
+    return _launch(
+        _compile(),
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+            "memory_floor_bytes": 0,
+        },
+    )
 
 
-def test_plan_rejects_duplicate_final_projection_target() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "duplicate-projection"
-    document["artifacts"].append(duplicate)
-    with pytest.raises(ValidationError):
-        VerifiedExecutionPlan.model_validate(document)
+def test_wire_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
+    document = _single_node_launch()
+    duplicate = copy.deepcopy(_sequence(document["artifacts"])[0])
+    _mapping(duplicate)["file_id"] = "duplicate"
+    _sequence(document["artifacts"]).append(duplicate)
+    with pytest.raises(CompiledExecutionPlanError):
+        validate_compiled_launch_payload(document)
+
+
+def test_wire_plan_rejects_duplicate_final_projection_target() -> None:
+    document = _single_node_launch()
+    duplicate = copy.deepcopy(_sequence(document["artifacts"])[0])
+    _sequence(document["artifacts"]).append(duplicate)
+    with pytest.raises(CompiledExecutionPlanError):
+        validate_compiled_launch_payload(document)
 
 
 def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:

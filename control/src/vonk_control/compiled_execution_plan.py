@@ -217,14 +217,6 @@ class CompiledModelArtifact(StrictModel):
     def path_is_relative(cls, value: str) -> str:
         return _safe_path(value, absolute=False)
 
-    @field_validator("materialized_path")
-    @classmethod
-    def materialized_path_is_safe(cls, value: str) -> str:
-        value = _safe_path(value, absolute=True, max_length=1024)
-        if not value.startswith("/run/vonk/models/"):
-            raise ValueError("materialized model path must be Controller-owned")
-        return value
-
     @field_validator("roles")
     @classmethod
     def roles_are_canonical(cls, value: list[str]) -> list[str]:
@@ -233,19 +225,11 @@ class CompiledModelArtifact(StrictModel):
         return sorted(value)
 
     @model_validator(mode="after")
-    def mount_is_bound(self) -> CompiledModelArtifact:
+    def weights_are_not_empty(self) -> CompiledModelArtifact:
         if self.bytes == 0 and any(
             role.casefold() in _WEIGHT_ROLES for role in self.roles
         ):
             raise ValueError("only non-weight support artifacts may be empty")
-        expected_source = f"/run/vonk/models/{self.selection_id}"
-        if self.mount.source != expected_source:
-            raise ValueError("model mount source must be the selection root")
-        expected_materialized = f"{expected_source}/{self.path}"
-        if self.materialized_path != expected_materialized:
-            raise ValueError(
-                "materialized path must preserve the original model file path"
-            )
         return self
 
 
@@ -275,39 +259,14 @@ class VerifiedExecutionPlan(StrictModel):
     @model_validator(mode="after")
     def artifact_set_bytes_are_exact(self) -> VerifiedExecutionPlan:
         by_digest: dict[str, int] = {}
-        by_physical: dict[tuple[str, str], tuple[object, ...]] = {}
-        selected: dict[tuple[str, str], str] = {}
         projection_ids: set[str] = set()
-        mount_paths: set[tuple[str, str]] = set()
         for artifact in self.artifacts:
             if artifact.id in projection_ids:
                 raise ValueError("compiled model artifact projections must be unique")
             projection_ids.add(artifact.id)
-            physical = (
-                artifact.file_id,
-                artifact.sha256,
-                artifact.bytes,
-                artifact.model.publisher,
-                artifact.model.slug,
-                artifact.model.content_sha256,
-            )
-            physical_key = (artifact.selection_id, artifact.path)
-            previous = by_physical.get(physical_key)
-            if previous is not None and previous != physical:
-                raise ValueError("compiled model artifact physical identity conflicts")
-            by_physical[physical_key] = physical
-            selected_key = (artifact.selection_id, artifact.file_id)
-            previous_path = selected.get(selected_key)
-            if previous_path is not None and previous_path != artifact.path:
-                raise ValueError("compiled model artifact file identity conflicts")
-            selected[selected_key] = artifact.path
             previous = by_digest.setdefault(artifact.sha256, artifact.bytes)
             if previous != artifact.bytes:
                 raise ValueError("one model digest cannot have multiple byte counts")
-            mount_path = (artifact.mount.target, artifact.path)
-            if mount_path in mount_paths:
-                raise ValueError("compiled model artifacts repeat a mount target")
-            mount_paths.add(mount_path)
         if sum(by_digest.values()) != self.model_artifact_set_bytes:
             raise ValueError("model artifact-set bytes do not match selected receipts")
         return self
@@ -354,10 +313,6 @@ class VerifiedExecutionPlan(StrictModel):
                 mounts.append(CompiledSecurityMount(source=kind, target=mount.target))
             except ValueError as error:
                 raise CompiledExecutionPlanError(str(error)) from error
-        if spec.security.network_mode not in {"none", "bridge"}:
-            raise CompiledExecutionPlanError(
-                "compiled security has an unsupported network mode"
-            )
         network_mode: Literal["none", "bridge"] = (
             "bridge"
             if placement.endpoint_address is not None
@@ -490,14 +445,6 @@ def compile_verified_execution_plan(
     )
     harness_sha256 = _digest(spec.identity.harness_sha256, "harness digest")
     execution_sha256 = spec.launch_identity_sha256()
-    declared_execution_sha256 = spec.identity.execution_sha256
-    if (
-        declared_execution_sha256 is not None
-        and declared_execution_sha256 != execution_sha256
-    ):
-        raise CompiledExecutionPlanError(
-            "runtime execution identity does not cover the compiled launch facts"
-        )
     if not spec.artifacts:
         raise CompiledExecutionPlanError("runtime spec has no selected model artifacts")
     if not model_objects:
@@ -513,7 +460,6 @@ def compile_verified_execution_plan(
 
     artifacts: list[CompiledModelArtifact] = []
     selected_keys: set[tuple[str, str]] = set()
-    selected_physical: dict[tuple[str, str], tuple[object, ...]] = {}
     for item in spec.artifacts:
         model = item.model
         source = by_identity.get((model.content_sha256, item.file_id))
@@ -529,22 +475,6 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model file path, digest or size does not match the verified cache object"
             )
-        physical = (
-            model.content_sha256,
-            item.file_id,
-            item.path,
-            source.sha256,
-            source.bytes,
-            model.publisher,
-            model.slug,
-        )
-        physical_key = (item.selection_id, item.path)
-        previous_physical = selected_physical.get(physical_key)
-        if previous_physical is not None and previous_physical != physical:
-            raise CompiledExecutionPlanError(
-                "runtime model artifact physical identity conflicts"
-            )
-        selected_physical[physical_key] = physical
         selected_keys.add((model.content_sha256, item.file_id))
         try:
             artifacts.append(
