@@ -9,7 +9,6 @@ from typing import Any, cast
 import pytest
 from vonk_control.harnesses.canonical import (
     _distributed_args,
-    _model_mounts,
     compile_canonical_harness,
 )
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
@@ -594,21 +593,24 @@ def _two_selection_recipe(second_path: str):
     return read_recipe(recipe_raw), models
 
 
+def _compile_two_selections(second_path: str):
+    recipe, models = _two_selection_recipe(second_path)
+    return compile_canonical_harness(
+        recipe, models, _BUILT_IMAGE, role="entrypoint", rank=0, settings=None
+    )
+
+
 def test_selections_may_share_a_mount_target_when_their_files_differ() -> None:
     # Break caught: refusing a shared target although every file is bind-mounted
     # per file, or splitting the directory mount per selection.
-    recipe, models = _two_selection_recipe("extra.safetensors")
-    selected = _model_mounts(recipe, models, "entrypoint")
-    assert {mount.target for _artifact, mount in selected} == {"/models"}
-    assert len({id(mount) for _artifact, mount in selected}) == 1
-    assert {artifact.selection_id for artifact, _mount in selected} == {
-        "primary",
-        "extra",
-    }
+    projection, artifacts, _digest = _compile_two_selections("extra.safetensors")
+    assert [(m.source, m.target) for m in projection.model_mounts] == [
+        ("/run/vonk/models/primary", "/models")
+    ]
+    assert {artifact.selection_id for artifact in artifacts} == {"primary", "extra"}
 
 
 def test_selections_colliding_on_one_mounted_path_are_refused() -> None:
     # Break caught: two files silently overlaying the same path at one target.
-    recipe, models = _two_selection_recipe("model.safetensors")
     with pytest.raises(HarnessCompileError, match="collide"):
-        _model_mounts(recipe, models, "entrypoint")
+        _compile_two_selections("model.safetensors")
