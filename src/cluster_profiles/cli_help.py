@@ -18,7 +18,7 @@ START_HERE = (
     ("vonkctl fleet", "What every Spark runs and what needs attention"),
     (
         "vonkctl run <recipe> --profile <n>",
-        "Prepare a recipe in a profile and start it",
+        "Recipe in a profile, reviewed and started",
     ),
     ("vonkctl profile endpoint", "API base and model name for clients"),
     ("vonkctl key create <name>", "A key for an app to call the models"),

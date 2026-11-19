@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import time
 from collections.abc import Callable, Mapping
-from typing import cast
+from enum import StrEnum
+from typing import Final, cast
 
 from ..cli_outcome import (
     operation_state,
@@ -16,6 +17,12 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
+from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
+from ..generated_control.models.fleet_profile_run_effect_action import (
+    FleetProfileRunEffectAction,
+    check_fleet_profile_run_effect_action,
+)
+from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
 from .confirmation import ActionDeclined, _require_confirmation
 from .profile import _profile
@@ -141,26 +148,30 @@ def _run(
     }
 
 
-def _review_lead(
-    number: int, spark_names: list[str], preview: Mapping[str, object]
-) -> list[str]:
+# A run effect keeps the workload or ends it; every action but this one ends it.
+class _Keep(StrEnum):
+    ACTION = "keep"
+
+
+# Checked against the generated contract, so a renamed action fails at import.
+_KEEP: Final[FleetProfileRunEffectAction] = check_fleet_profile_run_effect_action(
+    _Keep.ACTION
+)
+
+
+def _review_lead(number: int, spark_names: list[str], preview: object) -> list[str]:
     """The three facts to read before the plan: where, on what, and what stops."""
 
-    effects = preview.get("effects")
-    effects = effects if isinstance(effects, Mapping) else {}
-    stops = [
-        run
-        for run in effects.get("runs") or ()
-        if isinstance(run, Mapping) and run.get("action") == "stop"
-    ]
-    for adopted in effects.get("adopted") or ():
-        if isinstance(adopted, Mapping):
-            stops += [
-                stop["effect"]
-                for stop in adopted.get("stops") or ()
-                if isinstance(stop, Mapping) and isinstance(stop.get("effect"), Mapping)
-            ]
-    stopping = sorted({str(run.get("alias")) for run in stops})
+    if not isinstance(preview, dict):
+        return []
+    effects = FleetProfileEffects.from_dict(
+        validate_control_document("FleetProfileEffects", preview.get("effects"))
+    )
+    stops = [run.alias for run in effects.runs if run.action != _KEEP]
+    for adopted in effects.adopted if not isinstance(effects.adopted, Unset) else ():
+        for stop in adopted.stops if not isinstance(adopted.stops, Unset) else ():
+            stops.append(stop.effect.alias)
+    stopping = sorted(set(stops))
     return [
         f"Profile edited: {number} ({_text(preview.get('profile_name'))})",
         f"Sparks selected: {_words(spark_names)}",

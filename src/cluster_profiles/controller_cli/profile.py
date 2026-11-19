@@ -32,7 +32,7 @@ from .profile_load import _load_profile
 from .submission import _submit_idempotent_request
 
 
-def _list_profiles(client: ControllerClient, remaining: float) -> dict[str, object]:
+def _list_profiles(client: ControllerClient, remaining: float) -> object:
     """Every saved profile, paged."""
 
     page = client.request("GET", "/api/profile", timeout_seconds=remaining, retry=False)

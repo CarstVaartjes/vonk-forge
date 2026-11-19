@@ -64,7 +64,7 @@ def _review_and_submit_profile_load(
     *,
     question: str,
     review_when_confirmed: bool,
-    lead: Callable[[Mapping[str, object]], Sequence[str]] | None = None,
+    lead: Callable[[object], Sequence[str]] | None = None,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -110,7 +110,7 @@ def _review_and_submit_profile_load(
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
                 if lead is not None:
-                    for line in lead(cast(Mapping[str, object], preview)):
+                    for line in lead(preview):
                         print(line)
                 render_payload(preview, "profile", action="preview")
         _confirm_action(args, question)
@@ -142,7 +142,7 @@ def _load_profile(
     *,
     question: str,
     review_when_confirmed: bool = False,
-    lead: Callable[[Mapping[str, object]], Sequence[str]] | None = None,
+    lead: Callable[[object], Sequence[str]] | None = None,
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 
