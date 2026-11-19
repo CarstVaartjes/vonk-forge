@@ -76,13 +76,13 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
     expected_evidence = {
-        "image-janitor": ("unused.json", "st_mtime"),
+        "image-janitor": ("unused.json", "network-tick-ok", "st_mtime"),
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),
         "litellm": ("/health/readiness",),
         "prometheus": ("/-/ready",),
-        "caddy": ("127.0.0.1:8082/healthz",),
+        "caddy": ("127.0.0.1:8082/healthz", "ip route", "^default"),
         "registry": ("127.0.0.1:5000/v2/",),
         "tailscale-gateway": ("BackendState", "Running"),
         "tailscale-configurator": ("TS_HEALTHCHECK_ONLY=1",),

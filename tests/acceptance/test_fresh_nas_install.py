@@ -996,6 +996,56 @@ def verify_ingress_heals_after_network_loss(
     )
 
 
+def verify_running_caddy_heals_without_its_ingress(
+    bundle: Path, nas_ip: str, enrollment_hostname: str
+) -> None:
+    """The 2026-11-19 outage: Caddy keeps running without `ingress`.
+
+    Docker lost the network (or its endpoint) and restarted Caddy on its four
+    internal networks: :8443 closed, no default route, health check green. The
+    janitor must re-attach it (and recreate the network when it is gone) within
+    its repair period, from the bundle's declared networks, with no human.
+    """
+    document = json.loads(
+        run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
+    )
+    network = document["networks"]["ingress"]["name"]
+    caddy = run([*reference_compose(), "ps", "-q", "caddy"], cwd=bundle).stdout.strip()
+    for deleted in (False, True):
+        run(["docker", "network", "disconnect", "-f", network, caddy], cwd=bundle)
+        if deleted:
+            run(["docker", "network", "rm", network], cwd=bundle)
+        routes = run(["docker", "exec", caddy, "ip", "route"], cwd=bundle).stdout
+        if any(line.startswith("default") for line in routes.splitlines()):
+            raise AcceptanceError("Caddy still has a default route without ingress")
+        deadline = time.monotonic() + 180  # Several 30-second repair passes
+        while True:
+            try:
+                verify_controller_tls(bundle, nas_ip, enrollment_hostname)
+                break
+            except AcceptanceError:
+                if time.monotonic() > deadline:
+                    raise AcceptanceError(
+                        "Caddy :8443 did not heal after a running Caddy lost "
+                        f"ingress (network deleted: {deleted}); "
+                        f"{compose_startup_diagnostics(bundle)}"
+                    ) from None
+                time.sleep(5)
+        attached = run(
+            [
+                "docker",
+                "network",
+                "inspect",
+                "--format",
+                "{{json .Containers}}",
+                network,
+            ],
+            cwd=bundle,
+        ).stdout
+        if not any(member.startswith(caddy) for member in json.loads(attached)):
+            raise AcceptanceError("the healed Caddy is not the original container")
+
+
 def verify_postgres_databases(bundle: Path) -> None:
     result = run(
         [
@@ -1818,6 +1868,9 @@ def exercise_compose(
             if tailscale_mode == "disabled":
                 verify_ingress_heals_after_network_loss(
                     bundle, nas_ip, enrollment_hostname, started
+                )
+                verify_running_caddy_heals_without_its_ingress(
+                    bundle, nas_ip, enrollment_hostname
                 )
                 run(
                     [

@@ -245,3 +245,76 @@ def test_history_retention_alert_requires_sustained_failure_to_drain(
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+INGRESS = "AgentIngressDown"
+
+
+def _node(metric: str, node: str, state: str, values: str) -> dict[str, str]:
+    return _series(metric, f'node_id="{node}",state="{state}"', values)
+
+
+@pytest.mark.needs_docker
+@pytest.mark.slow(30)
+def test_agent_ingress_alert_fires_only_when_every_active_node_is_offline(
+    tmp_path: Path,
+) -> None:
+    """Catches the 2026-11-19 outage, which raised only per-node warnings."""
+    shutil.copy(ROOT / "deploy/compose/prometheus/alerts.yaml", tmp_path)
+    connection, agent = "vonk_node_connection_state", "vonk_agent_state"
+    both_offline = [
+        _node(connection, "a", "offline", "1x10"),
+        _node(connection, "b", "offline", "1x10"),
+        _node(agent, "a", "active", "1x10"),
+        _node(agent, "b", "active", "1x10"),
+    ]
+    one_online = [
+        _node(connection, "a", "offline", "1x10"),
+        _node(connection, "b", "offline", "0x10"),
+        _node(agent, "a", "active", "1x10"),
+        _node(agent, "b", "active", "1x10"),
+    ]
+    nobody_active = [
+        _node(connection, "a", "offline", "1x10"),
+        _node(agent, "a", "active", "0x10"),
+    ]
+    tests = [
+        _test(both_offline, [("4m", INGRESS, []), ("6m", INGRESS, [_alert(INGRESS)])]),
+        _test(one_online, [("8m", INGRESS, [])]),
+        _test(nobody_active, [("8m", INGRESS, [])]),
+    ]
+    (tmp_path / "test.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "rule_files": ["alerts.yaml"],
+                "evaluation_interval": "1m",
+                "tests": tests,
+            }
+        )
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-v",
+            f"{tmp_path}:/rules:ro",
+            "-w",
+            "/rules",
+            "--entrypoint",
+            "promtool",
+            _services()["prometheus"]["image"],
+            "test",
+            "rules",
+            "test.yaml",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

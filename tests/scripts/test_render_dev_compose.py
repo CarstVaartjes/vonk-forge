@@ -90,9 +90,16 @@ def test_render_produces_a_single_self_contained_compose_file(
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     # The janitor learns the bundle's services, to retire those an upgrade drops.
-    assert document["services"]["image-janitor"]["environment"] == {
-        "VONK_COMPOSE_SERVICES": ",".join(sorted(document["services"]))
-    }
+    janitor_env = document["services"]["image-janitor"]["environment"]
+    assert janitor_env["VONK_COMPOSE_SERVICES"] == ",".join(
+        sorted(document["services"])
+    )
+    # ... and the networks each service must have, which the janitor heals against.
+    declared = json.loads(janitor_env["VONK_COMPOSE_NETWORKS"])
+    assert "ingress" in declared["services"]["caddy"]
+    assert "ingress" not in declared["internal"]
+    assert "agent-proxy" in declared["internal"]
+    assert "image-janitor" not in declared["services"]  # network_mode: none
     # Runtime configuration ships in the Controller image instead.
     assert "configs" not in document
     assert not any(

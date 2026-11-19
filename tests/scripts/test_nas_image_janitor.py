@@ -175,6 +175,7 @@ class Networks(janitor.Docker):
         self.containers: dict[str, dict[str, Any]] = {}
         self.mutations: list[tuple[str, str]] = []
         self.network_reads: list[str] = []
+        self.created: list[dict[str, Any]] = []
         self.refuse_connect = False
         self.stop_times_out = False
         self.start_refusals = 0
@@ -194,6 +195,7 @@ class Networks(janitor.Docker):
             "Name": f"/{name}",
             "Created": "1970-01-01T00:00:00.123456789Z",
             "State": {"Status": "created", "Error": ""},
+            "Config": {"Labels": {janitor.SERVICE_LABEL: name.split("-")[2]}},
             "HostConfig": {
                 "NetworkMode": mode or networks[0],
                 "RestartPolicy": {"Name": "unless-stopped"},
@@ -235,6 +237,13 @@ class Networks(janitor.Docker):
         if self.dead:
             raise Killed
         route = unquote(path.split("?", 1)[0])
+        if method == "POST" and route == "/networks/create":
+            if body["Name"] in self.networks:
+                raise janitor.DockerError("Docker HTTP 409: network exists")
+            self.mutations.append(("create", body["Name"]))
+            self.created.append(body)
+            self.network(body["Name"])
+            return {"Id": self.networks[body["Name"]]["Id"]}
         if method == "GET" and route == "/containers/json":
             assert "all=1" in path and "vonk-forge" in unquote(path)
             return [
@@ -290,6 +299,16 @@ class Clock:
         return self.now
 
 
+# What the rendered bundle declares for the fleet below.
+TOPOLOGY = janitor.Topology(
+    {
+        "caddy": ("ingress", "agent-proxy"),
+        "api": ("agent-proxy", "data"),
+    },
+    frozenset({"agent-proxy", "data"}),
+)
+
+
 def fleet(tmp_path: Path) -> tuple[Networks, Any, Clock, str, str]:
     daemon = Networks()
     for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy", "vonk-forge_data"):
@@ -302,7 +321,11 @@ def fleet(tmp_path: Path) -> tuple[Networks, Any, Clock, str, str]:
     )
     clock = Clock()
     reconciler = janitor.Reconciler(
-        daemon, tmp_path / "repairing.json", clock=clock, jitter=lambda: 1.0
+        daemon,
+        tmp_path / "repairing.json",
+        clock=clock,
+        jitter=lambda: 1.0,
+        topology=TOPOLOGY,
     )
     return daemon, reconciler, clock, caddy, api
 
@@ -354,6 +377,82 @@ def test_running_container_without_its_endpoint_is_reattached(tmp_path: Path) ->
     ]
     assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
     assert json.loads((tmp_path / "repairing.json").read_text()) == {}
+
+
+def test_running_container_whose_record_lost_a_declared_network_is_reattached(
+    tmp_path: Path,
+) -> None:
+    """Catches the 2026-11-19 outage: Caddy running, `ingress` gone from its record."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    del daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_ingress"]
+    daemon.networks["vonk-forge_ingress"]["Containers"].pop(caddy)
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == [
+        ("stop", caddy),
+        ("connect", "vonk-forge_ingress"),
+        ("start", caddy),
+    ]
+    record = daemon.containers[caddy]["NetworkSettings"]["Networks"]
+    assert record["vonk-forge_ingress"]["Aliases"] == ["vonk-forge-caddy-1", "caddy"]
+    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+    daemon.mutations.clear()
+    ticks(reconciler, clock, 2)
+    assert daemon.mutations == []
+
+
+def test_declared_network_that_vanished_is_recreated_and_reattached(
+    tmp_path: Path,
+) -> None:
+    """Catches waiting for a `compose up` nobody runs after the daemon lost a network."""
+    daemon, reconciler, clock, caddy, api = fleet(tmp_path)
+    for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy"):
+        del daemon.containers[caddy]["NetworkSettings"]["Networks"][name]
+        del daemon.networks[name]
+    del daemon.containers[api]["NetworkSettings"]["Networks"]["vonk-forge_agent-proxy"]
+    ticks(reconciler, clock, 1)
+    assert {(c["Name"], c["Internal"]) for c in daemon.created} == {
+        ("vonk-forge_ingress", False),
+        ("vonk-forge_agent-proxy", True),
+    }
+    assert daemon.created[0]["Labels"][janitor.PROJECT_LABEL] == "vonk-forge"
+    for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy"):
+        assert caddy in daemon.networks[name]["Containers"]
+    assert api in daemon.networks["vonk-forge_agent-proxy"]["Containers"]
+    assert daemon.running(caddy) and daemon.running(api)
+    daemon.mutations.clear()
+    ticks(reconciler, clock, 2)
+    assert daemon.mutations == []
+
+
+def test_undeclared_missing_network_still_waits_for_compose(tmp_path: Path) -> None:
+    """Catches the janitor inventing networks the bundle does not declare."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_stray"] = {
+        "NetworkID": "stray",
+        "Aliases": [],
+    }
+    ticks(reconciler, clock, 1)
+    assert daemon.created == []
+
+
+def test_failed_reconnect_is_healed_later_even_without_the_journal(
+    tmp_path: Path,
+) -> None:
+    """Catches a half-attached container the journal alone must remember."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.networks["vonk-forge_ingress"]["Containers"].clear()
+    daemon.refuse_connect = True
+    ticks(reconciler, clock, 1)
+    assert daemon.running(caddy)
+    assert (
+        "vonk-forge_ingress"
+        not in daemon.containers[caddy]["NetworkSettings"]["Networks"]
+    )
+    (tmp_path / "repairing.json").write_text("not json")  # The owed network is lost.
+    daemon.refuse_connect = False
+    clock.now += janitor.MAX_REPAIR_BACKOFF
+    ticks(reconciler, clock, 1)
+    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
 
 
 def test_each_network_is_inspected_once_per_tick(tmp_path: Path) -> None:
@@ -487,6 +586,7 @@ def test_repair_waits_for_compose_and_respects_stops_of_a_running_container(
 ) -> None:
     """Catches inventing networks, starting ordinary stops, and touching shared netns."""
     daemon, reconciler, clock, caddy, api = fleet(tmp_path)
+    reconciler.topology = janitor.Topology({}, frozenset())  # Nothing declared.
     daemon.stop(caddy)
     del daemon.networks["vonk-forge_ingress"]
     daemon.stop(api)  # Stopped after it ran: no start error.

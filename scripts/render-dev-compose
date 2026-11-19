@@ -43,6 +43,7 @@ VONK_REPOSITORY_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
 # that the NAS Compose file is older than its release.
 COMPOSE_BUNDLE_DIGEST = "VONK_COMPOSE_BUNDLE_DIGEST"
 COMPOSE_SERVICES = "VONK_COMPOSE_SERVICES"
+COMPOSE_NETWORKS = "VONK_COMPOSE_NETWORKS"
 
 
 def channel_image(image: str, channel: str) -> str:
@@ -168,7 +169,33 @@ def bundle_digest(template: Path) -> str:
     return hashlib.sha256(document.encode("utf-8")).hexdigest()
 
 
-def _stamp_bundle_digest(services: dict[str, dict], digest: str) -> None:
+def _declared_networks(services: dict[str, dict], networks: dict) -> str:
+    """Per service, the networks it joins; and which networks are internal.
+
+    The janitor heals against this, not against a container's own record. A
+    service with `network_mode` or no `networks` key declares none.
+    """
+    return json.dumps(
+        {
+            "services": {
+                name: sorted(service["networks"])
+                for name, service in services.items()
+                if "network_mode" not in service and service.get("networks")
+            },
+            "internal": sorted(
+                name
+                for name, network in networks.items()
+                if (network or {}).get("internal")
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _stamp_bundle_digest(
+    services: dict[str, dict], digest: str, networks: dict
+) -> None:
     if not isinstance(services, dict):
         raise TypeError("Compose services are invalid")
     # The worker reads the same site configuration as the API.
@@ -181,6 +208,9 @@ def _stamp_bundle_digest(services: dict[str, dict], digest: str) -> None:
     # defines (an upgrade does not remove them).
     services["image-janitor"].setdefault("environment", {})[COMPOSE_SERVICES] = (
         ",".join(sorted(services))
+    )
+    services["image-janitor"]["environment"][COMPOSE_NETWORKS] = _declared_networks(
+        services, networks
     )
 
 
@@ -297,7 +327,9 @@ def render(
     _resolve_runtime_images(document, channel)
     if channel != "pinned":
         _resolve_extension_images(document, channel)
-    _stamp_bundle_digest(document["services"], bundle_digest(template))
+    _stamp_bundle_digest(
+        document["services"], bundle_digest(template), document.get("networks") or {}
+    )
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_CONTROL_HOSTNAME" not in rendered:
         raise ValueError("development channel must render the production graph")

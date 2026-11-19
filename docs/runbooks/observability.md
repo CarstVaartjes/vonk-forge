@@ -155,6 +155,22 @@ delayed, and stale evidence remain distinct; an online connection alone does
 not establish readiness. A hostname or address change must be updated through
 the current Fleet API settings; it must not create a new node identity.
 
+## Agent ingress down
+
+`AgentIngressDown` fires when every active Spark is offline at once. The
+browser and `vonkctl` path does not use the agent ingress, so the Controller
+looks healthy. The usual cause is Caddy (`vonk-forge-caddy-1`) running without
+the `ingress` network: port 8443 is not published and Caddy has no outbound
+route, after a NAS or Docker restart that lost the network. The
+`image-janitor` recreates a missing declared network and re-attaches Caddy
+within a minute (its log shows `declared-network-recreated` and
+`network-reattached`); Caddy's health check shows `unhealthy` while it is cut
+off. If the alert persists past that, read the janitor log, then delete the
+Caddy container (not volumes) and Redeploy the project so Compose recreates it
+on all five networks. Confirm with `nc -vz <NAS LAN IP> 8443` and
+`vonkctl fleet`. If every node is offline with 8443 open, the cause is the
+Controller or the Spark network, not the ingress.
+
 ## Invalid node certificate
 
 Inspect the certificate state and expiry metric for the affected node. Renew or

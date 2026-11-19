@@ -5,6 +5,10 @@ repair loop that re-attaches project containers to networks they lost (a
 network recreated under them, or an endpoint the network no longer lists).
 `compose up` and restarts reuse such a container: a stopped one is started
 as-is, and only a running one is checked for missing networks.
+
+The networks a service must have come from the rendered bundle, not from the
+container's own record: Docker can lose the network and drop it from the record
+together, and a healer that trusts the record sees nothing wrong.
 """
 
 from __future__ import annotations
@@ -35,11 +39,57 @@ NETWORK_INTERVAL = 30
 MAX_REPAIR_BACKOFF = 300
 PROJECT_LABEL = "com.docker.compose.project"
 SERVICE_LABEL = "com.docker.compose.service"
+NETWORK_LABEL = "com.docker.compose.network"
 ONEOFF_LABEL = "com.docker.compose.oneoff"
 # The services the rendered bundle defines; empty (unrendered) retires nothing.
 COMPOSE_SERVICES = frozenset(
     name for name in os.environ.get("VONK_COMPOSE_SERVICES", "").split(",") if name
 )
+
+
+class NetworkDefinition(TypedDict):
+    Name: str
+    Driver: str
+    Internal: bool
+    Labels: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Topology:
+    """The networks the rendered bundle declares: per service, and which are internal."""
+
+    services: dict[str, tuple[str, ...]]
+    internal: frozenset[str]
+
+    @classmethod
+    def parse(cls, raw: str) -> Topology:
+        try:
+            document = json.loads(raw)
+            return cls(
+                {str(k): tuple(map(str, v)) for k, v in document["services"].items()},
+                frozenset(map(str, document["internal"])),
+            )
+        except (ValueError, KeyError, TypeError, AttributeError):
+            # Unrendered or unreadable: fall back to each container's own record.
+            return cls({}, frozenset())
+
+    def declared(self, project: str, service: str) -> tuple[str, ...]:
+        return tuple(f"{project}_{n}" for n in self.services.get(service, ()))
+
+    def definition(self, project: str, name: str) -> NetworkDefinition | None:
+        """The Compose definition of a declared network, else None."""
+        short = name.removeprefix(f"{project}_")
+        if name == short or not any(short in n for n in self.services.values()):
+            return None
+        return {
+            "Name": name,
+            "Driver": "bridge",
+            "Internal": short in self.internal,
+            "Labels": {PROJECT_LABEL: project, NETWORK_LABEL: short},
+        }
+
+
+TOPOLOGY = Topology.parse(os.environ.get("VONK_COMPOSE_NETWORKS", ""))
 # A redeploy that adds a service creates it while the previous janitor, with its
 # older list, still runs; only containers older than this process are retired.
 STARTED = time.time()
@@ -56,6 +106,8 @@ REPOSITORIES = frozenset(
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 STATE = Path("/state/unused.json")
 REPAIRING = Path("/state/repairing.json")
+# Touched by every repair pass that completed; the health check reads its age.
+REPAIR_PASSED = Path("/state/network-tick-ok")
 LOGGER = logging.getLogger("image-janitor")
 
 
@@ -87,6 +139,7 @@ class Reason(StrEnum):
     NO_PROJECT = "not-in-a-compose-project"
     RETIRED = "retired-service-container-removed"
     MARKS_INVALID = "repair-journal-invalid-reset"
+    NETWORK_CREATED = "declared-network-recreated"
 
 
 @dataclass(frozen=True)
@@ -353,6 +406,7 @@ class Container:
     # State.StartedAt: tells a restarted container from the one inspected.
     started: str
     created: float
+    service: str
     # Network name -> (recorded network ID, recorded aliases).
     networks: dict[str, tuple[str, tuple[str, ...]]]
 
@@ -377,6 +431,9 @@ class Container:
             mode=str(row["HostConfig"]["NetworkMode"]),
             started=str(row["State"].get("StartedAt") or ""),
             created=datetime.fromisoformat(row["Created"]).timestamp(),
+            service=str(
+                ((row.get("Config") or {}).get("Labels") or {}).get(SERVICE_LABEL, "")
+            ),
             networks=networks,
         )
 
@@ -424,9 +481,21 @@ def decide(
 ) -> Action:
     """The one transition: observed container and network facts -> action.
 
-    `broken` is None while a network to attach does not exist (Compose owns
-    networks), else the networks whose attachment is lost or still owed by a
-    `pending` repair. `held_until` is the backoff of the planned repair.
+    `broken` is None while a network to attach does not exist and the bundle
+    does not declare it, else the networks whose attachment is lost, declared
+    but missing from the container, or still owed by a `pending` repair.
+    `held_until` is the backoff of the planned repair.
+
+    State -> action (first match; a planned action inside its backoff waits):
+      docker-owned state              -> WAIT_STATE
+      network unknown and undeclared  -> WAIT_NETWORK (Compose creates it)
+      any network broken              -> REATTACH
+      not running, should run         -> START
+      created, never started          -> WAIT_CREATED, then START
+      otherwise                       -> NONE
+    A declared network that does not exist is created from the bundle's
+    definition before it is judged (`Reconciler.network`), so it is broken,
+    never unknown; REATTACH then converges to the declared set.
     """
     if container.state in DOCKER_OWNED:
         return Action.WAIT_STATE
@@ -502,9 +571,12 @@ class Reconciler:
         *,
         clock: Callable[[], float] = time.time,
         jitter: Callable[[], float] = random.random,
+        topology: Topology = TOPOLOGY,
     ) -> None:
         self.docker = docker
         self.journal = journal
+        self.topology = topology
+        self.project = ""
         self.clock = clock
         self.backoff = Backoff(jitter)
 
@@ -573,6 +645,7 @@ class Reconciler:
         selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
         rows = self.docker.request("GET", f"/containers/json?all=1&filters={selector}")
         rows = self.retire(rows, services)
+        self.project = project
         # One inspect per network per tick, shared by every container.
         networks: dict[str, Network | None] = {}
         for row in rows:
@@ -605,23 +678,26 @@ class Reconciler:
     ) -> list[str] | None:
         """Networks to (re-)attach, or None while one of them does not exist.
 
-        The container's own network entries are the declared set: the daemon
-        keeps them until an explicit disconnect, even when the network or the
-        endpoint is gone. An entry is broken when it names an older network ID
-        (the network was recreated) or, while running, when the network lists
-        no endpoint for it. A pending repair also owes the networks it
-        disconnected and has not yet seen attached again.
+        The bundle's networks for the container's service are the declared set
+        (the container's own record when the bundle lists none): the record can
+        lose a network together with the network itself. A declared network the
+        record lacks is owed. A recorded entry is broken when it names an older
+        network ID (the network was recreated) or, while running, when the
+        network lists no endpoint for it. A pending repair also owes the
+        networks it disconnected and has not yet seen attached again.
         """
         owed = [
             n
-            for n in (pending.networks if pending else {})
+            for n in [
+                *(pending.networks if pending else {}),
+                *self.topology.declared(self.project, container.service),
+            ]
             if n not in container.networks
         ]
+        owed = list(dict.fromkeys(owed))
         broken = []
         for name in [*container.networks, *owed]:
-            if name not in networks:
-                networks[name] = Network.inspect(self.docker, name)
-            network = networks[name]
+            network = self.network(name, networks)
             if network is None:
                 return None
             if name not in owed and self.detached(container, name, network):
@@ -638,6 +714,22 @@ class Reconciler:
             if name in owed or self.detached(container, name, network):
                 broken.append(name)
         return broken
+
+    def network(self, name: str, networks: dict[str, Network | None]) -> Network | None:
+        """The network, recreated from the bundle's definition if it is declared.
+
+        A declared network that vanished (the daemon lost its network store)
+        would otherwise wait for a `compose up` nobody runs. Compose finds the
+        recreated network by its project and network labels and keeps it.
+        """
+        if name not in networks:
+            networks[name] = Network.inspect(self.docker, name)
+            definition = self.topology.definition(self.project, name)
+            if networks[name] is None and definition is not None:
+                self.docker.request("POST", "/networks/create", definition)
+                log(Reason.NETWORK_CREATED, network=name)
+                networks[name] = Network.inspect(self.docker, name)
+        return networks[name]
 
     @staticmethod
     def detached(container: Container, name: str, network: Network) -> bool:
@@ -721,7 +813,12 @@ class Reconciler:
         # name resolvable on the re-attached network.
         owed = dict(pending.networks) if pending else {}
         for network in broken or []:
-            owed.setdefault(network, container.networks.get(network, ("", ()))[1])
+            owed.setdefault(
+                network,
+                container.networks.get(
+                    network, ("", (container.name, container.service))
+                )[1],
+            )
         self.record(identity, Pending(start, owed))
         try:
             if container.state == State.RUNNING:
@@ -784,6 +881,7 @@ def main() -> None:
                 log(Reason.NO_PROJECT, next_attempt=time.time() + NETWORK_INTERVAL)
             else:
                 reconciler.tick(project, COMPOSE_SERVICES)
+            REPAIR_PASSED.touch()
         except (
             DockerError,
             OSError,
