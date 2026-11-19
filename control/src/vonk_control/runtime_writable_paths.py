@@ -509,17 +509,6 @@ def _validate_requirement_paths(
         )
 
 
-def validate_telemetry(
-    slug: str, telemetry: EngineTelemetryContract, env: Mapping[str, str]
-) -> None:
-    expected = telemetry_contract(slug)
-    if telemetry != expected:
-        raise _compile_error("runtime telemetry is not the central engine contract")
-    for name, value in expected.environment:
-        if env.get(name) != value:
-            raise _compile_error(f"runtime telemetry environment is incomplete: {name}")
-
-
 def document(
     slug: str,
     env: Iterable[tuple[str, str]],
@@ -535,8 +524,7 @@ def document(
 
 
 def _compile_error(message: str) -> ValueError:
-    # Import lazily because ``harnesses.common`` uses this module while it is
-    # being imported by the harness package.
+    # Import lazily because the harness package imports this module.
     from .harnesses.common import HarnessCompileError
 
     return HarnessCompileError(message)
