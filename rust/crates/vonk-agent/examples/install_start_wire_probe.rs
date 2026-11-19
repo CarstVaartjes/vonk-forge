@@ -15,7 +15,10 @@ use std::{
 };
 
 use vonk_agent::{
-    executor::{recipe_install_success, recipe_start_success, runtime_arguments_for_plan},
+    executor::{
+        recipe_install_success, recipe_start_success, refuse_invalid_plan,
+        runtime_arguments_for_plan,
+    },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
     outcome::ExecutionResult,
 };
@@ -97,24 +100,19 @@ impl StageTimings {
 
 fn result_for(claim: &AgentClaim, timings: &mut StageTimings) -> Result<AgentResult, String> {
     // The production parser validates this exact claim before touching its
-    // payload. Exercise that boundary once, as the normal worker does.
+    // payload, then dispatch validates its plan. Exercise both boundaries once,
+    // as the normal worker does.
     let request = timings
         .measure("request_parse", || RecipeOperationRequest::parse(claim))
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
+    if let Some(refusal) = timings.measure("plan_validate", || refuse_invalid_plan(&request)) {
+        return Err(format!("{refusal:?}"));
+    }
     let result = match request {
-        RecipeOperationRequest::Install(request) => {
-            timings
-                .measure("install_plan_validate", || {
-                    request.compiled_execution_plan.validate()
-                })
-                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-            recipe_install_success(request.expected_bytes)
-        }
+        RecipeOperationRequest::Install(request) => recipe_install_success(request.expected_bytes),
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
-            // The production OCI projection validates this same immutable spec
-            // before building arguments; do not repeat its full document and
-            // per-artifact validation immediately before that boundary.
+            // Dispatch validates the plan once before this boundary.
             let plan = timings.measure("start_oci_projection", || runtime_plan(&request, &spec))?;
             let _ = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success(&request)

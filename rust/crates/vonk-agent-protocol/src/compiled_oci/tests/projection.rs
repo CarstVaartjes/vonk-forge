@@ -155,10 +155,8 @@ fn duplicate_materialized_target_is_rejected() {
     let mut value = fixture();
     value["artifacts"][1]["mount"]["target"] = json!("/models/target");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    assert!(matches!(
-        project(&plan, &paths()),
-        Err(CompiledOciError::Workload(_))
-    ));
+    // Ingress validation owns plan identity; projection trusts it.
+    assert!(plan.validate().is_err());
 }
 
 #[test]
@@ -183,10 +181,8 @@ fn conflicting_duplicate_physical_source_is_rejected() {
     projection["file_id"] = json!("different-file");
     value["artifacts"].as_array_mut().unwrap().push(projection);
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    assert!(matches!(
-        project(&plan, &paths()),
-        Err(CompiledOciError::Workload(_))
-    ));
+    // Ingress validation owns plan identity; projection trusts it.
+    assert!(plan.validate().is_err());
 }
 
 #[test]

@@ -250,15 +250,19 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         );
     }
     let state_path = config.data_dir.join("state.sqlite");
-    let state = match StateStore::open_recovered(&state_path, &config.node_id) {
-        Ok(state) => state,
-        Err(error) => {
-            eprintln!("vonk-agent: durable custody unavailable: {error}");
-            // No effects are possible through this handle. Claims can still
-            // receive a bounded unknown and storage is re-observed next pass.
-            StateStore::observation_only(&state_path, &config.node_id)?
-        }
-    };
+    let state =
+        match StateStore::open_recovered(&state_path, &config.node_id).and_then(|mut state| {
+            state.drop_claimless_rows()?;
+            Ok(state)
+        }) {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("vonk-agent: durable custody unavailable: {error}");
+                // No effects are possible through this handle. Claims can still
+                // receive a bounded unknown and storage is re-observed next pass.
+                StateStore::observation_only(&state_path, &config.node_id)?
+            }
+        };
     systemd_notify::notify(
         "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );

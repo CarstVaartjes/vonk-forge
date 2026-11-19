@@ -12,22 +12,6 @@ pub enum ProtocolError {
 
 impl AgentClaim {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if !matches!(
-            self.operation,
-            generated::AgentOperation::AgentUpgradeV1
-                | generated::AgentOperation::RuntimePreflightV1
-                | generated::AgentOperation::ArtifactDistributionV1
-                | generated::AgentOperation::RecipeBuildV1
-                | generated::AgentOperation::RecipeBuildCleanupV1
-                | generated::AgentOperation::RecipeJobRunV1
-                | generated::AgentOperation::RecipeInstall
-                | generated::AgentOperation::RecipeStart
-                | generated::AgentOperation::RecipeStop
-                | generated::AgentOperation::RecipeUninstall
-                | generated::AgentOperation::RecipeReconcile
-        ) {
-            return Err(ProtocolError::Identity("claim operation"));
-        }
         if self.operation == generated::AgentOperation::ArtifactDistributionV1 {
             let generated::AgentClaimPayload::ArtifactDistributionPayload(request) = &self.payload
             else {

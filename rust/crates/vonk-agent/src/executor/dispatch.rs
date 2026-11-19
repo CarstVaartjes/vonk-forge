@@ -25,6 +25,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             Ok(request) => request,
             Err(_) => return failed("recipe operation payload is invalid"),
         };
+        // The one place a compiled plan is validated; parse stays structural so
+        // journal re-observation survives upgrades that tighten the rules.
+        if let Some(refusal) = refuse_invalid_plan(&request) {
+            return refusal;
+        }
         match request {
             RecipeOperationRequest::RuntimePreflight(request) => {
                 self.execute_runtime_preflight(claim, cancellation, request)
@@ -154,6 +159,59 @@ mod tests {
     use super::*;
     use crate::executor::test_support::{NoProcess, claim};
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn an_invalid_compiled_plan_is_refused_at_dispatch_with_its_rule_text() {
+        let data = tempfile::tempdir().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let client = AgentHttpClient::for_http_test(
+            "http://127.0.0.1:1/",
+            "spk_0123456789abcdef0123456789abcdef",
+        );
+        let executor = RecipeExecutor {
+            client: &client,
+            helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+            runtime_root: runtime.path(),
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: data.path(),
+            },
+        };
+        let mut plan: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        plan["runtime"]["placement"]["endpoint_address"] = serde_json::json!("100.100.20.30");
+        // A single-node service may only bridge; host networking is refused.
+        plan["security"]["network_mode"] = serde_json::json!("host");
+        let mut start = claim();
+        start.operation = AgentOperation::RecipeStart;
+        start.payload = serde_json::from_value(serde_json::json!({
+            "run_id": "00000000-0000-4000-8000-0000000000aa",
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
+            "mapping_id": "00000000-0000-4000-8000-0000000000cc",
+            "run_generation": 1,
+            "plan_digest": "a".repeat(64),
+            "compiled_execution_plan": plan,
+        }))
+        .unwrap();
+        let (_lease, deadline) = tokio::sync::watch::channel(start.deadline);
+        let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+        let result = executor.execute(&start, deadline, cancellation).await;
+        let ExecutionResult::Failed(failure) = result else {
+            panic!("an invalid plan must be refused");
+        };
+        assert_eq!(failure.reason, "compiled execution plan is invalid");
+        assert!(
+            failure
+                .diagnostic
+                .as_deref()
+                .is_some_and(|text| text.contains("compiled security")),
+            "{:?}",
+            failure.diagnostic
+        );
+    }
 
     #[tokio::test]
     async fn a_refusal_past_its_cool_down_is_offered_again_and_never_holds_the_claim_lane() {

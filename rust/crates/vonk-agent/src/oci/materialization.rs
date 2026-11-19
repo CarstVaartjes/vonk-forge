@@ -87,7 +87,6 @@ pub(super) fn materialize_compiled_models_controlled(
     if !data_root.is_absolute() {
         return Err(OciError::Artifact);
     }
-    plan.validate()?;
     let installation = managed_path(data_root, "installations", installation_id)?;
     let destination_root = installation.join("models");
     repair_managed_model_directory(&installation)?;

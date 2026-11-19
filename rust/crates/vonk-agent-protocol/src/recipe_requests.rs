@@ -184,6 +184,11 @@ pub(super) mod recipe_start_tests {
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "world_size": world_size,
         });
+        // The ingress validates the plan: its network mode and topology follow
+        // the placement the way the Controller derives them.
+        plan["security"]["network_mode"] =
+            serde_json::json!(if world_size == 1 { "bridge" } else { "host" });
+        plan["topology"]["node_count"] = serde_json::json!(world_size);
         let mut payload = serde_json::json!({
             "compiled_execution_plan": plan,
             "installation_id": "00000000-0000-4000-8000-000000000001",

@@ -667,10 +667,6 @@ pub(super) fn runtime_failure(
     ExecutionResult::Failed(failure)
 }
 
-pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
-    preparation_failure_at(error, FailureStage::Unknown, "preparation")
-}
-
 /// A preparation step that stopped on a local error: the step, the stage and
 /// the error's safe category stay visible, and only a cause that cannot change
 /// for this exact request ends the start.

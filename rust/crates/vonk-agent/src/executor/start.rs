@@ -55,9 +55,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(_) => return failed("recipe start deadline is invalid"),
         };
         let spec = request.compiled_execution_plan.clone();
-        if let Err(error) = spec.validate() {
-            return runtime_preparation_failure(&OciError::Workload(error));
-        }
         let Some(endpoint) = spec.endpoint.as_ref() else {
             return failed("installed recipe is not a persistent service");
         };

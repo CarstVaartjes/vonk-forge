@@ -4393,3 +4393,24 @@ def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
         for hit in scan_source(verdict_first)
         if "verdict" in hit[1] or "wait" in hit[1]
     ]
+
+
+def test_compiled_plan_validation_is_refused_outside_its_owners():
+    source = "fn f() { spec.validate()?; }\n"
+    base = "rust/crates/vonk-agent/src/"
+    assert check_source(
+        base + "oci/lifecycle.rs", source, {1}, modes=("plan-validation",)
+    )
+    assert check_source(
+        "rust/crates/vonk-agent-protocol/src/compiled_oci/projection.rs",
+        source,
+        {1},
+        modes=("plan-validation",),
+    )
+    split = "fn f() {\n    request\n        .compiled_execution_plan\n        .validate()?;\n}\n"
+    assert check_source(
+        base + "oci/lifecycle.rs", split, {4}, modes=("plan-validation",)
+    )
+    assert not check_source(
+        base + "executor/plans.rs", source, {1}, modes=("plan-validation",)
+    )

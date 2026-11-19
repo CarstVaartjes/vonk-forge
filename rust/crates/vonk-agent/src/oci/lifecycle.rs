@@ -10,7 +10,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         run_id: &str,
         placement: &CompiledRuntimePlacement,
     ) -> Result<Vec<String>, OciError> {
-        spec.validate()?;
         placement.validate_bound()?;
         if placement != &spec.runtime.placement {
             return Err(OciError::Runtime);
@@ -106,7 +105,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         placement: &CompiledRuntimePlacement,
         identity: Option<&RecipeRunStartIdentity>,
     ) -> Result<RuntimeStartPlan, OciError> {
-        start_stage(FailureStage::ImageVerification, || self.verify_image(spec))?;
         let state = start_stage(FailureStage::RunStorage, || {
             let state = managed_path(self.data_root, "runs", run_id)?;
             fs::create_dir_all(&state)?;
@@ -192,7 +190,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         run_id: &str,
         placement: &CompiledRuntimePlacement,
     ) -> Result<RuntimeStartPlan, OciError> {
-        self.verify_image(spec)?;
         let Some((retained_spec, retained_installation_id, retained_placement, _)) =
             self.load_run_lifecycle(run_id)?
         else {
@@ -268,7 +265,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         placement: &CompiledRuntimePlacement,
         invocation: &CompiledExecutionPlan,
     ) -> Result<RuntimeStartPlan, OciError> {
-        invocation.validate()?;
         if !same_job_workload(spec, invocation) {
             return Err(OciError::Runtime);
         }
