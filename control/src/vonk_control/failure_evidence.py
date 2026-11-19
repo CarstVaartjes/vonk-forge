@@ -642,22 +642,21 @@ class FailureEvidenceService:
                 )
             job = session.get(Job, operation_id)
             ended = None
-            if job is not None:
+            if job is not None and job.state not in FAILED_ATTEMPT_STATES:
                 from .lifecycle.job_ranks import ended_artifact_job
 
                 # A multi-rank artifact job fails when its owner rank reports;
                 # the parent Job ends only after the siblings stop, so the
                 # artifact job's own end is the failure and its words the cause.
                 ended = ended_artifact_job(session, job)
+                if (
+                    ended is not None
+                    and ajs.state_of(ended) not in FAILED_ATTEMPT_STATES
+                ):
+                    ended = None
             if (
                 job is not None
-                and (
-                    job.state in FAILED_ATTEMPT_STATES
-                    or (
-                        ended is not None
-                        and ajs.state_of(ended) in FAILED_ATTEMPT_STATES
-                    )
-                )
+                and (job.state in FAILED_ATTEMPT_STATES or ended is not None)
                 # Activity numbers a Job's first attempt 1 although the row
                 # counts from 0; the download answers to the number it was
                 # advertised under as well as to the stored one.
@@ -665,7 +664,7 @@ class FailureEvidenceService:
             ):
                 result = OperationResultFacts.model_validate(job.result)
                 node_ids = list(job.targets)
-                if job.state not in FAILED_ATTEMPT_STATES and ended is not None:
+                if ended is not None:
                     # Not yet ended itself: its stored words are the siblings'
                     # stop, not why the job failed.
                     result = result.model_copy(

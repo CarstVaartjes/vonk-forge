@@ -1073,8 +1073,42 @@ def test_a_failed_artifact_job_has_evidence_before_its_sibling_rank_stops(servic
                 updated_at=NOW,
             )
         )
+        order_id = str(uuid4())
+        session.add(
+            AgentOperation(
+                id=order_id,
+                parent_job_id=job_id,
+                node_id=NODE_A,
+                kind=ProtocolAgentOperation.RECIPE_JOB_RUN.value,
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision=COMMIT,
+                state="failed",
+                status_reason="failed",
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=order_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="test-serial",
+                state="failed",
+                progress=None,
+                result={
+                    "error_code": "recipe_job_run_failed",
+                    "diagnostics": _child_diagnostics_document("Killed\n"),
+                },
+            )
+        )
     bundle = service.read(job_id, 1)
     assert bundle.summary == "the workload process exited"
+    assert "Killed" in bundle.diagnostics.stderr.text
 
 
 def _child_diagnostics_document(stderr: str) -> dict[str, object]:
