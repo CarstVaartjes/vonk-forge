@@ -329,6 +329,12 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
     )
     assert coerced_scalar.status_code == 422
 
+    over_limit = client.post(
+        f"/api/recipe/runs/{JOB_ID}/artifact-jobs",
+        json={**body, "timeout_seconds": 3601},
+    )
+    assert over_limit.status_code == 422
+
 
 def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     tmp_path: Path,

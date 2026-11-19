@@ -1195,7 +1195,7 @@ def test_artifact_submission_receipt_degrades_on_corrupt_owner(
     assert (view.operation_id, view.submit_request_id) == (None, None)
 
 
-def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
+def test_artifact_job_rejects_unsafe_names(tmp_path) -> None:
     _sessions, _operations, _queue, service, run_id, _node_id = (
         running_artifact_service(tmp_path)
     )
@@ -1227,8 +1227,6 @@ def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
             ],
             timeout_seconds=60,
         )
-    with pytest.raises(ArtifactJobError):
-        create_artifact_job(service, **request, inputs=[], timeout_seconds=3601)
 
 
 @pytest.mark.parametrize(

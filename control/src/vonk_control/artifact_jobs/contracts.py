@@ -33,7 +33,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_agent_protocol.recipe_jobs import (
+from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
     MAX_INPUT_TOTAL_BYTES,
@@ -206,14 +206,14 @@ class ArtifactOutputFile(ArtifactJobContractModel):
         pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
         r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
     )
-    size_bytes: int = Field(ge=0, le=1024**3)
+    size_bytes: int = Field(ge=0, le=MAX_OUTPUT_FILE_BYTES)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class OutputLimits(ArtifactJobContractModel):
-    max_files: int = Field(ge=1, le=32)
-    max_file_bytes: int = Field(ge=1, le=1024**3)
-    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    max_files: int = Field(ge=1, le=MAX_OUTPUT_FILES)
+    max_file_bytes: int = Field(ge=1, le=MAX_OUTPUT_FILE_BYTES)
+    max_total_bytes: int = Field(ge=1, le=MAX_OUTPUT_TOTAL_BYTES)
     allowed_media_types: list[str] = Field(min_length=1, max_length=16)
 
 

@@ -24,7 +24,10 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_agent_protocol.recipe_jobs import (
+from vonk_agent_protocol.job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
     MAX_OUTPUT_FILE_BYTES,
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TOTAL_BYTES,
@@ -70,9 +73,6 @@ from ..recipe_start_payloads import (
     start_peer_addresses,
 )
 from .contracts import (
-    MAX_INPUT_FILE_BYTES,
-    MAX_INPUT_FILES,
-    MAX_INPUT_TOTAL_BYTES,
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobInvalid,

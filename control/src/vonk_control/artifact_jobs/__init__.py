@@ -4,9 +4,6 @@ from ..compiled_artifact_contract import (
     CompiledArtifactContract as CompiledArtifactContract,
 )
 from .contracts import _UUID_ID_ADAPTER as _UUID_ID_ADAPTER
-from .contracts import MAX_INPUT_FILE_BYTES as MAX_INPUT_FILE_BYTES
-from .contracts import MAX_INPUT_FILES as MAX_INPUT_FILES
-from .contracts import MAX_INPUT_TOTAL_BYTES as MAX_INPUT_TOTAL_BYTES
 from .contracts import ArtifactFileDeclaration as ArtifactFileDeclaration
 from .contracts import (
     ArtifactJobCapabilitiesResponse as ArtifactJobCapabilitiesResponse,
@@ -58,7 +55,6 @@ from .job_contract import JobContractState as JobContractState
 from .service import ArtifactJobService as ArtifactJobService
 
 __all__ = [
-    "MAX_INPUT_FILE_BYTES",
     "ArtifactFileDeclaration",
     "ArtifactJobCapabilitiesResponse",
     "ArtifactJobError",
