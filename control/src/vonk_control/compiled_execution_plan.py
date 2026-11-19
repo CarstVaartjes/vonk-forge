@@ -539,7 +539,7 @@ def validate_compiled_launch_payload(value: object) -> WireCompiledExecutionPlan
     if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
         raise CompiledExecutionPlanError("compiled launch plan is too large")
     try:
-        # This calls VerifiedExecutionPlan.model_validate, including all nested
+        # This validates the wire CompiledExecutionPlan, including all nested
         # schema, identity, path, mount, runtime and security validators.
         return validate_compiled_execution_plan(value)
     except ValueError as error:

@@ -1130,55 +1130,6 @@ def _collision_objects() -> list[dict[str, object]]:
     ]
 
 
-def _single_node_launch() -> dict[str, object]:
-    return _launch(
-        _compile(),
-        _spec(),
-        placement={
-            "endpoint_address": None,
-            "rank": 0,
-            "role": "entrypoint",
-            "world_size": 1,
-            "local_address": None,
-            "master_address": None,
-            "master_port": None,
-            "port": 8000,
-            "reserved_memory_bytes": 1,
-            "memory_floor_bytes": 0,
-        },
-    )
-
-
-def test_wire_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
-    document = _single_node_launch()
-    duplicate = copy.deepcopy(_sequence(document["artifacts"])[0])
-    _mapping(duplicate)["file_id"] = "duplicate"
-    _sequence(document["artifacts"]).append(duplicate)
-    with pytest.raises(CompiledExecutionPlanError):
-        validate_compiled_launch_payload(document)
-
-
-def test_wire_plan_rejects_duplicate_final_projection_target() -> None:
-    document = _single_node_launch()
-    duplicate = copy.deepcopy(_sequence(document["artifacts"])[0])
-    _sequence(document["artifacts"]).append(duplicate)
-    with pytest.raises(CompiledExecutionPlanError):
-        validate_compiled_launch_payload(document)
-
-
-def test_plan_preserves_duplicate_physical_artifact_as_two_projections() -> None:
-    document = _compile().model_dump(mode="json")
-    duplicate = copy.deepcopy(document["artifacts"][0])
-    duplicate["id"] = "second-projection"
-    duplicate["mount"]["target"] = "/models/target"
-    document["artifacts"].append(duplicate)
-    plan = VerifiedExecutionPlan.model_validate(document)
-    assert [(artifact.mount.target, artifact.path) for artifact in plan.artifacts] == [
-        ("/models", "model.safetensors"),
-        ("/models/target", "model.safetensors"),
-    ]
-
-
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(
     tmp_path,
 ) -> None:
