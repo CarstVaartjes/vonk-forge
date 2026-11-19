@@ -12,7 +12,7 @@ import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../lib/fleet";
 import { AreaChart } from "./chart/area-chart";
 import { Estimate, EstimateTag } from "./estimate";
 import { StatusPill } from "./status-pill";
-import { WorkloadJobs } from "./workload-jobs";
+import { WorkloadChecking, WorkloadJobs } from "./workload-jobs";
 
 const WINDOW_SECONDS = 1800;
 
@@ -55,12 +55,17 @@ export function WorkloadHero({
   const symbol = spec ? UNITS[spec.unit].symbol : "";
   const value = latest == null ? null : Number(latest);
   const queue = queueText(reads.running, reads.waiting, unit.alias);
-  // A job recipe takes jobs, not chat requests: its jobs replace the engine figures.
-  if (jobs.isJob)
+  // A job recipe takes jobs, not chat requests: its jobs replace the engine figures. Until the recipe has
+  // been read nothing is claimed about the workload.
+  if (jobs.kind !== "model")
     return (
       <div className="workload-hero">
         <WorkloadHeader unit={unit} />
-        <WorkloadJobs recipeId={unit.recipeId} jobs={jobs.jobs} />
+        {jobs.kind === "job" ? (
+          <WorkloadJobs selector={jobs.selector} adapter={jobs.interface} jobs={jobs.jobs} />
+        ) : (
+          <WorkloadChecking error={jobs.error} />
+        )}
       </div>
     );
   // While the speed reads are out nothing is claimed; once they are in, no latest value is Not reported.

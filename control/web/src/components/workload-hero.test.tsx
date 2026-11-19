@@ -1,20 +1,35 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { WorkloadHero } from "./workload-hero";
-import type { ArtifactJob, MetricsSeriesResponse } from "../api/types";
+import type {
+  ArtifactJob,
+  MetricsSeriesResponse,
+  RecipeDetail,
+  VisualFleetNode,
+} from "../api/types";
 import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../hooks/use-workload-reads";
-import type { WorkloadGroup } from "../lib/fleet";
+import { groupByWorkload } from "../lib/fleet";
 
-const unit = {
-  runId: "r",
-  recipeId: "rec",
-  title: "GLM 5.3 Flash",
-  alias: "coder",
-  state: "running",
-  tone: "ok",
-  nodes: [],
-  ranks: {},
-} as WorkloadGroup;
+// The real projection ids: the run carries a catalog recipe id and the revision id the recipe read takes.
+const REVISION = "0b6c0f0e-4f56-4d27-8c0f-2f7a1d5a6a01";
+const unit = groupByWorkload([
+  {
+    id: "spk_0123456789abcdef0123456789abcdef",
+    display_name: "Spark One",
+    loaded: [
+      {
+        run_id: "r",
+        recipe_id: "6a5b4c3d-0000-4000-8000-000000000001",
+        recipe_revision_id: REVISION,
+        title: "GLM 5.3 Flash",
+        alias: "coder",
+        run_state: "running",
+        healthy: true,
+        rank: 0,
+      },
+    ],
+  } as unknown as VisualFleetNode,
+]).clusters[0]!.units[0]!;
 
 function series(metric: string, title: string, unitName: string, latest: number | null) {
   const points = [100, 160, 200].map((t) => ({ timestamp: t, value: latest }));
@@ -111,10 +126,21 @@ test("an engine figure takes its title and unit from the catalogue; a metric it 
   expect(screen.queryByText("Prefill throughput")).toBeNull();
 });
 
-const jobApi = (adapter: string): JobWorkloadApi =>
-  ({
-    recipeDetail: async () => ({ document: { interfaces: [{ adapter }] } }),
-    artifactJobsForRun: async () => ({
+// Answers only the revision id, as the Controller does: the catalog recipe id is a 404.
+class FakeApi {
+  reads = 0;
+  failures = 0;
+  constructor(private readonly adapter: string) {}
+  async recipeDetail(selector: string) {
+    this.reads += 1;
+    if (selector !== REVISION || this.failures-- > 0) throw new Error("404 recipe not found");
+    return {
+      identity: { publisher: "vonk", slug: "h3-video" },
+      document: { interfaces: [{ adapter: this.adapter }] },
+    } as unknown as RecipeDetail;
+  }
+  async artifactJobsForRun(_run: string, _signal?: AbortSignal, limit?: number) {
+    return {
       jobs: [
         {
           id: "j1",
@@ -123,27 +149,46 @@ const jobApi = (adapter: string): JobWorkloadApi =>
           created_at: "2026-11-19T10:00:00Z",
           updated_at: "2026-11-19T10:15:16Z",
         } as ArtifactJob,
-      ],
-    }),
-  }) as unknown as JobWorkloadApi;
+      ].slice(0, limit),
+    };
+  }
+}
+const mount = (api: FakeApi) =>
+  render(<WorkloadHero api={api} unit={unit} reads={reads({})} live={false} />);
 
-test("a job recipe shows its jobs and a way to create one, not engine figures", async () => {
-  render(<WorkloadHero api={jobApi("video")} unit={unit} reads={reads({})} live={false} />);
+test("a job recipe shows its jobs and a create link by selector, not engine figures", async () => {
+  mount(new FakeApi("video-job"));
   expect(await screen.findByText(/takes jobs, not chat requests/)).toBeInTheDocument();
-  expect(await screen.findByText("15m 16s", { exact: false })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Create job" })).toHaveAttribute(
+  expect(await screen.findByText(/15m 16s/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Create a video" })).toHaveAttribute(
     "href",
-    "/library/recipes/rec",
+    "/library/recipes/vonk%2Fh3-video",
   );
   expect(screen.queryByText("Requests")).toBeNull();
   expect(screen.queryByText("Not reported")).toBeNull();
 });
 
 test("a chat recipe keeps the engine figures", async () => {
-  const api = jobApi("openai");
-  const read = vi.spyOn(api, "recipeDetail");
-  render(<WorkloadHero api={api} unit={unit} reads={reads({})} live={false} />);
-  await waitFor(() => expect(read).toHaveBeenCalled());
+  mount(new FakeApi("openai"));
+  expect(await screen.findByText("Requests")).toBeInTheDocument();
   expect(screen.queryByText(/takes jobs/)).toBeNull();
-  expect(screen.getAllByText("Requests").length).toBeGreaterThan(0);
+});
+
+test("an unreadable recipe claims nothing, then resolves when a retry reads it", async () => {
+  vi.useFakeTimers();
+  try {
+    const api = new FakeApi("video-job");
+    api.failures = 1;
+    mount(api);
+    await act(async () => {});
+    expect(screen.getByRole("status")).toHaveTextContent("Recipe unavailable");
+    expect(screen.queryByText("Requests")).toBeNull();
+    expect(screen.queryByText("Not reported")).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(screen.getByText(/takes jobs, not chat requests/)).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });

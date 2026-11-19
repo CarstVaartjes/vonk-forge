@@ -22,7 +22,15 @@ import {
   stringifyContractJson,
   type WireNumber,
 } from "../api/contract-numeric";
-import { LifecycleState } from "../api/vocabulary.generated";
+import {
+  isTerminal,
+  jobInterfacesOf,
+  jobTone,
+  phaseOf,
+  type JobRecipeInterface,
+} from "../lib/artifact-job";
+
+type JobRecipeDocument = RecipeDefinition;
 import { formatBytes } from "../lib/fleet";
 import { humanizeIdentifier, TechnicalDetails } from "./library-technical-details";
 import { StatusPill } from "./status-pill";
@@ -58,27 +66,11 @@ function integerInput(value: string): WireNumber | string {
   const parsed = materialize(parseContractJson(value));
   return isWireNumber(parsed) && contractType(parsed, ["integer"]) ? parsed : value;
 }
-const TERMINAL_STATES = new Set<string>(["succeeded", "failed", "cancelled"]);
-
-/** The name a job is shown under: its lifecycle state, or its preparation stage before it is submitted. */
-function phaseOf(job: ArtifactJob): string {
-  return job.state ?? job.preparation ?? "draft";
-}
-
-function isTerminal(job: ArtifactJob): boolean {
-  return job.state != null && TERMINAL_STATES.has(job.state);
-}
-
 /** A cancel was accepted and the job has not settled: it completes by itself, so nobody has to act. */
 function isCancelling(job: ArtifactJob): boolean {
   return job.cancel_requested_at != null && !isTerminal(job);
 }
 
-type JobRecipeDocument = RecipeDefinition;
-type JobRecipeInterface = Extract<
-  JobRecipeDocument["interfaces"][number],
-  { adapter: ArtifactJobInterface }
->;
 type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
 type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
 type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
@@ -204,19 +196,6 @@ const outputMedia: Record<ArtifactJobInterface, string[]> = {
     "image/webp",
   ],
 };
-
-function jobTone(state: string): "ok" | "warn" | "bad" | "info" {
-  if (state === LifecycleState.SUCCEEDED) return "ok";
-  if (state === LifecycleState.FAILED || state === LifecycleState.CANCELLED) return "bad";
-  if (
-    state === "running" ||
-    state === "queued" ||
-    state === LifecycleState.BACKOFF ||
-    state === LifecycleState.OBSERVING
-  )
-    return "info";
-  return "warn";
-}
 
 function filename(value: string): string {
   const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -474,11 +453,7 @@ export function ArtifactJobWorkspace({
 }) {
   type ActiveRun = { run_id: string; state: string };
   const document = detail.definition;
-  const jobInterfaces = useMemo(
-    () =>
-      document.interfaces.filter((item): item is JobRecipeInterface => item.adapter !== "openai"),
-    [document],
-  );
+  const jobInterfaces = useMemo(() => jobInterfacesOf(document), [document]);
   const [interfaceIndex, setInterfaceIndex] = useState(0);
   const jobInterface = jobInterfaces[interfaceIndex];
   const activeRun = detail.operational_state.runs.find(

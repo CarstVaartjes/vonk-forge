@@ -986,8 +986,15 @@ export class ApiClient implements ControlApi {
     );
   }
 
-  artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList> {
-    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs`, { signal });
+  artifactJobsForRun(
+    runId: string,
+    signal?: AbortSignal,
+    limit?: number,
+  ): Promise<ArtifactJobList> {
+    const query = limit === undefined ? "" : `?limit=${limit}`;
+    return this.request(`/api/recipe/runs/${encodeURIComponent(runId)}/artifact-jobs${query}`, {
+      signal,
+    });
   }
 
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob> {
