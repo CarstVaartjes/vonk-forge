@@ -46,7 +46,9 @@ from .cli_update import (
 from .control_client import (
     ControlClient,
     ControlClientError,
+    ControlNotConfigured,
     ControlTransportError,
+    ControlTransportUnsupported,
     ControlUnavailable,
 )
 from .controller_cli import (
@@ -249,6 +251,7 @@ def _control_error(
     if (
         isinstance(observation, Observation)
         and observation.status == ObservationStatus.ENDED
+        and not isinstance(error, (ControlNotConfigured, ControlTransportUnsupported))
     ):
         result.update(observation.document())
     candidates = getattr(error, "candidates", ())
@@ -536,6 +539,8 @@ def _emit(
         code = safe.get("code")
         if isinstance(safe.get("detail"), str):
             safe["detail"] = _plain_language_error(code, safe["detail"])
+            if safe["detail"] == safe.get("error"):
+                del safe["detail"]  # never print the same sentence twice
     else:
         safe = cast(dict[str, object], _plain_language_document(safe))
     preview = (
@@ -713,7 +718,7 @@ def _main(
             )
             cache_update_notice(result)
             status = 0
-        except (CliUpdateError, OSError) as error:
+        except (CliUpdateError, ControlClientError, OSError) as error:
             result = failure_document(_sanitize_text(error), CliErrorType.UPDATE)
             status = 2
         if args.global_json or getattr(args, "json", False):

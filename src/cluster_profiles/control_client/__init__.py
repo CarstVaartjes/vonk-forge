@@ -20,12 +20,14 @@ from .errors import ControlContractMismatch as ControlContractMismatch
 from .errors import ControlForbidden as ControlForbidden
 from .errors import ControlHTTPError as ControlHTTPError
 from .errors import ControlMalformedResponse as ControlMalformedResponse
+from .errors import ControlNotConfigured as ControlNotConfigured
 from .errors import ControlNotFound as ControlNotFound
 from .errors import ControlObservationUnavailable as ControlObservationUnavailable
 from .errors import ControlResponseTooLarge as ControlResponseTooLarge
 from .errors import ControlSchemaRejected as ControlSchemaRejected
 from .errors import ControlTimeout as ControlTimeout
 from .errors import ControlTransportError as ControlTransportError
+from .errors import ControlTransportUnsupported as ControlTransportUnsupported
 from .errors import ControlUnauthorized as ControlUnauthorized
 from .errors import ControlUnavailable as ControlUnavailable
 from .errors import JobFailed as JobFailed

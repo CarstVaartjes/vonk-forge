@@ -58,11 +58,13 @@ from .errors import (
     ControlContractMismatch,
     ControlHTTPError,
     ControlMalformedResponse,
+    ControlNotConfigured,
     ControlObservationUnavailable,
     ControlResponseTooLarge,
     ControlSchemaRejected,
     ControlTimeout,
     ControlTransportError,
+    ControlTransportUnsupported,
     JobFailed,
     JobWaitingForOperator,
     _OpenedResponse,
@@ -425,9 +427,7 @@ class ControlClient:
         url = os.environ.get("VONK_CONTROL_URL", "")
         token = os.environ.get("VONK_CONTROL_TOKEN_FILE", "")
         if not url or not token:
-            raise ControlClientError(
-                "VONK_CONTROL_URL and VONK_CONTROL_TOKEN_FILE are required"
-            )
+            raise ControlNotConfigured
         return cls(url, Path(token))
 
     def request(
@@ -663,7 +663,11 @@ class ControlClient:
                     request_id=request_id,
                 ),
             ) from None
-        except (ControlHTTPError, ControlObservationUnavailable):
+        except (
+            ControlHTTPError,
+            ControlObservationUnavailable,
+            ControlTransportUnsupported,
+        ):
             raise
         except (ControlMalformedResponse, ControlResponseTooLarge) as error:
             # The bounded HTTP error parser and canonical validators already
