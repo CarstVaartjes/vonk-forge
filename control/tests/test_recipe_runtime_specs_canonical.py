@@ -439,12 +439,16 @@ def test_canonical_argv_preserves_post_executable_platform_shaped_data(
         "--opaque",
         "--option=-c",
     ]
-    assert structured_command(
-        ("/opt/vonk/bin/argv-check", "--option=-c", "-c"), canonical_argv=True
-    )[1:] == (
+    assert structured_command(("/opt/vonk/bin/argv-check", "--option=-c", "-c"))[
+        1:
+    ] == (
         "--option=-c",
         "-c",
     )
+
+
+def test_structured_command_has_no_token_count_cap() -> None:
+    assert len(structured_command(("/opt/vonk/bin/x", *["--a"] * 300))) == 301
 
 
 def test_canonical_argv_json_and_utf8_bounds() -> None:
