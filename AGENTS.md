@@ -610,3 +610,5 @@ Merging source does not itself wipe a database. A deliberate database reset
 and its data loss are separate consequential operations requiring explicit
 authorization; do not infer reset authorization from permission to implement
 or merge.
+
+The agent validates a compiled execution plan once, in `executor/dispatch.rs` right after `RecipeOperationRequest::parse` (the `plan-validation` added-line guard refuses other `.validate()` calls on a plan; disk read-backs in `oci/custody.rs` and `oci/observation.rs` are the only other owners). `parse` stays structural so journal re-observation survives upgrades that tighten rules.

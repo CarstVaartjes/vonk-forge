@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::compiled_execution_plan::CompiledExecutionPlan;
+use crate::generated::CompiledSecurityNetworkMode;
 
 use super::validation::{
     model_source, model_target, ordered_environment, publications, validate_paths,
@@ -130,12 +131,10 @@ pub fn project(
     let security = OciSecurityOptions {
         user: plan.security.user.clone(),
         devices: plan.security.devices(),
-        // The plan's security block was validated at ingress to be exactly one
-        // of the three modes its placement derives.
-        network_mode: match plan.security.network_mode.as_str() {
-            "host" => OciNetworkMode::Host,
-            "bridge" => OciNetworkMode::Bridge,
-            _ => OciNetworkMode::None,
+        network_mode: match plan.security.network_mode {
+            CompiledSecurityNetworkMode::Host => OciNetworkMode::Host,
+            CompiledSecurityNetworkMode::Bridge => OciNetworkMode::Bridge,
+            CompiledSecurityNetworkMode::None => OciNetworkMode::None,
         },
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
         shared_memory_bytes: (plan.runtime.placement.reserved_memory_bytes / 8)

@@ -667,6 +667,7 @@ pub(super) fn runtime_failure(
     ExecutionResult::Failed(failure)
 }
 
+#[cfg(test)]
 pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     preparation_failure_at(error, FailureStage::Unknown, "preparation")
 }

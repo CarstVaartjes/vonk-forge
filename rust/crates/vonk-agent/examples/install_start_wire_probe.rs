@@ -102,19 +102,10 @@ fn result_for(claim: &AgentClaim, timings: &mut StageTimings) -> Result<AgentRes
         .measure("request_parse", || RecipeOperationRequest::parse(claim))
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
     let result = match request {
-        RecipeOperationRequest::Install(request) => {
-            timings
-                .measure("install_plan_validate", || {
-                    request.compiled_execution_plan.validate()
-                })
-                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-            recipe_install_success(request.expected_bytes)
-        }
+        RecipeOperationRequest::Install(request) => recipe_install_success(request.expected_bytes),
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
-            // The production OCI projection validates this same immutable spec
-            // before building arguments; do not repeat its full document and
-            // per-artifact validation immediately before that boundary.
+            // Dispatch validates the plan once before this boundary.
             let plan = timings.measure("start_oci_projection", || runtime_plan(&request, &spec))?;
             let _ = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success(&request)

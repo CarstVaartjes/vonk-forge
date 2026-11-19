@@ -217,9 +217,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return cancelled("controller cancelled before installation began");
         }
         let spec = request.compiled_execution_plan.clone();
-        if spec.validate().is_err() {
-            return failed("compiled execution plan is invalid");
-        }
         if *cancellation.borrow() {
             return cancelled("controller cancelled before model installation began");
         }

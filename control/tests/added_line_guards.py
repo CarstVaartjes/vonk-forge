@@ -78,6 +78,7 @@ MODES = (
     "reasons",
     "boundaries",
     "locks",
+    "plan-validation",
     "optimistic",
     "clocks",
     "excerpts",
@@ -1718,6 +1719,31 @@ def check_source(
             and line not in test_lines
             and re.search(
                 r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
+            )
+        )
+    if (
+        "plan-validation" in modes
+        and not is_test
+        and path.startswith("rust/crates/vonk-agent/src/")
+        and path.endswith(".rs")
+        and path
+        not in {
+            "rust/crates/vonk-agent/src/executor/dispatch.rs",
+            "rust/crates/vonk-agent/src/oci/custody.rs",
+            "rust/crates/vonk-agent/src/oci/observation.rs",
+        }
+    ):
+        # A compiled plan is validated once at dispatch (request ingress) and
+        # once where it is read back from disk. Another call repeats a rule.
+        test_lines = rust_test_lines(source)
+        noexit_hits.extend(
+            f"{path}:{line}: compiled plan validated again; dispatch owns it"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added
+            and line not in test_lines
+            and re.search(
+                r"\b(?:plan|spec|invocation|compiled_execution_plan)\s*\.validate\(\)",
+                text,
             )
         )
     if (

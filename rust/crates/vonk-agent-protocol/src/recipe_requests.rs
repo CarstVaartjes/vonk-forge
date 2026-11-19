@@ -79,8 +79,6 @@ impl RecipeReconciliationIdentity {
 }
 
 impl RecipeOperationRequest {
-    /// The one place a compiled execution plan is validated: every consumer in
-    /// the agent receives its plan through this request ingress.
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match (&claim.operation, &claim.payload) {
@@ -131,18 +129,13 @@ impl RecipeOperationRequest {
             Self::RuntimePreflight(_) => true,
             Self::Build(value) => validate_build(value),
             Self::BuildCleanup(_) => true,
-            Self::JobRun(value) => {
-                validate_recipe_job(value) && value.compiled_execution_plan.validate().is_ok()
-            }
+            Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
                 lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
                     && valid_role(&value.compiled_execution_plan.runtime.placement.role)
-                    && value.compiled_execution_plan.validate().is_ok()
             }
-            Self::Start(value) => {
-                validate_recipe_start(value) && value.compiled_execution_plan.validate().is_ok()
-            }
+            Self::Start(value) => validate_recipe_start(value),
             Self::Stop(value) => validate_recipe_stop(value),
             Self::Uninstall(value) => {
                 lower_hex(&value.plan_digest, 64)

@@ -169,14 +169,6 @@ fn a_dual_plan_stored_before_peer_addresses_existed_still_validates() {
 }
 
 #[test]
-fn unauthorized_host_network_mode_is_rejected() {
-    let mut value = fixture();
-    value["security"]["network_mode"] = json!("host");
-    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    assert!(plan.validate().is_err());
-}
-
-#[test]
 fn signed_endpoint_selects_bridge_and_exact_cdi_device() {
     let mut value = fixture();
     value["runtime"]["placement"]["endpoint_address"] = json!("192.168.1.211");

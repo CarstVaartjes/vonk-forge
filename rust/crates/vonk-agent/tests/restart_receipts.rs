@@ -625,6 +625,7 @@ fn a_journal_row_without_its_claim_is_deleted_not_refused() {
     .unwrap();
     drop(old);
     let mut reopened = StateStore::open(&path, NODE_ID).unwrap();
+    reopened.drop_claimless_rows().unwrap();
     assert_eq!(
         reopened.begin(&accepted, Utc::now()).unwrap(),
         BeginDecision::Execute
