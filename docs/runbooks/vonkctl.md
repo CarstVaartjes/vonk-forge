@@ -56,7 +56,7 @@ Use `--profile N` to select a
 stable numbered Profile for that invocation. Profile views default to
 Profile 1 and `profile endpoint` to the loaded profile.
 Profile edits, loads and `run` require an explicit `--profile N`; there is no
-saved selection. `profile endpoint` without it answers for the loaded profile.
+saved selection.
 
 Help is a map of the command tree and works offline. `vonkctl` (or
 `vonkctl --help`) lists where to start, every command group, and the global

@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 MAX_PAGE_LIMIT = 512
 
 
+class NoLoadedProfile(ValueError):
+    """No profile was named and none is loaded; a local usage answer."""
+
+
 MAX_LOG_LINES = 1000
 
 

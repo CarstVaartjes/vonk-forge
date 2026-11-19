@@ -15,7 +15,13 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
-from .common import ControllerClient, _profile_number, _quoted, _request_key
+from .common import (
+    ControllerClient,
+    NoLoadedProfile,
+    _profile_number,
+    _quoted,
+    _request_key,
+)
 from .confirmation import _confirm_action, _require_confirmation
 from .observation import (
     _bounded_timeout,
@@ -89,7 +95,7 @@ def _profile(
             return profiles
         loaded = _loaded_profile_number(profiles)
         if loaded is None:
-            return {"number": None, "application_id": None, "assignments": None}
+            raise NoLoadedProfile("No profile is loaded.")
         number = loaded
     else:
         number = _profile_number(args)

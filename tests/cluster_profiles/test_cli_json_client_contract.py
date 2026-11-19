@@ -155,6 +155,19 @@ def test_usage_error_document_matches_its_schema(capsys) -> None:
     _validate(DocumentKind.ERROR, json.loads(capsys.readouterr().out))
 
 
+def test_no_loaded_profile_error_document_matches_its_schema(capsys) -> None:
+    class Idle:
+        request_timeout_seconds = 1.0
+
+        def request(self, *_args, **_kwargs):
+            return {"profiles": [{"number": 1, "loaded_revision": None}]}
+
+    assert cli.main(("--json", "profile", "endpoint"), control_client=Idle()) == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["recovery_actions"] == ["vonkctl profile list"]
+    _validate(DocumentKind.ERROR, document)
+
+
 def test_failed_update_error_document_matches_its_schema(capsys, monkeypatch) -> None:
     def refuse(**kwargs):
         raise CliUpdateError("no signed release is reachable")

@@ -3409,7 +3409,7 @@ def test_profile_endpoint_survives_one_transient_failure_listing_profiles() -> N
     assert payload["number"] == 42
 
 
-def test_profile_endpoint_with_nothing_loaded_says_so_and_points_to_the_list(
+def test_profile_endpoint_with_nothing_loaded_is_a_local_error_with_a_next_step(
     capsys,
 ) -> None:
     client = FakeClient(
@@ -3422,10 +3422,10 @@ def test_profile_endpoint_with_nothing_loaded_says_so_and_points_to_the_list(
 
     status = cli.main(("profile", "endpoint"), control_client=client)
 
-    assert status == 0
-    out = capsys.readouterr().out
-    assert "No profile is loaded." in out
-    assert "Next: vonkctl profile list" in out
+    assert status == 2
+    err = capsys.readouterr().err
+    assert "No profile is loaded." in err
+    assert "Next: vonkctl profile list" in err
     assert [call[1] for call in client.calls] == ["/api/profile"]
 
 
