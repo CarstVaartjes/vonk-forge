@@ -196,7 +196,7 @@ export function LibrarySetupStrip({
   }));
   const anyCount = countBy(records, openSparks, query, noun);
   const fit = countFleetFit(records, filters, query, noun);
-  // Placement state (not qualification): only ready or blocked are verdicts; "unavailable" is unknown.
+  // Placement state (not qualification): only ready or blocked are verdicts; an unavailable fit is unknown.
   const assessed = fit.fits + fit.nonFit > 0;
   return (
     <section className="library-setup" aria-label="Start from your fleet">
