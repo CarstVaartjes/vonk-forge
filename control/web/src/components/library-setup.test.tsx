@@ -295,6 +295,22 @@ test("an assessed empty result keeps 0, not Fit not assessed", () => {
   );
 });
 
+test("header and button agree when every verdict is unavailable", () => {
+  render(
+    <LibrarySetupStrip
+      records={assessed(["unavailable"])}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={() => undefined}
+    />,
+  );
+  expect(screen.queryByText(/has not assessed placement/)).toBeNull();
+  expect(screen.getByRole("button", { name: /^Fits my fleet now/ })).not.toHaveTextContent(
+    "Fit not assessed",
+  );
+});
+
 test("a recipe used by several models is counted once", () => {
   const first = records.find((record) => record.recipe)!;
   const doubled = [...records, { ...first, key: `${first.key}:again`, modelKey: "other-model" }];

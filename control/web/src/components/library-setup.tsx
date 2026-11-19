@@ -58,6 +58,10 @@ export function countFleetFit(
   for (const rank of best.values()) byRank[rank] += 1;
   return { ...NO_VERDICTS, fits: byRank[2]!, unknown: byRank[1]!, nonFit: byRank[0]! };
 }
+/** Placement state (not qualification): the one predicate for "assessed" in the header and the fit button. */
+export function hasPlacementVerdict(records: LibraryRecipeRecord[]): boolean {
+  return records.some((record) => record.recipe?.assessment);
+}
 type FacetOption = { value: string; label: string; count: number };
 
 function countBy(
@@ -196,9 +200,7 @@ export function LibrarySetupStrip({
   }));
   const anyCount = countBy(records, openSparks, query, noun);
   const fit = countFleetFit(records, filters, query, noun);
-  const assessed = fit.fits + fit.nonFit > 0;
-  // Placement state (not qualification): no verdict at all means "not assessed", not zero.
-  const hasVerdict = records.some((record) => record.recipe?.assessment);
+  const assessed = hasPlacementVerdict(records);
   return (
     <section className="library-setup" aria-label="Start from your fleet">
       <header>
@@ -233,13 +235,13 @@ export function LibrarySetupStrip({
           type="button"
           className="library-setup-fit"
           aria-pressed={filters.fits}
-          aria-label={`Fits my fleet now: ${hasVerdict ? `${fit.fits} ${noun}` : "Fit not assessed"}`}
+          aria-label={`Fits my fleet now: ${assessed ? `${fit.fits} ${noun}` : "Fit not assessed"}`}
           disabled={fit.fits === 0 && !filters.fits}
           title="Keep what the Controller can place on fresh fleet capacity; unknown verdicts stay visible (vonkctl recipe library --fits-fleet)"
           onClick={() => onFiltersChange({ ...filters, fits: !filters.fits })}
         >
           Fits my fleet now
-          <small>{hasVerdict ? fit.fits : "Fit not assessed"}</small>
+          <small>{assessed ? fit.fits : "Fit not assessed"}</small>
         </button>
       </header>
       <div className="library-setup-tiles" role="group" aria-label="Sparks per recipe">
