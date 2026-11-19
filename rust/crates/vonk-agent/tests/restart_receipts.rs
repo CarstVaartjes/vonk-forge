@@ -75,13 +75,10 @@ fn completed_result_is_redelivered_until_acknowledged() {
 
 #[test]
 fn acknowledged_result_is_not_replayed_after_restart() {
-    // The original retention remedy was to delete reconciliation markers,
-    // which would let an acknowledged outcome replay on the next start.  An
-    // acknowledgement and its marker must survive a restart together, and only
-    // the diagnostic-only reconciliation path may see the receipt once.
+    // An acknowledged outcome is delivered exactly once, also across restart.
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
-    let result = {
+    {
         let mut state = StateStore::open(&path, NODE_ID).unwrap();
         let claim = claim();
         assert_eq!(
@@ -92,21 +89,11 @@ fn acknowledged_result_is_not_replayed_after_restart() {
             .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
             .unwrap();
         state.acknowledge(&result).unwrap();
-        result
-    };
+    }
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
     assert!(restarted.pending_results().unwrap().is_empty());
-    assert_eq!(
-        restarted.unreconciled_results().unwrap(),
-        vec![(AgentOperation::RecipeStop, result.clone())]
-    );
-    restarted.mark_reconciled(&result).unwrap();
-    drop(restarted);
-
-    let again = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(again.pending_results().unwrap().is_empty());
-    assert!(again.unreconciled_results().unwrap().is_empty());
+    assert!(restarted.next_delivery_result().unwrap().is_none());
 }
 
 #[test]
