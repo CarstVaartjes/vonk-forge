@@ -14,7 +14,6 @@ import {
   addWire,
   compareWire,
   contractType,
-  displayRatio,
   formatWire,
   isWireNumber,
   materialize,
@@ -22,13 +21,24 @@ import {
   stringifyContractJson,
   type WireNumber,
 } from "../api/contract-numeric";
-import { LifecycleState } from "../api/vocabulary.generated";
+import {
+  createJobTitle,
+  isTerminal,
+  jobElapsed,
+  jobInterfacesOf,
+  jobTone,
+  phaseOf,
+  type JobRecipeInterface,
+} from "../lib/artifact-job";
+
 import { formatBytes } from "../lib/fleet";
 import { humanizeIdentifier, TechnicalDetails } from "./library-technical-details";
 import { StatusPill } from "./status-pill";
 import { Time } from "./time";
 import { hashArtifactBlob } from "./artifact-hash";
 import "./artifact-job-workspace.css";
+
+type JobRecipeDocument = RecipeDefinition;
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
@@ -58,27 +68,11 @@ function integerInput(value: string): WireNumber | string {
   const parsed = materialize(parseContractJson(value));
   return isWireNumber(parsed) && contractType(parsed, ["integer"]) ? parsed : value;
 }
-const TERMINAL_STATES = new Set<string>(["succeeded", "failed", "cancelled"]);
-
-/** The name a job is shown under: its lifecycle state, or its preparation stage before it is submitted. */
-function phaseOf(job: ArtifactJob): string {
-  return job.state ?? job.preparation ?? "draft";
-}
-
-function isTerminal(job: ArtifactJob): boolean {
-  return job.state != null && TERMINAL_STATES.has(job.state);
-}
-
 /** A cancel was accepted and the job has not settled: it completes by itself, so nobody has to act. */
 function isCancelling(job: ArtifactJob): boolean {
   return job.cancel_requested_at != null && !isTerminal(job);
 }
 
-type JobRecipeDocument = RecipeDefinition;
-type JobRecipeInterface = Extract<
-  JobRecipeDocument["interfaces"][number],
-  { adapter: ArtifactJobInterface }
->;
 type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
 type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
 type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
@@ -204,19 +198,6 @@ const outputMedia: Record<ArtifactJobInterface, string[]> = {
     "image/webp",
   ],
 };
-
-function jobTone(state: string): "ok" | "warn" | "bad" | "info" {
-  if (state === LifecycleState.SUCCEEDED) return "ok";
-  if (state === LifecycleState.FAILED || state === LifecycleState.CANCELLED) return "bad";
-  if (
-    state === "running" ||
-    state === "queued" ||
-    state === LifecycleState.BACKOFF ||
-    state === LifecycleState.OBSERVING
-  )
-    return "info";
-  return "warn";
-}
 
 function filename(value: string): string {
   const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -385,9 +366,7 @@ function JobHistory({
           {job.result_evidence.elapsed_milliseconds != null && (
             <>
               <dt>Elapsed</dt>
-              <dd>
-                {displayRatio(job.result_evidence.elapsed_milliseconds, 1000).toLocaleString()} s
-              </dd>
+              <dd>{jobElapsed(job, Date.now())}</dd>
             </>
           )}
           {job.result_evidence.peak_memory_bytes != null && (
@@ -474,11 +453,7 @@ export function ArtifactJobWorkspace({
 }) {
   type ActiveRun = { run_id: string; state: string };
   const document = detail.definition;
-  const jobInterfaces = useMemo(
-    () =>
-      document.interfaces.filter((item): item is JobRecipeInterface => item.adapter !== "openai"),
-    [document],
-  );
+  const jobInterfaces = useMemo(() => jobInterfacesOf(document), [document]);
   const [interfaceIndex, setInterfaceIndex] = useState(0);
   const jobInterface = jobInterfaces[interfaceIndex];
   const activeRun = detail.operational_state.runs.find(
@@ -1203,7 +1178,7 @@ export function ArtifactJobWorkspace({
       <header className="artifact-job-heading">
         <div>
           <h4 id="artifact-job-heading" ref={heading} tabIndex={-1}>
-            Create artifacts
+            {createJobTitle(adapter)}
           </h4>
           <p>
             Send a bounded, durable {humanizeIdentifier(adapter)} request to this running recipe.

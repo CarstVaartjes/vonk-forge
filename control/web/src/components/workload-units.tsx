@@ -1,4 +1,5 @@
 import type { ControlApi, VisualFleetNode } from "../api/types";
+import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../hooks/use-workload-reads";
 import { groupByWorkload, type WorkloadCluster } from "../lib/fleet";
 import { SparkCard } from "./spark-card";
@@ -14,7 +15,7 @@ export function ClusterUnit({
   live,
   onOpen,
 }: {
-  api: Pick<ControlApi, "metricsSeries">;
+  api: Pick<ControlApi, "metricsSeries"> & Partial<JobWorkloadApi>;
   cluster: WorkloadCluster;
   /** Each Spark's place in the enrolment order, which fixes its colour. */
   order: ReadonlyMap<string, number>;
@@ -27,7 +28,7 @@ export function ClusterUnit({
   const [only] = cluster.units;
   const ranked = cluster.units.length === 1 && cluster.nodes.length > 1 ? only : undefined;
   return (
-    <WorkloadUnit cluster={cluster} reads={reads} live={live}>
+    <WorkloadUnit api={api} cluster={cluster} reads={reads} live={live}>
       {cluster.nodes.map((node) => (
         <SparkCard
           key={node.id}
@@ -52,7 +53,7 @@ export function WorkloadUnits({
   live,
   onOpen,
 }: {
-  api: Pick<ControlApi, "metricsSeries">;
+  api: Pick<ControlApi, "metricsSeries"> & Partial<JobWorkloadApi>;
   nodes: VisualFleetNode[];
   /** The page's reads: the units and the page's own figures share them. */
   reads: WorkloadReads;

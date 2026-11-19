@@ -1,3 +1,4 @@
+import { type JobWorkloadApi, useJobWorkload } from "../hooks/use-workload-jobs";
 import { ENGINE_FIGURES, type WorkloadReads } from "../hooks/use-workload-reads";
 import {
   aliasSeries,
@@ -11,6 +12,7 @@ import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../lib/fleet";
 import { AreaChart } from "./chart/area-chart";
 import { Estimate, EstimateTag } from "./estimate";
 import { StatusPill } from "./status-pill";
+import { WorkloadChecking, WorkloadJobs } from "./workload-jobs";
 
 const WINDOW_SECONDS = 1800;
 
@@ -35,24 +37,42 @@ export function WorkloadHeader({ unit }: { unit: WorkloadGroup }) {
  * computes none.
  */
 export function WorkloadHero({
+  api,
   unit,
   reads,
   live,
 }: {
+  /** Reads the recipe and jobs of a job workload; without it the workload shows as a model. */
+  api?: Partial<JobWorkloadApi>;
   unit: WorkloadGroup;
   reads: WorkloadReads;
   live: boolean;
 }) {
+  const jobs = useJobWorkload(api, unit);
   const { reading: hero, pending } = leadReading(reads, unit.alias);
   const spec = hero?.data.spec;
   const latest = hero?.series.summary.latest;
   const symbol = spec ? UNITS[spec.unit].symbol : "";
   const value = latest == null ? null : Number(latest);
   const queue = queueText(reads.running, reads.waiting, unit.alias);
+  // A job recipe takes jobs, not chat requests: its jobs replace the engine figures. Until the recipe has
+  // been read nothing is claimed about the workload.
+  if (jobs.kind === "job" || (jobs.kind === "unknown" && !jobs.error))
+    return (
+      <div className="workload-hero">
+        <WorkloadHeader unit={unit} />
+        {jobs.kind === "job" ? (
+          <WorkloadJobs revision={jobs.revision} adapter={jobs.interface} jobs={jobs.jobs} />
+        ) : (
+          <WorkloadChecking />
+        )}
+      </div>
+    );
   // While the speed reads are out nothing is claimed; once they are in, no latest value is Not reported.
   return (
     <div className="workload-hero">
       <WorkloadHeader unit={unit} />
+      {jobs.kind === "unknown" && <WorkloadChecking error={jobs.error} />}
       <div className="hero-body">
         <div className="hero-read">
           {spec && value !== null ? (
