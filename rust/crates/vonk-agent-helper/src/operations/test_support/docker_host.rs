@@ -167,6 +167,7 @@ impl Host {
                 let quiet = args.iter().any(|arg| arg == "--quiet");
                 let identity_read = args.iter().any(|arg| arg == REOBSERVE_FORMAT);
                 let id_filter = args.iter().find_map(|arg| arg.strip_prefix("id="));
+                let ended_only = args.iter().any(|arg| arg == "status=exited");
                 // Newest first, as Docker lists them; `--last` applies after
                 // the filters.
                 let lines: String = containers
@@ -179,6 +180,7 @@ impl Host {
                         name_filter.is_none_or(|name| name == format!("vonk-{}", container.target))
                     })
                     .filter(|container| id_filter.is_none_or(|id| id == container.id()))
+                    .filter(|container| !ended_only || matches!(container.state, "exited" | "dead"))
                     .take(last.unwrap_or(usize::MAX))
                     .map(|container| {
                         if quiet {

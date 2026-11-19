@@ -424,8 +424,29 @@ fn a_container_with_no_provable_owner_keeps_every_store_until_it_is_proven() {
         executor.helper_store_owners(deadline),
         Err(OperationError::InstallationReconciliationBusy)
     ));
-    // Listing, one inspection, one re-listing: no call per unproven container.
-    assert_eq!(host.calls.lock().unwrap().len(), 3);
+    // Listing, one inspection, one re-listing, one ended listing: no call per
+    // unproven container.
+    assert_eq!(host.calls.lock().unwrap().len(), 4);
+}
+
+#[test]
+fn an_unproven_exited_container_owns_nothing_but_a_running_one_still_blocks() {
+    // Exited containers kept for the serving grace must not stop retention.
+    let mut containers = managed_containers(3);
+    containers[1].state = "exited";
+    let exited = containers[1].id();
+    let running = containers[2].id();
+    let host = Host::with(&containers);
+    host.uninspectable.lock().unwrap().push(exited);
+    let (_temp, executor) = host_executor(&host);
+    let deadline = Instant::now() + Duration::from_secs(600);
+    let owners = executor.helper_store_owners(deadline).unwrap();
+    assert_eq!(owners.runtimes.len(), 2);
+    host.uninspectable.lock().unwrap().push(running);
+    assert!(matches!(
+        executor.helper_store_owners(deadline),
+        Err(OperationError::InstallationReconciliationBusy)
+    ));
 }
 
 #[test]

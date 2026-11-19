@@ -190,11 +190,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     /// What every managed container (any state) keeps in use. A container
     /// whose owner cannot be proven (its record does not parse, or Docker
-    /// will not inspect it) could use any store, so the pass then reports
-    /// `InstallationReconciliationBusy` and every owner-dependent collection
-    /// keeps everything. It stays that way for as long as the container is
-    /// listed and unreadable. A container that Docker no longer lists owns
-    /// nothing. Every Docker call is capped by what is left of `deadline`.
+    /// will not inspect it) could use any store while it runs, so the pass
+    /// then reports `InstallationReconciliationBusy` and every owner-dependent
+    /// collection keeps everything for as long as it stays listed and
+    /// unreadable. An unproven container Docker no longer lists, or one that
+    /// has ended (exited/dead: the platform never restarts it and a launch
+    /// holds `runtime_stores`), owns nothing. Every Docker call is capped by
+    /// what is left of `deadline`.
     fn helper_store_owners(&self, deadline: Instant) -> Result<Owners, OperationError> {
         let ids = self.managed_container_ids(deadline, Duration::from_secs(10))?;
         let mut owners = Owners::default();
@@ -228,6 +230,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let listed: HashSet<_> = listed.iter().collect();
             unproven.retain(|id| listed.contains(*id));
         }
+        if !unproven.is_empty() {
+            let ended = self.ended_container_ids(deadline, Duration::from_secs(10))?;
+            unproven.retain(|id| !ended.contains(*id));
+        }
         if unproven.is_empty() {
             return Ok(owners);
         }
@@ -241,6 +247,43 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .join(",")
         );
         Err(OperationError::InstallationReconciliationBusy)
+    }
+
+    /// The ids of managed containers that have ended (exited or dead).
+    fn ended_container_ids(
+        &self,
+        deadline: Instant,
+        cap: Duration,
+    ) -> Result<HashSet<String>, OperationError> {
+        let mut ids = HashSet::new();
+        let output = self.run_docker_lines(
+            &[
+                "container",
+                "ls",
+                "--all",
+                "--quiet",
+                "--no-trunc",
+                "--filter",
+                "label=ai.vonkforge.managed=true",
+                "--filter",
+                "status=exited",
+                "--filter",
+                "status=dead",
+            ]
+            .map(str::to_owned),
+            time_left(deadline, cap)?,
+            &mut |line| {
+                if lower_hex(line, 64) {
+                    ids.insert(line.to_owned());
+                }
+            },
+        )?;
+        if !output.success {
+            return Err(OperationError::CommandFailed {
+                cause: CommandFailure::exit(&output),
+            });
+        }
+        Ok(ids)
     }
 
     /// The ids of every managed container, in any state, read as a stream.
