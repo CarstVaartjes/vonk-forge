@@ -268,7 +268,7 @@ fn a_recovered_traceback_far_above_never_names_the_exit() {
     let (retained, summary) = summary_of(log, 1);
     // The first error of the capture is retained for the reader, but the exit
     // is decided by the window alone.
-    assert!(retained.stderr.text.contains("Traceback"));
+    assert!(retained.stderr.text.contains("ConnectionRefusedError"));
     assert!(summary.contains("exit_cause=unclassified"), "{summary}");
     assert!(!summary.contains("exception="), "{summary}");
 }

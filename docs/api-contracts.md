@@ -961,9 +961,9 @@ redaction; the protocol owns that number and the Controller, agent and helper re
 first (its reader accepts larger tails), then agents and helpers. The helper keeps a native abort report (`terminate called ...` and
 its `what()` message) ahead of the tail, marks the omitted middle, and stays
 within that bound. When a window drops the head of a stream, the helper also
-keeps the stream's first error lines (up to a quarter of the bound) ahead of it,
-so a root error is never lost behind repeated output; the exit is still
-classified from the window alone. The status is omitted when no
+keeps the first error lines of the capture (the last 400 lines or 32 KiB of
+`docker logs`), within 4 KiB, ahead of it; the exit is still classified from the
+window alone. The status is omitted when no
 numeric status was observed (including spawn failure or signal termination).
 The ingress path rule only exempts the diagnostics log-tail and property-value
 leaves from the filesystem-path ban; `FailureDiagnostics` owns their length bounds.

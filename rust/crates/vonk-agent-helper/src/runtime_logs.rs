@@ -39,7 +39,7 @@
 //! * The window keeps the first error.  A failed start prints its root error
 //!   first and later output repeats the failure (four identical tracebacks
 //!   filled a window and hid the first).  When the window drops the head of a
-//!   stream, the stream's first reporting lines, up to a quarter of the bound,
+//!   stream, each process's first error line, up to a quarter of the bound,
 //!   are retained ahead of it, with the omitted middle marked.  They are
 //!   evidence for the reader only: an exit is classified from the window
 //!   without them, since the workload may have recovered from that error.
@@ -375,7 +375,7 @@ fn window_within(stream: &[u8], total: usize) -> (Vec<Range<usize>>, Range<usize
 /// The first error of a failed start is usually printed first, and a window
 /// anchored on the last failure line (or a plain tail) loses it when later
 /// output repeats the same failure.  When the window drops the head of the
-/// stream, the whole lines from its first reporting line, up to [`HEAD_BYTES`], are retained as causes,
+/// stream, the each process's first error line, up to [`HEAD_BYTES`], is retained as causes,
 /// the window is chosen again within what they and the omission marker leave,
 /// and everything retained still fits in [`RETAINED_BYTES`].
 fn window(stream: &[u8], keep_head: bool) -> (Vec<Range<usize>>, Range<usize>) {
@@ -389,31 +389,8 @@ fn window(stream: &[u8], keep_head: bool) -> (Vec<Range<usize>>, Range<usize>) {
     let below = causes
         .first()
         .map_or(above(stream, &range), |line| line.start);
-    // The head starts at the stream's first reporting line, so start-up chatter
-    // above it does not spend the budget.
-    let mut head = Vec::new();
-    let mut offset = 0;
-    let mut used = 0;
-    for line in stream.split_inclusive(|byte| *byte == b'\n') {
-        let end = offset + line.len();
-        if !line.ends_with(b"\n") || end > below {
-            break;
-        }
-        let reports = contains(line, TRACEBACK)
-            || CAUSE_MARKERS
-                .iter()
-                .any(|marker| contains(line, marker.as_bytes()));
-        if head.is_empty() && !reports {
-            offset = end;
-            continue;
-        }
-        if used + line.len() > HEAD_BYTES {
-            break;
-        }
-        used += line.len();
-        head.push(offset..end);
-        offset = end;
-    }
+    // The first error line of each process, as for a summary that points above.
+    let mut head = first_failure_lines(stream, below, HEAD_BYTES);
     if head.is_empty() {
         return first;
     }
@@ -748,7 +725,9 @@ fn classified_windows(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
 /// CAPTURE_LINES` printed, as the helper's command runner kept it (the last
 /// `package_command::STREAM_RETAINED_BYTES` of each stream).  An exit is
 /// classified from this alone, and everything it needs is derived once, here:
-/// the windows that cross the protocol, their own closing exception, and the
+/// the windows that cross the protocol, the classified windows (the same
+/// windows without the first error kept for the reader, which is all
+/// classification reads), their closing exception, and the
 /// closing exception of the whole capture, admitted only when a window points
 /// above itself.  Classification can never be handed a window.
 #[derive(Clone, Debug, PartialEq)]
@@ -930,8 +909,9 @@ fn has(text: &str, needles: &[&str]) -> bool {
 }
 
 /// Classify from the exit state first (it is authoritative), then from the
-/// container's own words in the retained windows, the text the evidence
-/// carries.  A window can drop the line that names a cause: a two-Spark vLLM
+/// container's own words in the classified windows (the retained windows
+/// without the first error kept for the reader, not the text that crosses the
+/// protocol).  A window can drop the line that names a cause: a two-Spark vLLM
 /// start ends in kilobytes of C++ frames below the engine's `RuntimeError:
 /// Worker failed with error 'CUDA error: no kernel image ...`, and the window
 /// keeps only the frames and the pointer to it.  So an exit the windows leave
@@ -1999,9 +1979,6 @@ mod tests {
         stream.extend(canary.as_bytes());
         let tail = retain(&stream);
         assert!(tail.text.ends_with(canary), "{}", tail.text);
-        // The first error of the capture is kept ahead of the window.
-        assert!(tail.text.contains("optional_feature"), "{}", tail.text);
-        assert!(tail.text.contains("bytes omitted]"), "{}", tail.text);
     }
 
     #[test]
