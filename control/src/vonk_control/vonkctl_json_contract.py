@@ -353,6 +353,7 @@ def incompatibilities(
     new: object,
     path: str = "",
     roots: tuple[object, object] | None = None,
+    seen: frozenset[tuple[object, object]] = frozenset(),
 ) -> list[str]:
     """What a client of ``old`` can no longer rely on in ``new``.
 
@@ -383,15 +384,22 @@ def incompatibilities(
                     continue
                 before = _definition(roots[0], value) if key == "$ref" else None
                 after = _definition(roots[1], new[key]) if key == "$ref" else None
+                pair = (value, new[key])
                 if (
                     before is not None
                     and after is not None
-                    and not incompatibilities(before, after, where, roots)
+                    and (
+                        pair in seen
+                        or not incompatibilities(
+                            before, after, where, roots, seen | {pair}
+                        )
+                    )
                 ):
+                    # A pair already being compared is compatible (recursive defs).
                     continue
                 problems.append(f"{where}: {value!r} became {new[key]!r}")
             else:
-                problems.extend(incompatibilities(value, new[key], where, roots))
+                problems.extend(incompatibilities(value, new[key], where, roots, seen))
     elif isinstance(old, list) and isinstance(new, list):
         if path.rsplit("/", 1)[-1] in ("anyOf", "oneOf"):
             # Alternatives pair by ``$ref``; a dropped one is never emitted.
@@ -412,7 +420,9 @@ def incompatibilities(
         else:
             pairs = list(zip(old, new, strict=False))
         for index, (before, after) in enumerate(pairs):
-            problems.extend(incompatibilities(before, after, f"{path}/{index}", roots))
+            problems.extend(
+                incompatibilities(before, after, f"{path}/{index}", roots, seen)
+            )
     return problems
 
 
