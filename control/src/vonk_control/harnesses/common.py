@@ -10,7 +10,6 @@ from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
 
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
-_SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(
     {"sh", "bash", "dash", "ash", "zsh", "ksh", "csh", "tcsh", "fish", "busybox"}
