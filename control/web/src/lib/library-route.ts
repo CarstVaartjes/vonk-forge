@@ -1,7 +1,9 @@
+import { canonicalRecipeSelector, type LibraryViewRecipe } from "../api/types";
+
 export type LibraryRoute =
   | { kind: "root" }
   | { kind: "model"; modelKey: string }
-  | { kind: "recipe"; recipeId: string };
+  | { kind: "recipe"; selector: string };
 
 function decode(value: string): string | undefined {
   try {
@@ -20,8 +22,8 @@ export function libraryRoute(path: string): LibraryRoute {
   }
   const recipe = /^\/library\/recipes\/([^/]+)$/.exec(path);
   if (recipe) {
-    const recipeId = decode(recipe[1]);
-    if (recipeId !== undefined) return { kind: "recipe", recipeId };
+    const selector = decode(recipe[1]);
+    if (selector !== undefined) return { kind: "recipe", selector };
   }
   return { kind: "root" };
 }
@@ -38,7 +40,10 @@ export function modelLibraryPath(modelKey: string): string {
   return `/library/models/${encodeURIComponent(modelKey)}`;
 }
 
-/** `selector` is what GET /api/recipe/{selector} accepts: a revision id or a selector, never a recipe id. */
-export function recipeLibraryPath(selector: string): string {
+/** Link by the recipe selector (newest revision), never by a recipe or revision id. */
+export function recipeLibraryPath(
+  recipe: Pick<LibraryViewRecipe, "publisher" | "slug"> | { selector: string },
+): string {
+  const selector = "selector" in recipe ? recipe.selector : canonicalRecipeSelector(recipe);
   return `/library/recipes/${encodeURIComponent(selector)}`;
 }

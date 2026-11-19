@@ -472,8 +472,8 @@ function ModelRevisionsRow({
           {recipes.map((recipe) => (
             <li key={recipe.recipe_revision_id}>
               <a
-                href={recipeLibraryPath(recipe.recipe_revision_id)}
-                onClick={(event) => onNavigate(event, recipeLibraryPath(recipe.recipe_revision_id))}
+                href={recipeLibraryPath(recipe)}
+                onClick={(event) => onNavigate(event, recipeLibraryPath(recipe))}
               >
                 {recipe.title}
               </a>
