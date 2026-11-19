@@ -296,8 +296,9 @@ fn clamp_retained(text: String, limit: usize) -> (String, usize) {
     };
     let (causes, tail) = (&text[..marker.start], &text[marker.end..]);
     let budget = limit.saturating_sub(marker.len());
-    // The helper reserves at most half its bound for the causes; the tail
-    // takes whatever the causes leave.
+    // The causes the helper keeps (first error lines, a native abort, memory
+    // figures) take at most half of its bound; the tail takes whatever they
+    // leave.
     let causes = keep_front(causes, (budget / 2).max(budget.saturating_sub(tail.len())));
     let (tail, _) = clamp_tail(tail.to_owned(), budget - causes.len());
     let kept = format!("{causes}{}{tail}", &text[marker]);
