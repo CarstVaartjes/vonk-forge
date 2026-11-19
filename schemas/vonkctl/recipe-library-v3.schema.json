@@ -1389,6 +1389,55 @@
         }
       ]
     },
+    "KnobDisplay": {
+      "description": "What a form shows for one job knob; its type and limits stay in the recipe.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "title": "KnobDisplay",
+      "type": "object"
+    },
     "LibraryAssessmentCode": {
       "description": "Why a library entry is not assessed runnable on the current fleet.",
       "enum": [
@@ -3761,6 +3810,20 @@
           "default": "recipe-display",
           "title": "Kind",
           "type": "string"
+        },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/KnobDisplay"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
         },
         "tags": {
           "items": {

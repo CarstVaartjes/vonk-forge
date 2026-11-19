@@ -14,8 +14,21 @@ from ..generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
 from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
+from ..generated_control.models.boolean_parameter import BooleanParameter
+from ..generated_control.models.enum_parameter import EnumParameter
+from ..generated_control.models.float_parameter import FloatParameter
+from ..generated_control.models.integer_parameter import IntegerParameter
+from ..generated_control.models.string_parameter import StringParameter
 from ..generated_control.types import Unset
 from .common import _bytes, _field, _records, _text, _time
+
+type Knob = (
+    StringParameter
+    | IntegerParameter
+    | FloatParameter
+    | BooleanParameter
+    | EnumParameter
+)
 
 
 class ResultFiles(StrEnum):
@@ -174,18 +187,56 @@ def _contract_slots(label: str, slots: list[ArtifactSlotContract]) -> None:
         _field(f"{label} max total size", _bytes(slot.max_total_bytes))
 
 
+def knob_range(low: object, high: object, step: object) -> str:
+    """The range and step a numeric knob declares, in words."""
+    if low is not None and high is not None:
+        text = f"{low} to {high}"
+    else:
+        text = f"at least {low}" if low is not None else f"at most {high}"
+    return f"{text} in steps of {step}" if step is not None else text
+
+
+def contract_knob_fields(knob: Knob) -> list[tuple[str, object]]:
+    """One knob's printed fields: only what its definition sets."""
+    low, high, step = (
+        declared(knob.minimum),
+        declared(knob.maximum),
+        declared(knob.step),
+    )
+    allowed = declared(knob.allowed_values)
+    fields: list[tuple[str, object | None]] = [
+        ("Knob", knob.name),
+        ("Knob label", declared(knob.label)),
+        ("Knob type", knob.type_),
+        ("Knob default", knob.default),
+        (
+            "Knob range",
+            knob_range(low, high, step)
+            if low is not None or high is not None
+            else None,
+        ),
+        (
+            "Knob allowed values",
+            ", ".join(str(value) for value in allowed) if allowed else None,
+        ),
+        ("Knob unit", declared(knob.unit)),
+        ("Knob description", declared(knob.description)),
+    ]
+    return [(label, value) for label, value in fields if value is not None]
+
+
 def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     contract = answer.contract
     if contract is None or isinstance(contract, Unset):
         raise ControlMalformedResponse("job contract observation is unavailable")
-    _field("Recipe", _set(answer.recipe))
-    _field("Recipe revision", _set(answer.recipe_revision_id))
-    run_id = _set(answer.run_id)
+    _field("Recipe", declared(answer.recipe))
+    _field("Recipe revision", declared(answer.recipe_revision_id))
+    run_id = declared(answer.run_id)
     if run_id is not None:
         _field("Run", run_id)
-        _field("Alias", _set(answer.alias))
+        _field("Alias", declared(answer.alias))
     _field("Interface", contract.interface)
-    _field("Contract SHA-256", _set(answer.contract_sha256))
+    _field("Contract SHA-256", declared(answer.contract_sha256))
     _field("Max job timeout", f"{contract.max_timeout_seconds} seconds")
     _field("Input required", "yes" if contract.input_.required else "no")
     _field("Input max bytes", _bytes(contract.input_.max_bytes))
@@ -193,17 +244,16 @@ def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
     _field("Output max bytes", _bytes(contract.output.max_total_bytes))
     _contract_slots("Output slot", contract.output.slots)
     for knob in contract.parameters:
-        _field("Knob", knob.name)
-        _field("Knob type", knob.type_)
-        _field("Knob default", knob.default)
-    _field(
-        "Next",
-        f"vonkctl job create --run {shlex.quote(run_id or '<run>')} "
-        "--file <binding.json>",
-    )
+        for label, value in contract_knob_fields(knob):
+            _field(label, value)
+    alias = declared(answer.alias)
+    parts = ["vonkctl job run", shlex.quote(alias or "<alias>")]
+    parts += [f"--input {slot.id}=<path>" for slot in contract.input_.slots[:1]]
+    parts += [f"--option {knob.name}=<value>" for knob in contract.parameters[:1]]
+    _field("Next", " ".join(parts))
 
 
-def _set[T](value: T | Unset) -> T | None:
+def declared[T](value: T | Unset) -> T | None:
     """A generated optional field, absent as ``None``."""
     return None if isinstance(value, Unset) else value
 

@@ -118,11 +118,6 @@
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
-      "type": "RecipeParameter",
-      "reason": "UI-only view model derived from generated API types for one screen; not an API document"
-    },
-    {
       "file": "control/web/src/components/chart/area-chart.tsx",
       "type": "ChartSeries",
       "reason": "Chart drawing input (label, colour token, plotted points) assembled in the browser from generated metric/telemetry series; never serialized as API data."

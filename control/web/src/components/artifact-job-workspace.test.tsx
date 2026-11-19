@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   ArtifactJob,
+  ArtifactJobParameter,
   LibraryApi,
   LibraryViewRecipeDetail,
   RecipeDefinition,
@@ -260,6 +261,26 @@ function job(given: JobInput = {}): ArtifactJob {
   } as ArtifactJob;
 }
 
+const contractParameters = [
+  {
+    name: "steps",
+    type: "integer",
+    default: 24,
+    minimum: 1,
+    maximum: 100,
+    step: 1,
+    label: "Inference steps",
+    unit: "steps",
+    description: "More steps, finer detail.",
+    allowed_values: [],
+  },
+  { name: "negative_prompt", type: "string", default: "", allowed_values: [] },
+] as ArtifactJobParameter[];
+
+function contractRead(parameters: ArtifactJobParameter[]) {
+  return { state: "available", contract: { parameters } };
+}
+
 function api(initialJobs: ArtifactJob[] = []) {
   const submitted = job({ state: "succeeded" });
   let storedDraft: ArtifactJob | undefined;
@@ -281,6 +302,7 @@ function api(initialJobs: ArtifactJob[] = []) {
         remaining_bytes: 9_663_676_416,
       },
     }),
+    artifactJobContract: vi.fn().mockResolvedValue(contractRead(contractParameters)),
     artifactJobsForRun: vi.fn().mockResolvedValue({ jobs: initialJobs }),
     artifactJobByRequestId: vi
       .fn()
@@ -360,7 +382,9 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
 
   expect(await screen.findByText("No artifact jobs yet")).toBeInTheDocument();
-  expect(screen.getByRole("textbox", { name: "Steps" })).toHaveValue("24");
+  const steps = await screen.findByRole("textbox", { name: "Inference steps" });
+  expect(steps).toHaveValue("24");
+  expect(screen.getByText(/More steps, finer detail\. 1 to 100/)).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Negative Prompt" })).toHaveValue("");
   expect(screen.getByText(/optional visual reference.*image\/png/i)).toBeInTheDocument();
   const submit = screen.getByRole("button", { name: "Submit artifact job" });
@@ -1282,13 +1306,19 @@ test("keeps the declared native form visible while controller capacity is loadin
 test("keeps a wide integer recipe setting exact through editing and durable request creation", async () => {
   const user = userEvent.setup();
   const client = api();
-  const recipe = detail();
-  if (recipe.definition.settings.kind !== "job" || !recipe.definition.settings.knobs)
-    throw new Error("job fixture required");
-  recipe.definition.settings.knobs.steps.value = new LosslessNumber("9007199254740993");
-  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={recipe} />);
+  client.artifactJobContract.mockResolvedValue(
+    contractRead([
+      {
+        name: "steps",
+        type: "integer",
+        default: new LosslessNumber("9007199254740993"),
+        allowed_values: [],
+      } as ArtifactJobParameter,
+    ]),
+  );
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
   await screen.findByText("No artifact jobs yet");
-  const setting = screen.getByRole("textbox", { name: "Steps" });
+  const setting = await screen.findByRole("textbox", { name: "Steps" });
   expect(setting).toHaveAttribute("value", "9007199254740993");
   await user.clear(setting);
   await user.type(setting, "9007199254740995");
@@ -1347,4 +1377,84 @@ test("checks browser input bytes against the Controller's exact declared transpo
   const inputs = client.createArtifactJob.mock.calls[0][1].inputs;
   if (!inputs?.[0]) throw new Error("accepted input declaration required");
   expect(inputs[0].size_bytes).toBe(1);
+});
+
+test("renders an enum as a select and a bounded float input", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.artifactJobContract.mockResolvedValue(
+    contractRead([
+      {
+        name: "num-frames",
+        type: "enum",
+        default: 49,
+        allowed_values: [49, 97],
+        label: "Frames",
+      },
+      { name: "scale", type: "float", default: 1.5, minimum: 0.5, maximum: 4, allowed_values: [] },
+    ] as ArtifactJobParameter[]),
+  );
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
+
+  const frames = await screen.findByRole("combobox", { name: "Frames" });
+  expect(
+    within(frames)
+      .getAllByRole("option")
+      .map((item) => item.textContent),
+  ).toEqual(["49", "97"]);
+  await user.selectOptions(frames, "97");
+  const scale = screen.getByRole("textbox", { name: "Scale" });
+  expect(screen.getByText("0.5 to 4")).toBeInTheDocument();
+  await user.clear(scale);
+  await user.type(scale, "2.5");
+  await user.type(screen.getByRole("textbox", { name: "Prompt" }), "x");
+  await user.upload(
+    screen.getByLabelText("Reference image"),
+    new File([new Uint8Array(8)], "source.png"),
+  );
+  await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
+  await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalled());
+  expect(client.createArtifactJob.mock.calls[0][1].parameters).toEqual({
+    "num-frames": 97,
+    scale: 2.5,
+  });
+});
+
+test("keeps the typed prompt and picked file when the contract arrives", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  let arrive: (value: ReturnType<typeof contractRead>) => void = () => {};
+  client.artifactJobContract.mockReturnValue(new Promise((resolve) => (arrive = resolve)));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
+
+  expect(await screen.findByRole("button", { name: "Loading recipe settings…" })).toBeDisabled();
+  await user.type(screen.getByRole("textbox", { name: "Prompt" }), "kept");
+  await user.upload(
+    screen.getByLabelText("Reference image"),
+    new File([new Uint8Array(8)], "source.png"),
+  );
+  arrive(contractRead(contractParameters));
+
+  await screen.findByRole("textbox", { name: "Inference steps" });
+  expect(screen.getByRole("textbox", { name: "Prompt" })).toHaveValue("kept");
+  expect(screen.getByRole("button", { name: "Submit artifact job" })).toBeEnabled();
+});
+
+test("a failed contract read blocks submit until the retry succeeds", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  client.artifactJobContract.mockRejectedValueOnce(new Error("controller offline"));
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
+
+  expect(await screen.findByText("controller offline")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Recipe settings required" })).toBeDisabled();
+  await user.type(screen.getByRole("textbox", { name: "Prompt" }), "x");
+  await user.upload(
+    screen.getByLabelText("Reference image"),
+    new File([new Uint8Array(8)], "source.png"),
+  );
+  await user.click(screen.getByRole("button", { name: "Retry recipe settings" }));
+
+  expect(await screen.findByRole("button", { name: "Submit artifact job" })).toBeEnabled();
+  expect(screen.getByRole("textbox", { name: "Prompt" })).toHaveValue("x");
 });

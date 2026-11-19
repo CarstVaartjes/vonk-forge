@@ -463,6 +463,30 @@
           "title": "Default",
           "type": "boolean"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -491,10 +515,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "boolean",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -574,6 +615,30 @@
         "default": {
           "$ref": "#/$defs/ParameterScalar"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -602,10 +667,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "enum",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -638,6 +720,30 @@
           ],
           "title": "Default"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "anyOf": [
             {
@@ -686,10 +792,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "float",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -714,6 +837,30 @@
           "title": "Default",
           "type": "integer"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "anyOf": [
             {
@@ -756,10 +903,35 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
         "type": {
           "const": "integer",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -945,6 +1117,30 @@
           "title": "Default",
           "type": "string"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -973,10 +1169,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "string",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [

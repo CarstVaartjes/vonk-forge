@@ -82,6 +82,7 @@ from .contracts import (
     _effective_output_limits,
     _effective_parameters,
     _output_mappings,
+    _recipe_display,
     _recipe_interface,
     _validate_inputs_against_contract,
 )
@@ -375,7 +376,7 @@ class ArtifactJobService(OutputService):
                 "recipe revision evidence is unavailable",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        _revision, recipe = resolved
+        revision, recipe = resolved
         if _recipe_interface(recipe) != interface or interface == "openai":
             if existing is not None:
                 raise ArtifactJobInvalid(
@@ -387,9 +388,12 @@ class ArtifactJobService(OutputService):
                 reason=InvalidRequestReason.CONFLICT,
             )
         try:
-            contract = _compile_contract(recipe, interface)
+            contract = _compile_contract(
+                recipe, interface, _recipe_display(session, revision)
+            )
             if isinstance(contract, Damaged):
-                # The revision is immutable: its contract never compiles, so a
+                # Compiling depends on the recipe alone (display only adds
+                # wording), and a revision is immutable: it never compiles, so a
                 # retry cannot succeed. Refuse it with the cause, never "retry".
                 raise ArtifactJobInvalid(
                     f"recipe artifact contract does not compile: {contract.note}",

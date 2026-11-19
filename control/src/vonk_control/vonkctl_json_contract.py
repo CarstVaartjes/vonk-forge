@@ -342,14 +342,29 @@ def schema_text(kind: DocumentKind) -> str:
     return json.dumps(document_schema(kind), indent=2, sort_keys=True) + "\n"
 
 
-def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
+def _definition(root: object, ref: object) -> object:
+    name = ref.removeprefix("#/$defs/") if isinstance(ref, str) else ""
+    defs = root.get("$defs") if isinstance(root, dict) else None
+    return defs.get(name) if isinstance(defs, dict) else None
+
+
+def incompatibilities(
+    old: object,
+    new: object,
+    path: str = "",
+    roots: tuple[object, object] | None = None,
+    seen: frozenset[tuple[object, object]] = frozenset(),
+) -> list[str]:
     """What a client of ``old`` can no longer rely on in ``new``.
 
     A removed property, a ``required`` list that grew or a changed ``type`` needs
     a new ``schema_version``; added properties and added or removed
-    alternatives do not.
+    alternatives do not. A ``$ref`` that now names another definition is
+    compatible when that definition is the old one plus compatible additions
+    (it passes the same check), so a type may gain optional fields as a subtype.
     """
 
+    roots = roots or (old, new)
     problems: list[str] = []
     if isinstance(old, dict) and isinstance(new, dict):
         for key, value in old.items():
@@ -365,10 +380,26 @@ def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
                 if grown:
                     problems.append(f"{where}: now required {grown}")
             elif key in ("type", "const", "$ref"):
-                if value != new[key]:
-                    problems.append(f"{where}: {value!r} became {new[key]!r}")
+                if value == new[key]:
+                    continue
+                before = _definition(roots[0], value) if key == "$ref" else None
+                after = _definition(roots[1], new[key]) if key == "$ref" else None
+                pair = (value, new[key])
+                if (
+                    before is not None
+                    and after is not None
+                    and (
+                        pair in seen
+                        or not incompatibilities(
+                            before, after, where, roots, seen | {pair}
+                        )
+                    )
+                ):
+                    # A pair already being compared is compatible (recursive defs).
+                    continue
+                problems.append(f"{where}: {value!r} became {new[key]!r}")
             else:
-                problems.extend(incompatibilities(value, new[key], where))
+                problems.extend(incompatibilities(value, new[key], where, roots, seen))
     elif isinstance(old, list) and isinstance(new, list):
         if path.rsplit("/", 1)[-1] in ("anyOf", "oneOf"):
             # Alternatives pair by ``$ref``; a dropped one is never emitted.
@@ -389,7 +420,9 @@ def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
         else:
             pairs = list(zip(old, new, strict=False))
         for index, (before, after) in enumerate(pairs):
-            problems.extend(incompatibilities(before, after, f"{path}/{index}"))
+            problems.extend(
+                incompatibilities(before, after, f"{path}/{index}", roots, seen)
+            )
     return problems
 
 

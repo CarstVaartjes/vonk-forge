@@ -30,6 +30,7 @@ from .contracts import (
     ArtifactJobError,
     _active_recipe_revision,
     _compile_contract,
+    _recipe_display,
     _recipe_interface,
 )
 
@@ -134,7 +135,7 @@ def read_job_contract(
             state=JobContractState.NOT_A_JOB_RECIPE,
             detail="the recipe declares no single job interface, so it takes no jobs",
         )
-    contract = _compile_contract(recipe, interface)
+    contract = _compile_contract(recipe, interface, _recipe_display(session, revision))
     if isinstance(contract, Damaged):
         return answer(
             state=JobContractState.CONTRACT_INVALID,

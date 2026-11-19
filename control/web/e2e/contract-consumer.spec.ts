@@ -83,6 +83,15 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
       }),
   );
   await page.route(
+    (url) => url.pathname === `/api/artifact-jobs/contract/run/${routing.run_id}`,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: routing.contract_json,
+      }),
+  );
+  await page.route(
     (url) => url.pathname === "/api/fleet",
     (route) =>
       route.fulfill({

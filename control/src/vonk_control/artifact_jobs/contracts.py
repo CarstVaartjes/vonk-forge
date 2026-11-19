@@ -33,7 +33,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
 
 from ..artifact_blob_store import ArtifactBlobStoreError, BlobReconciliation
 from ..artifact_job_evidence import (
@@ -56,7 +56,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import ArtifactJob, CatalogDocumentRevision, Job, RunNode
+from ..models import ArtifactJob, CatalogDocument, CatalogDocumentRevision, Job, RunNode
 from ..run_switch_contract import MemoryKind
 from ..stored_json import read_row_column
 from ..stored_states import CatalogRevisionState
@@ -167,6 +167,16 @@ def _active_recipe_revision(
     except (TypeError, ValueError):
         return None
     return revision, recipe
+
+
+def _recipe_display(
+    session: Session, revision: CatalogDocumentRevision
+) -> RecipeDisplay | None:
+    """The recipe's current display (knob wording); ``None`` when it has none yet
+    or cannot be read, and the contract then carries no wording."""
+
+    document = session.get(CatalogDocument, revision.document_id)
+    return None if document is None else document.readable_recipe_display()
 
 
 class ArtifactJobContractModel(StrictJSONModel):
@@ -382,14 +392,16 @@ def _finite_parameter_number(value: object) -> bool:
 
 
 def _compile_contract(
-    recipe: RecipeDefinition, interface_name: str
+    recipe: RecipeDefinition,
+    interface_name: str,
+    display: RecipeDisplay | None = None,
 ) -> CompiledArtifactContract | Damaged:
     """The contract a recipe declares, or ``Damaged`` (with the reason) when it
     does not compile: the caller decides, a request refuses the recipe and a
     rebuild finds no evidence."""
 
     try:
-        return compile_artifact_contract(recipe, interface_name)
+        return compile_artifact_contract(recipe, interface_name, display)
     except (TypeError, ValueError) as error:
         return Damaged(str(error))
 
@@ -615,6 +627,31 @@ def _validate_outputs_against_limits(
         )
 
 
+def _numeric_rule(definition: ParameterDefinition) -> str:
+    """The range and step a numeric parameter declares, worded from the
+    definition itself."""
+
+    low, high, step = definition.minimum, definition.maximum, definition.step
+    if low is not None and high is not None:
+        text = f"{low}..{high}"
+    else:
+        text = f">= {low}" if low is not None else f"<= {high}"
+    return f"{text} in steps of {step}" if step else text
+
+
+def _numeric_fits(definition: ParameterDefinition, value: float) -> bool:
+    low, high, step = definition.minimum, definition.maximum, definition.step
+    return not (
+        low is not None
+        and value < low
+        or high is not None
+        and value > high
+        or step is not None
+        and low is not None
+        and (value - low) % step
+    )
+
+
 def _effective_parameters(
     definitions: Sequence[ParameterDefinition],
     supplied: Mapping[str, ParameterScalar],
@@ -642,7 +679,10 @@ def _effective_parameters(
             or kind == "boolean"
             and isinstance(value, bool)
             or kind == "enum"
-            and value in definition.allowed_values
+            and any(
+                type(value) is type(item) and value == item
+                for item in definition.allowed_values
+            )
         )
         if not valid_type:
             raise ArtifactJobInvalid(
@@ -652,15 +692,11 @@ def _effective_parameters(
         if (
             isinstance(value, (int, float))
             and not isinstance(value, bool)
-            and (
-                definition.minimum is not None
-                and value < definition.minimum
-                or definition.maximum is not None
-                and value > definition.maximum
-            )
+            and not _numeric_fits(definition, value)
         ):
             raise ArtifactJobInvalid(
-                f"artifact job parameter {name} is outside its range",
+                f"artifact job parameter {name} must be "
+                f"{_numeric_rule(definition)} (got {value})",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
             )
         if isinstance(definition.pattern, str) and isinstance(value, str):

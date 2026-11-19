@@ -180,6 +180,9 @@ export type ArtifactJobOutputLimits = components["schemas"]["OutputLimits"];
 export type ArtifactJobCreateInput = components["schemas"]["ArtifactJobCreate"];
 export type ArtifactJob = components["schemas"]["ArtifactJobResponse"];
 export type ArtifactJobList = components["schemas"]["ArtifactJobListResponse"];
+export type ArtifactJobContractRead = components["schemas"]["ArtifactJobContractResponse"];
+export type ArtifactJobParameter = components["schemas"]["ParameterDefinition"];
+export type ArtifactJobParameterValue = components["schemas"]["ParameterScalar"];
 export type ArtifactJobCapabilities = components["schemas"]["ArtifactJobCapabilitiesResponse"];
 export type ArtifactTransferProgress = { loaded: number; total: number };
 export type FleetProfile = components["schemas"]["FleetProfileView"];
@@ -219,6 +222,7 @@ export interface LibraryApi {
   artifactJobsForRun(runId: string, signal?: AbortSignal, limit?: number): Promise<ArtifactJobList>;
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
+  artifactJobContract(runId: string, signal?: AbortSignal): Promise<ArtifactJobContractRead>;
   createArtifactJob(
     runId: string,
     input: ArtifactJobCreateInput,
