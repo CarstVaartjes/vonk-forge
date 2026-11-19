@@ -579,26 +579,35 @@ They live under `vonkctl job` (there is no `vonkctl recipe job`). The normal
 flow is one command; the step commands further down are the advanced path.
 
 ```bash
+vonkctl job run image --input prompt=prompt.txt --option steps=4 --output results
 vonkctl job run image --file artifact-job.json --output results
 ```
 
-`job run ALIAS_OR_RECIPE --file BINDING.json` does everything in order: it picks
-the running workload of the loaded profile whose alias (or recipe) matches, or
+`job run ALIAS` does everything in order: it picks the running workload of the
+loaded fleet that has that alias (`vonkctl profile endpoint` lists aliases), or
 the run named by `--run ID`; creates the job and uploads its inputs; submits
-it; follows it with the usual progress output; and downloads the verified
-results into `--output` (default `./<job-id>`, created if missing). Nothing
-matching, or several matches, is refused with the candidates listed; pass
-`--run ID` (from `vonkctl fleet`) to choose. The create request key is derived
-from the run and the job's content (the binding plus the SHA-256 of every input
-file), so running the same command again reconnects to the same job while it is in
-progress and returns its result once it succeeded, and a changed binding or
-input file makes a new job. If the job for that content ended `failed` or
-`cancelled`, running the command again is a new request: it says
-`previous job ID failed: REASON; starting a new one` and creates a new job. A
-job that fails shows its reason and the command exits non-zero.
-`--no-wait` stops after submit and prints the job id (with `--json`, the job
-document); `--timeout-seconds` bounds how long this command watches, and
-running it again continues. The binding file is described below.
+it; follows it until it ends (up to the job's own `timeout_seconds`, printing a
+line whenever its state changes); and downloads the verified results into
+`--output` (default `./<job-id>`, created if missing). No match, or several
+matches, is refused with the candidates listed (`candidates` with `--json`);
+pass `--run ID` (from `vonkctl fleet`) to choose. A run spread over several
+Sparks is one candidate.
+
+Describe the job with `--input SLOT=PATH` (repeatable) and `--option KEY=VALUE`
+(repeatable), which the CLI checks against the run's `job contract`: slot names
+and file counts, knob names and types. Or pass a binding `--file` (described
+below); the two forms cannot be combined.
+
+The create request key is derived from the run and the job's content (the
+binding plus the SHA-256 of every input file). Running the same command again
+reconnects to the same job while it is in progress and returns its result once
+it succeeded; a changed binding or input file makes a new job. If the job for
+that content ended `failed` or `cancelled`, running the command again is a new
+request: it says `previous job ID failed: REASON; starting a new one` and
+creates a new job. A job that fails or needs an operator shows its reason and
+the command exits non-zero. `--no-wait` stops after submit and prints the job
+id (with `--json`, the job document); `job download` on a job that is still
+running says to wait with `job detail ID --follow`.
 
 Step commands: use the run UUID to list jobs and the job UUID
 to inspect, resume, submit, cancel, or retrieve one job:

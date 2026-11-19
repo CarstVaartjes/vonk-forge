@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping
 from enum import StrEnum
+from typing import TypedDict
 
 
 class DocumentKind(StrEnum):
@@ -51,12 +52,17 @@ class Word(StrEnum):
     JOB = "job"
     RUN = "run"
     CONTRACT = "contract"
-    OPERATION = "operation"
     DOWNLOAD = "download"
     CREATE = "create"
     UPLOAD = "upload"
     SUBMIT = "submit"
     RESULT = "result"
+
+
+class Reconcile(TypedDict):
+    """The command that reconnects to an operation (``reconcile`` in a result)."""
+
+    operation: str
 
 
 class CliErrorType(StrEnum):

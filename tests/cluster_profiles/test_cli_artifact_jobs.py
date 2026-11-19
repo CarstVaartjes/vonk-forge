@@ -13,8 +13,10 @@ from collections.abc import Mapping
 from email.message import Message
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from test_cli_job_contract import _contract_document
 from test_control_client_requests import (
     _artifact_job_response,
     _Response,
@@ -1384,39 +1386,77 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
     assert len(reads) == 4
 
 
-def _loaded(alias: str, run_id: str, recipe_id: str = "vonk-forge/image") -> dict:
+RECIPE_ID = "00000000-0000-4000-8000-000000000008"
+
+
+def _loaded(alias: str, run_id: str) -> dict:
     return {
         "alias": alias,
-        "recipe_id": recipe_id,
+        "recipe_id": RECIPE_ID,
         "run_id": run_id,
         "run_state": "running",
     }
 
 
 class RunClient(ArtifactJobClient):
-    """The job client plus a fleet whose nodes carry the loaded runs."""
+    """The job client plus a fleet whose nodes carry the loaded runs.
+
+    ``ended`` makes the first N distinct request keys answer an ended job (each
+    with its own id); ``finish_state`` makes the job end that way on the detail
+    read that follows submit.
+    """
 
     def __init__(
-        self, *loaded: dict, succeed: bool = False, end_first_key: str | None = None
+        self,
+        *loaded: dict,
+        succeed: bool = False,
+        ended: int = 0,
+        ended_state: str = "failed",
+        finish_state: str | None = None,
+        nodes: int = 1,
     ) -> None:
         super().__init__()
         self.loaded = list(loaded)
         self.succeed = succeed
-        self.end_first_key = end_first_key
-        self.ended_key: str | None = None
+        self.ended = ended
+        self.ended_state = ended_state
+        self.finish_state = finish_state
+        self.nodes = nodes
+        self.ended_keys: list[str] = []
+        self.contract: dict[str, object] | None = None
 
     def request(self, method, path, payload=None, **kwargs):
-        if path.startswith("/api/artifact-jobs/requests/") and self.end_first_key:
+        kwargs.pop("retry", None)
+        if path.startswith("/api/artifact-jobs/requests/") and self.ended:
             key = path.rsplit("/", 1)[1]
-            if self.ended_key in (None, key):
-                self.ended_key = key
-                ended = _job(state=self.end_first_key)
+            if key in self.ended_keys or len(self.ended_keys) < self.ended:
+                if key not in self.ended_keys:
+                    self.ended_keys.append(key)
+                ended = _job(state=self.ended_state)
+                ended["id"] = (
+                    f"00000000-0000-4000-8000-{self.ended_keys.index(key):012d}"
+                )
                 ended["status_reason"] = "boom"
                 return ended
             if self.job is None:
                 raise ControlNotFound(404, "artifact draft not found")
         if path == "/api/fleet":
-            return {"nodes": [{"id": "n1", "loaded": self.loaded}]}
+            return {
+                "nodes": [
+                    {"id": f"n{n}", "loaded": self.loaded} for n in range(self.nodes)
+                ]
+            }
+        if path.startswith("/api/artifact-jobs/contract/run/"):
+            return copy.deepcopy(self.contract)
+        if (
+            self.finish_state
+            and method == "GET"
+            and path == f"/api/artifact-jobs/{JOB_ID}"
+            and self.job is not None
+            and self.job.get("operation_id")
+        ):
+            self.job["state"] = self.finish_state
+            self.job["status_reason"] = "worker stopped"
         result = super().request(method, path, payload, **kwargs)
         if self.succeed and path.endswith("/submit") and self.job is not None:
             done = _succeeded_job()
@@ -1428,21 +1468,26 @@ class RunClient(ArtifactJobClient):
         return result
 
 
+def _create_call(client: ArtifactJobClient) -> tuple[Any, Any]:
+    """The body and headers of the first create POST the client received."""
+    call = next(
+        c for c in client.calls if c[0] == "POST" and c[1].endswith("/artifact-jobs")
+    )
+    return cast(Any, call[2]), cast(Any, call[3])
+
+
 def _run_binding(tmp_path: Path, content: bytes = b"a") -> Path:
     return _binding(tmp_path / "job.json", {"in.png": content})
 
 
+def _run_arguments(binding: Path, *extra: str) -> tuple[str, ...]:
+    return ("job", "run", "image", "--file", str(binding), *extra)
+
+
 def test_job_run_resolves_the_one_matching_alias(tmp_path, vonkctl_json) -> None:
     client = RunClient(_loaded("image", RUN_ID), _loaded("other", JOB_ID))
-    binding = _run_binding(tmp_path)
     status, job = vonkctl_json(
-        "job",
-        "run",
-        "image",
-        "--file",
-        str(binding),
-        "--no-wait",
-        control_client=client,
+        *_run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
     )
     assert status == 0
     assert job["id"] == JOB_ID
@@ -1452,31 +1497,30 @@ def test_job_run_resolves_the_one_matching_alias(tmp_path, vonkctl_json) -> None
     )
 
 
+def test_a_run_on_two_sparks_is_one_candidate(tmp_path, vonkctl_json) -> None:
+    client = RunClient(_loaded("image", RUN_ID), nodes=2)
+    status, _ = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+    )
+    assert status == 0
+
+
 @pytest.mark.parametrize(
-    ("loaded", "expected"),
+    "loaded",
     [
-        ([_loaded("video", RUN_ID)], "no running workload matches 'image'"),
-        (
-            [_loaded("image", RUN_ID), _loaded("image", JOB_ID)],
-            "2 running workloads match 'image'",
-        ),
+        [_loaded("video", RUN_ID)],
+        [_loaded("image", RUN_ID), _loaded("image", JOB_ID)],
     ],
 )
-def test_job_run_refuses_none_or_several_matches(
-    tmp_path, vonkctl_json, loaded, expected
+def test_job_run_refuses_none_or_several_matches_with_candidates(
+    tmp_path, vonkctl_json, loaded
 ) -> None:
     client = RunClient(*loaded)
     status, error = vonkctl_json(
-        "job",
-        "run",
-        "image",
-        "--file",
-        str(_run_binding(tmp_path)),
-        control_client=client,
+        *_run_arguments(_run_binding(tmp_path)), control_client=client
     )
     assert status == 2
-    assert expected in error["detail"]
-    assert RUN_ID in error["detail"]
+    assert len(error["candidates"]) == len(loaded)
     assert not [call for call in client.calls if call[0] == "POST"]
 
 
@@ -1508,18 +1552,111 @@ def test_job_run_follows_and_downloads_into_a_created_directory(
     client = RunClient(_loaded("image", RUN_ID), succeed=True)
     output = tmp_path / "deep" / "results"
     status, result = vonkctl_json(
-        "job",
-        "run",
-        "image",
-        "--file",
-        str(_run_binding(tmp_path)),
-        "--output",
-        str(output),
+        *_run_arguments(_run_binding(tmp_path), "--output", str(output)),
         control_client=client,
     )
     assert status == 0
     assert result["job_id"] == JOB_ID
     assert (output / "result.png").read_bytes() == b"x"
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled", "needs-operator"])
+def test_job_run_exits_non_zero_when_the_job_ends_without_a_result(
+    tmp_path, vonkctl_json, state
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), finish_state=state)
+    status, job = vonkctl_json(
+        *_run_arguments(_run_binding(tmp_path), "--interval-seconds", "0.01"),
+        control_client=client,
+    )
+    assert status == 2, job
+    assert job["state"] == state, job
+    assert job["status_reason"] == "worker stopped"
+
+
+@pytest.mark.parametrize("state", ["failed", "cancelled"])
+def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
+    tmp_path, state
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID), ended=1, ended_state=state)
+    assert (
+        cli.main(
+            _run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+        )
+        == 0
+    )
+    _, headers = _create_call(client)
+    assert headers["X-Request-ID"] not in client.ended_keys
+
+
+def test_the_rerun_chain_has_no_cap(tmp_path) -> None:
+    client = RunClient(_loaded("image", RUN_ID), ended=40)
+    assert (
+        cli.main(
+            _run_arguments(_run_binding(tmp_path), "--no-wait"), control_client=client
+        )
+        == 0
+    )
+    _, headers = _create_call(client)
+    assert len(client.ended_keys) == 40
+    assert headers["X-Request-ID"] not in client.ended_keys
+
+
+def _contract_for_flags() -> dict[str, object]:
+    document = _contract_document()
+    document["run_id"] = RUN_ID
+    contract = document["contract"]
+    assert isinstance(contract, dict)
+    contract["output_limits"] = dict(OUTPUT_LIMITS)
+    contract["max_timeout_seconds"] = 1
+    return document
+
+
+def test_job_run_builds_the_binding_from_input_and_option_flags(
+    tmp_path, vonkctl_json
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _contract_for_flags()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("a")
+    status, _ = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={prompt}",
+        "--option",
+        "steps=4",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 0
+    body, _ = _create_call(client)
+    assert body["parameters"] == {"steps": 4}
+    assert [(i["slot"], i["name"], i["media_type"]) for i in body["inputs"]] == [
+        ("prompt", "prompt.txt", "text/plain")
+    ]
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ("--input", "nope=x.txt"),
+        ("--option", "nope=1"),
+        ("--option", "steps=many"),
+        (),
+    ],
+)
+def test_job_run_flags_are_checked_against_the_contract(
+    tmp_path, vonkctl_json, flags
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _contract_for_flags()
+    status, _ = vonkctl_json(
+        "job", "run", "image", *flags, "--no-wait", control_client=client
+    )
+    assert status == 2
+    assert not [c for c in client.calls if c[0] == "POST"]
 
 
 def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
@@ -1547,22 +1684,41 @@ def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
     assert "local filesystem" in error["error"]
 
 
-@pytest.mark.parametrize("state", ["failed", "cancelled"])
-def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
-    tmp_path, state
-) -> None:
-    client = RunClient(_loaded("image", RUN_ID), end_first_key=state)
-    binding = _run_binding(tmp_path)
-    assert (
-        cli.main(
-            ("job", "run", "image", "--file", str(binding), "--no-wait"),
+def test_download_of_a_running_job_says_to_wait(tmp_path, vonkctl_json) -> None:
+    client = ArtifactJobClient()
+    client.job = _job(state="running")
+    status, error = vonkctl_json(
+        "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
+    )
+    assert status == 2
+    assert "still running" in error["error"]
+    assert f"job detail {JOB_ID} --follow" in error["error"]
+    assert "control API unavailable" not in error["error"]
+
+
+def test_unwritable_output_directory_is_a_local_error_not_an_api_error(
+    tmp_path, capsys
+):
+    """Catches a local temp-file failure being retried as a control API outage."""
+    directory = tmp_path / "outputs"
+    directory.mkdir()
+    digest = hashlib.sha256(b"x").hexdigest()
+
+    def opener(request, *, timeout):
+        if "/results/" in request.full_url:
+            return _StreamResponse(b"x", media_type="image/png", sha256=digest)
+        return _Response(200, _succeeded_job())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    directory.chmod(0o500)
+    try:
+        status = cli.main(
+            ("--json", "job", "download", JOB_ID, "--output", str(directory)),
             control_client=client,
         )
-        == 0
-    )
-    post = next(
-        c for c in client.calls if c[0] == "POST" and c[1].endswith("/artifact-jobs")
-    )
-    headers = post[3]
-    assert isinstance(headers, dict)
-    assert headers["X-Request-ID"] != client.ended_key
+    finally:
+        directory.chmod(0o700)
+    assert status == 2
+    assert "local filesystem" in json.loads(capsys.readouterr().out)["error"]

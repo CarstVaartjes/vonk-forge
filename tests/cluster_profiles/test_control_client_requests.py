@@ -36,6 +36,7 @@ from cluster_profiles.control_client import (
     ControlTimeout,
     _RecordingTransport,
 )
+from cluster_profiles.control_client.transfers import LocalFilesystemError
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
     FleetProfileDefinition,
 )
@@ -67,7 +68,7 @@ def _not_adopted() -> Iterator[list[Exception]]:
     failures: list[Exception] = []
     try:
         yield failures
-    except (ControlClientError, OSError) as error:
+    except (ControlClientError, OSError, LocalFilesystemError) as error:
         failures.append(error)
     assert len(failures) == 1, "an incomplete observation was adopted"
 

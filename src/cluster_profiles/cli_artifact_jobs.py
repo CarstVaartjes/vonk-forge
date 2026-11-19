@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import mimetypes
 import os
 import re
 import shlex
@@ -15,13 +16,16 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from time import monotonic as _monotonic
 from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from .cli_files import read_json_document
 from .cli_json_contract import Word
+from .cli_select import SelectorError
 from .cli_states import (
     ARTIFACT_JOB_STATES,
     CANCELLED,
+    ENDED_WITHOUT_RESULT,
     FAILED,
     NEEDS_OPERATOR,
     READY,
@@ -38,10 +42,14 @@ from .control_client import (
     ControlTransportError,
     validate_control_document,
 )
-from .control_client.transfers import TransferReceipt
+from .control_client.transfers import TransferReceipt, local_filesystem_error
 from .control_client.transfers import download_destination as _download_destination
 from .control_client.transfers import verified_output as _existing_verified_file
 from .generated_control.media_types import canonical_media_types
+from .generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse,
+)
+from .generated_control.types import Unset
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -61,7 +69,6 @@ _CREATE_FIELDS = {
 _INPUT_FIELDS = {"slot", "name", "media_type"}
 _JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, NEEDS_OPERATOR}
 _RECOVERY_ATTEMPTS = 3
-_MAX_RERUN_CHAIN = 32
 _RUN_KEY_NAMESPACE = uuid.UUID("7d0c9a64-3f0e-5b1a-8c52-1f0b6a9e2d41")
 
 
@@ -128,20 +135,38 @@ def add_artifact_job_commands(
         help="Create, upload, submit, follow and download one job",
         description="Resolve the running workload, create the job and deliver its "
         "inputs, submit it, follow it to the end and download its result files. "
-        "Running the same command again resumes the same job; a changed binding "
-        "or input file makes a new one.",
-        epilog="Example: vonkctl job run image --file job.json --output results",
+        "Describe the job with --input and --option (checked against the "
+        "recipe's job contract) or with a binding --file. Running the same "
+        "command again resumes the same job while it is in progress or after it "
+        "succeeded; a changed input makes a new one, and so does running it "
+        "again after the job failed or was cancelled.",
+        epilog="Example: vonkctl job run image --input prompt=prompt.txt "
+        "--option steps=4 --output results",
     )
     run.add_argument(
         "selector",
         nargs="?",
-        metavar="ALIAS_OR_RECIPE",
-        help="Alias or recipe of a running workload in the loaded profile",
+        metavar="ALIAS",
+        help="Alias of a running workload (see `vonkctl profile endpoint`)",
     )
     run.add_argument(
         "--file",
-        required=True,
-        help="Bounded JSON file with a canonical create object and local input paths",
+        help="Bounded JSON binding file (create object and local input paths) "
+        "instead of --input/--option",
+    )
+    run.add_argument(
+        "--input",
+        action="append",
+        default=[],
+        metavar="SLOT=PATH",
+        help="A local file for one of the recipe's input slots (repeatable)",
+    )
+    run.add_argument(
+        "--option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="A knob of the recipe's job contract (repeatable)",
     )
     run.add_argument(
         "--output",
@@ -153,15 +178,21 @@ def add_artifact_job_commands(
         "--run",
         type=_uuid_argument,
         metavar="ID",
-        help="Use this run (its id is in `vonkctl fleet`) instead of resolving one",
+        help="Use this run (its id is in `vonkctl fleet`) instead of an alias",
     )
     run.add_argument(
         "--no-wait",
         action="store_true",
         help="Stop after submit and print the job id",
     )
+    run.add_argument(
+        "--interval-seconds",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="Time between refreshes while following (default: 1)",
+    )
     run.set_defaults(outcome_context="await")
-    watch_controls(run)
     add_output(run)
 
     contract = actions.add_parser(
@@ -325,53 +356,66 @@ def _content_key_for_rerun(
     client: ArtifactJobClient,
     quote: Callable[[str], str],
     canonical_body: str,
+    key: str | None = None,
+    ended: str | None = None,
 ) -> str:
-    """The key of the job this content should continue, or a new one.
+    """The key of the job this content should continue, or of a new one.
 
-    A job still in progress, or one that succeeded, is resumed (reconnect, no
-    duplicate work). One that ended failed or cancelled was the answer to an
-    earlier request; running the command again is a new request, so the next
-    key in a deterministic chain (this key plus that job's id) starts a new job.
+    A job in progress, or one that succeeded, is resumed (reconnect, no
+    duplicate work). One that ended failed or cancelled answered an earlier
+    request; running the command again is a new request, so the next key in a
+    deterministic chain (this key plus that job's id) starts a new job. The
+    chain is followed to its end and the last ended job is reported once.
     """
-    key = _content_request_key(args.run, canonical_body)
-    for _ in range(_MAX_RERUN_CHAIN):
-        try:
-            found = _job(
-                client.request("GET", f"/api/artifact-jobs/requests/{quote(key)}"),
-                expected_run=args.run,
-            )
-        except ControlNotFound:
-            return key
-        if found.get("state") not in {FAILED, CANCELLED}:
-            return key
-        if not _json_mode(args):
-            print(
-                f"previous job {found['id']} {found['state']}: "
-                f"{found.get('status_reason') or 'no reason recorded'}; "
-                "starting a new one",
-                file=sys.stderr,
-                flush=True,
-            )
-        key = _content_request_key(args.run, canonical_body, cast(str, found["id"]))
+    key = key or _content_request_key(args.run, canonical_body)
+
+    def read(timeout: float):
+        return _job(
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/requests/{quote(key)}",
+                timeout_seconds=timeout,
+            ),
+            expected_run=args.run,
+        )
+
+    try:
+        found = _recover(
+            client, read, lambda timeout: None, retry_if=_transient_failure
+        )
+    except ControlNotFound:
+        found = None
+    if found is not None and found.get("state") in ENDED_WITHOUT_RESULT:
+        return _content_key_for_rerun(
+            args,
+            client,
+            quote,
+            canonical_body,
+            _content_request_key(args.run, canonical_body, cast(str, found["id"])),
+            f"previous job {found['id']} {found['state']}: "
+            f"{found.get('status_reason') or 'no reason recorded'}; "
+            "starting a new one",
+        )
+    if ended is not None and not _json_mode(args):
+        print(ended, file=sys.stderr, flush=True)
     return key
 
 
 class _LoadedRun(NamedTuple):
     alias: str | None
-    recipe_id: str | None
 
 
 def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
     """The one running workload of the fleet that ``selector`` names.
 
-    The fleet's loaded workloads are the source (as for ``vonkctl fleet``); an
-    alias or the recipe id selects. Nothing or several matches are refused with
-    the candidates, never guessed.
+    The fleet's loaded workloads are the source (as for ``vonkctl fleet``); the
+    alias selects. Nothing or several matches are refused with the candidates,
+    never guessed. A run on several Sparks is one candidate.
     """
     if not selector:
-        raise ValueError(
-            "name the running workload (alias or recipe) or pass --run ID; "
-            "`vonkctl fleet` lists them"
+        raise SelectorError(
+            "name the running workload by its alias or pass --run ID; "
+            "`vonkctl profile endpoint` lists the aliases"
         )
 
     def read(timeout: float):
@@ -390,28 +434,133 @@ def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
                 and isinstance(run.get("run_id"), str)
             ):
                 running.setdefault(
-                    cast(str, run["run_id"]),
-                    _LoadedRun(run.get("alias"), run.get("recipe_id")),
+                    cast(str, run["run_id"]), _LoadedRun(run.get("alias"))
                 )
 
-    def label(run_id: str, names: _LoadedRun) -> str:
-        return f"{names.alias or names.recipe_id} ({run_id})"
+    def label(run_id: str, loaded: _LoadedRun) -> str:
+        return f"{loaded.alias} ({run_id})"
 
-    matches = [run_id for run_id, names in running.items() if selector in names]
+    matches = [run_id for run_id, loaded in running.items() if loaded.alias == selector]
     if len(matches) == 1:
         return matches[0]
     if matches:
-        raise ValueError(
-            f"{len(matches)} running workloads match '{selector}': "
-            + ", ".join(label(run_id, running[run_id]) for run_id in matches)
-            + "; pass --run ID to choose one"
+        raise SelectorError(
+            f"{len(matches)} running workloads have the alias '{selector}'; "
+            "pass --run ID to choose one",
+            candidates=[label(run_id, running[run_id]) for run_id in matches],
         )
-    candidates = ", ".join(label(run_id, names) for run_id, names in running.items())
-    raise ValueError(
-        f"no running workload matches '{selector}'"
-        + (f"; running: {candidates}" if candidates else "; nothing is running")
-        + " (see `vonkctl fleet`)"
+    raise SelectorError(
+        f"no running workload has the alias '{selector}'"
+        + ("" if running else "; nothing is running")
+        + " (see `vonkctl fleet`)",
+        candidates=[label(run_id, loaded) for run_id, loaded in running.items()],
     )
+
+
+def _binding_from_flags(
+    args: argparse.Namespace,
+    client: ArtifactJobClient,
+    quote: Callable[[str], str],
+    capabilities: Any,
+):
+    """The create object and input paths for ``--input``/``--option``, checked
+    against the run's job contract (slot names and counts, knob names and types)."""
+    args.revision = None
+    answer = ArtifactJobContractResponse.from_dict(_contract(args, client, quote))
+    contract = answer.contract
+    if contract is None or isinstance(contract, Unset):
+        raise ControlMalformedResponse("job contract observation is unavailable")
+    slots = {slot.id: slot for slot in contract.input_.slots}
+    chosen: dict[str, list[Path]] = {slot_id: [] for slot_id in slots}
+    for item in args.input:
+        slot_id, separator, raw_path = item.partition("=")
+        if not separator or not raw_path:
+            raise ValueError(f"--input takes SLOT=PATH, got '{item}'")
+        if slot_id not in slots:
+            raise ValueError(
+                f"unknown input slot '{slot_id}'; this recipe takes: "
+                + ", ".join(slots)
+            )
+        chosen[slot_id].append(Path(raw_path).absolute())
+    inputs = []
+    paths: dict[str, Path] = {}
+    for slot_id, slot in slots.items():
+        count = len(chosen[slot_id])
+        if not slot.min_files <= count <= slot.max_files:
+            raise ValueError(
+                f"input slot '{slot_id}' takes {slot.min_files} to "
+                f"{slot.max_files} files, got {count}; pass --input {slot_id}=PATH"
+            )
+        for path in chosen[slot_id]:
+            guessed = mimetypes.guess_type(path.name)[0]
+            if guessed in slot.media_types:
+                media_type = guessed
+            elif len(slot.media_types) == 1:
+                media_type = slot.media_types[0]
+            else:
+                raise ValueError(
+                    f"cannot tell the media type of {path.name} for slot "
+                    f"'{slot_id}'; it takes: {', '.join(slot.media_types)}"
+                )
+            if path.name in paths:
+                raise ValueError(f"two inputs are named {path.name}")
+            paths[path.name] = path
+            inputs.append(
+                {"slot": slot_id, "name": path.name, "media_type": media_type}
+            )
+    knobs = {knob.name: knob for knob in contract.parameters}
+    parameters = {}
+    for item in args.option:
+        key, separator, raw_value = item.partition("=")
+        if not separator:
+            raise ValueError(f"--option takes KEY=VALUE, got '{item}'")
+        if key not in knobs:
+            raise ValueError(
+                f"unknown option '{key}'; this recipe takes: " + ", ".join(knobs)
+            )
+        parameters[key] = _knob_value(key, knobs[key].type_, raw_value)
+    transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
+    limits = contract.output_limits
+    output_limits = {
+        "max_files": min(
+            limits.max_files, _integer(transport.get("max_output_files"), "limit")
+        ),
+        "max_file_bytes": min(
+            limits.max_file_bytes,
+            _integer(transport.get("max_output_file_bytes"), "limit"),
+        ),
+        "max_total_bytes": min(
+            limits.max_total_bytes,
+            _integer(transport.get("max_output_total_bytes"), "limit"),
+        ),
+        "allowed_media_types": limits.allowed_media_types,
+    }
+    create = {
+        "interface": str(contract.interface),
+        "parameters": parameters,
+        "inputs": inputs,
+        "output_limits": output_limits,
+        "timeout_seconds": min(
+            contract.max_timeout_seconds,
+            _integer(transport.get("max_timeout_seconds"), "job timeout limit"),
+        ),
+    }
+    return create, paths
+
+
+def _knob_value(name: str, kind: str, raw: str) -> object:
+    try:
+        if kind == "integer":
+            return int(raw)
+        if kind == "float":
+            return float(raw)
+        if kind == "boolean":
+            if raw.lower() in {"true", "false"}:
+                return raw.lower() == "true"
+            raise ValueError(raw)
+    except ValueError:
+        raise ValueError(f"option '{name}' takes a {kind} value, got '{raw}'") from None
+    return raw
 
 
 def _run_job(
@@ -427,12 +576,11 @@ def _run_job(
     The create key is derived from the job's content, so running the same
     command again finds the same job and continues from where it stopped.
     """
+    if args.file is not None and (args.input or args.option):
+        raise ValueError("--file cannot be combined with --input or --option")
     args.run = args.run or _resolve_run(client, args.selector)
     args.artifact_job_run = True
-    rerun = shlex.join(
-        ["vonkctl", Word.JOB, Word.RUN, *([args.selector] if args.selector else [])]
-        + ["--file", args.file, "--run", args.run]
-    )
+    rerun = shlex.join(["vonkctl", *getattr(args, "invocation", ())])
     args.artifact_job_reconcile = rerun
     try:
         job = _create(
@@ -448,11 +596,15 @@ def _run_job(
         args.artifact_job_reconcile = rerun
         raise
     args.artifact_job_reconcile = rerun
+    # Submit marks its own receipt a read; the run still ends in the job's outcome.
+    args.outcome_context = "await"
     if args.no_wait:
         return job
     if not _json_mode(args):
         print(f"Job ID: {args.job_id}", file=sys.stderr, flush=True)
     path = f"/api/artifact-jobs/{quote(args.job_id)}"
+    # Follow until the job's own timeout, not the short watch cap of other commands.
+    follow_until = _monotonic() + _integer(job.get("timeout_seconds"), "job timeout")
     job = poll(
         client,
         path,
@@ -460,6 +612,7 @@ def _run_job(
         args,
         terminal=lambda value: value.get("state") in _JOB_TERMINAL_STATES,
         validate=lambda value: _same_job(value, args.job_id),
+        deadline=follow_until,
     )
     if job.get("state") != SUCCEEDED:
         # Unfinished (watch deadline) or ended without a result: the job
@@ -484,8 +637,11 @@ def _create(
     *,
     content_key: bool = False,
 ) -> dict[str, object]:
-    binding, paths = _read_binding(args.file)
     capabilities = _capabilities(client)
+    if args.file is None:
+        binding, paths = _binding_from_flags(args, client, quote, capabilities)
+    else:
+        binding, paths = _read_binding(args.file)
     declarations = _recover(
         client,
         lambda timeout: _prepare_inputs(binding, paths, capabilities),
@@ -878,8 +1034,15 @@ def _download(
         expected_id=args.job_id,
     )
     if result["state"] != SUCCEEDED:
-        raise ControlClientError(
-            f"artifact job result is unavailable while its state is {result['state']}"
+        state = result["state"]
+        if state in ENDED_WITHOUT_RESULT:
+            raise ValueError(
+                f"job {args.job_id} ended {state} and has no result files: "
+                f"{result.get('status_reason') or 'no reason recorded'}"
+            )
+        raise ValueError(
+            f"job {args.job_id} is still running (state {state}); wait with "
+            f"vonkctl {Word.JOB} {Word.DETAIL} {args.job_id} --follow"
         )
     digest = result.get("output_manifest_sha256")
     outputs = result.get("output_files")
@@ -1326,7 +1489,7 @@ def _output_directory(path: Path, *, create: bool = False) -> Path:
             path.mkdir(parents=True, exist_ok=True)
         metadata = path.lstat()
     except OSError as error:
-        raise ValueError(_local_path_message(path, error)) from error
+        raise local_filesystem_error(path, error) from error
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
         raise ControlClientError(
             "artifact output path must be an existing non-symlink directory"
@@ -1334,14 +1497,7 @@ def _output_directory(path: Path, *, create: bool = False) -> Path:
     try:
         return path.resolve(strict=True)
     except OSError as error:
-        raise ValueError(_local_path_message(path, error)) from error
-
-
-def _local_path_message(path: Path, error: OSError) -> str:
-    return (
-        f"cannot use output directory {path}: {error.strerror or type(error).__name__}"
-        " (a local filesystem problem, not the control API)"
-    )
+        raise local_filesystem_error(path, error) from error
 
 
 def _transfer_client(client: ArtifactJobClient) -> ArtifactJobClient:

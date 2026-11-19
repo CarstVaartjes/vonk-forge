@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -424,12 +425,13 @@ class ControlClient(HTTPControlClient):
                     raise ControlMalformedResponse(
                         "artifact output digest header does not match its manifest"
                     )
-                descriptor, temporary_name = tempfile.mkstemp(
-                    prefix=f".{destination.name}.", suffix=".download", dir=parent
-                )
-                temporary = Path(temporary_name)
-                temporary_owner = os.fstat(descriptor)
-                os.fchmod(descriptor, 0o600)
+                with _local_filesystem(destination):
+                    descriptor, temporary_name = tempfile.mkstemp(
+                        prefix=f".{destination.name}.", suffix=".download", dir=parent
+                    )
+                    temporary = Path(temporary_name)
+                    temporary_owner = os.fstat(descriptor)
+                    os.fchmod(descriptor, 0o600)
                 digest = hashlib.sha256()
                 observed = 0
                 with os.fdopen(descriptor, "wb", closefd=True) as output:
@@ -442,18 +444,21 @@ class ControlClient(HTTPControlClient):
                             break
                         observed += len(chunk)
                         digest.update(chunk)
-                        output.write(chunk)
-                    output.flush()
-                    os.fsync(output.fileno())
+                        with _local_filesystem(destination):
+                            output.write(chunk)
+                    with _local_filesystem(destination):
+                        output.flush()
+                        os.fsync(output.fileno())
                 if observed != expected_size or digest.hexdigest() != expected_sha256:
                     raise ControlMalformedResponse(
                         "artifact output content does not match its manifest"
                     )
-            if overwrite:
-                os.replace(temporary, destination)
-            else:
-                os.link(temporary, destination, follow_symlinks=False)
-                temporary.unlink()
+            with _local_filesystem(destination):
+                if overwrite:
+                    os.replace(temporary, destination)
+                else:
+                    os.link(temporary, destination, follow_symlinks=False)
+                    temporary.unlink()
             temporary = Path()
         except FileExistsError:
             raise ControlTransportError(
@@ -478,6 +483,28 @@ class ControlClient(HTTPControlClient):
             size_bytes=expected_size,
             sha256=expected_sha256,
         )
+
+
+class LocalFilesystemError(ValueError):
+    """A local file could not be created or written: the operator's to fix."""
+
+
+def local_filesystem_error(path: Path, error: OSError) -> LocalFilesystemError:
+    return LocalFilesystemError(
+        f"cannot use {path}: {error.strerror or type(error).__name__}"
+        " (a local filesystem problem, not the control API)"
+    )
+
+
+@contextlib.contextmanager
+def _local_filesystem(destination: Path):
+    """Local file errors are named as such, never retried as control API faults."""
+    try:
+        yield
+    except FileExistsError:
+        raise
+    except OSError as error:
+        raise local_filesystem_error(destination, error) from error
 
 
 def verified_output(path: Path, expected_size: int, expected_sha256: str) -> bool:

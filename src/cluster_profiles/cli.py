@@ -25,7 +25,13 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
-from .cli_json_contract import CliErrorType, Word, failure_document, stamp_document
+from .cli_json_contract import (
+    CliErrorType,
+    Reconcile,
+    Word,
+    failure_document,
+    stamp_document,
+)
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -446,11 +452,11 @@ def _control_error(
                 }
         elif artifact_job_action in {"create", "upload", "submit", "cancel"}:
             if isinstance(artifact_job_id, str):
-                result["reconcile"] = {
-                    Word.OPERATION: shlex.join(
+                result["reconcile"] = Reconcile(
+                    operation=shlex.join(
                         ["vonkctl", Word.JOB, Word.DETAIL, artifact_job_id]
                     )
-                }
+                )
             else:
                 result.pop("reconcile", None)
     elif not acceptance_may_exist:
