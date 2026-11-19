@@ -5865,9 +5865,6 @@ def test_result_scope_changed_yields_without_outer_replay(
     assert len(calls) == 1
 
 
-_RENEWAL_ROUTES = [("/agent/renew", "renew")]
-
-
 def _renewable_source(services) -> None:
     with services.sessions.begin() as session:
         source = session.scalar(
@@ -5882,9 +5879,8 @@ def _renewal_body() -> dict[str, str]:
     return {"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()}
 
 
-@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
 def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
-    agent_system, monkeypatch, path, method
+    agent_system, monkeypatch
 ) -> None:
     # Wrong implementation: any ValueError answered 403, a security verdict the
     # Spark backs off on for 30-600 s, for a Controller-side bug.
@@ -5894,18 +5890,15 @@ def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
     def broken(*_args, **_kwargs):
         raise ValueError("internal decode failure")
 
-    monkeypatch.setattr(services.enrollment, method, broken)
+    monkeypatch.setattr(services.enrollment, "renew", broken)
     response = client.post(
-        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
+        "/agent/renew", headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert response.status_code == 503
     assert 0 < int(response.headers["Retry-After"]) <= 300
 
 
-@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
-def test_real_denial_during_renewal_stays_a_403(
-    agent_system, monkeypatch, path, method
-) -> None:
+def test_real_denial_during_renewal_stays_a_403(agent_system, monkeypatch) -> None:
     from vonk_control.enrollment.types import EnrollmentDenied
 
     client, services, _, _ = agent_system
@@ -5914,20 +5907,17 @@ def test_real_denial_during_renewal_stays_a_403(
     def denied(*_args, **_kwargs):
         raise EnrollmentDenied("certificate is revoked")
 
-    monkeypatch.setattr(services.enrollment, method, denied)
+    monkeypatch.setattr(services.enrollment, "renew", denied)
     response = client.post(
-        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
+        "/agent/renew", headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert response.status_code == 403
 
 
-@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
-def test_renewal_heals_after_one_internal_error(
-    agent_system, monkeypatch, path, method
-) -> None:
+def test_renewal_heals_after_one_internal_error(agent_system, monkeypatch) -> None:
     client, services, _, _ = agent_system
     _renewable_source(services)
-    real = getattr(services.enrollment, method)
+    real = services.enrollment.renew
     calls = []
 
     def flaky(*args, **kwargs):
@@ -5936,13 +5926,13 @@ def test_renewal_heals_after_one_internal_error(
             raise ValueError("transient internal failure")
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(services.enrollment, method, flaky)
+    monkeypatch.setattr(services.enrollment, "renew", flaky)
     first = client.post(
-        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
+        "/agent/renew", headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert first.status_code == 503
     again = client.post(
-        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
+        "/agent/renew", headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert len(calls) == 2
     assert again.status_code == 200

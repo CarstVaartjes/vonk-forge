@@ -72,7 +72,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew")?)
@@ -81,16 +81,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        if !response.status().is_success() {
-            let mut error = super::response_controller_error(&response);
-            if error.retryable() {
-                // A refusal's body is read only for a transient wait; any
-                // other refusal keeps its status, code and request id.
-                let body = bounded_body(response).await.unwrap_or_default();
-                super::apply_transient_body(&mut error, &body);
-            }
-            return Err(ClientError::Controller(Box::new(error)));
-        }
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;

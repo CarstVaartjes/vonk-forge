@@ -491,7 +491,6 @@ class SecurityRefusalReason(WireEnum):
 
     HTTP_401 = "401"
     HTTP_403 = "403"
-    AGENT_CERTIFICATE_ROTATION_CONFLICT = "agent.certificate.rotation.conflict"
     AGENT_ENROLLMENT_SUBMIT_REJECTED = "agent.enrollment.submit.rejected"
     AGENT_EXPIRED_RENEWAL_REFUSED = "agent.expired_renewal_refused"
     AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED = "agent.expired_renewal_grace_exhausted"
