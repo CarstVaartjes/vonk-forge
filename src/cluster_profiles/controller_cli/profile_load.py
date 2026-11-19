@@ -6,7 +6,7 @@ import argparse
 import re
 import shlex
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import redirect_stdout
 from typing import cast
 
@@ -64,6 +64,7 @@ def _review_and_submit_profile_load(
     *,
     question: str,
     review_when_confirmed: bool,
+    lead: Callable[[Mapping[str, object]], Sequence[str]] | None = None,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -108,6 +109,9 @@ def _review_and_submit_profile_load(
         effects_digest = _reviewed_effects_digest(preview)
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
+                if lead is not None:
+                    for line in lead(cast(Mapping[str, object], preview)):
+                        print(line)
                 render_payload(preview, "profile", action="preview")
         _confirm_action(args, question)
         try:
@@ -138,6 +142,7 @@ def _load_profile(
     *,
     question: str,
     review_when_confirmed: bool = False,
+    lead: Callable[[Mapping[str, object]], Sequence[str]] | None = None,
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 
@@ -153,6 +158,7 @@ def _load_profile(
         factory,
         question=question,
         review_when_confirmed=review_when_confirmed,
+        lead=lead,
     )
     if getattr(getattr(args, "observation", None), "status", None) in {
         "timed_out",

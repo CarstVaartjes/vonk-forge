@@ -55,6 +55,7 @@ from .controller_cli import (
     add_controller_commands,
     run_controller,
 )
+from .controller_cli.common import NoLoadedProfile
 from .runtime_identity import packaged_runtime_identity
 
 _MAX_TEXT_CHARS = 1_024
@@ -125,7 +126,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="N",
-        help="Profile number for profile commands (default: 1)",
+        help="Profile number; required to change a profile",
     )
     parser.add_argument(
         "--no-input",
@@ -852,6 +853,11 @@ def _main(
             error=True,
         )
         return 2
+    except NoLoadedProfile as error:
+        return _report_usage_error(
+            raw_argv,
+            _UsageError(str(error), usage=None, next_step="vonkctl profile list"),
+        )
     except EnrollmentDeliveryError as error:
         _emit(error.document, args, error=True)
         return 130 if error.interrupted else 2
