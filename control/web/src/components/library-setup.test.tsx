@@ -61,6 +61,10 @@ function assessed(states: ("ready" | "blocked" | "unavailable" | null)[]) {
   });
 }
 
+/** Recipes are counted once, however many models list them. */
+const uniqueRecipes = (list: typeof records) =>
+  new Set(list.flatMap((record) => (record.recipe ? [record.recipe.recipe_id] : [])));
+
 test("summarises the fleet from online nodes and their free memory", () => {
   expect(summarizeFleet(undefined)).toBeUndefined();
   const summary = summarizeFleet(
@@ -113,11 +117,9 @@ test("Spark tiles count the library, mark the operator's fleet, and set the same
   );
   const tiles = within(screen.getByRole("group", { name: "Sparks per recipe" }));
   for (const value of counts) {
-    const expected = filterLibraryRecipeRecords(
-      records,
-      { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sparks: value },
-      "",
-    ).filter((record) => record.recipe).length;
+    const expected = uniqueRecipes(
+      filterLibraryRecipeRecords(records, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sparks: value }, ""),
+    ).size;
     const tile = tiles.getByRole("button", {
       name: new RegExp(`^${value} Sparks? or fewer: ${expected} recipes`),
     });
@@ -157,11 +159,9 @@ test("family and engine chips carry counts that respect the other filters and to
   fireEvent.click(pressed);
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine: "" });
   const families = within(screen.getByRole("group", { name: "Family" }));
-  const familyCount = filterLibraryRecipeRecords(
-    records,
-    { ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine, family },
-    "",
-  ).filter((record) => record.recipe).length;
+  const familyCount = uniqueRecipes(
+    filterLibraryRecipeRecords(records, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine, family }, ""),
+  ).size;
   const title = withRecipe.modelDisplay!.family_title;
   fireEvent.click(families.getByRole("button", { name: `${title}: ${familyCount}` }));
   expect(onFiltersChange).toHaveBeenLastCalledWith({
@@ -207,8 +207,7 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
   const onFiltersChange = vi.fn();
   const stamped = assessed(["ready", "blocked", "unavailable", null]);
   const counts = countFleetFit(stamped, EMPTY_LIBRARY_WORKCELL_FILTERS, "", "recipes");
-  const withRecipe = stamped.filter((record) => record.recipe).length;
-  expect(counts.fits + counts.nonFit + counts.unknown).toBe(withRecipe);
+  expect(counts.fits + counts.nonFit + counts.unknown).toBe(uniqueRecipes(stamped).size);
   expect(counts.fits).toBeGreaterThan(0);
   expect(counts.unknown).toBeGreaterThan(0);
   render(
@@ -233,8 +232,8 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
     stamped,
     { ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true },
     "",
-  ).filter((record) => record.recipe);
-  expect(kept.length).toBe(counts.fits + counts.unknown);
+  );
+  expect(uniqueRecipes(kept).size).toBe(counts.fits + counts.unknown);
   expect(kept.every((record) => record.recipe!.assessment?.fleet_fit.state !== "blocked")).toBe(
     true,
   );
@@ -276,7 +275,45 @@ test("without any verdict the toggle is disabled and the strip says so", () => {
     />,
   );
   expect(screen.getByText(/has not assessed placement/)).toBeVisible();
-  expect(screen.getByRole("button", { name: "Fits my fleet now: 0 models" })).toBeDisabled();
+  const button = screen.getByRole("button", { name: /^Fits my fleet now/ });
+  expect(button).toBeDisabled();
+  expect(button).toHaveTextContent("Fit not assessed");
+});
+
+test("an assessed empty result keeps 0, not Fit not assessed", () => {
+  render(
+    <LibrarySetupStrip
+      records={assessed(["blocked"])}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={() => undefined}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Fits my fleet now: 0 recipes" })).toHaveTextContent(
+    "0",
+  );
+});
+
+test("a recipe used by several models is counted once", () => {
+  const first = records.find((record) => record.recipe)!;
+  const doubled = [...records, { ...first, key: `${first.key}:again`, modelKey: "other-model" }];
+  const total = (list: typeof records) => uniqueRecipes(list).size;
+  render(
+    <LibrarySetupStrip
+      records={doubled}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={() => undefined}
+    />,
+  );
+  expect(
+    within(screen.getByRole("group", { name: "Sparks per recipe" })).getByRole("button", {
+      name: `Any Spark count: ${total(doubled)} recipes`,
+    }),
+  ).toBeVisible();
+  expect(total(doubled)).toBe(total(records));
 });
 
 test("the header gives the online Sparks' total and free memory with the fleet bar, and says what it covers", () => {
