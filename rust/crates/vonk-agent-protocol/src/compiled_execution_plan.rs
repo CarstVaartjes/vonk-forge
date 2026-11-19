@@ -58,11 +58,9 @@ pub fn same_installed_workload(
     installed: &CompiledExecutionPlan,
     requested: &CompiledExecutionPlan,
 ) -> bool {
-    // Network authority is derived from signed placement at start time. Validate
-    // both plans before comparing the installed process and filesystem identity.
-    installed.validate().is_ok()
-        && requested.validate().is_ok()
-        && installed.identity == requested.identity
+    // Network authority is derived from signed placement at start time. Both
+    // plans were validated where they entered (request ingress, persisted read).
+    installed.identity == requested.identity
         && installed.artifacts == requested.artifacts
         && installed.runtime.executable == requested.runtime.executable
         && installed.runtime.argv == requested.runtime.argv

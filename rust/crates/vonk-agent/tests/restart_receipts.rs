@@ -182,7 +182,6 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     }
 
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
-    restarted.recover_interrupted().unwrap();
     assert!(matches!(
         restarted.begin(&claim, Utc::now()),
         Err(vonk_agent::state::StateError::Busy)
@@ -603,29 +602,32 @@ fn a_refused_result_stays_in_the_spool_with_its_refusal_and_is_offered_again_aft
 }
 
 #[test]
-fn adding_claim_custody_preserves_existing_journal_receipts() {
-    // Wrong implementation: bumping the journal version resets retained
-    // receipts instead of adding claim custody to the existing table.
+fn a_journal_row_without_its_claim_is_deleted_not_refused() {
+    // Wrong implementation: a row an older agent wrote without its accepted
+    // claim fails every read of its fence instead of being dropped on open.
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
     let accepted = claim();
-    let mut store = StateStore::open(&path, NODE_ID).unwrap();
-    store.begin(&accepted, Utc::now()).unwrap();
-    let receipt = store
-        .finish(
-            &accepted,
-            ExecutionResult::done(RecipeStopResult::default()),
-        )
-        .unwrap();
-    drop(store);
+    drop(StateStore::open(&path, NODE_ID).unwrap());
     let old = rusqlite::Connection::open(&path).unwrap();
-    old.execute("ALTER TABLE operations DROP COLUMN claim_json", [])
-        .unwrap();
+    old.execute_batch(
+        "DROP TABLE operations;
+         CREATE TABLE operations (
+           fence TEXT PRIMARY KEY NOT NULL, operation TEXT NOT NULL, deadline TEXT NOT NULL,
+           state TEXT NOT NULL, claim_json BLOB, result_json BLOB,
+           result_acknowledged INTEGER NOT NULL DEFAULT 0) STRICT;",
+    )
+    .unwrap();
+    old.execute(
+        "INSERT INTO operations(fence,operation,deadline,state) VALUES (?1,?2,'2099-01-01T00:00:00Z','running')",
+        [accepted.fence.to_string(), accepted.operation.to_string()],
+    )
+    .unwrap();
     drop(old);
-    let reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    let mut reopened = StateStore::open(&path, NODE_ID).unwrap();
     assert_eq!(
-        reopened.pending_results().unwrap(),
-        vec![(accepted.operation, receipt)]
+        reopened.begin(&accepted, Utc::now()).unwrap(),
+        BeginDecision::Execute
     );
 }
 

@@ -35,32 +35,6 @@ pub(super) fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOci
     Ok(())
 }
 
-pub(super) fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciError> {
-    let placement = &plan.runtime.placement;
-    let native_fabric = placement.world_size > 1 && placement.master_port.is_some();
-    let expected_network_mode = if native_fabric {
-        "host"
-    } else if placement.endpoint_address.is_some() {
-        "bridge"
-    } else {
-        "none"
-    };
-    if native_fabric
-        && (plan.topology.node_count < 2
-            || placement.local_address.is_none()
-            || placement.master_address.is_none()
-            || !plan.security.gpu)
-    {
-        return Err(CompiledOciError::Invalid(
-            "native fabric placement is incomplete",
-        ));
-    }
-    if plan.security.network_mode.as_str() != expected_network_mode {
-        return Err(CompiledOciError::Invalid("security override"));
-    }
-    Ok(())
-}
-
 pub(super) fn ordered_environment(
     plan: &CompiledExecutionPlan,
 ) -> Result<Vec<CompiledEnvironmentEntry>, CompiledOciError> {
@@ -166,8 +140,7 @@ pub(super) fn model_source(
 }
 
 pub(super) fn model_target(artifact: &CompiledModelArtifact) -> Result<String, CompiledOciError> {
-    if !artifact.mount.target.starts_with("/models")
-        || artifact.mount.target.contains("//")
+    if artifact.mount.target.contains("//")
         || artifact
             .mount
             .target

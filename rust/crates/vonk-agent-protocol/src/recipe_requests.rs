@@ -79,6 +79,8 @@ impl RecipeReconciliationIdentity {
 }
 
 impl RecipeOperationRequest {
+    /// The one place a compiled execution plan is validated: every consumer in
+    /// the agent receives its plan through this request ingress.
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match (&claim.operation, &claim.payload) {
@@ -129,13 +131,18 @@ impl RecipeOperationRequest {
             Self::RuntimePreflight(_) => true,
             Self::Build(value) => validate_build(value),
             Self::BuildCleanup(_) => true,
-            Self::JobRun(value) => validate_recipe_job(value),
+            Self::JobRun(value) => {
+                validate_recipe_job(value) && value.compiled_execution_plan.validate().is_ok()
+            }
             Self::Install(value) => {
                 lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
                     && valid_role(&value.compiled_execution_plan.runtime.placement.role)
+                    && value.compiled_execution_plan.validate().is_ok()
             }
-            Self::Start(value) => validate_recipe_start(value),
+            Self::Start(value) => {
+                validate_recipe_start(value) && value.compiled_execution_plan.validate().is_ok()
+            }
             Self::Stop(value) => validate_recipe_stop(value),
             Self::Uninstall(value) => {
                 lower_hex(&value.plan_digest, 64)
@@ -184,6 +191,11 @@ pub(super) mod recipe_start_tests {
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "world_size": world_size,
         });
+        // The ingress validates the plan: its network mode and topology follow
+        // the placement the way the Controller derives them.
+        plan["security"]["network_mode"] =
+            serde_json::json!(if world_size == 1 { "bridge" } else { "host" });
+        plan["topology"]["node_count"] = serde_json::json!(world_size);
         let mut payload = serde_json::json!({
             "compiled_execution_plan": plan,
             "installation_id": "00000000-0000-4000-8000-000000000001",
