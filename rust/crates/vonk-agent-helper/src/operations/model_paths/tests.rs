@@ -11,7 +11,7 @@ fn runtime_accepts_exact_single_and_multiple_artifact_mounts() {
     fs::create_dir_all(&model).unwrap();
     fs::create_dir_all(&tokenizer).unwrap();
 
-    let single = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+    let single = runtime_arguments(&roots, &[(model.clone(), "/models/model", true)]);
     let validated = validate_docker_run(&single, &roots, None).unwrap();
     assert_eq!(validated.models, vec![model.clone()]);
 
@@ -104,9 +104,13 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
     fs::create_dir_all(&tokenizer).unwrap();
 
     let invalid_single_mounts = [
-        (runtime_models(&roots), "/models", true),
-        (runtime_models(&roots).join("sha256"), "/models", true),
-        (runtime_models(&roots).join("a".repeat(64)), "/models", true),
+        (runtime_models(&roots), "/models/model", true),
+        (runtime_models(&roots).join("sha256"), "/models/model", true),
+        (
+            runtime_models(&roots).join("a".repeat(64)),
+            "/models/model",
+            true,
+        ),
         (
             roots
                 .agent_data
@@ -117,17 +121,18 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
                 .join("..")
                 .join("sha256")
                 .join("a".repeat(64)),
-            "/models",
+            "/models/model",
             true,
         ),
         (
             runtime_models(&roots)
                 .join("Primary")
                 .join("artifact-a.bin"),
-            "/models",
+            "/models/model",
             true,
         ),
-        (model.clone(), "/models", false),
+        (model.clone(), "/models", true),
+        (model.clone(), "/models/model", false),
         (model.clone(), "/model", true),
         (model.clone(), "/models/..", true),
         (model.clone(), "/models/model/", true),
@@ -136,22 +141,19 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
         assert!(validate_docker_run(&runtime_arguments(&roots, &[mount]), &roots, None).is_err());
     }
 
-    for mounts in [
-        vec![
-            (model.clone(), "/models/model", true),
-            (model.clone(), "/models/tokenizer", true),
-        ],
-        vec![
-            (model.clone(), "/models/model", true),
-            (tokenizer.clone(), "/models/model", true),
-        ],
-        vec![
-            (model.clone(), "/models", true),
-            (tokenizer.clone(), "/models/tokenizer", true),
-        ],
-    ] {
-        assert!(validate_docker_run(&runtime_arguments(&roots, &mounts), &roots, None).is_err());
-    }
+    let shared_source = [
+        (model.clone(), "/models/model", true),
+        (model.clone(), "/models/tokenizer", true),
+    ];
+    assert!(validate_docker_run(&runtime_arguments(&roots, &shared_source), &roots, None).is_ok());
+
+    let repeated_target = [
+        (model.clone(), "/models/model", true),
+        (tokenizer.clone(), "/models/model", true),
+    ];
+    assert!(
+        validate_docker_run(&runtime_arguments(&roots, &repeated_target), &roots, None).is_err()
+    );
 
     let too_many = (0..4097)
         .map(|index| {
@@ -172,7 +174,7 @@ fn runtime_rejects_noncanonical_or_unsafe_artifact_mounts() {
     symlink(&model, &symlinked).unwrap();
     assert!(
         validate_docker_run(
-            &runtime_arguments(&roots, &[(symlinked, "/models", true)]),
+            &runtime_arguments(&roots, &[(symlinked, "/models/model", true)]),
             &roots,
             None,
         )
@@ -187,7 +189,7 @@ fn runtime_accepts_installation_model_root_and_rejects_legacy_model_root() {
     fs::create_dir_all(&current_model).unwrap();
     assert!(
         validate_docker_run(
-            &runtime_arguments(&roots, &[(current_model, "/models", true)]),
+            &runtime_arguments(&roots, &[(current_model, "/models/model", true)]),
             &roots,
             None,
         )
@@ -202,22 +204,7 @@ fn runtime_accepts_installation_model_root_and_rejects_legacy_model_root() {
     fs::create_dir_all(&legacy_model).unwrap();
     assert!(
         validate_docker_run(
-            &runtime_arguments(&roots, &[(legacy_model, "/models", true)]),
-            &roots,
-            None,
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn runtime_rejects_legacy_sha256_model_layout() {
-    let (_temp, roots) = runtime_fixture();
-    let legacy_model = runtime_models(&roots).join("sha256").join("a".repeat(64));
-    fs::create_dir_all(&legacy_model).unwrap();
-    assert!(
-        validate_docker_run(
-            &runtime_arguments(&roots, &[(legacy_model, "/models", true)]),
+            &runtime_arguments(&roots, &[(legacy_model, "/models/model", true)]),
             &roots,
             None,
         )
@@ -239,7 +226,7 @@ fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         let mount = artifact_path(&roots, 'a');
         assert!(
             validate_docker_run(
-                &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                &runtime_arguments(&roots, &[(mount, "/models/model", true)]),
                 &roots,
                 None,
             )
@@ -258,7 +245,7 @@ fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         let mount = artifact_path(&roots, 'a');
         assert!(
             validate_docker_run(
-                &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                &runtime_arguments(&roots, &[(mount, "/models/model", true)]),
                 &roots,
                 None,
             )
@@ -286,7 +273,7 @@ fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         fs::create_dir_all(&model).unwrap();
         assert!(
             validate_docker_run(
-                &runtime_arguments(&roots, &[(model, "/models", true)]),
+                &runtime_arguments(&roots, &[(model, "/models/model", true)]),
                 &roots,
                 None,
             )
@@ -315,7 +302,7 @@ fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         let mount = artifact_path(&roots, 'a');
         assert!(
             validate_docker_run(
-                &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                &runtime_arguments(&roots, &[(mount, "/models/model", true)]),
                 &roots,
                 None,
             )
@@ -352,7 +339,7 @@ fn runtime_rejects_unsafe_model_ownership_and_modes() {
     let (_temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models/model", true)]);
 
     let owner = fs::symlink_metadata(&roots.agent_data).unwrap().uid();
     assert!(validate_docker_run(&arguments, &roots, Some(owner ^ 1)).is_err());

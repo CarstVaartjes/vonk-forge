@@ -4,37 +4,23 @@ use super::*;
 
 pub(super) fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
     if target.chars().count() > MAX_COMPILED_MODEL_PATH_CHARS
-        || (target != "/models"
-            && (!target.starts_with("/models/")
-                || target.ends_with('/')
-                || !target.split('/').skip(1).all(valid_model_path_component)))
+        || !target.starts_with("/models/")
+        || target.ends_with('/')
+        || !target.split('/').skip(1).all(valid_model_path_component)
     {
         return false;
     }
     let Some(model_root) = runtime_model_root(source, roots) else {
         return false;
     };
-    let relative = source.strip_prefix(model_root).ok();
-    let components = relative
+    let components = source
+        .strip_prefix(model_root)
         .into_iter()
         .flat_map(Path::components)
         .collect::<Vec<_>>();
-    let new_layout = components.len() >= 3
-        && matches!(components[0], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64))
-        && matches!(components[1], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()))
-        && valid_model_file_path_components(&components[2..]);
-    let selection_layout = components.len() >= 2
-        && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) && value != "sha256")
-        && valid_model_file_path_components(&components[1..]);
-    if !(new_layout || selection_layout) {
-        return false;
-    }
-    if target == "/models" {
-        return true;
-    }
-    target
-        .strip_prefix("/models/")
-        .is_some_and(|value| value.split('/').all(valid_model_path_component))
+    components.len() >= 2
+        && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()))
+        && valid_model_file_path_components(&components[1..])
 }
 
 pub(super) fn valid_model_file_path_components(components: &[Component<'_>]) -> bool {

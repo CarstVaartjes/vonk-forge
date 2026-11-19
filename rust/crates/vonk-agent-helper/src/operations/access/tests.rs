@@ -8,7 +8,7 @@ fn runtime_access_grants_exact_model_output_cache_and_run_tmp_acls() {
     let (_temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
     let validated = validate_docker_run(&arguments, &roots, None).unwrap();
     let runner = RecordingAclRunner::default();
     let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
@@ -68,7 +68,7 @@ fn runtime_access_skips_exact_model_acl_and_rejects_unexpected_acl() {
         acl.extend_from_slice(&identifier.to_le_bytes());
     }
     xattr::set(&model, "system.posix_acl_access", &acl).unwrap();
-    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models/model", true)]);
     let validated = validate_docker_run(&arguments, &roots, None).unwrap();
     let runner = RecordingAclRunner::default();
     let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
