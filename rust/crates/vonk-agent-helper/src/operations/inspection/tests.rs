@@ -266,7 +266,9 @@ fn a_recovered_traceback_far_above_never_names_the_exit() {
     let log = through_docker_logs_capture(b"", stderr.as_bytes());
     assert!(log.stderr.len() <= crate::package_command::STREAM_RETAINED_BYTES);
     let (retained, summary) = summary_of(log, 1);
-    assert!(!retained.stderr.text.contains("Traceback"), "precondition");
+    // The first error of the capture is retained for the reader, but the exit
+    // is decided by the window alone.
+    assert!(retained.stderr.text.contains("ConnectionRefusedError"));
     assert!(summary.contains("exit_cause=unclassified"), "{summary}");
     assert!(!summary.contains("exception="), "{summary}");
 }

@@ -9,6 +9,7 @@ from fastapi import (
     Header,
     HTTPException,
     Path,
+    Query,
     Request,
     Response,
     status,
@@ -152,11 +153,19 @@ def install_artifact_job_routes(
         operation_id="listArtifactJobsForRun",
     )
     def list_jobs(
-        run_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
+        run_id: str = Path(pattern=_UUID),
+        # A read never refuses: a limit outside 1..100 is clamped into it.
+        limit: int = Query(default=100),
+        _actor: Actor = actor_dependency,
     ) -> ArtifactJobListResponse:
         try:
             return ArtifactJobListResponse(
-                jobs=[_view(item) for item in _service(service).list_for_run(run_id)]
+                jobs=[
+                    _view(item)
+                    for item in _service(service).list_for_run(
+                        run_id, limit=min(max(limit, 1), 100)
+                    )
+                ]
             )
         except KeyError:
             raise HTTPException(

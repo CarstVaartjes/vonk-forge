@@ -216,7 +216,7 @@ export interface LibraryApi {
     fitsFleet?: boolean,
   ): Promise<RecipeLibrary>;
   recipeDetail(selector: string, signal?: AbortSignal): Promise<RecipeDetail>;
-  artifactJobsForRun(runId: string, signal?: AbortSignal): Promise<ArtifactJobList>;
+  artifactJobsForRun(runId: string, signal?: AbortSignal, limit?: number): Promise<ArtifactJobList>;
   artifactJobByRequestId(requestId: string, signal?: AbortSignal): Promise<ArtifactJob>;
   artifactJobCapabilities(signal?: AbortSignal): Promise<ArtifactJobCapabilities>;
   createArtifactJob(

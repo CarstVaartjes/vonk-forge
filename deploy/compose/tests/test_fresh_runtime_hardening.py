@@ -71,7 +71,10 @@ def test_caddy_healthcheck_does_not_depend_on_a_virtual_host() -> None:
 
     assert healthcheck == [
         "CMD-SHELL",
-        "wget -q -O /dev/null http://127.0.0.1:8082/healthz",
+        (
+            "wget -q -O /dev/null http://127.0.0.1:8082/healthz"
+            " && ip route | grep -q '^default'"
+        ),
     ]
     assert "http://127.0.0.1:8082" in caddyfile
 

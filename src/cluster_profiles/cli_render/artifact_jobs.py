@@ -6,6 +6,7 @@ import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 
+from ..cli_json_contract import Word
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
@@ -94,7 +95,7 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
     if job_reconnects(state, operation_id):
         _field(
             "Reconnect",
-            f"vonkctl recipe job detail {shlex.quote(str(payload.get('id')))} --follow",
+            f"vonkctl job detail {shlex.quote(str(payload.get('id')))} --follow",
         )
 
 
@@ -135,7 +136,7 @@ def _artifact_job_list(payload: Mapping[str, object]) -> None:
         if job_reconnects(job.get("state"), operation_id):
             _field(
                 "Reconnect",
-                f"vonkctl recipe job detail {shlex.quote(str(job.get('id')))} --follow",
+                f"vonkctl job detail {shlex.quote(str(job.get('id')))} --follow",
             )
 
 
@@ -197,7 +198,7 @@ def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
         _field("Knob default", knob.default)
     _field(
         "Next",
-        f"vonkctl recipe job create --run {shlex.quote(run_id or '<run>')} "
+        f"vonkctl job create --run {shlex.quote(run_id or '<run>')} "
         "--file <binding.json>",
     )
 
@@ -212,9 +213,16 @@ def _artifact_job(payload: Mapping[str, object], action: str) -> None:
         _artifact_job_contract(ArtifactJobContractResponse.from_dict(dict(payload)))
     elif action == "list":
         _artifact_job_list(payload)
-    elif action == "download":
+    elif action == Word.DOWNLOAD or (action == Word.RUN and "job_id" in payload):
         _artifact_job_download(payload)
-    elif action in {"detail", "create", "upload", "submit", "cancel"}:
+    elif action in {
+        Word.DETAIL,
+        Word.CREATE,
+        Word.UPLOAD,
+        Word.SUBMIT,
+        Word.CANCEL,
+        Word.RUN,
+    }:
         _artifact_job_record(payload, action)
     else:
         _field("Observation", ENDPOINT_UNAVAILABLE)

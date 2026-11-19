@@ -23,6 +23,7 @@ START_HERE = (
     ("vonkctl profile endpoint", "API base and model name for clients"),
     ("vonkctl key create <name>", "A key for an app to call the models"),
     ("vonkctl recipe library", "Recipes you can run"),
+    ("vonkctl job run <alias> --input slot=file", "Send files to a running recipe"),
 )
 
 # The root and the groups whose bare invocation shows their current state.

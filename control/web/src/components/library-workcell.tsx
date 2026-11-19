@@ -18,7 +18,7 @@ import type {
   RecipeReadinessState,
 } from "../api/types";
 import { canonicalRecipeSelector } from "../api/types";
-import type { LibraryRoute } from "../lib/library-route";
+import { LibraryPath, type LibraryRoute } from "../lib/library-route";
 import { modelKey, modelLibraryPath, recipeLibraryPath } from "../lib/library-route";
 import { formatBytes } from "../lib/fleet";
 import { EmptyState } from "./empty-state";
@@ -473,7 +473,7 @@ export function LibraryWorkcell({
     ...new Map(records.map((record) => [record.modelKey, record.modelTitle])).entries(),
   ];
   const selectedModelKey =
-    route.kind === "model" ? route.modelKey : filters.model || models[0]?.modelKey;
+    route.kind === LibraryPath.MODELS ? route.modelKey : filters.model || models[0]?.modelKey;
   const selectedModel = models.find((record) => record.modelKey === selectedModelKey);
   const selectedRecipes = matching.filter(
     (record) => record.modelKey === selectedModelKey && record.recipe,
@@ -481,7 +481,7 @@ export function LibraryWorkcell({
   const recipePaneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (
-      (!filters.model && route.kind !== "model") ||
+      (!filters.model && route.kind !== LibraryPath.MODELS) ||
       typeof window === "undefined" ||
       window.innerWidth > 760
     )
@@ -857,10 +857,7 @@ export function LibraryWorkcell({
                 );
                 return (
                   <li key={record.key}>
-                    <NavigateLink
-                      href={recipeLibraryPath(record.recipe!.recipe_id)}
-                      onNavigate={onNavigate}
-                    >
+                    <NavigateLink href={recipeLibraryPath(record.recipe!)} onNavigate={onNavigate}>
                       <strong>{record.title}</strong>
                       <RecipeBadges recipe={record.recipe!} />
                       <RecipeQualificationEvidence qualification={record.recipe!.qualification} />

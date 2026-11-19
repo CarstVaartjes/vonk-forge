@@ -83,7 +83,7 @@ class DownloadedFile(StrictModel):
 
 
 class ArtifactDownloadDocument(StrictModel):
-    """``vonkctl recipe job download --json``: the verified local files."""
+    """``vonkctl job download --json``: the verified local files."""
 
     job_id: str
     state: ArtifactJobState

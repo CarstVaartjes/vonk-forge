@@ -429,6 +429,20 @@ fn a_container_with_no_provable_owner_keeps_every_store_until_it_is_proven() {
 }
 
 #[test]
+fn an_unproven_exited_container_owns_nothing() {
+    // Exited containers kept for the serving grace must not stop retention.
+    let mut containers = managed_containers(3);
+    containers[1].state = "exited";
+    let exited = containers[1].id();
+    let host = Host::with(&containers);
+    host.uninspectable.lock().unwrap().push(exited);
+    let (_temp, executor) = host_executor(&host);
+    let deadline = Instant::now() + Duration::from_secs(600);
+    let owners = executor.helper_store_owners(deadline).unwrap();
+    assert_eq!(owners.runtimes.len(), 2);
+}
+
+#[test]
 fn a_container_gone_before_its_inspection_owns_nothing() {
     let host = Host::with(&managed_containers(2));
     host.ghosts.lock().unwrap().push("a".repeat(64));

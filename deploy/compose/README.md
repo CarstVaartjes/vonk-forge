@@ -233,33 +233,53 @@ record. A network recreated under a stopped container (new ID) therefore
 leaves it exited with `network ... not found`; for Caddy that closes `:8443`.
 Losing Docker's network store across a daemon restart produces exactly this.
 
-The janitor reads each container's recorded networks once per tick against
-one inspect per network. An entry is broken when it names an older network ID,
-or when the container runs and the network lists no endpoint for it. The
-repair is journalled in `image-janitor-state` (`/state/repairing.json`) before its first effect, then
-stops a running container, disconnects and re-attaches each broken network by
-name with its recorded aliases, and starts the container if it should run. A
-janitor that dies or is stopped mid-repair leaves the journal to the next
-process, so the container is not left stopped (Docker counts an API stop as a
-manual stop) or short of a network. A container whose last start failed, in
-any non-running state Docker does not own, is started while its restart policy
-is `always` or `unless-stopped`; one stopped after it ran has no start error
-and stays stopped. `restarting`, `paused`, `removing` and `dead` are logged and
-left to Docker. A network that does not exist waits for the next `compose up`.
-Each repair backs off exponentially with jitter (30 s doubling to five minutes) while
-it does not converge. Containers sharing another container's network namespace
-are not touched.
+The janitor heals against the networks the rendered bundle declares for each
+service (`VONK_COMPOSE_NETWORKS`, rendered by `scripts/render-dev-compose`),
+not against the container's own record: Docker can lose a network and drop it
+from the record together, and a healer that trusted the record saw nothing
+wrong (the 2026-11-19 outage, the third after 11-03 and 11-05: Caddy running
+without `ingress`, `:8443` closed, no outbound DNS). Once per tick, against one
+inspect per network, a declared network that does not exist is broken whatever
+the record says; a recorded entry is broken when it names an older network ID,
+or when the container runs and the network lists no endpoint for it. A declared
+network that exists but is missing from the record is left to Compose (a
+redeploy may be attaching it), unless a journalled repair owes it or the
+network carries the janitor's own mark. A missing declared network is recreated
+only inside a journalled, backed-off repair, from the bundle's definition
+(`internal` flag, Compose project and network labels). It carries a
+`config-hash` that Compose never computes, so the next `compose up` sees it as
+diverged and recreates it from the bundle: Compose stays the owner. An
+undeclared missing network waits for the next `compose up`. A non-empty,
+unparsable `VONK_COMPOSE_NETWORKS` logs `declared-networks-invalid-blind` and
+the janitor falls back to the records alone.
+
+State to action, first match: Docker-owned state (`restarting`, `paused`,
+`removing`, `dead`) waits; a missing undeclared network waits; a broken or owed
+network is repaired; a container that is not running but should be (failed
+start with an `always`/`unless-stopped` policy, or owed a start by the journal)
+is started; a container left `created` by an aborted `up` is started after a
+grace; otherwise nothing. The repair is journalled in `image-janitor-state`
+(`/state/repairing.json`) before its first effect, then stops a running
+container, disconnects and re-attaches each broken network by name with its
+aliases, and starts the container if it should run. A repair that fails
+half-way still starts the container, but the missing network stays owed,
+so the journal (or the network mark) owes it again on the next tick;
+each repair backs off exponentially with jitter (30 s doubling to five minutes)
+while it does not converge. Containers sharing another container's network
+namespace are not touched.
 
 This uses more of the Docker API than image collection: the janitor stops and
-starts project containers and disconnects and connects their networks.
+starts project containers, creates a declared network that vanished, and
+disconnects and connects their networks.
 
-Whether this matches the Caddy outages after the 2026-11-03 and 2026-11-05
-NAS OS updates is not established; the state seen there (Caddy running while
-`ingress` listed no container) was not reproduced. If it happens again, the
-janitor log shows which case it was: `network-reattached` for
-`vonk-forge-caddy-1` (covered), `start-retried` (a failed start with intact
-networks), `repair-backoff` repeating (a repair that does not converge), or
-`network-absent-wait-for-compose` (the network is gone until a Redeploy).
+The janitor's health check also requires a completed repair pass in the last 15
+minutes. Caddy's health check requires a default route, which exists only
+while `ingress` (its one non-internal network) is attached, so a half-attached
+Caddy shows `unhealthy`. If every active Spark is offline for five minutes,
+the critical `AgentIngressDown` alert fires and names this cause (runbook:
+`docs/runbooks/observability.md#agent-ingress-down`). If the janitor log shows
+`repair-backoff` repeating, a repair is not converging; as a manual recovery
+delete the Caddy container (not volumes) and Redeploy.
 
 **Deployment requires rerunning the accepted NAS installer in the existing bundle
 directory**, preserving `.env`, secrets and volumes, then redeploying Compose.

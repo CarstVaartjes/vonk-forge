@@ -132,7 +132,7 @@ def _fleet_job_progress_hint(
     """The recipe operation was not found; a fleet job under that id names its view.
 
     ``recipe progress`` follows recipe preparation. A recipe job's run is a
-    fleet job (for a job's own result, ``vonkctl recipe job detail``), so when
+    fleet job (for a job's own result, ``vonkctl job detail``), so when
     the id resolves as one, the not-found carries ``vonkctl fleet progress`` as
     its recovery action.
     """
@@ -161,6 +161,25 @@ def _fleet_job_progress_hint(
     )
 
 
+def _job(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    factory: Callable[[], str],
+):
+    if not isinstance(client, ArtifactJobClient):
+        raise ControlClientError(
+            "artifact byte transfer is unavailable in this CLI client"
+        )
+    return run_artifact_job(
+        args,
+        client,
+        factory,
+        request_key=_request_key,
+        quote=_quoted,
+        poll=_poll_path,
+    )
+
+
 def _recipe(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -176,19 +195,6 @@ def _recipe(
             return _cache_progress(client, "recipe", args, factory)
         except ControlNotFound as error:
             raise _fleet_job_progress_hint(client, args, error) from error
-    if action == "job":
-        if not isinstance(client, ArtifactJobClient):
-            raise ControlClientError(
-                "artifact byte transfer is unavailable in this CLI client"
-            )
-        return run_artifact_job(
-            args,
-            client,
-            factory,
-            request_key=_request_key,
-            quote=_quoted,
-            poll=_poll_path,
-        )
     if action is None:
         return _overview(client, "recipe", args)
     if action == "library":

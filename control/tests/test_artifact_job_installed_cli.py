@@ -167,7 +167,6 @@ def _run_cli(
         [
             str(executable),
             *(["--json"] if json_output else []),
-            "recipe",
             "job",
             *arguments,
         ],
@@ -610,7 +609,7 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
         assert human_queued.returncode == 0, human_queued.stderr
         assert f"Artifact job: {job_id}" in human_queued.stdout
         assert "Result files: unavailable" in human_queued.stdout
-        assert f"vonkctl recipe job detail {job_id} --follow" in human_queued.stdout
+        assert f"vonkctl job detail {job_id} --follow" in human_queued.stdout
 
         with sessions() as session:
             artifact_job = session.get(ArtifactJob, job_id)

@@ -167,6 +167,9 @@ impl Host {
                 let quiet = args.iter().any(|arg| arg == "--quiet");
                 let identity_read = args.iter().any(|arg| arg == REOBSERVE_FORMAT);
                 let id_filter = args.iter().find_map(|arg| arg.strip_prefix("id="));
+                let state_listing = args
+                    .iter()
+                    .any(|arg| arg == crate::operations::store_retention::LISTING_STATE_FORMAT);
                 // Newest first, as Docker lists them; `--last` applies after
                 // the filters.
                 let lines: String = containers
@@ -183,6 +186,8 @@ impl Host {
                     .map(|container| {
                         if quiet {
                             format!("{}\n", container.id())
+                        } else if state_listing {
+                            format!("{}\t{}\n", container.id(), container.state)
                         } else if identity_read {
                             let live =
                                 matches!(container.state, "running" | "paused" | "restarting");

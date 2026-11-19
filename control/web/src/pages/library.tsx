@@ -24,7 +24,7 @@ import { LibraryVocabularyProvider } from "../components/library-vocabulary";
 import { libraryFiltersFromSearch, libraryRecencySince } from "../components/library-workcell";
 import { nodeDisplayName } from "../lib/fleet";
 import { libraryRoute, modelKey } from "../lib/library-route";
-import type { LibraryRoute } from "../lib/library-route";
+import { LibraryPath, type LibraryRoute } from "../lib/library-route";
 import "./library.css";
 
 function subview(path: string): LibrarySubview {
@@ -302,8 +302,8 @@ export function LibraryPage({
     return () => controller.abort();
   }, [api, fleetAttempt]);
   useEffect(() => {
-    const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
-    if (!recipeId) {
+    const selector = route.kind === LibraryPath.RECIPES ? route.selector : undefined;
+    if (!selector) {
       setDetail(undefined);
       setDetailError("");
       setDetailLoading(false);
@@ -313,7 +313,7 @@ export function LibraryPage({
     setDetailLoading(true);
     setDetailError("");
     void api
-      .recipeDetail(recipeId, controller.signal)
+      .recipeDetail(selector, controller.signal)
       .then((value) => {
         if (!controller.signal.aborted) {
           setDetail(viewRecipeDetail(value));
@@ -333,7 +333,7 @@ export function LibraryPage({
   useEffect(() => {
     if (
       !snapshot ||
-      route.kind !== "model" ||
+      route.kind !== LibraryPath.MODELS ||
       snapshot.models.some(
         (model) =>
           `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}` ===
@@ -344,7 +344,12 @@ export function LibraryPage({
     onNavigatePath?.("/library", true);
   }, [onNavigatePath, route, snapshot]);
   useEffect(() => {
-    if (route.kind === "model" && typeof window !== "undefined" && window.innerWidth <= 760) return;
+    if (
+      route.kind === LibraryPath.MODELS &&
+      typeof window !== "undefined" &&
+      window.innerWidth <= 760
+    )
+      return;
     queueMicrotask(() => heading.current?.focus());
   }, [path, route.kind]);
   const updateQuery = useCallback(
@@ -369,8 +374,8 @@ export function LibraryPage({
   );
   const refresh = useCallback(
     async (signal: AbortSignal) => {
-      if (route.kind === "recipe")
-        await api.recipeDetail(route.recipeId, signal).then((value) => {
+      if (route.kind === LibraryPath.RECIPES)
+        await api.recipeDetail(route.selector, signal).then((value) => {
           if (!signal.aborted) setDetail(viewRecipeDetail(value));
         });
       if (!signal.aborted) {

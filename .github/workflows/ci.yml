@@ -39,6 +39,9 @@ env:
 # A member pull request's gate is renamed too ("CI gate (member PR)"): only a
 # full run reports the required "CI gate", so every change lands through an
 # integration pull request (scripts/select-ci-areas, `full`).
+# A Dependabot pull request runs nothing, not even the selector or the gate:
+# its update lands through an integration pull request, which runs CI once.
+# Its skipped gate keeps the raw name, so it never reports "CI gate".
 concurrency:
   group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -46,7 +49,7 @@ concurrency:
 jobs:
   changes:
     name: Select CI integration dependencies
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     permissions:
       contents: read
       actions: read
@@ -1280,7 +1283,7 @@ jobs:
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
     needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
-    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

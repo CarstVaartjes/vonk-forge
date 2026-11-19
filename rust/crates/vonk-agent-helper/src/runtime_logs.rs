@@ -36,6 +36,13 @@
 //!   traceback.  The message lines are retained ahead of the tail, with the
 //!   omitted middle marked, so the evidence keeps both why the process aborted
 //!   and how it ended.
+//! * The window keeps the first error.  A failed start prints its root error
+//!   first and later output repeats the failure (four identical tracebacks
+//!   filled a window and hid the first).  When the window drops the head of a
+//!   stream, each process's first error line, up to a quarter of the bound,
+//!   are retained ahead of it, with the omitted middle marked.  They are
+//!   evidence for the reader only: an exit is classified from the window
+//!   without them, since the workload may have recovered from that error.
 
 use std::ops::Range;
 pub use vonk_agent_protocol::failure_evidence::ExitCause;
@@ -55,6 +62,9 @@ const OMISSION_MARKER_BYTES: usize = 48;
 /// Bytes of memory-figure lines retained ahead of the window, reserved from
 /// the window's budget so the stream's bound stays [`RETAINED_BYTES`].
 const MEMORY_FIGURE_BYTES: usize = RETAINED_BYTES / 4;
+/// Bytes of the stream's first lines retained ahead of the window when the
+/// window drops the head, reserved from the window's budget.
+const HEAD_BYTES: usize = RETAINED_BYTES / 4;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
 /// The capture is the smaller of these lines and the last
@@ -334,8 +344,8 @@ fn through_the_message(
 /// frame, the exception, the causes -- is placed within the smaller budget
 /// rather than cut from its top afterwards, and the figures are taken from
 /// above that smaller window.
-fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
-    let (causes, range) = failure_window(stream, RETAINED_BYTES);
+fn window_within(stream: &[u8], total: usize) -> (Vec<Range<usize>>, Range<usize>) {
+    let (causes, range) = failure_window(stream, total);
     if memory_figures(
         &stream[..above(stream, &range)],
         &causes,
@@ -345,7 +355,7 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     {
         return (causes, range);
     }
-    let budget = RETAINED_BYTES - MEMORY_FIGURE_BYTES - OMISSION_MARKER_BYTES;
+    let budget = total - MEMORY_FIGURE_BYTES - OMISSION_MARKER_BYTES;
     let (reduced_causes, reduced) = failure_window(stream, budget);
     let figures = memory_figures(
         &stream[..above(stream, &reduced)],
@@ -358,6 +368,34 @@ fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     let mut retained: Vec<_> = reduced_causes.into_iter().chain(figures).collect();
     retained.sort_by_key(|line| line.start);
     (retained, reduced)
+}
+
+/// The window with the stream's first lines kept ahead of it.
+///
+/// The first error of a failed start is usually printed first, and a window
+/// anchored on the last failure line (or a plain tail) loses it when later
+/// output repeats the same failure.  When the window drops the head of the
+/// stream, the each process's first error line, up to [`HEAD_BYTES`], is retained as causes,
+/// the window is chosen again within what they and the omission marker leave,
+/// and everything retained still fits in [`RETAINED_BYTES`].
+fn window(stream: &[u8], keep_head: bool) -> (Vec<Range<usize>>, Range<usize>) {
+    let first = window_within(stream, RETAINED_BYTES);
+    let covered = first.0.first().map_or(first.1.start, |line| line.start);
+    if !keep_head || covered == 0 {
+        return first;
+    }
+    let (mut causes, range) =
+        window_within(stream, RETAINED_BYTES - HEAD_BYTES - OMISSION_MARKER_BYTES);
+    let below = causes
+        .first()
+        .map_or(above(stream, &range), |line| line.start);
+    // The first error line of each process, as for a summary that points above.
+    let mut head = first_failure_lines(stream, below, HEAD_BYTES);
+    if head.is_empty() {
+        return first;
+    }
+    head.append(&mut causes);
+    (head, range)
 }
 
 /// Where the bytes above `window` end: at its start, or past the line it opens
@@ -623,7 +661,12 @@ fn memory_figures(above: &[u8], retained: &[Range<usize>], budget: usize) -> Vec
 /// lines retained from above the window come first, followed by a line that
 /// marks what was omitted between them and the window.
 pub fn retain(stream: &[u8]) -> FailureLogTail {
-    let (causes, range) = window(stream);
+    retain_stream(stream, true)
+}
+
+/// [`retain`], with or without the stream's first error ahead of the window.
+fn retain_stream(stream: &[u8], keep_head: bool) -> FailureLogTail {
+    let (causes, range) = window(stream, keep_head);
     let (start, length) = (range.start, range.len());
     let selected = &stream[start..(start + length).min(stream.len())];
     // A window that opens mid-line must not present a partial line as if the
@@ -667,16 +710,30 @@ pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
     }
 }
 
+/// The windows an exit is classified from: [`retain_container`] without the
+/// first error of each stream.  That error is evidence for the reader; the
+/// workload may have recovered from it, so it never names the exit.
+fn classified_windows(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
+    HostHelperProcessLogs {
+        exit_code: None,
+        stdout: retain_stream(stdout, false),
+        stderr: retain_stream(stderr, false),
+    }
+}
+
 /// One failed container's captured output: what `docker logs --tail
 /// CAPTURE_LINES` printed, as the helper's command runner kept it (the last
 /// `package_command::STREAM_RETAINED_BYTES` of each stream).  An exit is
 /// classified from this alone, and everything it needs is derived once, here:
-/// the windows that cross the protocol, their own closing exception, and the
+/// the windows that cross the protocol, the classified windows (the same
+/// windows without the first error kept for the reader, which is all
+/// classification reads), their closing exception, and the
 /// closing exception of the whole capture, admitted only when a window points
 /// above itself.  Classification can never be handed a window.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CapturedOutput {
     retained: HostHelperProcessLogs,
+    classified: HostHelperProcessLogs,
     window_exception: Option<String>,
     /// The cause a window's pointer ("please check the stack trace above")
     /// sends the reader to, when the window holds no exception of its own:
@@ -689,8 +746,9 @@ pub struct CapturedOutput {
 impl CapturedOutput {
     pub fn new(stdout: &[u8], stderr: &[u8]) -> Self {
         let retained = retain_container(stdout, stderr);
-        let window_exception = python_exception(&retained);
-        let points_above = [&retained.stdout.text, &retained.stderr.text]
+        let classified = classified_windows(stdout, stderr);
+        let window_exception = python_exception(&classified);
+        let points_above = [&classified.stdout.text, &classified.stderr.text]
             .into_iter()
             .any(|text| {
                 text.as_bytes()
@@ -714,6 +772,7 @@ impl CapturedOutput {
         };
         Self {
             retained,
+            classified,
             window_exception,
             dropped_exception,
         }
@@ -850,8 +909,9 @@ fn has(text: &str, needles: &[&str]) -> bool {
 }
 
 /// Classify from the exit state first (it is authoritative), then from the
-/// container's own words in the retained windows, the text the evidence
-/// carries.  A window can drop the line that names a cause: a two-Spark vLLM
+/// container's own words in the classified windows (the retained windows
+/// without the first error kept for the reader, not the text that crosses the
+/// protocol).  A window can drop the line that names a cause: a two-Spark vLLM
 /// start ends in kilobytes of C++ frames below the engine's `RuntimeError:
 /// Worker failed with error 'CUDA error: no kernel image ...`, and the window
 /// keeps only the frames and the pointer to it.  So an exit the windows leave
@@ -861,7 +921,7 @@ fn has(text: &str, needles: &[&str]) -> bool {
 pub fn classify(exit: Option<&ContainerExit>, output: Option<&CapturedOutput>) -> ExitCause {
     let cause = classify_retained(
         exit,
-        output.map(CapturedOutput::retained),
+        output.map(|output| &output.classified),
         output.is_some_and(|output| output.window_exception.is_some()),
     );
     if cause != ExitCause::Unclassified {
@@ -1073,6 +1133,42 @@ mod tests {
                 .to_vec();
         stream.extend(cut_off_traceback());
         stream
+    }
+
+    #[test]
+    fn the_first_error_survives_a_tail_of_repeated_noise() {
+        // Wrong implementation this catches: a plain window kept the newest
+        // bytes, so the root error printed first was lost behind four repeated
+        // tracebacks of the same failure.
+        let mut stream = b"(rank0) ERROR rank 0 died: root cause here\n".to_vec();
+        for _ in 0..4 {
+            stream.extend(b"(APIServer pid=57) Traceback (most recent call last):\n");
+            for index in 0..12 * SCALE {
+                stream.extend(
+                    format!("(APIServer pid=57)   File \"/opt/vllm/stage_{index:03}.py\", line {index}, in run\n").into_bytes(),
+                );
+            }
+            stream.extend(b"(APIServer pid=57) RuntimeError: Orchestrator initialization failed\n");
+        }
+        let tail = retain(&stream);
+        assert!(
+            tail.text
+                .starts_with("(rank0) ERROR rank 0 died: root cause here\n")
+        );
+        assert!(tail.text.contains("bytes omitted]"));
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
+        assert!(
+            tail.text
+                .ends_with("RuntimeError: Orchestrator initialization failed\n")
+        );
+        assert_eq!(
+            tail.dropped_bytes,
+            Some((stream.len() - kept_bytes(&tail)) as u64)
+        );
+    }
+
+    fn kept_bytes(tail: &FailureLogTail) -> usize {
+        tail.text.len() - omission_marker(tail.dropped_bytes.unwrap()).len() - 1
     }
 
     #[test]
@@ -1883,7 +1979,6 @@ mod tests {
         stream.extend(canary.as_bytes());
         let tail = retain(&stream);
         assert!(tail.text.ends_with(canary), "{}", tail.text);
-        assert!(!tail.text.contains("optional_feature"), "{}", tail.text);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import type { RecipeQualification } from "../api/types";
-import { modelKey, recipeLibraryPath } from "../lib/library-route";
+import { LibraryPath, modelKey, recipeLibraryPath } from "../lib/library-route";
 import { libraryViewSnapshot, minimalLibraryDetail } from "../test-fixtures/library";
 import { LibraryRecipeAuthority } from "./library-recipe-detail";
 import { EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell } from "./library-workcell";
@@ -48,7 +48,7 @@ test("each recipe row shows its published status and newest evidence; none is no
       onNavigate={() => undefined}
       onQueryChange={() => undefined}
       query=""
-      route={{ kind: "model", modelKey: modelKey(base.model) }}
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
       snapshot={{
         ...libraryViewSnapshot,
         models: libraryViewSnapshot.models.map((entry) =>
@@ -59,7 +59,7 @@ test("each recipe row shows its published status and newest evidence; none is no
   );
   const pane = screen.getByLabelText("Recipes matching selected Model");
   const row = (index: number) =>
-    pane.querySelector<HTMLElement>(`a[href="${recipeLibraryPath(recipes[index]!.recipe_id)}"]`)!;
+    pane.querySelector<HTMLElement>(`a[href="${recipeLibraryPath(recipes[index]!)}"]`)!;
 
   expect(row(0).querySelector('[data-badge="qualification"]')).toHaveTextContent("Working");
   expect(within(row(0)).getByText(/Last passed/)).toHaveTextContent(/on 2 Sparks$/);
