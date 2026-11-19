@@ -27,11 +27,16 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_OUTPUT_FILE_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_jobs import (
     JOB_CONTRACT_NOT_FOUND,
-    MAX_INPUT_FILE_BYTES,
     ArtifactJobCapabilitiesResponse,
     ArtifactJobContractResponse,
     ArtifactJobError,
@@ -60,8 +65,9 @@ _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}
 #: The largest body each artifact-job upload accepts. The request boundary
 #: enforces these, and the edge (``deploy/compose/Caddyfile``) must admit at
 #: least as much on the same route (``test_agent_ingress`` compares them).
-MAX_ARTIFACT_INPUT_UPLOAD_BYTES = 512 * 1024**2
-MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES = 1024**3
+#: An upload carries one file, so each cap is the per-file job limit.
+MAX_ARTIFACT_INPUT_UPLOAD_BYTES = MAX_INPUT_FILE_BYTES
+MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES = MAX_OUTPUT_FILE_BYTES
 
 
 class ArtifactJobModel(BaseModel):
@@ -73,9 +79,11 @@ class ArtifactJobCreate(ArtifactJobModel):
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
     parameters: dict[str, ParameterScalar] = Field(default_factory=dict)
-    inputs: list[RecipeJobInputFile] = Field(default_factory=list, max_length=32)
+    inputs: list[RecipeJobInputFile] = Field(
+        default_factory=list, max_length=MAX_INPUT_FILES
+    )
     output_limits: RecipeJobOutputLimits
-    timeout_seconds: int = Field(ge=1, le=3_600)
+    timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
 
 
 class CancelRequest(ArtifactJobModel):

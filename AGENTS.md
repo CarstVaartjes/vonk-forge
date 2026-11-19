@@ -97,7 +97,7 @@ lives in a small pure function in `cluster_profiles/cli_render` that returns an
 enum, a dataclass or a typed value the renderer prints. A secret or terminal
 control in any output is a leak, not wording, and a line shown twice is a
 duplication fault: absence, count and emptiness checks on captured stdout/stderr
-stay valid. The `printed-output` added-line guard refuses only a new positive
+stay valid. Artifact-job size, count and timeout limits live only in `agent_protocol/src/vonk_agent_protocol/job_limits.py`; import them from there (the `job-limits` added-line guard refuses a restated assignment). The `printed-output` added-line guard refuses only a new positive
 wording assertion on captured output (`assert "<literal>" in captured.out`) in
 the rest of `tests/cluster_profiles`.
 In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet.ts`; a component never

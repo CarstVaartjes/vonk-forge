@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterable
 
 from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.job_limits import MAX_INPUT_FILE_BYTES
 
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
@@ -15,7 +16,6 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
 from ..models import ArtifactJob, ArtifactJobFile
 from .contracts import (
-    MAX_INPUT_FILE_BYTES,
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,
     ArtifactJobView,

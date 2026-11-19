@@ -92,6 +92,7 @@ MODES = (
     "exit-causes",
     "nas-space",
     "fixed-reserves",
+    "job-limits",
     "model-sets",
     "openers",
     "follow-validators",
@@ -152,6 +153,12 @@ CAPACITY_REFUSAL_MARKER = "capacity-refusal: disk"
 FIXED_RESERVE = re.compile(
     r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
 )
+# Artifact-job limits have one owner, `vonk_agent_protocol/job_limits.py`;
+# a second assignment restates a number that must stay equal to it.
+JOB_LIMIT_ASSIGNMENT = re.compile(
+    r"^\s*(?:MAX_(?:INPUT|OUTPUT)_[A-Z_]+|MAX_TIMEOUT_SECONDS)\s*(?::[^=]+)?="
+)
+JOB_LIMITS_OWNER = "agent_protocol/src/vonk_agent_protocol/job_limits.py"
 # A display title feeding a normalised name builds identity from display text;
 # a title edit then changes behaviour with no new revision (#2009).
 TITLE_IDENTITY = re.compile(
@@ -2325,6 +2332,18 @@ def check_source(
             for line, text in enumerate(source.splitlines(), 1)
             if (match := FIXED_RESERVE.search(text))
             and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "job-limits" in modes
+        and path != JOB_LIMITS_OWNER
+        and path.startswith(("control/src/", "agent_protocol/src/"))
+    ):
+        hits.extend(
+            (line, "job limit restated; import it from vonk_agent_protocol.job_limits")
+            for line, text in enumerate(source.splitlines(), 1)
+            if JOB_LIMIT_ASSIGNMENT.search(text)
         )
     if (
         python

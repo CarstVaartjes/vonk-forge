@@ -33,6 +33,15 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
+    MAX_OUTPUT_FILE_BYTES,
+    MAX_OUTPUT_FILES,
+    MAX_OUTPUT_TOTAL_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
 
 from ..artifact_blob_store import ArtifactBlobStoreError, BlobReconciliation
@@ -62,9 +71,6 @@ from ..stored_json import read_row_column
 from ..stored_states import CatalogRevisionState
 from ..strict_json import StrictJSONModel, read_stored_model
 
-MAX_INPUT_FILES = 32
-MAX_INPUT_FILE_BYTES = 512 * 1024**2
-MAX_INPUT_TOTAL_BYTES = 1024**3
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 
 
@@ -200,14 +206,14 @@ class ArtifactOutputFile(ArtifactJobContractModel):
         pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
         r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
     )
-    size_bytes: int = Field(ge=0, le=1024**3)
+    size_bytes: int = Field(ge=0, le=MAX_OUTPUT_FILE_BYTES)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class OutputLimits(ArtifactJobContractModel):
-    max_files: int = Field(ge=1, le=32)
-    max_file_bytes: int = Field(ge=1, le=1024**3)
-    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    max_files: int = Field(ge=1, le=MAX_OUTPUT_FILES)
+    max_file_bytes: int = Field(ge=1, le=MAX_OUTPUT_FILE_BYTES)
+    max_total_bytes: int = Field(ge=1, le=MAX_OUTPUT_TOTAL_BYTES)
     allowed_media_types: list[str] = Field(min_length=1, max_length=16)
 
 
@@ -270,7 +276,7 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     output_files: tuple[ArtifactOutputFile, ...]
     result_evidence: ArtifactJobResultEvidence | None = None
     status_reason: str | None = Field(default=None, max_length=512)
-    timeout_seconds: int = Field(ge=1, le=3_600)
+    timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
     created_at: datetime
     updated_at: datetime
     supported_actions: tuple[Literal["stop"], ...] = ()
@@ -281,13 +287,13 @@ class ArtifactJobListResponse(ArtifactJobContractModel):
 
 
 class ArtifactJobTransportCapabilities(ArtifactJobContractModel):
-    max_input_files: int = Field(ge=1, le=32)
+    max_input_files: int = Field(ge=1, le=MAX_INPUT_FILES)
     max_input_file_bytes: int = Field(ge=1, le=MAX_INPUT_FILE_BYTES)
-    max_input_total_bytes: int = Field(ge=1, le=1024**3)
-    max_output_files: int = Field(ge=1, le=32)
-    max_output_file_bytes: int = Field(ge=1, le=1024**3)
-    max_output_total_bytes: int = Field(ge=1, le=2 * 1024**3)
-    max_timeout_seconds: int = Field(ge=1, le=3_600)
+    max_input_total_bytes: int = Field(ge=1, le=MAX_INPUT_TOTAL_BYTES)
+    max_output_files: int = Field(ge=1, le=MAX_OUTPUT_FILES)
+    max_output_file_bytes: int = Field(ge=1, le=MAX_OUTPUT_FILE_BYTES)
+    max_output_total_bytes: int = Field(ge=1, le=MAX_OUTPUT_TOTAL_BYTES)
+    max_timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
     reserved_input_names: list[str] = Field(min_length=1, max_length=32)
 
 

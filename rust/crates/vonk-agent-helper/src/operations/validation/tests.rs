@@ -170,7 +170,7 @@ fn runtime_requires_explicit_none_network_and_entrypoint() {
     let (_temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
+    let arguments = runtime_arguments(&roots, &[(model.clone(), "/models/model", true)]);
     for value in ["bridge", "host", "custom-network"] {
         let mut candidate = arguments.clone();
         let position = candidate.iter().position(|item| item == "none").unwrap();
@@ -201,7 +201,7 @@ fn runtime_accepts_signed_bridge_endpoint_and_exact_cdi_gpu() {
     let (_temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
     let network = arguments.iter().position(|value| value == "none").unwrap();
     arguments[network] = "bridge".to_owned();
     let image = arguments
@@ -247,7 +247,7 @@ fn runtime_cache_rejects_other_installations_and_symlinked_ancestors() {
         let (temp, roots) = runtime_fixture_with_separate_agent_data();
         let model = artifact_path(&roots, 'a');
         fs::create_dir_all(&model).unwrap();
-        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
         validate_docker_run(&arguments, &roots, None).unwrap();
 
         let installation = runtime_models(&roots).parent().unwrap().to_path_buf();

@@ -438,7 +438,7 @@ pub(super) async fn deliver_retained<C: LoopClient>(
         // Scan at most one bounded receipt at a time, yielding at each network
         // observation. Projection writes never surrender receipt custody.
         while tokio::time::Instant::now() < delivery_deadline {
-            let Some((_operation, result, acknowledged)) = state.next_delivery_result()? else {
+            let Some((_operation, result)) = state.next_delivery_result()? else {
                 break;
             };
             tokio::task::yield_now().await;
@@ -457,13 +457,7 @@ pub(super) async fn deliver_retained<C: LoopClient>(
                 continue;
             }
             let projection = match submit_or_core(client, &result).await {
-                Ok(()) | Err(ClientError::ResultSuperseded) => {
-                    if acknowledged {
-                        state.mark_reconciled(&result)
-                    } else {
-                        state.acknowledge(&result)
-                    }
-                }
+                Ok(()) | Err(ClientError::ResultSuperseded) => state.acknowledge(&result),
                 Err(ClientError::ResultRejected(error)) => {
                     if let Err(error) = record_result_rejection(state, &result, &error, now) {
                         eprintln!("vonk-agent: rejection projection deferred: {error}");

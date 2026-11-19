@@ -174,7 +174,7 @@ fn runtime_consumes_post_image_entrypoint_marker_before_docker() {
     let (_temp, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir_all(&model).unwrap();
-    let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let mut arguments = runtime_arguments(&roots, &[(model, "/models/model", true)]);
     let image = arguments
         .iter()
         .position(|value| value.starts_with("localhost/vonk/"))

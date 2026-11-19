@@ -62,7 +62,7 @@ fn fixture_for_gpu(
     let (root, roots) = runtime_fixture();
     let model = artifact_path(&roots, 'a');
     fs::create_dir(&model).unwrap();
-    let mut args = runtime_arguments(&roots, &[(model, "/models", true)]);
+    let mut args = runtime_arguments(&roots, &[(model, "/models/model", true)]);
     if gpu {
         args.splice(
             1..1,

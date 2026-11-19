@@ -63,7 +63,6 @@ pub(super) fn validate_docker_run_with_archive(
     let mut xdg_cache_home = false;
     let mut tmpdir = false;
     let mut models = Vec::new();
-    let mut model_sources = BTreeSet::new();
     let mut model_targets = BTreeSet::new();
     let mut outputs = None;
     let mut cache_root = None;
@@ -333,9 +332,7 @@ pub(super) fn validate_docker_run_with_archive(
                     .ok_or(OperationError::InvalidOperation)?;
                 let (source, target, readonly) = parse_mount(value)?;
                 if readonly && valid_model_mount(&source, target, roots) {
-                    if !model_sources.insert(source.clone())
-                        || !model_targets.insert(target.to_owned())
-                    {
+                    if !model_targets.insert(target.to_owned()) {
                         return Err(OperationError::InvalidOperation);
                     }
                     models.push(source);
@@ -510,10 +507,7 @@ pub(super) fn validate_docker_run_with_archive(
     } else {
         None
     };
-    if models.is_empty()
-        || models.len() > MAX_COMPILED_MODEL_FILES
-        || models.len() > 1 && model_targets.contains("/models")
-    {
+    if models.is_empty() || models.len() > MAX_COMPILED_MODEL_FILES {
         return Err(OperationError::InvalidOperation);
     }
     let canonical_model_root = canonical_model_root(roots, &models, agent_data_owner_uid)?;

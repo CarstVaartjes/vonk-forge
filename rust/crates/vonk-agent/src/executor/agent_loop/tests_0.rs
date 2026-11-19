@@ -256,10 +256,9 @@ async fn a_refused_result_is_kept_instead_of_discarded() {
     .settled();
 
     assert_eq!(client.submitted.lock().unwrap().len(), 1);
-    // The execution is not retried. Its recorded outcome remains readable
-    // and is offered once more as diagnostic evidence after restart.
+    // The execution is not retried and the acknowledged outcome is never
+    // offered again.
     assert!(state.pending_results().unwrap().is_empty());
-    assert_eq!(state.unreconciled_results().unwrap().len(), 1);
     run_once_with_heartbeat_interval(
         &client,
         &mut state,
@@ -277,8 +276,7 @@ async fn a_refused_result_is_kept_instead_of_discarded() {
     .await
     .unwrap()
     .settled();
-    assert_eq!(client.submitted.lock().unwrap().len(), 2);
-    assert!(state.unreconciled_results().unwrap().is_empty());
+    assert_eq!(client.submitted.lock().unwrap().len(), 1);
     let connection = rusqlite::Connection::open(&path).unwrap();
     let stored: Option<Vec<u8>> = connection
         .query_row(
@@ -1452,15 +1450,8 @@ async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
             .settled();
         }
         // Offered once and settled (one disposition for every definite
-        // refusal); the refusal stays as durable evidence. An acknowledged
-        // fenced result (409) is offered one more time to the Controller's
-        // reconciliation path and then marked reconciled: bounded, never again.
-        let offers = if status == 409 { 2 } else { 1 };
-        assert_eq!(
-            client.submitted.lock().unwrap().len(),
-            offers,
-            "HTTP {status}"
-        );
+        // refusal); the refusal stays as durable evidence.
+        assert_eq!(client.submitted.lock().unwrap().len(), 1, "HTTP {status}");
         assert!(state.pending_results().unwrap().is_empty(), "HTTP {status}");
         let rejection = state.result_rejection(&result, Utc::now()).unwrap();
         if status == 409 {

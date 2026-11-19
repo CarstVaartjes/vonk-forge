@@ -50,7 +50,6 @@ _JOB_INTERFACES = frozenset(
 # The compiled argv total budget, derived from the canonical host-runtime
 # request ceiling rather than restated as 1 MiB.
 _MAX_ARGV_BYTES = MAX_ARGV_BYTES
-_SAFE_ARG_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 # Engine variables such as Ray's RAY_memory_usage_threshold are case-sensitive,
 # so only the first character is held to upper case.
 _SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]{0,127}$")
@@ -209,20 +208,10 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
             )
     elif executable not in canonical_harness(recipe.runtime.engine).executables:
         raise HarnessCompileError("recipe entrypoint does not match its engine harness")
-    if any(
-        type(item) is not str or not item or len(item) > 4096 or "\x00" in item
-        for item in entrypoint
-    ):
-        raise HarnessCompileError("recipe entrypoint contains invalid argv data")
     result = list(entrypoint[1:])
     for argument in recipe.runtime.arguments:
-        name = argument.name.removeprefix("--")
-        if _SAFE_ARG_NAME.fullmatch(name) is None:
-            raise HarnessCompileError(
-                f"recipe argument name is invalid: {argument.name}"
-            )
         # Preserve engine option spelling exactly; argv is not shell text.
-        flag = f"--{name}"
+        flag = f"--{argument.name}"
         value = (
             argument.value if argument.setting is None else settings[argument.setting]
         )
@@ -553,10 +542,7 @@ def compile_canonical_harness(
             rank=rank,
         ),
     )
-    try:
-        validate_projection(projection, canonical_argv=True, canonical_mounts=True)
-    except HarnessCompileError as error:
-        raise HarnessCompileError(str(error)) from error
+    validate_projection(projection)
     return projection, tuple(artifact for artifact, _mount in mounts), image_digest
 
 

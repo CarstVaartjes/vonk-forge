@@ -876,16 +876,16 @@ impl StateStore {
     /// in custody; only a typed unknown is offered for the exact valid fence.
     pub fn next_delivery_result(
         &mut self,
-    ) -> Result<Option<(AgentOperation, AgentResult, bool)>, StateError> {
+    ) -> Result<Option<(AgentOperation, AgentResult)>, StateError> {
         if !self.durable_custody {
             return Ok(None);
         }
         const RECEIPT_READ_BYTES: i64 =
             vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64;
         let row = self.connection.query_row(
-            "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.result_json)<=?2 THEN o.result_json END,o.result_acknowledged
+            "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.result_json)<=?2 THEN o.result_json END
              FROM operations o LEFT JOIN result_reconciliation r ON r.fence=o.fence
-             WHERE o.state=?3 AND r.fence IS NULL
+             WHERE o.state=?3 AND o.result_acknowledged=0 AND r.fence IS NULL
              AND o.rowid>?1 ORDER BY o.rowid LIMIT 1",
             params![self.delivery_cursor, RECEIPT_READ_BYTES, ProgressPhase::Completed.as_str()],
             |row| {
@@ -895,11 +895,7 @@ impl StateStore {
                         eprintln!("vonk-agent: receipt bytes unavailable: {error}");
                         None
                     });
-                    let acknowledged = row.get::<_, bool>(4).unwrap_or_else(|error| {
-                        eprintln!("vonk-agent: acknowledgement projection unavailable: {error}");
-                        false
-                    });
-                    Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?, bytes, acknowledged))
+                    Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?, bytes))
                 })();
                 Ok((cursor, value))
             },
@@ -923,7 +919,7 @@ impl StateStore {
         ) {
             eprintln!("vonk-agent: receipt delivery cursor projection deferred: {error}");
         }
-        let (fence, operation, bytes, acknowledged) = match value {
+        let (fence, operation, bytes) = match value {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("vonk-agent: damaged receipt row observation deferred: {error}");
@@ -943,7 +939,7 @@ impl StateStore {
                 result.fence == fence && result.validate_for_operation(&operation).is_ok()
             })
             .unwrap_or_else(|| uncertain_receipt(fence, &operation));
-        Ok(Some((operation, result, acknowledged)))
+        Ok(Some((operation, result)))
     }
 
     pub fn pending_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
@@ -972,44 +968,6 @@ impl StateStore {
             }
         }
         Ok(results)
-    }
-
-    /// Results acknowledged by older agents may include a refused 409. Offer
-    /// each retained receipt once to the Controller's diagnostic-only path.
-    /// The Controller deduplicates an outcome it already accepted and retains
-    /// an expired exact-fence outcome without applying it to live workload state.
-    pub fn unreconciled_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
-        let mut statement = self.connection.prepare(
-            "SELECT o.operation,o.result_json FROM operations o
-             LEFT JOIN result_reconciliation r ON r.fence=o.fence
-             WHERE o.state='completed' AND o.result_acknowledged=1
-               AND r.fence IS NULL ORDER BY o.rowid LIMIT 16",
-        )?;
-        let values = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        values
-            .into_iter()
-            .map(|(operation, value)| {
-                let operation = operation.parse().map_err(|_| StateError::ResultState)?;
-                let result: AgentResult = parse_strict(&value)?;
-                result.validate_for_operation(&operation)?;
-                Ok((operation, result))
-            })
-            .collect()
-    }
-
-    pub fn mark_reconciled(&mut self, result: &AgentResult) -> Result<(), StateError> {
-        result.validate()?;
-        self.connection.execute(
-            "INSERT OR IGNORE INTO result_reconciliation(fence)
-             SELECT fence FROM operations
-             WHERE fence=?1 AND state='completed' AND result_acknowledged=1",
-            [result.fence.to_string()],
-        )?;
-        Ok(())
     }
 
     pub fn acknowledge(&mut self, result: &AgentResult) -> Result<(), StateError> {
