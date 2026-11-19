@@ -23,16 +23,17 @@ function elapsed(job: ArtifactJob, now: number): string {
  * the job form and results are.
  */
 export function WorkloadJobs({
-  selector,
+  revision,
   adapter,
   jobs,
 }: {
-  selector: string;
+  /** The running recipe revision: its page opens that exact revision. */
+  revision: string;
   adapter: ArtifactJobInterface;
   jobs: ArtifactJob[] | string | undefined;
 }) {
   const now = Date.now();
-  const page = recipeLibraryPath(selector);
+  const page = recipeLibraryPath({ revision });
   return (
     <section className="workload-jobs" aria-label="Jobs">
       <p className="hero-caption">

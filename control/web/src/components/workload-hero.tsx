@@ -62,7 +62,7 @@ export function WorkloadHero({
       <div className="workload-hero">
         <WorkloadHeader unit={unit} />
         {jobs.kind === "job" ? (
-          <WorkloadJobs selector={jobs.selector} adapter={jobs.interface} jobs={jobs.jobs} />
+          <WorkloadJobs revision={jobs.revision} adapter={jobs.interface} jobs={jobs.jobs} />
         ) : (
           <WorkloadChecking error={jobs.error} />
         )}

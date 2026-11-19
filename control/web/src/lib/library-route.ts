@@ -40,10 +40,21 @@ export function modelLibraryPath(modelKey: string): string {
   return `/library/models/${encodeURIComponent(modelKey)}`;
 }
 
-/** Link by the recipe selector (newest revision), never by a recipe or revision id. */
+/**
+ * A recipe page: by selector for browsing (the newest revision), or by revision for a running workload,
+ * so the page opens the exact revision that runs. Never a recipe id.
+ */
 export function recipeLibraryPath(
-  recipe: Pick<LibraryViewRecipe, "publisher" | "slug"> | { selector: string },
+  recipe:
+    | Pick<LibraryViewRecipe, "publisher" | "slug">
+    | { selector: string }
+    | { revision: string },
 ): string {
-  const selector = "selector" in recipe ? recipe.selector : canonicalRecipeSelector(recipe);
-  return `/library/recipes/${encodeURIComponent(selector)}`;
+  const target =
+    "revision" in recipe
+      ? recipe.revision
+      : "selector" in recipe
+        ? recipe.selector
+        : canonicalRecipeSelector(recipe);
+  return `/library/recipes/${encodeURIComponent(target)}`;
 }

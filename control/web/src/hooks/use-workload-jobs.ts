@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  type ArtifactJob,
-  type ArtifactJobInterface,
-  canonicalRecipeSelector,
-  type ControlApi,
-} from "../api/types";
+import { type ArtifactJob, type ArtifactJobInterface, type ControlApi } from "../api/types";
 import { jobInterfacesOf } from "../lib/artifact-job";
 import { safeErrorText } from "../lib/error-display";
 
@@ -23,8 +18,8 @@ export type JobWorkload =
   | { kind: "model" }
   | {
       kind: "job";
-      /** The recipe's selector, for its page. */
-      selector: string;
+      /** The running recipe revision, for its page. */
+      revision: string;
       interface: ArtifactJobInterface;
       /** The run's latest jobs: undefined while they load, the message of a read that failed. */
       jobs: ArtifactJob[] | string | undefined;
@@ -50,7 +45,7 @@ export function useJobWorkload(
     const reads = api;
     const controller = new AbortController();
     let busy = false;
-    let job: { selector: string; interface: ArtifactJobInterface } | undefined;
+    let job: { interface: ArtifactJobInterface } | undefined;
     const tick = async () => {
       if (busy) return;
       busy = true;
@@ -63,10 +58,7 @@ export function useJobWorkload(
             if (!controller.signal.aborted) setState({ kind: "model" });
             return;
           }
-          job = {
-            selector: canonicalRecipeSelector(detail.identity),
-            interface: jobs[0].adapter,
-          };
+          job = { interface: jobs[0].adapter };
         }
         let jobs: ArtifactJob[] | string;
         try {
@@ -75,7 +67,8 @@ export function useJobWorkload(
           if (controller.signal.aborted) return;
           jobs = safeErrorText(cause instanceof Error ? cause.message : "Jobs unavailable");
         }
-        if (!controller.signal.aborted) setState({ kind: "job", ...job, jobs });
+        if (!controller.signal.aborted)
+          setState({ kind: "job", revision: recipeRevisionId, ...job, jobs });
       } catch (cause) {
         if (!controller.signal.aborted)
           setState({

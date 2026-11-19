@@ -23,6 +23,7 @@ import {
   type WireNumber,
 } from "../api/contract-numeric";
 import {
+  createJobTitle,
   isTerminal,
   jobInterfacesOf,
   jobTone,
@@ -1178,7 +1179,7 @@ export function ArtifactJobWorkspace({
       <header className="artifact-job-heading">
         <div>
           <h4 id="artifact-job-heading" ref={heading} tabIndex={-1}>
-            Create artifacts
+            {createJobTitle(adapter)}
           </h4>
           <p>
             Send a bounded, durable {humanizeIdentifier(adapter)} request to this running recipe.

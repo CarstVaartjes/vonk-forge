@@ -156,13 +156,13 @@ class FakeApi {
 const mount = (api: FakeApi) =>
   render(<WorkloadHero api={api} unit={unit} reads={reads({})} live={false} />);
 
-test("a job recipe shows its jobs and a create link by selector, not engine figures", async () => {
+test("a job recipe shows its jobs and a create link to the running revision, not engine figures", async () => {
   mount(new FakeApi("video-job"));
   expect(await screen.findByText(/takes jobs, not chat requests/)).toBeInTheDocument();
   expect(await screen.findByText(/15m 16s/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Create a video" })).toHaveAttribute(
     "href",
-    "/library/recipes/vonk%2Fh3-video",
+    `/library/recipes/${REVISION}`,
   );
   expect(screen.queryByText("Requests")).toBeNull();
   expect(screen.queryByText("Not reported")).toBeNull();
