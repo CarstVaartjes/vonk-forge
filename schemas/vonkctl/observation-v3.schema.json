@@ -1590,6 +1590,30 @@
           "title": "Default",
           "type": "boolean"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -1618,10 +1642,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "boolean",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -2982,6 +3023,30 @@
         "default": {
           "$ref": "#/$defs/ParameterScalar"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -3010,10 +3075,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "enum",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -7250,6 +7332,30 @@
           ],
           "title": "Default"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "anyOf": [
             {
@@ -7298,10 +7404,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "float",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -8529,6 +8652,30 @@
           "title": "Default",
           "type": "integer"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "anyOf": [
             {
@@ -8571,10 +8718,35 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
         "type": {
           "const": "integer",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [
@@ -8930,6 +9102,55 @@
           "type": "null"
         }
       ]
+    },
+    "KnobDisplay": {
+      "description": "What a form shows for one job knob; its type and limits stay in the recipe.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "title": "KnobDisplay",
+      "type": "object"
     },
     "LibraryAssessmentCode": {
       "description": "Why a library entry is not assessed runnable on the current fleet.",
@@ -14635,6 +14856,20 @@
           "title": "Kind",
           "type": "string"
         },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/KnobDisplay"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
+        },
         "tags": {
           "items": {
             "type": "string"
@@ -15108,6 +15343,117 @@
       "title": "RecipeJobInterface",
       "type": "object"
     },
+    "RecipeJobKnob": {
+      "description": "A job option: the default plus the type and limits a form and a check read.\n\nThe JSON type of ``value`` is the knob type, so it cannot disagree with its\ndefault; ``allowed_values`` makes it an enum. A knob's label, description\nand unit are display (``RecipeDisplay.knobs``), never recipe identity.\n``step`` means ``minimum + k * step``, as the HTML ``step`` attribute does.",
+      "properties": {
+        "allowed_values": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "maxItems": 64,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Values"
+        },
+        "change_effect": {
+          "enum": [
+            "none",
+            "restart",
+            "reprepare",
+            "rebuild"
+          ],
+          "title": "Change Effect",
+          "type": "string"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value",
+        "change_effect"
+      ],
+      "title": "RecipeJobKnob",
+      "type": "object"
+    },
     "RecipeJobOutput": {
       "properties": {
         "max_total_bytes": {
@@ -15201,7 +15547,7 @@
           "maxProperties": 64,
           "patternProperties": {
             "^[a-z][a-z0-9_-]*$": {
-              "$ref": "#/$defs/RecipeSetting"
+              "$ref": "#/$defs/RecipeJobKnob"
             }
           },
           "propertyNames": {
@@ -21556,6 +21902,30 @@
           "title": "Default",
           "type": "string"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
         "maximum": {
           "default": null,
           "title": "Maximum",
@@ -21584,10 +21954,27 @@
           "default": null,
           "title": "Pattern"
         },
+        "step": {
+          "default": null,
+          "title": "Step",
+          "type": "null"
+        },
         "type": {
           "const": "string",
           "title": "Type",
           "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
         }
       },
       "required": [

@@ -392,7 +392,8 @@ class ArtifactJobService(OutputService):
                 recipe, interface, _recipe_display(session, revision)
             )
             if isinstance(contract, Damaged):
-                # The revision is immutable: its contract never compiles, so a
+                # Compiling depends on the recipe alone (display only adds
+                # wording), and a revision is immutable: it never compiles, so a
                 # retry cannot succeed. Refuse it with the cause, never "retry".
                 raise ArtifactJobInvalid(
                     f"recipe artifact contract does not compile: {contract.note}",

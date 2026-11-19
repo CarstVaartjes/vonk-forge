@@ -25,6 +25,7 @@ from pydantic import (
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
 from vonk_forge_contracts import RecipeDefinition, RecipeDisplay
+from vonk_forge_contracts.display import KnobDisplay
 from vonk_forge_contracts.recipe import (
     RecipeFileSlot,
     RecipeJobInterface,
@@ -60,6 +61,9 @@ SlotId = Annotated[str, StringConstraints(pattern=_SLOT)]
 Extension = Annotated[str, StringConstraints(pattern=_EXTENSION)]
 ParameterName = Annotated[str, StringConstraints(pattern=_PARAMETER)]
 type ParameterScalar = bool | int | float | str
+#: The display fields of a knob (label, description, unit): the one owner of
+#: which parameter fields are wording, so they stay out of the digest.
+_WORDING = frozenset(KnobDisplay.model_fields)
 
 
 def _tuple(value: object) -> object:
@@ -212,9 +216,10 @@ class _ArtifactParameterBase(ArtifactContractModel):
     step: int | None = Field(default=None, ge=1)
     # Wording from the recipe's display document: it never changes execution
     # identity, so ``CompiledArtifactContract.sha256`` leaves it out.
-    label: str | None = Field(default=None, min_length=1, max_length=64)
-    description: str | None = Field(default=None, min_length=1, max_length=256)
-    unit: str | None = Field(default=None, min_length=1, max_length=16)
+    # Ingress validated the wording (``KnobDisplay``); it is not checked again.
+    label: str | None = None
+    description: str | None = None
+    unit: str | None = None
     # Required on the abstract base so each concrete parameter states its own
     # empty default. A base default that a subclass removes is a legal Pydantic
     # override but is not something a dataclass-based checker can accept, and
@@ -478,9 +483,7 @@ def _parameter(
             "step": knob.step,
             "allowed_values": list(knob.allowed_values or ()),
             "pattern": None,
-            "label": words.label if words else None,
-            "description": words.description if words else None,
-            "unit": words.unit if words else None,
+            **{field: getattr(words, field, None) for field in _WORDING},
         }
     )
 
