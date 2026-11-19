@@ -181,6 +181,8 @@ export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[
 /** One workload and the Sparks that carry it, in rank order. */
 export type WorkloadGroup = {
   runId: string;
+  /** The recipe the run serves; absent when the Controller could not project it. */
+  recipeId: string | null;
   title: string;
   alias: string | null;
   /** The run's state in a word, as `nodeWorkloadLines` prints it. */
@@ -207,6 +209,7 @@ export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
     for (const run of node.loaded) {
       const unit: WorkloadGroup = units.get(run.run_id) ?? {
         runId: run.run_id,
+        recipeId: run.recipe_id ?? null,
         title: run.title ?? run.run_id,
         alias: run.alias ?? null,
         state: runStateWord(run),

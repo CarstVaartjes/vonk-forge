@@ -2,6 +2,7 @@ import "./workload-unit.css";
 import type { WorkloadReads } from "../hooks/use-workload-reads";
 import { nodeDisplayName, type WorkloadCluster } from "../lib/fleet";
 import type { ReactNode } from "react";
+import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
 import { WorkloadHeader, WorkloadHero } from "./workload-hero";
 
 /**
@@ -10,11 +11,14 @@ import { WorkloadHeader, WorkloadHero } from "./workload-hero";
  * to the Spark cards (a "Runs on" line on a phone). `children` are the cards.
  */
 export function WorkloadUnit({
+  api,
   cluster,
   reads,
   live,
   children,
 }: {
+  /** Reads a job workload's recipe and jobs; without it every workload shows as a model. */
+  api?: Partial<JobWorkloadApi>;
   cluster: WorkloadCluster;
   reads: WorkloadReads;
   live: boolean;
@@ -28,7 +32,7 @@ export function WorkloadUnit({
     >
       {cluster.units.map((unit, index) =>
         index === 0 ? (
-          <WorkloadHero key={unit.runId} unit={unit} reads={reads} live={live} />
+          <WorkloadHero key={unit.runId} api={api} unit={unit} reads={reads} live={live} />
         ) : (
           // A second workload on the same Sparks is one line under the first.
           <div className="workload-strip" key={unit.runId}>

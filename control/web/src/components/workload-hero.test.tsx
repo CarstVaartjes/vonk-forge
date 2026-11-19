@@ -1,11 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { WorkloadHero } from "./workload-hero";
-import type { MetricsSeriesResponse } from "../api/types";
+import type { ArtifactJob, MetricsSeriesResponse } from "../api/types";
+import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../hooks/use-workload-reads";
 import type { WorkloadGroup } from "../lib/fleet";
 
 const unit = {
   runId: "r",
+  recipeId: "rec",
   title: "GLM 5.3 Flash",
   alias: "coder",
   state: "running",
@@ -107,4 +109,41 @@ test("an engine figure takes its title and unit from the catalogue; a metric it 
   });
   expect(screen.getByText("KV cache in use").nextSibling).toHaveTextContent("42.0%");
   expect(screen.queryByText("Prefill throughput")).toBeNull();
+});
+
+const jobApi = (adapter: string): JobWorkloadApi =>
+  ({
+    recipeDetail: async () => ({ document: { interfaces: [{ adapter }] } }),
+    artifactJobsForRun: async () => ({
+      jobs: [
+        {
+          id: "j1",
+          interface: "video-job",
+          state: "succeeded",
+          created_at: "2026-11-19T10:00:00Z",
+          updated_at: "2026-11-19T10:15:16Z",
+        } as ArtifactJob,
+      ],
+    }),
+  }) as unknown as JobWorkloadApi;
+
+test("a job recipe shows its jobs and a way to create one, not engine figures", async () => {
+  render(<WorkloadHero api={jobApi("video")} unit={unit} reads={reads({})} live={false} />);
+  expect(await screen.findByText(/takes jobs, not chat requests/)).toBeInTheDocument();
+  expect(await screen.findByText("15m 16s", { exact: false })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Create job" })).toHaveAttribute(
+    "href",
+    "/library/recipes/rec",
+  );
+  expect(screen.queryByText("Requests")).toBeNull();
+  expect(screen.queryByText("Not reported")).toBeNull();
+});
+
+test("a chat recipe keeps the engine figures", async () => {
+  const api = jobApi("openai");
+  const read = vi.spyOn(api, "recipeDetail");
+  render(<WorkloadHero api={api} unit={unit} reads={reads({})} live={false} />);
+  await waitFor(() => expect(read).toHaveBeenCalled());
+  expect(screen.queryByText(/takes jobs/)).toBeNull();
+  expect(screen.getAllByText("Requests").length).toBeGreaterThan(0);
 });
