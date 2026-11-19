@@ -82,9 +82,9 @@ type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
 type Scalar = ArtifactJobParameterValue;
 type RecipeParameter = ArtifactJobParameter;
 type ContractState =
-  | { kind: "loading" }
-  | { kind: "ready"; parameters: RecipeParameter[] }
-  | { kind: "unavailable"; detail: string };
+  | { kind: "awaiting" }
+  | { kind: "received"; parameters: RecipeParameter[] }
+  | { kind: "unreadable"; detail: string };
 type InputPayload = { declaration: ArtifactJobInputFile; blob: Blob };
 type CancelRecovery = {
   jobId: string;
@@ -490,9 +490,9 @@ export function ArtifactJobWorkspace({
       "state" in run &&
       run.state === "running",
   );
-  const [contract, setContract] = useState<ContractState>({ kind: "loading" });
+  const [contract, setContract] = useState<ContractState>({ kind: "awaiting" });
   const parameters = useMemo(
-    () => (contract.kind === "ready" ? contract.parameters : []),
+    () => (contract.kind === "received" ? contract.parameters : []),
     [contract],
   );
   const input = jobInterface?.input ?? null;
@@ -590,19 +590,19 @@ export function ArtifactJobWorkspace({
   const loadContract = useCallback(
     async (signal?: AbortSignal) => {
       if (!activeRunId) return;
-      setContract({ kind: "loading" });
+      setContract({ kind: "awaiting" });
       try {
         const read = await api.artifactJobContract(activeRunId, signal);
         if (signal?.aborted) return;
         setContract(
-          read.state === "available" && read.contract
-            ? { kind: "ready", parameters: read.contract.parameters }
-            : { kind: "unavailable", detail: read.detail ?? read.state },
+          read.contract
+            ? { kind: "received", parameters: read.contract.parameters }
+            : { kind: "unreadable", detail: read.detail ?? read.state },
         );
       } catch (value) {
         if (signal?.aborted) return;
         setContract({
-          kind: "unavailable",
+          kind: "unreadable",
           detail:
             value instanceof Error ? value.message.slice(0, 256) : "Unable to load recipe settings",
         });
@@ -770,7 +770,7 @@ export function ArtifactJobWorkspace({
   ];
   const canSubmit =
     Boolean(activeRun && capabilities) &&
-    contract.kind === "ready" &&
+    contract.kind === "received" &&
     !phase &&
     preflightErrors.length === 0 &&
     cancelRecovery?.source !== "upload";
@@ -1520,7 +1520,7 @@ export function ArtifactJobWorkspace({
               </button>
             </div>
           )}
-          {contract.kind === "unavailable" && (
+          {contract.kind === "unreadable" && (
             <div className="artifact-job-error" role="alert">
               <strong>Recipe settings unavailable</strong>
               <p>{contract.detail}</p>
@@ -1624,9 +1624,9 @@ export function ArtifactJobWorkspace({
             </div>
           )}
           <button type="submit" disabled={!canSubmit}>
-            {activeRun && contract.kind === "loading"
+            {activeRun && contract.kind === "awaiting"
               ? "Loading recipe settings…"
-              : contract.kind === "unavailable"
+              : contract.kind === "unreadable"
                 ? "Recipe settings required"
                 : capabilities
                   ? "Submit artifact job"
