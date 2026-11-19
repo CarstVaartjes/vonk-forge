@@ -3364,6 +3364,51 @@ def test_profile_endpoint_uses_scoped_current_controller_projection() -> None:
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 
 
+def test_profile_endpoint_without_a_profile_answers_for_the_loaded_one() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): {
+                "profiles": [
+                    {"number": 1, "name": "Default", "loaded_revision": None},
+                    {"number": 42, "name": "Video", "loaded_revision": 3},
+                ]
+            },
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+    assert client.calls[-1][1] == "/api/profile/42/endpoints"
+
+
+def test_profile_endpoint_survives_one_transient_failure_listing_profiles() -> None:
+    client = FakeClient(
+        {
+            ("GET", "/api/profile"): [
+                ControlHTTPError(503, "unavailable"),
+                {"profiles": [{"number": 42, "name": "Video", "loaded_revision": 3}]},
+            ],
+            ("GET", "/api/profile/42/endpoints"): {
+                "number": 42,
+                "observed_at": "2026-09-23T12:59:31Z",
+                "assignments": [],
+            },
+        }
+    )
+
+    status, payload = run(("profile", "endpoint", "--json"), client)
+
+    assert status == 0
+    assert payload["number"] == 42
+
+
 def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:
     client = FakeClient(
         {
@@ -5105,6 +5150,44 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) ->
     assert _effects(client) == [("PUT", "/api/profile/1")]
     assert "saved draft" in prompt.transcript
     assert "control.api_error" not in prompt.transcript
+
+
+def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
+    preview = _run_preview("b" * 64, _RUN_DIGEST)
+    preview["effects"] = {
+        "runs": [
+            {
+                "alias": "coding",
+                "action": "stop",
+                "run_id": "55555555-5555-4555-8555-555555555555",
+                "installation_id": "66666666-6666-4666-8666-666666666666",
+                "node_ids": ["spk_" + "a" * 32],
+            }
+        ],
+        "installations": [],
+        "superseded": [],
+    }
+    client = FakeClient(
+        {**_run_responses(), ("POST", "/api/profile/1/preview"): preview}
+    )
+    prompt = _Prompt(monkeypatch, "no")
+
+    cli.main(
+        ("--profile", "1", "run", "Qwen Code"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    lines = [
+        prompt.transcript.index(text)
+        for text in (
+            "Profile edited: 1 (Default)",
+            "Sparks selected: Atlas",
+            "Will stop: coding",
+            "Ready for review",
+        )
+    ]
+    assert lines == sorted(lines)
 
 
 @pytest.mark.parametrize(

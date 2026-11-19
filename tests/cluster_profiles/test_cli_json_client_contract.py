@@ -8,6 +8,7 @@ documents only the CLI prints, and the job documents, which need no API.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import jsonschema
@@ -155,6 +156,19 @@ def test_usage_error_document_matches_its_schema(capsys) -> None:
     _validate(DocumentKind.ERROR, json.loads(capsys.readouterr().out))
 
 
+def test_no_loaded_profile_error_document_matches_its_schema(capsys) -> None:
+    class Idle:
+        request_timeout_seconds = 1.0
+
+        def request(self, *_args, **_kwargs):
+            return {"profiles": [{"number": 1, "loaded_revision": None}]}
+
+    assert cli.main(("--json", "profile", "endpoint"), control_client=Idle()) == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["recovery_actions"] == ["vonkctl profile list"]
+    _validate(DocumentKind.ERROR, document)
+
+
 def test_failed_update_error_document_matches_its_schema(capsys, monkeypatch) -> None:
     def refuse(**kwargs):
         raise CliUpdateError("no signed release is reachable")
@@ -206,3 +220,41 @@ def test_a_document_without_a_kind_is_not_stamped() -> None:
     review = {"schema_version": 2, "allowed": True}
     assert stamp(review, DocumentKind.PROFILE_REVIEW) == review
     assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS
+
+
+def test_missing_configuration_names_each_step_once(capsys, monkeypatch) -> None:
+    monkeypatch.delenv("VONK_CONTROL_URL", raising=False)
+    monkeypatch.delenv("VONK_CONTROL_TOKEN_FILE", raising=False)
+    assert cli.main(("fleet",)) == 2
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == len(set(lines))
+    assert not any(line.startswith("Detail:") for line in lines)
+    assert any("client.not_configured" in line for line in lines)
+    assert lines[-1] == "Next: vonkctl --check-connection"
+    assert cli.main(("--json", "fleet")) == 2
+    document = json.loads(capsys.readouterr().out)
+    _validate(DocumentKind.ERROR, document)
+    assert document["code"] == "client.not_configured"
+    assert document["recovery_actions"]
+
+
+def test_unusable_socks_proxy_is_an_error_document_not_a_traceback(
+    capsys, monkeypatch, tmp_path
+) -> None:
+    token = tmp_path / "token"
+    token.write_text("secret\n")
+    token.chmod(0o600)
+    monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
+    monkeypatch.setenv("VONK_CONTROL_TOKEN_FILE", str(token))
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:1")
+    monkeypatch.setitem(sys.modules, "socksio", None)
+    assert cli.main(("--json", "fleet")) == 2
+    document = json.loads(capsys.readouterr().out)
+    _validate(DocumentKind.ERROR, document)
+    assert document["code"] == "client.transport_unsupported"
+    assert "SOCKS" in document["error"]
+    assert document["recovery_actions"]
+    assert cli.main(("fleet",)) == 2
+    assert len(capsys.readouterr().err.splitlines()) == 3

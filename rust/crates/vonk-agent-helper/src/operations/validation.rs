@@ -684,24 +684,14 @@ pub(super) fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(
     };
     if plan.run_generation == 0
         || plan.run_generation > i64::MAX as u64
-        || placement.rank >= placement.world_size
+        || placement.validate_bound().is_err()
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(plan.image_digest())
         || compiled.job.is_some()
         || compiled.endpoint.is_none()
         || plan.endpoint_address().is_none()
         || plan.port().is_none()
-        || (placement.world_size == 1
-            && (placement.rank != 0
-                || placement.local_address.is_some()
-                || placement.master_address.is_some()
-                || placement.master_port.is_some()
-                || plan.phase.is_some()
-                || plan.start_deadline.is_some()))
-        || (placement.world_size > 1
-            && (placement.local_address.is_none()
-                || placement.master_address.is_none()
-                || placement.master_port.is_none()))
+        || (placement.world_size == 1 && (plan.phase.is_some() || plan.start_deadline.is_some()))
         || !phase_binding_valid
         || encoded_plan.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
         || encoded_claim.len() > vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
@@ -729,8 +719,7 @@ pub(super) fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<()
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(&compiled.runtime_image.image_digest)
         || !(1..=3600).contains(&job.timeout_seconds)
-        || placement.rank != 0
-        || placement.world_size != 1
+        || placement.validate_bound().is_err()
         || plan.input_total_bytes > 1024 * 1024 * 1024
         || plan.inputs.iter().try_fold(0_u64, |total, file| {
             total.checked_add(u64::from(file.size_bytes))

@@ -31,6 +31,10 @@ class ClientCode(StrEnum):
 
     #: The Controller serves another control contract than this CLI ships.
     CONTRACT_MISMATCH = "client.contract_mismatch"
+    #: The connection variables are not set; no API was called.
+    NOT_CONFIGURED = "client.not_configured"
+    #: The environment asks for a transport this build cannot use (SOCKS proxy).
+    TRANSPORT_UNSUPPORTED = "client.transport_unsupported"
 
 
 #: The grammar of a surfaced error code: matched whole, and published in schemas.

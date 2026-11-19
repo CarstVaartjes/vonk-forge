@@ -133,9 +133,19 @@ class HTTPSResponse(io.BufferedIOBase):
     async def _open(
         self, request: urllib.request.Request, timeout: float, *, trust_env: bool
     ) -> httpx2.Response:
-        self._client = httpx2.AsyncClient(
-            timeout=timeout, follow_redirects=False, verify=True, trust_env=trust_env
-        )
+        try:
+            self._client = httpx2.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                verify=True,
+                trust_env=trust_env,
+            )
+        except ImportError:
+            # A proxy scheme whose package is missing: a typed error, not a
+            # traceback. Imported here to avoid an import cycle.
+            from .control_client.errors import ControlTransportUnsupported
+
+            raise ControlTransportUnsupported from None
         data = request.data
         content: bytes | AsyncIterator[bytes] | None
         if data is None or isinstance(data, bytes):

@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 MAX_PAGE_LIMIT = 512
 
 
+class NoLoadedProfile(ValueError):
+    """No profile was named and none is loaded; a local usage answer."""
+
+
 MAX_LOG_LINES = 1000
 
 
@@ -406,7 +410,9 @@ def _uuid_argument(value: str) -> str:
     return value
 
 
-def _add_profile_selection(parser: argparse.ArgumentParser) -> None:
+def _add_profile_selection(
+    parser: argparse.ArgumentParser, *, default_help: str = "1"
+) -> None:
     """Accept ``--profile N`` after the command, as well as before it.
 
     The suppressed default keeps a value given before the command from being
@@ -419,9 +425,9 @@ def _add_profile_selection(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=argparse.SUPPRESS,
         metavar="N",
-        help="Profile number (default: 1; required to change a profile)"
+        help="Profile number (required)"
         if parser.get_default("requires_profile")
-        else "Profile number (default: 1)",
+        else f"Profile number (default: {default_help})",
     )
 
 

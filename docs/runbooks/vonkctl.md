@@ -45,6 +45,11 @@ chmod 600 "$VONK_CONTROL_TOKEN_FILE"
 vonkctl --help
 ```
 
+If nothing is configured, `vonkctl` says so once and lists the steps: in the
+Controller open the operator menu and choose **Download CLI token**, set the
+two variables, then run `vonkctl --check-connection`. A SOCKS proxy in
+`ALL_PROXY` or `HTTPS_PROXY` is supported.
+
 For development from a source checkout, install that checkout with
 `uv tool install .` before setting these connection variables.
 
@@ -53,9 +58,10 @@ terminal, one compact line when it is piped (the same document either way).
 The documents clients consume carry a `schema_version` and have published JSON
 Schemas: see the [`--json` client contract](../vonkctl-json-contract.md).
 Use `--profile N` to select a
-stable numbered Profile for that invocation; the default is Profile 1.
-Profile edits and loads require an explicit `--profile N`; there is no saved
-selection.
+stable numbered Profile for that invocation. Profile views default to
+Profile 1 and `profile endpoint` to the loaded profile.
+Profile edits, loads and `run` require an explicit `--profile N`; there is no
+saved selection.
 
 Help is a map of the command tree and works offline. `vonkctl` (or
 `vonkctl --help`) lists where to start, every command group, and the global
@@ -786,9 +792,12 @@ its `reason_code` and, when a successor exists, `superseded_by`; `profile progre
 `supersedes_chain`. A `superseded` end without a successor means the reviewed
 effects changed during admission: review and load again.
 
+`run` needs `--profile N`, like every profile edit, and its review opens with
+three lines: the profile edited, the Sparks selected, and what will stop.
+
 `run` accepts one unambiguous recipe or model from the active library. It
 prepares the recipe and its model, adds the assignment to the selected saved
-profile (profile 1 by default), previews the complete profile change, asks for
+profile (`--profile N` is required, like every profile edit), previews the complete profile change, asks for
 confirmation, follows the application, and prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
 Spark is included. `run` has two separate effects: the recipe is saved into
@@ -1019,7 +1028,9 @@ cancellation response is recovered using the original application and
 cancellation request key; retrying does not create another cancellation intent.
 This receipt does not mean issued effects have already stopped.
 
-`profile endpoint` shows only routes belonging to the selected Profile's loaded
+`profile endpoint` without `--profile` answers for the loaded profile (with none
+loaded it says so and points to `vonkctl profile list`). It shows only routes
+belonging to the selected Profile's loaded
 assignments, with their exact run identity and publication state. An optional
 alias narrows the result. An absent, stale, revoked, or unpublished route is not
 replaced with a guessed address. Endpoint discovery does not issue credentials

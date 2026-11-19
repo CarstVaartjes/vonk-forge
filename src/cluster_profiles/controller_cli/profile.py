@@ -15,7 +15,13 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
-from .common import ControllerClient, _profile_number, _quoted, _request_key
+from .common import (
+    ControllerClient,
+    NoLoadedProfile,
+    _profile_number,
+    _quoted,
+    _request_key,
+)
 from .confirmation import _confirm_action, _require_confirmation
 from .observation import (
     _bounded_timeout,
@@ -26,44 +32,77 @@ from .profile_load import _load_profile
 from .submission import _submit_idempotent_request
 
 
+def _list_profiles(client: ControllerClient, remaining: float) -> object:
+    """Every saved profile, paged."""
+
+    page = client.request("GET", "/api/profile", timeout_seconds=remaining, retry=False)
+    entries = page.get("profiles")
+    if not isinstance(entries, list):
+        raise ControlMalformedResponse("profile listing is unreadable")
+    profiles = list(entries)
+    previous = 0
+    after = page.get("next_after")
+    while after is not None:
+        if type(after) is not int or after <= previous:
+            raise ControlMalformedResponse("profile listing cursor did not advance")
+        previous = after
+        page = client.request(
+            "GET",
+            "/api/profile",
+            query={"after": after},
+            timeout_seconds=remaining,
+            retry=False,
+        )
+        entries = page.get("profiles")
+        if not isinstance(entries, list):
+            raise ControlMalformedResponse("profile listing is unreadable")
+        profiles.extend(entries)
+        after = page.get("next_after")
+    return {**page, "profiles": profiles}
+
+
+def _loaded_profile_number(listing: object) -> int | None:
+    """The profile that is loaded now, from a profile listing; None when none is."""
+
+    rows = listing.get("profiles") if isinstance(listing, Mapping) else None
+    for row in rows if isinstance(rows, list) else ():
+        if isinstance(row, Mapping) and row.get("loaded_revision") is not None:
+            number = row.get("number")
+            if type(number) is int and number >= 1:
+                return number
+    return None
+
+
 def _profile(
     args: argparse.Namespace,
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    number = _profile_number(args)
     action = getattr(args, "profile_action", None)
+    if action == "endpoint" and getattr(args, "profile_number", None) is None:
+        # No profile named: answer for the loaded one, read with the same
+        # bounded retry as every other observation.
+        profiles = _poll_path(
+            client,
+            "/api/profile",
+            {},
+            args,
+            fetch_initial=True,
+            fetch=lambda remaining: _list_profiles(client, remaining),
+            terminal=lambda _: True,
+        )
+        if args.observation.status != "complete":
+            return profiles
+        loaded = _loaded_profile_number(profiles)
+        if loaded is None:
+            raise NoLoadedProfile("No profile is loaded.")
+        number = loaded
+    else:
+        number = _profile_number(args)
     if action == "list":
 
         def listing(remaining: float):
-            page = client.request(
-                "GET", "/api/profile", timeout_seconds=remaining, retry=False
-            )
-            entries = page.get("profiles")
-            if not isinstance(entries, list):
-                raise ControlMalformedResponse("profile listing is unreadable")
-            profiles = list(entries)
-            previous = 0
-            after = page.get("next_after")
-            while after is not None:
-                if type(after) is not int or after <= previous:
-                    raise ControlMalformedResponse(
-                        "profile listing cursor did not advance"
-                    )
-                previous = after
-                page = client.request(
-                    "GET",
-                    "/api/profile",
-                    query={"after": after},
-                    timeout_seconds=remaining,
-                    retry=False,
-                )
-                entries = page.get("profiles")
-                if not isinstance(entries, list):
-                    raise ControlMalformedResponse("profile listing is unreadable")
-                profiles.extend(entries)
-                after = page.get("next_after")
-            return {**page, "profiles": profiles}
+            return _list_profiles(client, remaining)
 
         return _poll_path(
             client,
