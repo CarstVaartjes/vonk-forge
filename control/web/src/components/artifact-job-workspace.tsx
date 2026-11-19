@@ -21,12 +21,12 @@ import {
   stringifyContractJson,
   type WireNumber,
 } from "../api/contract-numeric";
+import { LifecycleState } from "../api/vocabulary.generated";
 import {
   createJobTitle,
   isTerminal,
   jobElapsed,
   jobInterfacesOf,
-  jobTone,
   phaseOf,
   type JobRecipeInterface,
 } from "../lib/artifact-job";
@@ -198,6 +198,22 @@ const outputMedia: Record<ArtifactJobInterface, string[]> = {
     "image/webp",
   ],
 };
+
+function jobTone(state: string): "ok" | "warn" | "bad" | "info" {
+  if (state === LifecycleState.SUCCEEDED) return "ok";
+  if (state === LifecycleState.FAILED || state === LifecycleState.CANCELLED) return "bad";
+  if (
+    state === "running" ||
+    state === "queued" ||
+    state === LifecycleState.BACKOFF ||
+    state === LifecycleState.OBSERVING
+  )
+    return "info";
+  return "warn";
+}
+
+// The one owner of a job state's tone, shared with the Overview.
+export { jobTone };
 
 function filename(value: string): string {
   const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");

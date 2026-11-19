@@ -154,14 +154,17 @@ def install_artifact_job_routes(
     )
     def list_jobs(
         run_id: str = Path(pattern=_UUID),
-        limit: int = Query(default=100, ge=1, le=100),
+        # A read never refuses: a limit outside 1..100 is clamped into it.
+        limit: int = Query(default=100),
         _actor: Actor = actor_dependency,
     ) -> ArtifactJobListResponse:
         try:
             return ArtifactJobListResponse(
                 jobs=[
                     _view(item)
-                    for item in _service(service).list_for_run(run_id, limit=limit)
+                    for item in _service(service).list_for_run(
+                        run_id, limit=min(max(limit, 1), 100)
+                    )
                 ]
             )
         except KeyError:
