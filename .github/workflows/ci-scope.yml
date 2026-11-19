@@ -3,6 +3,7 @@ name: CI scope
 # The separate pull-request proof workflows call this to read the same `full`
 # decision ci.yml's selector makes (scripts/select-ci-areas): a member pull
 # request skips them, and its integration pull request runs them for the batch.
+# A Dependabot pull request skips even this job, so it uses no runner.
 on:
   workflow_call:
     outputs:
@@ -16,6 +17,7 @@ permissions:
 jobs:
   scope:
     name: Select member or full CI
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

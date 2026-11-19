@@ -306,6 +306,8 @@ owns that rule. A member PR runs no CI jobs: only the selector and a gate that
 reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
 itself. Check member work locally (targeted tests, fast guards); the integration
 PR proves it. A member PR is done when its review has passed.
+A Dependabot PR runs nothing at all (every root job skips its author,
+`tests/test_dependabot_updates.py`); fold it into an integration PR.
 An integration PR runs the complete suites, every selected integration, its
 candidate acceptance with the upgrade carry, and the path-filtered proof
 workflows. Main's Release runs the complete CI unless it reuses the integration
