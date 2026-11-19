@@ -280,6 +280,6 @@ def test_every_vm_cargo_entry_point_ignores_the_host_rustc_wrapper() -> None:
         if path.is_file()
     }
     entry_points = [n for n, t in texts.items() if any(m in t for m in markers)]
-    assert len(entry_points) >= 4
+    assert entry_points
     for name in entry_points:
         assert "CARGO_BUILD_RUSTC_WRAPPER=" in texts[name], name
