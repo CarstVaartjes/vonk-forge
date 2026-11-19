@@ -92,7 +92,7 @@ fn native_ranks_keep_host_addresses_without_docker_port_translation() {
         );
         value["security"]["network_mode"] = json!("bridge");
         let wrong: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-        assert!(project(&wrong, &paths()).is_err());
+        assert!(wrong.validate().is_err());
     }
 }
 
@@ -166,14 +166,6 @@ fn a_dual_plan_stored_before_peer_addresses_existed_still_validates() {
                 .contains("peer_addresses")
         );
     }
-}
-
-#[test]
-fn unauthorized_host_network_mode_is_rejected() {
-    let mut value = fixture();
-    value["security"]["network_mode"] = json!("host");
-    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    assert!(project(&plan, &paths()).is_err());
 }
 
 #[test]

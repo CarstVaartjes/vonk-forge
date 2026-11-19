@@ -4,7 +4,10 @@ use std::{
     io::{self, Read},
 };
 use vonk_agent::{
-    executor::{parse_compiled_execution_plan, prepare_job_invocation, recipe_job_input_manifest},
+    executor::{
+        parse_compiled_execution_plan, prepare_job_invocation, recipe_job_input_manifest,
+        refuse_invalid_plan,
+    },
     oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
 };
@@ -26,7 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     io::stdin().read_to_string(&mut input)?;
     let doc: serde_json::Value = serde_json::from_str(&input)?;
     let claim: AgentClaim = serde_json::from_value(doc["claim"].clone())?;
-    let RecipeOperationRequest::JobRun(request) = RecipeOperationRequest::parse(&claim)? else {
+    let parsed = RecipeOperationRequest::parse(&claim)?;
+    if let Some(refusal) = refuse_invalid_plan(&parsed) {
+        return Err(format!("{refusal:?}").into());
+    }
+    let RecipeOperationRequest::JobRun(request) = parsed else {
         return Err("not a job".into());
     };
     let installed = parse_compiled_execution_plan(doc["installed"].to_string().as_bytes())?;

@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use crate::compiled_execution_plan::CompiledExecutionPlan;
+use crate::generated::CompiledSecurityNetworkMode;
 
 use super::validation::{
     model_source, model_target, ordered_environment, publications, validate_paths,
-    validate_security,
 };
 use super::{
     CompiledOciError, CompiledOciInvocation, CompiledOciPaths, OciImageReceipt, OciMount,
@@ -25,7 +25,7 @@ pub fn runtime_output_mountpoints() -> impl Iterator<Item = &'static str> {
 }
 const PID_LIMIT: u64 = 4096;
 
-/// Convert a validated compiled Controller plan into direct Podman pieces.
+/// Convert a compiled Controller plan (validated at request ingress) into direct Podman pieces.
 /// Every host path is checked lexically and every selected model file remains
 /// nested under its selection ID, so colliding names such as `config.json`
 /// cannot flatten into one mount or one receipt.
@@ -33,9 +33,7 @@ pub fn project(
     plan: &CompiledExecutionPlan,
     paths: &CompiledOciPaths,
 ) -> Result<CompiledOciInvocation, CompiledOciError> {
-    plan.validate()?;
     validate_paths(paths)?;
-    validate_security(plan)?;
 
     let mut mounts = Vec::with_capacity(plan.artifacts.len() + 3);
     let mut target_paths = BTreeSet::new();
@@ -68,11 +66,10 @@ pub fn project(
         }
         match mount.source.as_str() {
             "model"
-                if (mount.target == "/models" || mount.target.starts_with("/models/"))
-                    && plan
-                        .artifacts
-                        .iter()
-                        .any(|artifact| artifact.mount.target == mount.target) =>
+                if plan
+                    .artifacts
+                    .iter()
+                    .any(|artifact| artifact.mount.target == mount.target) =>
             {
                 saw_model = true
             }
@@ -88,7 +85,7 @@ pub fn project(
                     read_only: true,
                 });
             }
-            "outputs" if mount.target == "/outputs" => {
+            "outputs" => {
                 saw_outputs = true;
                 mounts.push(OciMount {
                     source: paths.output_root.clone(),
@@ -134,11 +131,10 @@ pub fn project(
     let security = OciSecurityOptions {
         user: plan.security.user.clone(),
         devices: plan.security.devices(),
-        network_mode: match plan.security.network_mode.as_str() {
-            "none" => OciNetworkMode::None,
-            "bridge" => OciNetworkMode::Bridge,
-            "host" => OciNetworkMode::Host,
-            _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
+        network_mode: match plan.security.network_mode {
+            CompiledSecurityNetworkMode::Host => OciNetworkMode::Host,
+            CompiledSecurityNetworkMode::Bridge => OciNetworkMode::Bridge,
+            CompiledSecurityNetworkMode::None => OciNetworkMode::None,
         },
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
         shared_memory_bytes: (plan.runtime.placement.reserved_memory_bytes / 8)

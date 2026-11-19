@@ -129,7 +129,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = AgentHttpClient::from_identity_paths(&config, &identity)?;
     if request.mode == AgentExecutorProbeMode::Recover {
-        state.recover_interrupted()?;
         let runner = NoBuildProcess;
         let executor = RecipeExecutor {
             client: &client,

@@ -64,7 +64,7 @@ pub struct StateStore {
 struct StoredOperation {
     operation: String,
     result: Option<Vec<u8>>,
-    claim: Option<Vec<u8>>,
+    claim: Vec<u8>,
 }
 
 /// Bounded, durable record of one Controller refusal of an agent result.
@@ -153,7 +153,7 @@ impl StateStore {
                operation TEXT NOT NULL,
                deadline TEXT NOT NULL,
                state TEXT NOT NULL CHECK (state IN ('running','completed')),
-               claim_json BLOB,
+               claim_json BLOB NOT NULL,
                result_json BLOB,
                result_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (result_acknowledged IN (0,1)),
                CHECK ((state = 'running' AND result_json IS NULL) OR (state = 'completed' AND result_json IS NOT NULL))
@@ -176,16 +176,6 @@ impl StateStore {
                rejections INTEGER NOT NULL DEFAULT 1 CHECK (rejections > 0)
              ) STRICT;",
         )?;
-        // Additive journal evolution preserves running custody and receipts.
-        let has_claim = connection
-            .prepare("PRAGMA table_info(operations)")?
-            .query_map([], |row| row.get::<_, String>(1))?
-            .collect::<Result<Vec<_>, _>>()?
-            .iter()
-            .any(|name| name == "claim_json");
-        if !has_claim {
-            connection.execute("ALTER TABLE operations ADD COLUMN claim_json BLOB", [])?;
-        }
         let stored: Option<String> = connection
             .query_row(
                 "SELECT value FROM metadata WHERE key='node_id'",
@@ -381,6 +371,16 @@ impl StateStore {
         Ok(())
     }
 
+    /// Delete rows an agent from before 2026-10-20 wrote without their
+    /// accepted claim: they cannot be observed, replayed or finished, so they
+    /// are unreadable and dropped (never refused). Run once per process start;
+    /// remove this once it has run fleet-wide.
+    pub fn drop_claimless_rows(&mut self) -> Result<(), StateError> {
+        self.connection
+            .execute("DELETE FROM operations WHERE claim_json IS NULL", [])?;
+        Ok(())
+    }
+
     /// Restore a disposable local journal after proven stored-state damage.
     /// The Controller remains the authority for claims and observes exact
     /// effects before reissuing work. Keep the damaged journal for diagnostics.
@@ -390,10 +390,7 @@ impl StateStore {
         // intent before opening either the old or the replacement journal.
         finish_pending_state_repair(path)?;
         prune_state_diagnostics(path);
-        let opened = Self::open(path, node_id).and_then(|mut state| {
-            state.recover_interrupted()?;
-            Ok(state)
-        });
+        let opened = Self::open(path, node_id);
         let error = match opened {
             Ok(state) => return Ok(state),
             Err(error) => error,
@@ -497,17 +494,15 @@ impl StateStore {
                 BeginDecision::Execute
             }
             Some(stored) => {
-                if let Some(bytes) = &stored.claim {
-                    let accepted: AgentClaim = parse_strict(bytes)?;
-                    if accepted.fence != claim.fence
-                        || accepted.operation != claim.operation
-                        || canonical_json(&accepted.payload)? != canonical_json(&claim.payload)?
-                    {
-                        return Err(StateError::Identity);
-                    }
-                    if stored.operation == accepted.operation.as_str() && stored.result.is_none() {
-                        return Err(StateError::Busy);
-                    }
+                let accepted: AgentClaim = parse_strict(&stored.claim)?;
+                if accepted.fence != claim.fence
+                    || accepted.operation != claim.operation
+                    || canonical_json(&accepted.payload)? != canonical_json(&claim.payload)?
+                {
+                    return Err(StateError::Identity);
+                }
+                if stored.operation == accepted.operation.as_str() && stored.result.is_none() {
+                    return Err(StateError::Busy);
                 }
                 // Stored bookkeeping cannot refuse a valid claim or prove that
                 // its effect never ran. Reconcile the same fence as unknown
@@ -541,26 +536,23 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (operation, retained, accepted): (String, Option<Vec<u8>>, Option<Vec<u8>>) =
-            transaction
-                .query_row(
-                    "SELECT operation,result_json,claim_json FROM operations WHERE fence=?1",
-                    [claim.fence.to_string()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .optional()?
-                .ok_or(StateError::Stale)?;
+        let (operation, retained, accepted): (String, Option<Vec<u8>>, Vec<u8>) = transaction
+            .query_row(
+                "SELECT operation,result_json,claim_json FROM operations WHERE fence=?1",
+                [claim.fence.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or(StateError::Stale)?;
         if operation != claim.operation.as_str() {
             return Err(StateError::Identity);
         }
-        if let Some(body) = accepted {
-            let accepted: AgentClaim = parse_strict(&body)?;
-            if accepted.fence != claim.fence
-                || accepted.operation != claim.operation
-                || canonical_json(&accepted.payload)? != canonical_json(&claim.payload)?
-            {
-                return Err(StateError::Identity);
-            }
+        let accepted: AgentClaim = parse_strict(&accepted)?;
+        if accepted.fence != claim.fence
+            || accepted.operation != claim.operation
+            || canonical_json(&accepted.payload)? != canonical_json(&claim.payload)?
+        {
+            return Err(StateError::Identity);
         }
         if let Some(body) = retained {
             let previous: AgentResult = parse_strict(&body)?;
@@ -984,26 +976,6 @@ impl StateStore {
         Ok(())
     }
 
-    /// Stop re-sending a result the Controller refused as no longer current.
-    ///
-    /// The recorded outcome is retained with its attempt and fence so the work
-    /// this agent actually performed stays observable, but it is never sent
-    /// again: the Controller refused it, so re-sending it cannot make it commit
-    /// workload state and would only spin the loop.
-    pub fn supersede(&mut self, result: &AgentResult) -> Result<(), StateError> {
-        result.validate()?;
-        let changed = self.connection.execute(
-            "UPDATE operations SET result_acknowledged=1
-             WHERE fence=?1 AND state='completed'",
-            [result.fence.to_string()],
-        )?;
-        if changed != 1 {
-            return Err(StateError::Stale);
-        }
-        self.clear_result_rejection(result)?;
-        Ok(())
-    }
-
     /// Reopen exact accepted requests for the shared startup/tick observer.
     /// A claim leaves this set once [`Self::end_observation`] records that
     /// its final outcome is durable and nothing live remains to observe.
@@ -1015,7 +987,7 @@ impl StateStore {
             .query_row(
                 "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.claim_json)<=?4 THEN o.claim_json END,o.deadline
              FROM operations o LEFT JOIN observation_ended e ON e.fence=o.fence
-             WHERE o.claim_json IS NOT NULL AND e.fence IS NULL AND (o.state=?3 OR
+             WHERE e.fence IS NULL AND (o.state=?3 OR
                 (json_valid(CAST(o.result_json AS TEXT)) AND json_extract(CAST(o.result_json AS TEXT),'$.result.kind')=?2))
              ORDER BY (o.rowid <= ?1),o.rowid LIMIT 1",
                 params![
@@ -1066,62 +1038,6 @@ impl StateStore {
              SELECT fence FROM operations WHERE fence=?1 AND state=?2",
             params![fence.to_string(), ProgressPhase::Completed.as_str()],
         )?;
-        Ok(())
-    }
-
-    pub fn recover_interrupted(&mut self) -> Result<(), StateError> {
-        let claims = {
-            let mut statement = self.connection.prepare(
-                "SELECT fence,operation,claim_json IS NOT NULL FROM operations WHERE state=?1",
-            )?;
-            statement
-                .query_map([LifecycleState::Running.as_str()], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, bool>(2)?,
-                    ))
-                })?
-                .filter_map(Result::ok)
-                .collect::<Vec<_>>()
-        };
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (fence, operation, claim) in claims {
-            let Ok(operation) = operation.parse::<AgentOperation>() else {
-                continue;
-            };
-            if claim {
-                continue;
-            }
-            // Startup cannot establish whether the host action finished.
-            // Preserve that uncertainty as a typed unknown outcome: the
-            // Controller owns any new attempt and its current intent/authority
-            // checks.
-            let Ok(parsed_fence) = fence.parse::<uuid::Uuid>() else {
-                continue;
-            };
-            let finished = ExecutionResult::unknown(
-                WaitReason::AgentRestartInterrupted,
-                "agent restarted with an operation in progress",
-                UnknownEvidence::at(FailureStage::AgentRestart)
-                    .because("the agent restarted before the operation's result was recorded"),
-            )
-            .finish_for(&operation);
-            let result = AgentResult {
-                fence: parsed_fence,
-                result: finished.result,
-                state: finished.state,
-            };
-            result.validate_for_operation(&operation)?;
-            transaction.execute(
-                "UPDATE operations SET state='completed',result_json=?2,result_acknowledged=0
-                 WHERE fence=?1 AND state='running'",
-                params![fence, canonical_json(&result)?],
-            )?;
-        }
-        transaction.commit()?;
         Ok(())
     }
 }

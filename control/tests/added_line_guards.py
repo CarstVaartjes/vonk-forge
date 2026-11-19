@@ -78,6 +78,7 @@ MODES = (
     "reasons",
     "boundaries",
     "locks",
+    "plan-validation",
     "optimistic",
     "clocks",
     "excerpts",
@@ -1727,6 +1728,48 @@ def check_source(
                 r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
             )
         )
+    if (
+        "plan-validation" in modes
+        and not is_test
+        and path.startswith(
+            (
+                "rust/crates/vonk-agent/src/",
+                "rust/crates/vonk-agent-protocol/src/compiled_oci/",
+            )
+        )
+        and path.endswith(".rs")
+        and path
+        not in {
+            "rust/crates/vonk-agent/src/executor/plans.rs",
+            "rust/crates/vonk-agent/src/oci/custody.rs",
+            "rust/crates/vonk-agent/src/oci/observation.rs",
+        }
+    ):
+        # A compiled plan is validated once, by `refuse_invalid_plan` (plans.rs)
+        # at dispatch. Another call repeats a rule. Added lines only; the
+        # rustfmt split shape (`.validate()` on its own line after the plan
+        # expression) counts too.
+        test_lines = rust_test_lines(source)
+        owner = r"\b(?:plan|spec|invocation|compiled_execution_plan)\s*"
+        lines = source.splitlines()
+        previous = ""
+        for line, text in enumerate(lines, 1):
+            if (
+                line in added
+                and line not in test_lines
+                and (
+                    re.search(owner + r"\.validate\(\)", text)
+                    or (
+                        text.lstrip().startswith(".validate()")
+                        and re.search(owner + r"$", previous)
+                    )
+                )
+            ):
+                noexit_hits.append(
+                    f"{path}:{line}: compiled plan validated again; dispatch owns it"
+                )
+            if text.strip():
+                previous = text.rstrip()
     if (
         "locks" in modes
         and not is_test

@@ -610,3 +610,5 @@ Merging source does not itself wipe a database. A deliberate database reset
 and its data loss are separate consequential operations requiring explicit
 authorization; do not infer reset authorization from permission to implement
 or merge.
+
+The agent validates a compiled execution plan once, through `executor/plans.rs` `refuse_invalid_plan`, which `executor/dispatch.rs` calls right after `RecipeOperationRequest::parse` and the wire probes call too (`parse_compiled_execution_plan` in the same file is the probe/test document parser). The `plan-validation` added-line guard refuses added `.validate()` calls on a plan (including the split-line shape) in `vonk-agent/src` and `vonk-agent-protocol/src/compiled_oci/` outside that file. `oci/custody.rs` and `oci/observation.rs` still re-validate persisted copies read back from disk; removing those is a known follow-up. `parse` stays structural so journal re-observation of a claim's plan survives upgrades that tighten rules.

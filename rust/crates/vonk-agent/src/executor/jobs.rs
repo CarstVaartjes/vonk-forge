@@ -744,7 +744,6 @@ pub fn prepare_job_invocation(
     request: &vonk_agent_protocol::RecipeJobRunRequest,
 ) -> Result<CompiledExecutionPlan, WorkloadError> {
     let plan = request.compiled_execution_plan.clone();
-    plan.validate()?;
     if plan.job.is_none() {
         return Err(WorkloadError::Invalid("job interface"));
     }

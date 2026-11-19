@@ -127,7 +127,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
             return Err(OciError::Artifact);
         }
-        self.verify_image(spec)?;
         if !lower_hex(recipe_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
@@ -174,8 +173,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Artifact);
         }
-        self.verify_image(spec)
-            .map_err(|error| install_error(FailureStage::ImageVerification, error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
             .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
@@ -284,7 +281,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
             return Err(OciError::Artifact);
         }
-        self.verify_image(spec)?;
         if !lower_hex(recipe_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
@@ -315,7 +311,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
     ) -> Result<bool, OciError> {
-        self.verify_image(spec)?;
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let metadata = match fs::symlink_metadata(&installation) {
             Ok(metadata) => metadata,
@@ -371,13 +366,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
     ) -> Result<Vec<PathBuf>, OciError> {
         materialize_compiled_models(self.data_root, plan, installation_id)
-    }
-
-    pub fn verify_image(&self, spec: &CompiledExecutionPlan) -> Result<(), OciError> {
-        spec.validate()?;
-        // Runtime policy was admitted by the Controller. Local kit metadata
-        // is not image-byte or signature evidence and cannot veto this plan.
-        Ok(())
     }
 }
 

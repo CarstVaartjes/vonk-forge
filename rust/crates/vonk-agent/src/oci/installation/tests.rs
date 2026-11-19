@@ -56,20 +56,6 @@ fn routine_recipe_uninstall_retains_shared_model_cache() {
 }
 
 #[test]
-fn compiled_models_reject_duplicate_final_target() {
-    let mut value = compiled_plan();
-    let duplicate = value["artifacts"][0].clone();
-    value["artifacts"] = json!([duplicate.clone(), duplicate]);
-    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    let result = materialize_compiled_models(
-        Path::new("/tmp/vonk-agent-test-data"),
-        &plan,
-        "cb555393-764b-4eb6-8f15-b416d289428f",
-    );
-    assert!(matches!(result, Err(OciError::Workload(_))));
-}
-
-#[test]
 fn installed_bytes_sum_file_lengths_and_count_links_without_following_them() {
     let data = tempdir().unwrap();
     let (installation_id, installation, _) = persisted_installation(data.path());

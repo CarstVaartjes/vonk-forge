@@ -505,7 +505,7 @@ fn preparation_failure_keeps_safe_stage_and_permission_boundary_in_controller_re
             "/private/secret-credential-value",
         ))),
     };
-    let failure = super::runtime_preparation_failure(&error);
+    let failure = super::preparation_failure_at(&error, FailureStage::Unknown, "preparation");
     let failed = failed_outcome(&start_claim, failure);
     assert_eq!(
         failed.reason,
@@ -852,7 +852,10 @@ fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
     ] {
         // A merge must retain both the typed observation evidence and retry.
         let (stage, _) = error.safe_start_context();
-        let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        let outcome = failed_outcome(
+            &start_claim,
+            preparation_failure_at(&error, FailureStage::Unknown, "preparation"),
+        );
         assert_eq!(outcome.code, FailureCode::RuntimeObservationUnavailable);
         assert_eq!(evidence_of(&outcome).stage.as_deref(), Some(stage.as_str()));
         assert!(outcome.retry_after_seconds.is_some());
@@ -869,7 +872,10 @@ fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
             source: Box::new(OciError::ImageDigest),
         },
     ] {
-        let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        let outcome = failed_outcome(
+            &start_claim,
+            preparation_failure_at(&error, FailureStage::Unknown, "preparation"),
+        );
         assert!(outcome.retry_after_seconds.is_none());
         assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
     }
