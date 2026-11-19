@@ -33,7 +33,9 @@ test("renders every selected model's own recipe identities", () => {
   );
   const pane = screen.getByLabelText("Recipes matching selected Model");
   for (const recipe of model.recipes) {
-    expect(pane.querySelector(`a[href="${recipeLibraryPath(recipe.recipe_id)}"]`)).toBeVisible();
+    expect(
+      pane.querySelector(`a[href="${recipeLibraryPath(recipe.recipe_revision_id)}"]`),
+    ).toBeVisible();
   }
 });
 test("filters by exact model identity", () => {

@@ -858,7 +858,7 @@ export function LibraryWorkcell({
                 return (
                   <li key={record.key}>
                     <NavigateLink
-                      href={recipeLibraryPath(record.recipe!.recipe_id)}
+                      href={recipeLibraryPath(record.recipe!.recipe_revision_id)}
                       onNavigate={onNavigate}
                     >
                       <strong>{record.title}</strong>
