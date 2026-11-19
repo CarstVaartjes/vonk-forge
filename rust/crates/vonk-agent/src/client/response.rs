@@ -256,29 +256,6 @@ pub(super) fn valid_error_code(value: &str) -> bool {
         })
 }
 
-pub(super) fn is_rotation_conflict(body: &[u8]) -> bool {
-    const STAGED: &str = "a different certificate rotation is already staged";
-    if let Ok(refusal) = parse_strict::<BoundedErrorResponse>(body) {
-        return refusal.detail == STAGED
-            || refusal.context.is_some_and(|context| {
-                vocabulary::is(
-                    &context.code,
-                    SecurityRefusalReason::AgentCertificateRotationConflict,
-                )
-            });
-    }
-    // An older Controller answered with a bare code and/or detail.
-    parse_strict::<ControllerRefusalBody>(body).is_ok_and(|refusal| {
-        refusal.detail.as_deref() == Some(STAGED)
-            || refusal.code.as_deref().is_some_and(|code| {
-                vocabulary::is(
-                    code,
-                    SecurityRefusalReason::AgentCertificateRotationConflict,
-                ) || code == "agent_certificate_rotation_conflict"
-            })
-    })
-}
-
 pub(super) async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
     bounded_body_limit(response, MAX_BODY_BYTES).await
 }

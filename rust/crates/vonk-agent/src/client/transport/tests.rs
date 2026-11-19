@@ -23,19 +23,6 @@ fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
 }
 
 #[test]
-fn renewal_conflict_is_distinguished_from_revoked_identity() {
-    assert!(is_rotation_conflict(
-        br#"{"detail":"a different certificate rotation is already staged"}"#
-    ));
-    assert!(is_rotation_conflict(
-        &canonical_json(&vonk_agent_protocol::generated::ControllerRefusalBody { code: Some(vonk_agent_protocol::generated::SecurityRefusalReason::AgentCertificateRotationConflict.as_str().into()), detail: None }).unwrap()
-    ));
-    assert!(!is_rotation_conflict(
-        br#"{"detail":"agent certificate is not active"}"#
-    ));
-}
-
-#[test]
 fn reported_hostname_is_bounded_dns_syntax() {
     assert!(valid_reported_hostname("spark-3542"));
     assert!(valid_reported_hostname("spark-3542.lab.internal"));

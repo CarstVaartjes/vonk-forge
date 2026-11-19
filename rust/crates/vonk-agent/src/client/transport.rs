@@ -221,43 +221,6 @@ impl AgentHttpClient {
             .map_err(|_| ClientError::Unsettled("transport is being replaced"))
     }
 
-    /// Request recovery of an unactivated staged certificate whose CSR does
-    /// not match the durable pending CSR.  The endpoint is authenticated with
-    /// this client's active identity and is intentionally separate from the
-    /// normal renewal operation so a 403 cannot silently become a replacement
-    /// request.
-    pub async fn recover_renewal(
-        &self,
-        csr: &[u8],
-    ) -> Result<IssuedCertificateResponse, ClientError> {
-        let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
-        if csr.is_empty() || csr.len() > 16 * 1024 {
-            return Err(ClientError::Protocol);
-        }
-        let request = RenewRequest {
-            csr: csr.to_owned(),
-            node_id: self.node_id.clone(),
-        };
-        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let mut response = self
-            .current_client()
-            .await?
-            .post(self.endpoint("/agent/renew/recover")?)
-            .timeout(ROTATION_REQUEST_TIMEOUT)
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .await?;
-        classify_response(&mut response).await?;
-        let body = bounded_body(response).await?;
-        let issued: IssuedCertificateResponse =
-            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if issued.node_id != self.node_id || issued.generation == 0 {
-            return Err(ClientError::Protocol);
-        }
-        Ok(issued)
-    }
-
     pub async fn activate(&self, generation: u64) -> Result<(), ClientError> {
         if generation == 0 {
             return Err(ClientError::Protocol);

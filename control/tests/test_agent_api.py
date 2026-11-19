@@ -4825,36 +4825,6 @@ def test_enrollment_openapi_exposes_the_runtime_request_contract(agent_system) -
         assert components[name] == document
 
 
-def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
-    agent_system,
-) -> None:
-    from vonk_agent_protocol.enrollment import IssuedCertificateResponse, RenewRequest
-
-    client, _services, _sessions, _clock = agent_system
-    schema = client.get("/openapi.json").json()
-    operation = schema["paths"]["/agent/renew/recover"]["post"]
-    assert operation["requestBody"] == {
-        "content": {
-            "application/json": {
-                "schema": {"$ref": "#/components/schemas/RenewRequest"}
-            }
-        },
-        "required": True,
-    }
-    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/IssuedCertificateResponse"
-    }
-    components = schema["components"]["schemas"]
-    assert components["RenewRequest"] == RenewRequest.model_json_schema(
-        ref_template="#/components/schemas/{model}"
-    )
-    assert components["IssuedCertificateResponse"] == (
-        IssuedCertificateResponse.model_json_schema(
-            ref_template="#/components/schemas/{model}"
-        )
-    )
-
-
 @pytest.mark.parametrize("lose_response", [False, True])
 def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
     agent_system, tmp_path, capsys, lose_response
@@ -5895,10 +5865,7 @@ def test_result_scope_changed_yields_without_outer_replay(
     assert len(calls) == 1
 
 
-_RENEWAL_ROUTES = [
-    ("/agent/renew", "renew"),
-    ("/agent/renew/recover", "recover_rotation"),
-]
+_RENEWAL_ROUTES = [("/agent/renew", "renew")]
 
 
 def _renewable_source(services) -> None:
