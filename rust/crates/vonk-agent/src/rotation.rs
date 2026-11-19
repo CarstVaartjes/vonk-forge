@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
-use vonk_agent_protocol::generated::{Disposition, SecurityRefusalReason};
+use vonk_agent_protocol::generated::SecurityRefusalReason;
 
 use crate::{
     client::{AgentHttpClient, ClientError},
@@ -11,7 +11,6 @@ use crate::{
         retire_expired_staged, stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
-    vocabulary,
 };
 
 #[derive(Debug, Error)]
@@ -121,27 +120,7 @@ pub async fn rotate_if_due_at(
     } else {
         active_client.renew(&pending.csr_pem).await
     };
-    let issued = match renewal {
-        Ok(issued) => issued,
-        // A controller-side staged CSR conflict is a typed denial.  The
-        // recovery endpoint is authenticated with the same still-active
-        // source identity and is bounded to this one durable CSR.  Actual
-        // Only the exact Controller context emitted for a staged CSR
-        // conflict can enter recovery. Other authentication or rejection
-        // responses retain their original status, code, and decision.
-        Err(error)
-            if error.disposition() == Disposition::Security
-                && error.code().is_some_and(|code| {
-                    vocabulary::is(
-                        code,
-                        SecurityRefusalReason::AgentCertificateRotationConflict,
-                    )
-                }) =>
-        {
-            active_client.recover_renewal(&pending.csr_pem).await?
-        }
-        Err(error) => return Err(error.into()),
-    };
+    let issued = renewal?;
     validate_issued(&issued, &pending, &config.node_id)?;
     let generation = issued.generation;
     stage_identity(

@@ -1,15 +1,14 @@
 //! Certificate renewal transports share the normal identity and error fences.
 use std::fs;
 
-use reqwest::{Certificate, Client, StatusCode};
+use reqwest::{Certificate, Client};
 use vonk_agent_protocol::generated::{
-    ExpiredRenewRequest, IssuedCertificateResponse, RenewRequest, SecurityRefusalReason,
+    ExpiredRenewRequest, IssuedCertificateResponse, RenewRequest,
 };
 use vonk_agent_protocol::{canonical_generated_json, hex_sha256, parse_strict};
 
 use super::{
     AgentHttpClient, ClientError, ROTATION_REQUEST_TIMEOUT, bounded_body, classify_response,
-    is_rotation_conflict,
 };
 use crate::{config::AgentConfig, identity::active_identity_paths, pair::verify_ca_pin};
 
@@ -73,7 +72,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew")?)
@@ -82,33 +81,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        if !response.status().is_success() {
-            // Renewal can identify one narrowly defined recovery case from
-            // its bounded, safe error body. Keep the status, path, request ID,
-            // and canonical code in the contextual Controller error for all
-            // outcomes; generic 401/403 responses remain rejections.
-            let status = response.status();
-            let mut error = super::response_controller_error(&response);
-            let body = match bounded_body(response).await {
-                Ok(body) => body,
-                // A refusal's body names the one recoverable staged-CSR
-                // conflict. When it cannot be read, ask again (a wait) rather
-                // than turn a recoverable conflict into a definite refusal.
-                Err(read) if status == StatusCode::FORBIDDEN => return Err(read),
-                Err(read) => {
-                    // Only a 403 body can name the recoverable conflict; any
-                    // other refusal keeps its status, code and request id.
-                    eprintln!("vonk-agent: renewal refusal body unreadable: {read}");
-                    Vec::new()
-                }
-            };
-            if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
-                error.code = SecurityRefusalReason::AgentCertificateRotationConflict.to_string();
-            } else if error.retryable() {
-                super::apply_transient_body(&mut error, &body);
-            }
-            return Err(ClientError::Controller(Box::new(error)));
-        }
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;

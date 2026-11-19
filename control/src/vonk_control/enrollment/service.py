@@ -611,7 +611,7 @@ class EnrollmentService(RotationService):
             require_expired_proof(certificate, proof, now)
         # Admission rechecks removal/revocation and grace under the existing
         # node/certificate locks. No transaction spans provider I/O.
-        return self.recover_rotation(
+        return self.renew(
             proof.node_id, proof.serial, proof.csr.encode("ascii"), expired=True
         )
 
@@ -653,46 +653,6 @@ class EnrollmentService(RotationService):
                 time.sleep(delay)
             try:
                 return self._renew_once(node_id, serial, csr, expired=expired)
-            except (RenewalInProgress, StepCAIssuancePending):
-                # A follower ends observation, not the CA owner's accepted work.
-                pass
-            except (
-                SQLAlchemyError,
-                EnrollmentIssuanceUncertain,
-                RenewalIssuanceUncertain,
-                RenewalConflictRevocationUncertain,
-                RemoteRevocationUncertain,
-            ):
-                end_owner = True
-        ended = False
-        for delay in (0.0, 0.05, 0.1, 0.2):
-            if delay:
-                time.sleep(delay)
-            try:
-                if end_owner:
-                    self._end_rotation(node_id, csr=csr, serial=serial)
-                    ended = True
-                break
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
-                pass
-        return EnrollmentObservationOutcome(
-            category=ErrorCategory.UNKNOWN,
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            state=LifecycleState.FAILED if ended else LifecycleState.OBSERVING,
-        )
-
-    def recover_rotation(
-        self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
-    ) -> IssuedCertificate | UnknownError:
-        """Bounded bookkeeping retries; issuance uncertainty preserves its typed handoff."""
-        end_owner = False
-        for delay in (0.0, 0.05, 0.1, 0.2):
-            if delay:
-                time.sleep(delay)
-            try:
-                return self._recover_rotation_once(
-                    node_id, serial, csr, expired=expired
-                )
             except (RenewalInProgress, StepCAIssuancePending):
                 # A follower ends observation, not the CA owner's accepted work.
                 pass

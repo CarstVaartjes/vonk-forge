@@ -574,37 +574,6 @@ def install_authority_routes(
         return _json_response(_issued_response(issued))
 
     @agent.post(
-        "/renew/recover",
-        response_model=IssuedCertificateResponse,
-        responses={503: {"model": EnrollmentObservationReply}},
-    )
-    @operator_acceptance(ReceiptPolicy.ENROLLMENT_ISSUE)
-    def recover_renewal(body: RenewRequest, request: Request) -> Response:
-        """Recover a staged certificate that was created for another CSR.
-
-        The active source identity is deliberately used for admission.  The
-        Controller retires and CA-revokes the conflicting staged identity
-        before issuing the durable pending CSR.
-        """
-        identity = _authenticated_identity(request)
-        _body_node_matches(body.node_id, identity)
-        try:
-            issued = _require_enrollment(required).recover_rotation(
-                identity.node_id, identity.certificate_serial, body.csr.encode("ascii")
-            )
-        except UnicodeEncodeError:
-            raise HTTPException(
-                status_code=422, detail="CSR must be ASCII PEM"
-            ) from None
-        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
-            return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
-            contract_verdict_or_wait(error)
-        if isinstance(issued, UnknownError):
-            return unknown_response(issued)
-        return _json_response(_issued_response(issued))
-
-    @agent.post(
         "/renew/activate",
         status_code=status.HTTP_204_NO_CONTENT,
         responses={503: {"model": EnrollmentObservationReply}},

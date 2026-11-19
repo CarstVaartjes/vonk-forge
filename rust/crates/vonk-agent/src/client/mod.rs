@@ -35,9 +35,8 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse,
-    ClaimRequest, ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, InventoryVerdict,
-    IssuedCertificateResponse, PackageActivationGrantRequest, ProgressPhase, RenewRequest,
+    ClaimRequest, ControllerErrorCode, HostHelperGrantResponse, HostRuntimeGrantRequest,
+    HostRuntimeGrantRequestAction, InventoryVerdict, PackageActivationGrantRequest, ProgressPhase,
     RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
     TelemetryRequest,
 };
