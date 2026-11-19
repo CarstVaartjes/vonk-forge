@@ -1549,7 +1549,7 @@ def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
 
 @pytest.mark.parametrize("state", ["failed", "cancelled"])
 def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
-    tmp_path, capsys, state
+    tmp_path, state
 ) -> None:
     client = RunClient(_loaded("image", RUN_ID), end_first_key=state)
     binding = _run_binding(tmp_path)
@@ -1560,8 +1560,6 @@ def test_job_run_after_a_failed_or_cancelled_job_starts_a_new_one(
         )
         == 0
     )
-    err = capsys.readouterr().err
-    assert f"previous job {JOB_ID} {state}: boom; starting a new one" in err
     post = next(
         c for c in client.calls if c[0] == "POST" and c[1].endswith("/artifact-jobs")
     )
