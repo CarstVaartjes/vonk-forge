@@ -53,6 +53,9 @@ unpublished.
 
 - Adding a field, or a value to an open string, keeps the version. Clients
   must ignore fields they do not know; the published schemas allow them.
+- A `$ref` that names another definition keeps the version when that
+  definition is the old one plus compatible additions (the same check, applied
+  to both definitions): a type may become a subtype with optional fields.
 - Removing or renaming a field, changing its type, or making an optional field
   required bumps the version. The new schema file replaces the old one and the
   change lands in the same PR as every consumer in this repository.
