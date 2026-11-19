@@ -581,7 +581,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     # It is accepted before the command (`vonkctl --profile 2 profile load`)
     # and after it (`vonkctl profile load --profile 2`).
     for selecting in (profile, *profile_actions.choices.values()):
-        _add_profile_selection(selecting)
+        _add_profile_selection(
+            selecting,
+            default_help="the loaded profile" if selecting is profile_endpoint else "1",
+        )
 
     key = commands.add_parser(
         "key",
@@ -631,12 +634,12 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
 
     run = commands.add_parser(
         "run",
-        help="Prepare a recipe, review it, and start it",
+        help="Run a recipe in a profile",
         description="Prepare a recipe, review the plan, and start it on the fleet. "
         "The recipe is first saved into the profile as a draft so the plan can be "
         "reviewed; declining leaves that draft and the fleet unchanged.",
     )
-    run.set_defaults(outcome_context="mutation")
+    run.set_defaults(outcome_context="mutation", requires_profile=True)
     run.add_argument(
         "selector", metavar="RECIPE", help="Recipe name or exact model/recipe selector"
     )

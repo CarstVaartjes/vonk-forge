@@ -79,3 +79,18 @@ def test_a_command_that_changes_a_profile_tells_how_to_name_it(vonkctl_json):
     assert document["recovery_actions"] == [
         "add --profile N, for example: vonkctl --profile 1 --json profile load --yes"
     ]
+
+
+def test_run_without_a_profile_is_refused_like_every_profile_edit(vonkctl_json):
+    class Unreachable:
+        request_timeout_seconds = 1.0
+
+        def request(self, *_args, **_kwargs):
+            raise AssertionError("no request may be sent without a profile number")
+
+    status, document = vonkctl_json(
+        "run", "Qwen Code", "--yes", control_client=Unreachable()
+    )
+
+    assert status == 2
+    assert "needs --profile N" in document["error"]

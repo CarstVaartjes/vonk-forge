@@ -5,16 +5,24 @@ from __future__ import annotations
 import argparse
 import time
 from collections.abc import Callable, Mapping
-from typing import cast
+from enum import StrEnum
+from typing import Final, cast
 
 from ..cli_outcome import (
     operation_state,
 )
+from ..cli_render.common import _text, _words
 from ..cli_select import SelectorError
 from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
+from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
+from ..generated_control.models.fleet_profile_run_effect_action import (
+    FleetProfileRunEffectAction,
+    check_fleet_profile_run_effect_action,
+)
+from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
 from .confirmation import ActionDeclined, _require_confirmation
 from .profile import _profile
@@ -48,6 +56,7 @@ def _run(
     _request_key(args, factory)
     deadline = time.monotonic() + args.timeout_seconds
     spark_names = list(args.spark)
+    names: dict[str, str] = {}
 
     def roster():
         fleet = client.request(
@@ -62,6 +71,13 @@ def _run(
             not isinstance(node.get("id"), str) or not node["id"] for node in nodes
         ):
             raise ControlMalformedResponse("fleet membership is not yet observed")
+        names.update(
+            {
+                str(node["id"]): str(node["display_name"])
+                for node in nodes
+                if isinstance(node.get("display_name"), str) and node["display_name"]
+            }
+        )
         return [str(node["id"]) for node in nodes]
 
     # The library scan and the fleet roster are independent reads.
@@ -104,6 +120,9 @@ def _run(
             number,
             question=f"Start {selector} on profile {number} with this reviewed plan?",
             review_when_confirmed=True,
+            lead=lambda preview: _review_lead(
+                number, [names.get(name, name) for name in spark_names], preview
+            ),
         )
     except ActionDeclined as declined:
         raise ActionDeclined(
@@ -127,6 +146,38 @@ def _run(
         "state": application_state,
         "endpoints": endpoints,
     }
+
+
+# A run effect keeps the workload or ends it; every action but this one ends it.
+class _Keep(StrEnum):
+    ACTION = "keep"
+
+
+# Checked against the generated contract, so a renamed action fails at import.
+_KEEP: Final[FleetProfileRunEffectAction] = check_fleet_profile_run_effect_action(
+    _Keep.ACTION
+)
+
+
+def _review_lead(number: int, spark_names: list[str], preview: object) -> list[str]:
+    """The three facts to read before the plan: where, on what, and what stops."""
+
+    if not isinstance(preview, dict):
+        return []
+    effects = FleetProfileEffects.from_dict(
+        validate_control_document("FleetProfileEffects", preview.get("effects"))
+    )
+    stops = [run.alias for run in effects.runs if run.action != _KEEP]
+    for adopted in effects.adopted if not isinstance(effects.adopted, Unset) else ():
+        for stop in adopted.stops if not isinstance(adopted.stops, Unset) else ():
+            stops.append(stop.effect.alias)
+    stopping = sorted(set(stops))
+    return [
+        f"Profile edited: {number} ({_text(preview.get('profile_name'))})",
+        f"Sparks selected: {_words(spark_names)}",
+        f"Will stop: {', '.join(stopping) if stopping else 'nothing'}",
+        "",
+    ]
 
 
 def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:

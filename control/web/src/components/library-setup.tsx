@@ -50,7 +50,7 @@ export function countFleetFit(
   const best = new Map<string, 0 | 1 | 2>();
   for (const record of open) {
     const rank = fleetFitRank(record.recipe!);
-    const key = noun === "models" ? record.modelKey : record.key;
+    const key = noun === "models" ? record.modelKey : record.recipe!.recipe_id;
     const current = best.get(key);
     if (current === undefined || rank > current) best.set(key, rank);
   }
@@ -69,7 +69,7 @@ function countBy(
   const matching = filterLibraryRecipeRecords(records, filters, query);
   return noun === "models"
     ? new Set(matching.map((record) => record.modelKey)).size
-    : matching.filter((record) => record.recipe).length;
+    : new Set(matching.flatMap((record) => (record.recipe ? [record.recipe.recipe_id] : []))).size;
 }
 
 function facetOptions(
@@ -196,6 +196,7 @@ export function LibrarySetupStrip({
   }));
   const anyCount = countBy(records, openSparks, query, noun);
   const fit = countFleetFit(records, filters, query, noun);
+  // Placement state (not qualification): only ready or blocked are verdicts; an unavailable fit is unknown.
   const assessed = fit.fits + fit.nonFit > 0;
   return (
     <section className="library-setup" aria-label="Start from your fleet">
@@ -231,13 +232,13 @@ export function LibrarySetupStrip({
           type="button"
           className="library-setup-fit"
           aria-pressed={filters.fits}
-          aria-label={`Fits my fleet now: ${fit.fits} ${noun}`}
+          aria-label={`Fits my fleet now: ${assessed ? `${fit.fits} ${noun}` : "Fit not assessed"}`}
           disabled={fit.fits === 0 && !filters.fits}
           title="Keep what the Controller can place on fresh fleet capacity; unknown verdicts stay visible (vonkctl recipe library --fits-fleet)"
           onClick={() => onFiltersChange({ ...filters, fits: !filters.fits })}
         >
           Fits my fleet now
-          <small>{fit.fits}</small>
+          <small>{assessed ? fit.fits : "Fit not assessed"}</small>
         </button>
       </header>
       <div className="library-setup-tiles" role="group" aria-label="Sparks per recipe">
