@@ -36,6 +36,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    ArtifactJob,
     Base,
     Job,
 )
@@ -1018,6 +1019,62 @@ def test_download_is_named_only_for_a_stored_failed_attempt(service):
     assert download.href == f"/api/operations/{value['id']}/evidence?attempt=1"
     assert decorated({**value, "attempt": 2}) is None
     assert decorated({**value, "state": "running"}) is None
+
+
+def test_a_failed_artifact_job_has_evidence_before_its_sibling_rank_stops(service):
+    """The parent Job ends only after every rank has; the job's failure is the evidence.
+
+    Wrong implementation caught: the download answered 404 (and named the stop
+    of the sibling rank as the cause) until the second rank's order ended.
+    """
+
+    job_id, artifact_job_id = str(uuid4()), str(uuid4())
+    with service.sessions.begin() as session:
+        session.add(
+            Job(
+                id=job_id,
+                request_id=str(uuid4()),
+                kind="recipe.job.run.v1",
+                state="running",
+                actor="test",
+                authority_revision="a" * 64,
+                targets=[NODE_A, NODE_B],
+                payload_digest="b" * 64,
+                payload={
+                    "schema_version": 1,
+                    "owner_kind": "artifact-job",
+                    "owner_id": artifact_job_id,
+                    "plan_digest": "e" * 64,
+                },
+                result={},
+                status_reason="scope-changed",
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            ArtifactJob(
+                id=artifact_job_id,
+                run_id=str(uuid4()),
+                request_id=str(uuid4()),
+                interface="artifact-job",
+                parameters={},
+                output_limits={},
+                compiled_contract={},
+                contract_sha256="c" * 64,
+                state="failed",
+                input_manifest={},
+                input_manifest_sha256="d" * 64,
+                timeout_seconds=60,
+                actor="test",
+                status_reason="the workload process exited",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    bundle = service.read(job_id, 1)
+    assert bundle.summary == "the workload process exited"
 
 
 def _child_diagnostics_document(stderr: str) -> dict[str, object]:

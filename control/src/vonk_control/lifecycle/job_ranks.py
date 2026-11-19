@@ -108,6 +108,19 @@ def job_run_verdict(
     return ajs.state_of(job), job.status_reason
 
 
+def ended_artifact_job(session: Session, parent: Job) -> ArtifactJob | None:
+    """The artifact job of an artifact-owned parent once it has ended, else ``None``.
+
+    The parent Job ends only after every rank has (``job_run_verdict``), so
+    readers of the job's outcome ask the artifact job, which ends first.
+    """
+
+    if not is_artifact_owned(parent):
+        return None
+    job = session.get(ArtifactJob, parent.owner_id)
+    return job if job is not None and ajs.is_ended(job) else None
+
+
 def fan_in_cancellation_key(parent_id: str) -> str:
     """The cancellation a ended rank asks of its siblings (one per job)."""
 

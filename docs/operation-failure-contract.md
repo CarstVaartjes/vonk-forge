@@ -18,7 +18,8 @@ durable attempt result, job result or progress; nothing is copied or stored for
 it. The file carries the summary, error code, phase, category, redacted
 stdout/stderr tails and the agent's `FailureDiagnostics`. Operation responses
 name it through `evidence_download.href` only while that attempt is a failure
-attempt.
+attempt. A multi-rank artifact job's parent Job ends only after every rank has, so the
+download answers as soon as the artifact job itself has failed, with its reason.
 
 The cache writes `AvailabilityOperationFailure` directly into durable failure
 state. Exception codes and recovery choices are translated once, at creation.
