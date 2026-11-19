@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import time
 from collections.abc import Callable, Mapping
-from typing import cast, get_args
+from enum import StrEnum
+from typing import Final, cast
 
 from ..cli_outcome import (
     operation_state,
@@ -19,6 +20,7 @@ from ..control_client import (
 from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
 from ..generated_control.models.fleet_profile_run_effect_action import (
     FleetProfileRunEffectAction,
+    check_fleet_profile_run_effect_action,
 )
 from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
@@ -146,10 +148,15 @@ def _run(
     }
 
 
-# The run effects that end a running workload: every action but the one that keeps it.
-_STOPPING_ACTIONS = frozenset(get_args(FleetProfileRunEffectAction)) - {
-    get_args(FleetProfileRunEffectAction)[0]
-}
+# A run effect keeps the workload or ends it; every action but this one ends it.
+class _Keep(StrEnum):
+    ACTION = "keep"
+
+
+# Checked against the generated contract, so a renamed action fails at import.
+_KEEP: Final[FleetProfileRunEffectAction] = check_fleet_profile_run_effect_action(
+    _Keep.ACTION
+)
 
 
 def _review_lead(number: int, spark_names: list[str], preview: object) -> list[str]:
@@ -160,7 +167,7 @@ def _review_lead(number: int, spark_names: list[str], preview: object) -> list[s
     effects = FleetProfileEffects.from_dict(
         validate_control_document("FleetProfileEffects", preview.get("effects"))
     )
-    stops = [run.alias for run in effects.runs if run.action in _STOPPING_ACTIONS]
+    stops = [run.alias for run in effects.runs if run.action != _KEEP]
     for adopted in effects.adopted if not isinstance(effects.adopted, Unset) else ():
         for stop in adopted.stops if not isinstance(adopted.stops, Unset) else ():
             stops.append(stop.effect.alias)
