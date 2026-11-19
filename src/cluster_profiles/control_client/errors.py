@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol, Self, TypedDict
 from jsonschema import Draft202012Validator, validators
 
 from ..error_reporting import (
+    ClientCode,
     ErrorContext,
     decision_for,
     safe_code,
@@ -131,6 +132,41 @@ class ControlClientError(RuntimeError):
     @property
     def request_id(self) -> str | None:
         return self.context.request_id if self.context else None
+
+
+class ControlNotConfigured(ControlClientError):
+    """The connection variables are missing; nothing was sent."""
+
+    code = ClientCode.NOT_CONFIGURED.value
+    recovery = (
+        "In the Controller, open the operator menu and choose Download CLI token",
+        (
+            "Set VONK_CONTROL_URL to the Controller address and "
+            "VONK_CONTROL_TOKEN_FILE to the downloaded file"
+        ),
+        "vonkctl --check-connection",
+    )
+
+    def __init__(self) -> None:
+        super().__init__(
+            "vonkctl is not connected to a Controller: set VONK_CONTROL_URL "
+            "and VONK_CONTROL_TOKEN_FILE"
+        )
+
+
+class ControlTransportUnsupported(ControlClientError):
+    """The environment asks for a transport this build cannot use."""
+
+    code = ClientCode.TRANSPORT_UNSUPPORTED.value
+    recovery = (
+        "Unset ALL_PROXY for this command, or set NO_PROXY to the Controller host",
+    )
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A SOCKS proxy is set in ALL_PROXY, and this build cannot use it. "
+            "Unset it for this command or set NO_PROXY for the Controller host."
+        )
 
 
 class ControlMalformedResponse(ControlClientError):

@@ -133,9 +133,26 @@ class HTTPSResponse(io.BufferedIOBase):
     async def _open(
         self, request: urllib.request.Request, timeout: float, *, trust_env: bool
     ) -> httpx2.Response:
-        self._client = httpx2.AsyncClient(
-            timeout=timeout, follow_redirects=False, verify=True, trust_env=trust_env
-        )
+        try:
+            self._client = httpx2.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                verify=True,
+                trust_env=trust_env,
+            )
+        except ImportError as error:
+            # A proxy scheme the installed transport lacks a package for: say so
+            # plainly instead of a traceback. Imported here to avoid a cycle.
+            from .control_client.errors import (
+                ControlClientError,
+                ControlTransportUnsupported,
+            )
+
+            if "socks" in str(error).lower():
+                raise ControlTransportUnsupported from None
+            raise ControlClientError(
+                "this build cannot start its network transport"
+            ) from None
         data = request.data
         content: bytes | AsyncIterator[bytes] | None
         if data is None or isinstance(data, bytes):

@@ -45,6 +45,13 @@ chmod 600 "$VONK_CONTROL_TOKEN_FILE"
 vonkctl --help
 ```
 
+If nothing is configured, `vonkctl` says so once and lists the steps: in the
+Controller open the operator menu and choose **Download CLI token**, set the
+two variables, then run `vonkctl --check-connection`. A SOCKS proxy in
+`ALL_PROXY` is supported; if it cannot be used, `vonkctl` names it and says to
+unset it or set `NO_PROXY` for the Controller host (exit 2, with
+`recovery_actions` in `--json`).
+
 For development from a source checkout, install that checkout with
 `uv tool install .` before setting these connection variables.
 

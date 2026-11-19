@@ -8,6 +8,7 @@ documents only the CLI prints, and the job documents, which need no API.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import jsonschema
@@ -206,3 +207,37 @@ def test_a_document_without_a_kind_is_not_stamped() -> None:
     review = {"schema_version": 2, "allowed": True}
     assert stamp(review, DocumentKind.PROFILE_REVIEW) == review
     assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS
+
+
+def test_missing_configuration_names_each_step_once(capsys, monkeypatch) -> None:
+    monkeypatch.delenv("VONK_CONTROL_URL", raising=False)
+    monkeypatch.delenv("VONK_CONTROL_TOKEN_FILE", raising=False)
+    assert cli.main(("fleet",)) == 2
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == len(set(lines))
+    assert not any(line.startswith("Detail:") for line in lines)
+    assert any("client.not_configured" in line for line in lines)
+    assert lines[-1] == "Next: vonkctl --check-connection"
+    assert cli.main(("--json", "fleet")) == 2
+    document = json.loads(capsys.readouterr().out)
+    _validate(DocumentKind.ERROR, document)
+    assert document["code"] == "client.not_configured"
+    assert document["recovery_actions"]
+    assert "detail" not in document
+
+
+def test_unusable_socks_proxy_is_an_error_document_not_a_traceback(
+    capsys, monkeypatch, tmp_path
+) -> None:
+    token = tmp_path / "token"
+    token.write_text("secret\n")
+    token.chmod(0o600)
+    monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
+    monkeypatch.setenv("VONK_CONTROL_TOKEN_FILE", str(token))
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:1")
+    monkeypatch.setitem(sys.modules, "socksio", None)
+    assert cli.main(("--json", "fleet")) == 2
+    document = json.loads(capsys.readouterr().out)
+    _validate(DocumentKind.ERROR, document)
+    assert "SOCKS" in document["error"]
+    assert document["recovery_actions"]

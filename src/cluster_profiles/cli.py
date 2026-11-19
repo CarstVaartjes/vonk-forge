@@ -46,7 +46,9 @@ from .cli_update import (
 from .control_client import (
     ControlClient,
     ControlClientError,
+    ControlNotConfigured,
     ControlTransportError,
+    ControlTransportUnsupported,
     ControlUnavailable,
 )
 from .controller_cli import (
@@ -224,6 +226,8 @@ def _control_error(
     code = getattr(error, "code", None) or "control.api_error"
     detail = getattr(error, "detail", str(error))
     message = _plain_language_error(code, detail)
+    if isinstance(error, (ControlNotConfigured, ControlTransportUnsupported)):
+        detail = None  # the message already says it; never print it twice
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
@@ -233,7 +237,7 @@ def _control_error(
         message,
         CliErrorType.CONTROL_API,
         code=code,
-        detail=_sanitize_text(detail),
+        detail=_sanitize_text(detail) if detail is not None else None,
         recovery_actions=list(getattr(error, "recovery", ()) or ()),
         retryable=getattr(error, "retryable", False) is True,
         retry_time=getattr(error, "retry_time", None),
@@ -248,6 +252,7 @@ def _control_error(
     if (
         isinstance(observation, Observation)
         and observation.status == ObservationStatus.ENDED
+        and not isinstance(error, (ControlNotConfigured, ControlTransportUnsupported))
     ):
         result.update(observation.document())
     candidates = getattr(error, "candidates", ())
