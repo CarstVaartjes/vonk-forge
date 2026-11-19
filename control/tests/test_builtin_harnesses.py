@@ -9,9 +9,11 @@ from typing import Any, cast
 import pytest
 from vonk_control.harnesses.canonical import (
     _distributed_args,
+    _model_mounts,
     compile_canonical_harness,
 )
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
+from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -567,3 +569,46 @@ def test_distributed_sglang_compiles_rank_specific_launch(
     assert "--nnodes" in projection.command
     assert projection.command[projection.command.index("--nnodes") + 1] == "2"
     assert projection.command[projection.command.index("--node-rank") + 1] == "1"
+
+
+def _two_selection_recipe(second_path: str):
+    # Two selections of distinct models mounted at the same target, as a creator
+    # README that adds extra shards to a checkpoint directory instructs.
+    first_raw = _example("model-definition.json")
+    second_raw = copy.deepcopy(first_raw)
+    second_raw["identity"]["slug"] = "synthetic-tiny-extra"
+    second_raw["files"][0]["path"] = second_path
+    recipe_raw = _recipe("vllm")
+    first_selection = recipe_raw["models"][0]
+    second_selection = copy.deepcopy(first_selection)
+    second_selection["id"] = "extra"
+    second_selection["files"][0]["id"] = "extra-weights"
+    second_selection["model"] = {
+        "kind": "model",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-tiny-extra",
+        "content_sha256": document_sha256(second_raw),
+    }
+    recipe_raw["models"] = [first_selection, second_selection]
+    models = {document_sha256(raw): read_model(raw) for raw in (first_raw, second_raw)}
+    return read_recipe(recipe_raw), models
+
+
+def test_selections_may_share_a_mount_target_when_their_files_differ() -> None:
+    # Break caught: refusing a shared target although every file is bind-mounted
+    # per file, or splitting the directory mount per selection.
+    recipe, models = _two_selection_recipe("extra.safetensors")
+    selected = _model_mounts(recipe, models, "entrypoint")
+    assert {mount.target for _artifact, mount in selected} == {"/models"}
+    assert len({id(mount) for _artifact, mount in selected}) == 1
+    assert {artifact.selection_id for artifact, _mount in selected} == {
+        "primary",
+        "extra",
+    }
+
+
+def test_selections_colliding_on_one_mounted_path_are_refused() -> None:
+    # Break caught: two files silently overlaying the same path at one target.
+    recipe, models = _two_selection_recipe("model.safetensors")
+    with pytest.raises(HarnessCompileError, match="collide"):
+        _model_mounts(recipe, models, "entrypoint")

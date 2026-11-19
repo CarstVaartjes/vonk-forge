@@ -302,8 +302,8 @@ def _model_mounts(
         raise HarnessCompileError(str(error)) from error
     by_identity = {(m.identity.publisher, m.identity.slug): m for m in models.values()}
     selected: list[tuple[SpecArtifact, HarnessMount]] = []
-    mounts_by_key: dict[tuple[str, str], HarnessMount] = {}
-    target_owner: dict[str, str] = {}
+    mounts_by_target: dict[str, HarnessMount] = {}
+    placed: set[tuple[str, str]] = set()
     for selection in recipe.models:
         model = by_identity[(selection.model.publisher, selection.model.slug)]
         files = {item.id: item for item in model.files}
@@ -311,13 +311,14 @@ def _model_mounts(
             if role not in selector.roles:
                 continue
             source = f"/run/vonk/models/{selection.id}/{selector.file_id}"
-            target_owner.setdefault(selector.mount.target, selection.id)
-            if target_owner[selector.mount.target] != selection.id:
+            placement = (selector.mount.target, files[selector.file_id].path)
+            if placement in placed:
                 raise HarnessCompileError(
-                    f"model mount target is claimed by multiple selections: {selector.mount.target}"
+                    f"model files collide at mount target: {placement[0]}/{placement[1]}"
                 )
-            mount = mounts_by_key.setdefault(
-                (selection.id, selector.mount.target),
+            placed.add(placement)
+            mount = mounts_by_target.setdefault(
+                selector.mount.target,
                 HarnessMount(
                     f"/run/vonk/models/{selection.id}",
                     selector.mount.target,
