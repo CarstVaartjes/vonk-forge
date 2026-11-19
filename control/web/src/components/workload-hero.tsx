@@ -1,4 +1,4 @@
-import { type JobWorkloadApi, useJobWorkload } from "../hooks/use-workload-jobs";
+import { type JobWorkloadApi, useJobWorkload, WorkloadKind } from "../hooks/use-workload-jobs";
 import { ENGINE_FIGURES, type WorkloadReads } from "../hooks/use-workload-reads";
 import {
   aliasSeries,
@@ -57,11 +57,11 @@ export function WorkloadHero({
   const queue = queueText(reads.running, reads.waiting, unit.alias);
   // A job recipe takes jobs, not chat requests: its jobs replace the engine figures. Until the recipe has
   // been read nothing is claimed about the workload.
-  if (jobs.kind === "job" || (jobs.kind === "unknown" && !jobs.error))
+  if (jobs.kind === WorkloadKind.JOBS || (jobs.kind === WorkloadKind.UNREAD && !jobs.error))
     return (
       <div className="workload-hero">
         <WorkloadHeader unit={unit} />
-        {jobs.kind === "job" ? (
+        {jobs.kind === WorkloadKind.JOBS ? (
           <WorkloadJobs revision={jobs.revision} adapter={jobs.interface} jobs={jobs.jobs} />
         ) : (
           <WorkloadChecking />
@@ -72,7 +72,7 @@ export function WorkloadHero({
   return (
     <div className="workload-hero">
       <WorkloadHeader unit={unit} />
-      {jobs.kind === "unknown" && <WorkloadChecking error={jobs.error} />}
+      {jobs.kind === WorkloadKind.UNREAD && <WorkloadChecking error={jobs.error} />}
       <div className="hero-body">
         <div className="hero-read">
           {spec && value !== null ? (

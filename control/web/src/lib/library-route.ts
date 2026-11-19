@@ -1,9 +1,12 @@
 import { canonicalRecipeSelector, type LibraryViewRecipe } from "../api/types";
 
+/** The library pages a path can name. */
+export const LibraryPath = { ROOT: "root", MODELS: "models", RECIPES: "recipes" } as const;
+
 export type LibraryRoute =
-  | { kind: "root" }
-  | { kind: "model"; modelKey: string }
-  | { kind: "recipe"; selector: string };
+  | { kind: typeof LibraryPath.ROOT }
+  | { kind: typeof LibraryPath.MODELS; modelKey: string }
+  | { kind: typeof LibraryPath.RECIPES; selector: string };
 
 function decode(value: string): string | undefined {
   try {
@@ -14,18 +17,19 @@ function decode(value: string): string | undefined {
 }
 
 export function libraryRoute(path: string): LibraryRoute {
-  if (path === "/library" || path === "/library/") return { kind: "root" };
+  if (path === "/library" || path === "/library/") return { kind: LibraryPath.ROOT };
   const model = /^\/library\/models\/([^/]+)$/.exec(path);
   if (model) {
     const modelKey = decode(model[1]);
-    if (modelKey !== undefined && modelKey !== "~unlinked") return { kind: "model", modelKey };
+    if (modelKey !== undefined && modelKey !== "~unlinked")
+      return { kind: LibraryPath.MODELS, modelKey };
   }
   const recipe = /^\/library\/recipes\/([^/]+)$/.exec(path);
   if (recipe) {
     const selector = decode(recipe[1]);
-    if (selector !== undefined) return { kind: "recipe", selector };
+    if (selector !== undefined) return { kind: LibraryPath.RECIPES, selector };
   }
-  return { kind: "root" };
+  return { kind: LibraryPath.ROOT };
 }
 
 export function modelKey(model: {

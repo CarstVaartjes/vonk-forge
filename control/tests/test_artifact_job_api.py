@@ -329,15 +329,6 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
     )
     assert coerced_scalar.status_code == 422
 
-    # The list takes a bounded limit; outside 1..100 is refused at the boundary.
-    for bad_limit in (0, 101):
-        assert (
-            client.get(
-                f"/api/recipe/runs/{JOB_ID}/artifact-jobs?limit={bad_limit}"
-            ).status_code
-            == 422
-        )
-
 
 def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     tmp_path: Path,

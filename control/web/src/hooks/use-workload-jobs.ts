@@ -10,14 +10,16 @@ const POLL_MS = 5000;
 const RECENT = 5;
 
 /**
- * What a workload serves: "unknown" until its recipe has been read (it is read again every few seconds
- * until it is, and `error` says why not), "model" for a chat recipe, "job" for a recipe that takes jobs.
+ * What a workload serves: unread until its recipe has been read (it is read again every few seconds until
+ * it is, and `error` says why not), chat for a model recipe, jobs for a recipe that takes jobs.
  */
+export const WorkloadKind = { UNREAD: "unread", CHAT: "chat", JOBS: "jobs" } as const;
+
 export type JobWorkload =
-  | { kind: "unknown"; error?: string }
-  | { kind: "model" }
+  | { kind: typeof WorkloadKind.UNREAD; error?: string }
+  | { kind: typeof WorkloadKind.CHAT }
   | {
-      kind: "job";
+      kind: typeof WorkloadKind.JOBS;
       /** The running recipe revision, for its page. */
       revision: string;
       interface: ArtifactJobInterface;
@@ -38,9 +40,9 @@ export function useJobWorkload(
   unit: { runId: string; recipeRevisionId: string | null },
 ): JobWorkload {
   const { runId, recipeRevisionId } = unit;
-  const [state, setState] = useState<JobWorkload>({ kind: "unknown" });
+  const [state, setState] = useState<JobWorkload>({ kind: WorkloadKind.UNREAD });
   useEffect(() => {
-    setState({ kind: "unknown" });
+    setState({ kind: WorkloadKind.UNREAD });
     if (!canRead(api) || !recipeRevisionId) return;
     const reads = api;
     const controller = new AbortController();
@@ -55,7 +57,7 @@ export function useJobWorkload(
           const jobs = jobInterfacesOf(detail.document);
           if (jobs.length === 0 || jobs.length < detail.document.interfaces.length) {
             window.clearInterval(timer);
-            if (!controller.signal.aborted) setState({ kind: "model" });
+            if (!controller.signal.aborted) setState({ kind: WorkloadKind.CHAT });
             return;
           }
           job = { interface: jobs[0].adapter };
@@ -68,11 +70,11 @@ export function useJobWorkload(
           jobs = safeErrorText(cause instanceof Error ? cause.message : "Jobs unavailable");
         }
         if (!controller.signal.aborted)
-          setState({ kind: "job", revision: recipeRevisionId, ...job, jobs });
+          setState({ kind: WorkloadKind.JOBS, revision: recipeRevisionId, ...job, jobs });
       } catch (cause) {
         if (!controller.signal.aborted)
           setState({
-            kind: "unknown",
+            kind: WorkloadKind.UNREAD,
             error: safeErrorText(cause instanceof Error ? cause.message : "Recipe unavailable"),
           });
       } finally {
@@ -87,6 +89,6 @@ export function useJobWorkload(
     };
   }, [api, runId, recipeRevisionId]);
   // Without a way to read the recipe the workload shows as a model, as before.
-  if (!canRead(api) || !recipeRevisionId) return { kind: "model" };
+  if (!canRead(api) || !recipeRevisionId) return { kind: WorkloadKind.CHAT };
   return state;
 }
