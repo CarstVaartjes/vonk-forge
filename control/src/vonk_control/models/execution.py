@@ -31,6 +31,7 @@ from vonk_agent_protocol import (
     RunState,
     machine_check,
 )
+from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
@@ -395,7 +396,7 @@ class ArtifactJob(Base):
             name="ck_artifact_jobs_preparation",
         ),
         CheckConstraint(
-            "input_total_bytes >= 0 AND timeout_seconds BETWEEN 1 AND 3600",
+            f"input_total_bytes >= 0 AND timeout_seconds BETWEEN 1 AND {MAX_TIMEOUT_SECONDS}",
             name="ck_artifact_jobs_limits",
         ),
         CheckConstraint(

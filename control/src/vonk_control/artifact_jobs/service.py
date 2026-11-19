@@ -24,6 +24,15 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
+    MAX_OUTPUT_FILE_BYTES,
+    MAX_OUTPUT_FILES,
+    MAX_OUTPUT_TOTAL_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 
 from .. import agent_operation_states as aos
 from .. import artifact_job_states as ajs
@@ -64,9 +73,6 @@ from ..recipe_start_payloads import (
     start_peer_addresses,
 )
 from .contracts import (
-    MAX_INPUT_FILE_BYTES,
-    MAX_INPUT_FILES,
-    MAX_INPUT_TOTAL_BYTES,
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobInvalid,
@@ -251,16 +257,6 @@ class ArtifactJobService(OutputService):
                 "artifact job input bytes exceed the limit",
                 reason=InvalidRequestReason.LIMIT_EXCEEDED,
             )
-        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
-            raise ArtifactJobInvalid(
-                "artifact job timeout is invalid",
-                reason=InvalidRequestReason.OUT_OF_RANGE,
-            )
-        if not 1 <= timeout_seconds <= 3_600:
-            raise ArtifactJobInvalid(
-                "artifact job timeout is invalid",
-                reason=InvalidRequestReason.OUT_OF_RANGE,
-            )
         supplied_parameters = dict(parameters)
         manifest = RecipeJobInputManifest(
             schema_version=1, total_bytes=total, files=list(parsed_inputs)
@@ -404,11 +400,6 @@ class ArtifactJobService(OutputService):
                 contract.parameters, supplied_parameters
             )
             limits = _effective_output_limits(contract, output_limits)
-            if timeout_seconds > contract.max_timeout_seconds:
-                raise ArtifactJobInvalid(
-                    "artifact job timeout exceeds the recipe contract",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
-                )
             _validate_inputs_against_contract(contract, parsed_inputs)
         except ArtifactJobUnavailableError:
             raise
@@ -480,10 +471,10 @@ class ArtifactJobService(OutputService):
                 max_input_files=MAX_INPUT_FILES,
                 max_input_file_bytes=MAX_INPUT_FILE_BYTES,
                 max_input_total_bytes=MAX_INPUT_TOTAL_BYTES,
-                max_output_files=32,
-                max_output_file_bytes=1024**3,
-                max_output_total_bytes=2 * 1024**3,
-                max_timeout_seconds=3_600,
+                max_output_files=MAX_OUTPUT_FILES,
+                max_output_file_bytes=MAX_OUTPUT_FILE_BYTES,
+                max_output_total_bytes=MAX_OUTPUT_TOTAL_BYTES,
+                max_timeout_seconds=MAX_TIMEOUT_SECONDS,
                 reserved_input_names=["manifest.json"],
             ),
             storage=ArtifactJobStorageCapabilities.model_validate(

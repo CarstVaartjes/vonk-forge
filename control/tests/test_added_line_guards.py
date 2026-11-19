@@ -1575,6 +1575,18 @@ def test_other_reserve_lines_are_not_flagged(path: str, source: str) -> None:
     assert not check_source(path, source, {1}, modes=("fixed-reserves",))
 
 
+def test_a_restated_job_limit_is_flagged_outside_its_owner() -> None:
+    line = "MAX_INPUT_FILES = 32\n"
+    owner = "agent_protocol/src/vonk_agent_protocol/job_limits.py"
+    copy = "control/src/vonk_control/artifact_jobs/contracts.py"
+    assert check_source(copy, line, {1}, modes=("job-limits",))
+    assert check_source(
+        copy, "MAX_TIMEOUT_SECONDS: int = 3600\n", {1}, modes=("job-limits",)
+    )
+    assert not check_source(owner, line, {1}, modes=("job-limits",))
+    assert not check_source(copy, "le=MAX_INPUT_FILES\n", {1}, modes=("job-limits",))
+
+
 _SET_SELECTION = (
     "def sets(session, digest):\n"
     "    return session.scalars(\n"

@@ -20,18 +20,20 @@ from .agent_words import FailureStage
 from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
+from .job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
+    MAX_OUTPUT_FILE_BYTES,
+    MAX_OUTPUT_FILES,
+    MAX_OUTPUT_TOTAL_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
 if TYPE_CHECKING:
     from .job_inputs import RecipeJobInputManifest
 
-MAX_INPUT_FILES = 32
-MAX_INPUT_FILE_BYTES = 512 * 1024**2
-MAX_INPUT_TOTAL_BYTES = 1024**3
-MAX_OUTPUT_FILES = 32
-MAX_OUTPUT_FILE_BYTES = 1024**3
-MAX_OUTPUT_TOTAL_BYTES = 2 * 1024**3
-MAX_TIMEOUT_SECONDS = 60 * 60
 
 _DIGEST = r"^[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -415,6 +417,7 @@ __all__ = [
     "MAX_OUTPUT_FILES",
     "MAX_OUTPUT_FILE_BYTES",
     "MAX_OUTPUT_TOTAL_BYTES",
+    "MAX_TIMEOUT_SECONDS",
     "RecipeJobEnding",
     "RecipeJobEvidence",
     "RecipeJobFile",

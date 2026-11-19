@@ -23,6 +23,15 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.job_limits import (
+    MAX_INPUT_FILE_BYTES,
+    MAX_INPUT_FILES,
+    MAX_INPUT_TOTAL_BYTES,
+    MAX_OUTPUT_FILE_BYTES,
+    MAX_OUTPUT_FILES,
+    MAX_OUTPUT_TOTAL_BYTES,
+    MAX_TIMEOUT_SECONDS,
+)
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
 from vonk_forge_contracts import RecipeDefinition, RecipeDisplay
 from vonk_forge_contracts.display import KnobDisplay
@@ -35,12 +44,6 @@ from vonk_forge_contracts.recipe import (
 
 from .strict_json import StrictJSONModel
 
-MAX_INPUT_FILES = 32
-MAX_INPUT_FILE_BYTES = 512 * 1024**2
-MAX_INPUT_TOTAL_BYTES = 1024**3
-MAX_OUTPUT_FILES = 32
-MAX_OUTPUT_FILE_BYTES = 1024**3
-MAX_OUTPUT_TOTAL_BYTES = 2 * 1024**3
 MAX_PARAMETERS = 64
 
 _SLOT = r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"
@@ -356,7 +359,7 @@ class CompiledArtifactContract(ArtifactContractModel):
     parameters: tuple[ParameterDefinition, ...] = Field(max_length=MAX_PARAMETERS)
     output: ArtifactOutputContract
     output_limits: ArtifactOutputLimits
-    max_timeout_seconds: int = Field(ge=1, le=3_600)
+    max_timeout_seconds: int = Field(ge=1, le=MAX_TIMEOUT_SECONDS)
 
     @field_validator("parameters", mode="before")
     @classmethod
@@ -535,7 +538,7 @@ def compile_artifact_contract(
                         )
                     ),
                 ),
-                "max_timeout_seconds": 3_600,
+                "max_timeout_seconds": MAX_TIMEOUT_SECONDS,
             }
         )
     except ValidationError as error:
