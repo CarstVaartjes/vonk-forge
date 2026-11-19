@@ -176,6 +176,7 @@ class Networks(janitor.Docker):
         self.mutations: list[tuple[str, str]] = []
         self.network_reads: list[str] = []
         self.created: list[dict[str, Any]] = []
+        self.refuse_create = False
         self.refuse_connect = False
         self.stop_times_out = False
         self.start_refusals = 0
@@ -183,8 +184,12 @@ class Networks(janitor.Docker):
         self.dead = False
         self.endpoint_rebuilt = True
 
-    def network(self, name: str) -> None:
-        self.networks[name] = {"Id": uuid.uuid4().hex, "Containers": {}}
+    def network(self, name: str, labels: dict[str, str] | None = None) -> None:
+        self.networks[name] = {
+            "Id": uuid.uuid4().hex,
+            "Containers": {},
+            "Labels": labels or {},
+        }
 
     def container(
         self, name: str, networks: list[str], *, mode: str | None = None
@@ -238,11 +243,13 @@ class Networks(janitor.Docker):
             raise Killed
         route = unquote(path.split("?", 1)[0])
         if method == "POST" and route == "/networks/create":
+            if self.refuse_create:
+                raise janitor.DockerError("Docker HTTP 500: create refused")
             if body["Name"] in self.networks:
                 raise janitor.DockerError("Docker HTTP 409: network exists")
             self.mutations.append(("create", body["Name"]))
             self.created.append(body)
-            self.network(body["Name"])
+            self.network(body["Name"], body["Labels"])
             return {"Id": self.networks[body["Name"]]["Id"]}
         if method == "GET" and route == "/containers/json":
             assert "all=1" in path and "vonk-forge" in unquote(path)
@@ -379,23 +386,12 @@ def test_running_container_without_its_endpoint_is_reattached(tmp_path: Path) ->
     assert json.loads((tmp_path / "repairing.json").read_text()) == {}
 
 
-def test_running_container_whose_record_lost_a_declared_network_is_reattached(
+def test_existing_network_missing_from_the_record_is_left_to_compose(
     tmp_path: Path,
 ) -> None:
-    """Catches the 2026-11-19 outage: Caddy running, `ingress` gone from its record."""
+    """Catches fighting a redeploy that is attaching a network on its own."""
     daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
     del daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_ingress"]
-    daemon.networks["vonk-forge_ingress"]["Containers"].pop(caddy)
-    ticks(reconciler, clock, 1)
-    assert daemon.mutations == [
-        ("stop", caddy),
-        ("connect", "vonk-forge_ingress"),
-        ("start", caddy),
-    ]
-    record = daemon.containers[caddy]["NetworkSettings"]["Networks"]
-    assert record["vonk-forge_ingress"]["Aliases"] == ["vonk-forge-caddy-1", "caddy"]
-    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
-    daemon.mutations.clear()
     ticks(reconciler, clock, 2)
     assert daemon.mutations == []
 
@@ -414,7 +410,10 @@ def test_declared_network_that_vanished_is_recreated_and_reattached(
         ("vonk-forge_ingress", False),
         ("vonk-forge_agent-proxy", True),
     }
-    assert daemon.created[0]["Labels"][janitor.PROJECT_LABEL] == "vonk-forge"
+    labels = daemon.created[0]["Labels"]
+    assert labels[janitor.PROJECT_LABEL] == "vonk-forge"
+    # Compose stays the owner: a hash it never computes makes the next up recreate it.
+    assert labels[janitor.HASH_LABEL] == "janitor-recreated"
     for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy"):
         assert caddy in daemon.networks[name]["Containers"]
     assert api in daemon.networks["vonk-forge_agent-proxy"]["Containers"]
@@ -422,6 +421,26 @@ def test_declared_network_that_vanished_is_recreated_and_reattached(
     daemon.mutations.clear()
     ticks(reconciler, clock, 2)
     assert daemon.mutations == []
+
+
+def test_network_creation_is_journalled_first_and_never_for_docker_owned_states(
+    tmp_path: Path,
+) -> None:
+    """Catches creating networks from the observation path, outside journal and backoff."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    del daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_ingress"]
+    del daemon.networks["vonk-forge_ingress"]
+    daemon.containers[caddy]["State"]["Status"] = "restarting"
+    ticks(reconciler, clock, 1)
+    assert daemon.created == []
+    daemon.containers[caddy]["State"]["Status"] = "running"
+    daemon.refuse_create = True
+    ticks(reconciler, clock, 1)
+    assert (
+        "vonk-forge_ingress"
+        in json.loads((tmp_path / "repairing.json").read_text())[caddy]["networks"]
+    )
+    assert daemon.running(caddy)  # A failed create never touches the container.
 
 
 def test_undeclared_missing_network_still_waits_for_compose(tmp_path: Path) -> None:
@@ -433,12 +452,11 @@ def test_undeclared_missing_network_still_waits_for_compose(tmp_path: Path) -> N
     }
     ticks(reconciler, clock, 1)
     assert daemon.created == []
+    assert daemon.mutations == []
 
 
-def test_failed_reconnect_is_healed_later_even_without_the_journal(
-    tmp_path: Path,
-) -> None:
-    """Catches a half-attached container the journal alone must remember."""
+def test_failed_reconnect_is_retried_from_the_journal(tmp_path: Path) -> None:
+    """Catches a half-attached container nothing remembers."""
     daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
     daemon.networks["vonk-forge_ingress"]["Containers"].clear()
     daemon.refuse_connect = True
@@ -448,11 +466,23 @@ def test_failed_reconnect_is_healed_later_even_without_the_journal(
         "vonk-forge_ingress"
         not in daemon.containers[caddy]["NetworkSettings"]["Networks"]
     )
-    (tmp_path / "repairing.json").write_text("not json")  # The owed network is lost.
     daemon.refuse_connect = False
     clock.now += janitor.MAX_REPAIR_BACKOFF
     ticks(reconciler, clock, 1)
     assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+
+
+def test_unparsable_topology_is_logged_not_silent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Catches a janitor that silently falls back to trusting container records."""
+    with caplog.at_level("INFO", logger=janitor.LOGGER.name):
+        assert janitor.Topology.parse("").services == {}
+        assert not caplog.records  # Unrendered is not an error.
+        assert janitor.Topology.parse("{oops").services == {}
+    assert [json.loads(r.message)["reason"] for r in caplog.records] == [
+        janitor.Reason.TOPOLOGY_INVALID
+    ]
 
 
 def test_each_network_is_inspected_once_per_tick(tmp_path: Path) -> None:

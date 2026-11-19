@@ -239,12 +239,19 @@ not against the container's own record: Docker can lose a network and drop it
 from the record together, and a healer that trusted the record saw nothing
 wrong (the 2026-11-19 outage, the third after 11-03 and 11-05: Caddy running
 without `ingress`, `:8443` closed, no outbound DNS). Once per tick, against one
-inspect per network, a declared network the record lacks is owed, a recorded
-entry is broken when it names an older network ID, or when the container runs
-and the network lists no endpoint for it. A declared network that no longer
-exists is recreated first, from the bundle's definition (`internal` flag,
-Compose project and network labels), so Compose finds and keeps it; an
-undeclared missing network waits for the next `compose up`.
+inspect per network, a declared network that does not exist is broken whatever
+the record says; a recorded entry is broken when it names an older network ID,
+or when the container runs and the network lists no endpoint for it. A declared
+network that exists but is missing from the record is left to Compose (a
+redeploy may be attaching it), unless a journalled repair owes it or the
+network carries the janitor's own mark. A missing declared network is recreated
+only inside a journalled, backed-off repair, from the bundle's definition
+(`internal` flag, Compose project and network labels). It carries a
+`config-hash` that Compose never computes, so the next `compose up` sees it as
+diverged and recreates it from the bundle: Compose stays the owner. An
+undeclared missing network waits for the next `compose up`. A non-empty,
+unparsable `VONK_COMPOSE_NETWORKS` logs `declared-networks-invalid-blind` and
+the janitor falls back to the records alone.
 
 State to action, first match: Docker-owned state (`restarting`, `paused`,
 `removing`, `dead`) waits; a missing undeclared network waits; a broken or owed
@@ -255,8 +262,8 @@ grace; otherwise nothing. The repair is journalled in `image-janitor-state`
 (`/state/repairing.json`) before its first effect, then stops a running
 container, disconnects and re-attaches each broken network by name with its
 aliases, and starts the container if it should run. A repair that fails
-half-way still starts the container, but the missing network stays declared,
-so the next tick finds it again even if the journal is lost or unreadable;
+half-way still starts the container, but the missing network stays owed,
+so the journal (or the network mark) owes it again on the next tick;
 each repair backs off exponentially with jitter (30 s doubling to five minutes)
 while it does not converge. Containers sharing another container's network
 namespace are not touched.

@@ -1011,13 +1011,21 @@ def verify_running_caddy_heals_without_its_ingress(
     )
     network = document["networks"]["ingress"]["name"]
     caddy = run([*reference_compose(), "ps", "-q", "caddy"], cwd=bundle).stdout.strip()
+    janitor = run(
+        [*reference_compose(), "ps", "-q", "image-janitor"], cwd=bundle
+    ).stdout.strip()
     for deleted in (False, True):
-        run(["docker", "network", "disconnect", "-f", network, caddy], cwd=bundle)
-        if deleted:
-            run(["docker", "network", "rm", network], cwd=bundle)
-        routes = run(["docker", "exec", caddy, "ip", "route"], cwd=bundle).stdout
-        if any(line.startswith("default") for line in routes.splitlines()):
-            raise AcceptanceError("Caddy still has a default route without ingress")
+        # Paused while the fault is set up, so it is observed before the repair.
+        run(["docker", "pause", janitor], cwd=bundle)
+        try:
+            run(["docker", "network", "disconnect", "-f", network, caddy], cwd=bundle)
+            if deleted:
+                run(["docker", "network", "rm", network], cwd=bundle)
+            routes = run(["docker", "exec", caddy, "ip", "route"], cwd=bundle).stdout
+            if any(line.startswith("default") for line in routes.splitlines()):
+                raise AcceptanceError("Caddy still has a default route without ingress")
+        finally:
+            run(["docker", "unpause", janitor], cwd=bundle)
         deadline = time.monotonic() + 180  # Several 30-second repair passes
         while True:
             try:
