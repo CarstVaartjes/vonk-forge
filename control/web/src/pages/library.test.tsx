@@ -256,3 +256,16 @@ test("keeps storage observation age, failure and cadence visible on an empty mod
   expect(screen.getByText(/checked every 73s/)).toBeVisible();
   expect(screen.getByText("2 minutes ago")).toHaveAttribute("dateTime", observed);
 });
+
+test("typing in the Library search keeps focus in the input", async () => {
+  history.replaceState(null, "", "/library");
+  render(<App api={libraryApi as unknown as ControlApi} />);
+  const input = await screen.findByLabelText("Search Library");
+  input.focus();
+  for (const text of ["q", "qw", "qwe"]) {
+    fireEvent.change(input, { target: { value: text } });
+    await waitFor(() => expect(location.search).toContain(`q=${text}`));
+    await Promise.resolve();
+    expect(input).toHaveFocus();
+  }
+});
