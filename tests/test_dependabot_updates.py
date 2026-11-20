@@ -12,7 +12,7 @@ def test_dependabot_covers_every_container_and_action_location_weekly() -> None:
     required = {
         "docker": {"/control"},
         "docker-compose": {"/deploy/compose", "/deploy/compose/tailscale"},
-        "github-actions": {"/"},
+        "github-actions": {"/", "/.github/actions/*"},
         "cargo": {"/"},
     }
     covered: dict[str, set[str]] = {}

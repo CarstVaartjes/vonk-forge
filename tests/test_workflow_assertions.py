@@ -299,7 +299,7 @@ def test_every_action_is_pinned_at_one_sha() -> None:
     """The same action is never pinned at two commits across workflows/actions."""
     pin = re.compile(r"uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})")
     pins: dict[str, set[str]] = {}
-    for path in (ROOT / ".github").rglob("*.yml"):
+    for path in (ROOT / ".github").rglob("*.y*ml"):
         for action, sha in pin.findall(path.read_text()):
             pins.setdefault(action, set()).add(sha)
     assert pins
