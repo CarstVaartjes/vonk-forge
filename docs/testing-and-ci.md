@@ -687,6 +687,10 @@ that need fresh CI. `CI gate` requires its success independently
 of `scripts/select-ci-areas`. The sharded repository suite runs on every full run and excludes the same files/nodes
 to avoid running guards twice.
 
+A guard in `tests/test_workflow_assertions.py` requires every `uses: owner/action@<sha>` under
+`.github/` (workflows and composite actions, `.yml` and `.yaml`) to name the same SHA for the same action;
+Dependabot covers `/.github/actions/*` so a bump moves all sites together.
+
 `tests/repository_guards.py` owns the guard selection and the reviewed scope of
 all other test files under `tests/`. The inventory test rejects new or stale
 unclassified files, including scans delegated to helpers. A new whole-tree guard

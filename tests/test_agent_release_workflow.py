@@ -338,7 +338,7 @@ def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
     assert "secrets." not in text
     assert "vars." not in text
     cache = package_step("Restore Rust dependency cache")
-    assert "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6" in cache
+    assert "Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0" in cache
     assert "shared-key: linux-arm64" in cache
     assert 'add-job-id-key: "false"' in cache
 
@@ -1425,7 +1425,7 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
         in package_text
     )
     assert (
-        "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+        "uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
         in apt_text
     )
     assert workflow_action_pin_errors(ROOT) == {}
