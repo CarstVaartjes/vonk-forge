@@ -269,3 +269,13 @@ test("typing in the Library search keeps focus in the input", async () => {
     expect(input).toHaveFocus();
   }
 });
+
+test("exiting the Spark workspace moves focus to the heading", async () => {
+  history.replaceState(null, "", "/library?spark=node-1");
+  render(<App api={libraryApi as unknown as ControlApi} />);
+  const exit = await screen.findByRole("link", { name: "Exit Spark workspace" });
+  exit.focus();
+  fireEvent.click(exit);
+  await waitFor(() => expect(location.search).toBe(""));
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Library" })).toHaveFocus());
+});

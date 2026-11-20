@@ -343,9 +343,8 @@ export function LibraryPage({
       return;
     onNavigatePath?.("/library", true);
   }, [onNavigatePath, route, snapshot]);
-  // Focus the heading on a route change, never on a query-string change: the
-  // `?q=` rewrite on every search keystroke must not steal the input's focus.
-  const pathname = useMemo(() => new URL(path, location.origin).pathname, [path]);
+  // Focus the heading on a route, tab or Spark-workspace change, never on the
+  // `?q=` rewrite of every search keystroke (it would steal the input's focus).
   useEffect(() => {
     if (
       route.kind === LibraryPath.MODELS &&
@@ -354,7 +353,7 @@ export function LibraryPage({
     )
       return;
     queueMicrotask(() => heading.current?.focus());
-  }, [pathname, route.kind]);
+  }, [view, preferredNodeId, route.kind]);
   const updateQuery = useCallback(
     (value: string) => {
       setQuery(value);
