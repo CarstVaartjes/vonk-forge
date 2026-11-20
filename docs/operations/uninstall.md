@@ -200,6 +200,9 @@ sudo docker volume ls --filter label=com.docker.compose.project=vonk-forge
 Installs from before the standing image registry was removed may keep an orphan
 `registry-data` volume. It is unused; remove it with
 `sudo docker volume rm vonk-forge_registry-data`.
+If a redeploy did not remove the orphan container, check with
+`sudo docker ps -a --filter label=com.docker.compose.service=registry` and
+remove it with `sudo docker rm -f <container>`.
 
 ### 2b. Optional: remove the data
 

@@ -521,7 +521,7 @@ master key. That key is staged in the API-only gateway directory, outside the
 normalized secret volume shared with the worker.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
-registry publication, and inference networks separate. Only Caddy
+and inference networks separate. Only Caddy
 publishes a host port. LiteLLM alone joins GPU node-facing cluster egress; the
 worker and API do not.
 
