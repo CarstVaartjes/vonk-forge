@@ -28,6 +28,7 @@ from .common import _reported as _reported
 from .common import _table as _table
 from .common import _text as _text
 from .common import _time as _time
+from .common import _utc as _utc
 from .common import _waiting as _waiting
 from .common import _warn as _warn
 from .common import _width as _width

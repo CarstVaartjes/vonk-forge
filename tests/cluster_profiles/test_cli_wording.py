@@ -13,6 +13,7 @@ import json
 import re
 import textwrap
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -28,12 +29,13 @@ from cluster_profiles.cli_render import (
     _library_item,
     render_payload,
 )
+from cluster_profiles.cli_render.common import _utc
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
 from cluster_profiles.cli_render.profile import (
     _connection_examples,
+    _key_expired,
     _profile,
-    _profile_endpoints,
 )
 from cluster_profiles.cli_render.throttle import throttle_words
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
@@ -344,7 +346,7 @@ def test_profile_endpoint_serving_lines_are_the_vector_lines(case, printed):
         for index, item in enumerate(case["assignments"])
     ]
     lines = printed(
-        _profile_endpoints,
+        render_payload,
         {
             "number": 3,
             "profile_id": "11111111-1111-4111-8111-111111111111",
@@ -353,6 +355,8 @@ def test_profile_endpoint_serving_lines_are_the_vector_lines(case, printed):
             "observed_at": "2026-09-23T12:59:31Z",
             "assignments": assignments,
         },
+        "profile",
+        action="endpoint",
     )
     start = lines.index(_SERVING_NOW["heading"])
     assert lines[start + 1 : start + 1 + len(case["lines"])] == case["lines"]
@@ -364,7 +368,9 @@ _CONNECTION = _vector("connection-examples.json")
 
 @pytest.mark.parametrize("case", _CONNECTION["cases"], ids=lambda c: c["alias"])
 def test_connection_examples_are_the_vector_text(case, printed):
-    out = "\n".join(printed(_connection_examples, case["api_base"], case["alias"]))
+    out = "\n".join(
+        printed(_connection_examples, case["api_base"], case["alias"], wide=True)
+    )
     for name in ("setup", "curl", "python"):
         assert textwrap.indent(case[name], "  ") in out
     assert _CONNECTION["note"] in out
@@ -508,9 +514,10 @@ def test_rendered_profile_text_uses_load_words(printed):
             "number": 1,
             "application_id": application_id,
             "application_state": "succeeded",
+            "observed_at": "2026-09-23T12:59:31Z",
             "assignments": [],
         }
-        texts += printed(_profile_endpoints, payload)
+        texts += printed(render_payload, payload, "profile", action="endpoint")
     assert [t for t in texts if _APPLICATION.search(t)] == []
     assert any("vonkctl job run" in t for t in texts)
 
@@ -640,3 +647,95 @@ def test_sync_status_counts_documents_not_recipes(printed):
     lines = printed(_catalog_sync, payload)
     assert [line for line in lines if line.startswith("Documents: 725 of 725")]
     assert not [line for line in lines if line.startswith("Recipes")]
+
+
+# Times, endpoint detail and expired keys.
+
+_ENDPOINT = {
+    "api_base": "https://vonk-forge.example.ts.net/v1",
+    "backend_api_base": "http://10.0.0.10:8000/v1",
+    "alias": "coder",
+    "generation": 8,
+    "node_id": "spk_" + "a" * 32,
+    "plan_digest": "a" * 64,
+    "observed_at": "2026-09-23T12:59:30.611000+02:00",
+}
+
+
+def _endpoint_payload(**changes):
+    return {
+        "number": 3,
+        "application_id": "load-1",
+        "application_state": "succeeded",
+        "observed_at": "2026-09-23T12:59:31Z",
+        "assignments": [
+            {
+                "assignment_id": "33333333-3333-4333-8333-000000000001",
+                "desired_state": "running",
+                "alias": "coder",
+                "recipe_title": "Qwen Code",
+                "state": "published",
+                "endpoint": _ENDPOINT,
+            }
+        ],
+        **changes,
+    }
+
+
+def test_profile_endpoint_is_short_until_wide(printed):
+    short = printed(render_payload, _endpoint_payload(), "profile", action="endpoint")
+    wide = printed(
+        render_payload, _endpoint_payload(), "profile", action="endpoint", wide=True
+    )
+    route = ("Route generation", "Route observed at", "Freshness", "Spark backend")
+    assert [t for t in short if t.startswith(route)] == []
+    assert "API base (inference gateway): https://vonk-forge.example.ts.net/v1" in short
+    assert "curl example:" in short
+    assert [t for t in short if t.startswith("Python example")] == []
+    assert "Route observed at: 2026-09-23 10:59:30Z" in wide
+    assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in wide
+    assert "Python example (openai client):" in wide
+
+
+def test_wide_endpoint_with_invalid_history_still_answers(printed):
+    payload = _endpoint_payload(
+        projection_issue={
+            "code": "profile.application_intent.invalid",
+            "detail": "stored load history is invalid",
+        }
+    )
+    lines = printed(render_payload, payload, "profile", action="endpoint", wide=True)
+    assert "Stored evidence: stored load history is invalid" in lines
+
+
+def test_utc_time_literal():
+    assert _utc(datetime(2026, 10, 2, 16, 22, 58, 611000, tzinfo=UTC)) == (
+        "2026-10-02 16:22:58Z"
+    )
+    assert _utc(datetime.fromisoformat("2026-10-02T16:22:58+02:00")) == (
+        "2026-10-02 14:22:58Z"
+    )
+
+
+@pytest.mark.parametrize(
+    ("expires", "expired"),
+    [
+        ("2026-10-02T14:22:58+00:00", True),
+        ("2026-10-02T14:22:59+00:00", False),
+        ("2027-01-01T00:00:00Z", False),
+        ("not a time", False),
+    ],
+)
+def test_key_expiry_is_decided_against_now(expires, expired):
+    now = datetime(2026, 10, 2, 14, 22, 58, tzinfo=UTC)
+    assert _key_expired(expires, now) is expired
+
+
+def test_one_time_formatter_owns_isoformat():
+    render = Path(__file__).parents[2] / "src/cluster_profiles/cli_render"
+    users = [
+        path.name
+        for path in render.glob("*.py")
+        if ".isoformat(" in path.read_text() and path.name != "common.py"
+    ]
+    assert users == []

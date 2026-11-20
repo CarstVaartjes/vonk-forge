@@ -1107,12 +1107,20 @@ The output opens with `Serving now`, one `alias · recipe title · published` li
 per published route. The Fleet page's "Serving now" block shows the same lines
 for the loaded Profile, each with the same connection example.
 
+Per alias the default output is short: the assignment, its state, the `API base`,
+the `Client model identifier`, and the setup and `curl` examples. `--wide` adds
+`Route generation`, `Route observed at`, `Freshness` and
+`Spark backend (diagnostic)`, plus the Python example and the per-request note.
+
+Every time vonkctl prints for people is UTC to the second, for example
+`2026-10-02 14:22:58Z`. `--json` keeps the Controller's own timestamps.
+
 The client endpoint is the Controller's inference gateway, not a Spark:
 `API base` is `https://<controller host>/v1` (the same origin as
 `VONK_CONTROL_URL`; over Tailscale, the `svc:vonk-forge` service), where Caddy
 routes `/v1/*` to LiteLLM. Use it with the
 `Client model identifier` as the OpenAI `model`. `Spark backend (diagnostic)`
-is the Spark-local serving address LiteLLM forwards to; it is usually
+(`--wide` only) is the Spark-local serving address LiteLLM forwards to; it is usually
 unreachable from a client and is never the endpoint. The web Profiles view
 shows the same base URL and model for a loaded profile.
 
@@ -1139,8 +1147,9 @@ facts from `/v1/model/info`. Vonk Forge runs and wires no agent itself.
 Without `--model` a key may use every gateway model, so it keeps working as
 profiles change; `--expires` takes a duration such as `30d` or `12h` and the
 default is never. A roll keeps the time a key has left; rolling an expired key
-renews it for its original lifetime. `key list` shows names, models, creation, expiry, and last
-use, never a secret. The Controller keeps a key named `default` and writes it to
+renews it for its original lifetime. `key list` shows names, models, creation, expiry (a past expiry reads
+`expired 2026-10-02 14:22:58Z`), and last use, never a secret. A secret is shown
+once; lost it? `vonkctl key roll NAME`. The Controller keeps a key named `default` and writes it to
 `secrets/gateway/client-key` (mode 600) in the Compose bundle directory; a
 Controller restart recreates it if it was revoked or lost.
 

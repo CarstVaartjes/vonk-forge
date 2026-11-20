@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from .. import cli_states
+from ..control_client import ControlMalformedResponse
+from ..generated_control.models.endpoint_response import EndpointResponse
+from ..generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
+from ..generated_control.types import Unset
 from .common import (
     _actions,
     _field,
@@ -137,18 +144,18 @@ CONNECTION_NOTE = (
 )
 
 
-def _connection_examples(api_base: str, alias: str) -> None:
+def _connection_examples(api_base: str, alias: str, wide: bool = False) -> None:
     """Print the examples; the key is only ever read from the key file."""
     snippets = connection_snippets(terminal_text(api_base), terminal_text(alias))
-    for title, name in (
-        ("Client setup", "setup"),
-        ("curl example", "curl"),
-        ("Python example (openai client)", "python"),
-    ):
+    shown = [("Client setup", "setup"), ("curl example", "curl")]
+    if wide:
+        shown.append(("Python example (openai client)", "python"))
+    for title, name in shown:
         print(title + ":")
         for line in snippets[name].split("\n"):
             print(("  " + line) if line else "")
-    print(CONNECTION_NOTE)
+    if wide:
+        print(CONNECTION_NOTE)
 
 
 def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
@@ -167,27 +174,39 @@ def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
         print(f"{_text(alias)} · {_text(title)} · {_text(state)}")
 
 
-def _profile_endpoints(payload: Mapping[str, object]) -> None:
+def _endpoints_view(payload: object) -> FleetProfileEndpointsView:
+    """Validate the endpoint answer once, at the edge of rendering."""
+    try:
+        return FleetProfileEndpointsView.from_dict(dict(_object(payload, "endpoints")))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ControlMalformedResponse(
+            "endpoints observation is unavailable"
+        ) from error
+
+
+def _set(value: object) -> object:
+    """An optional contract field as a plain value: absent and null both read None."""
+    return None if isinstance(value, Unset) else value
+
+
+def _profile_endpoints(view: FleetProfileEndpointsView, wide: bool = False) -> None:
+    assignments = view.assignments or []
     listing = endpoint_listing(
-        payload.get("application_id"),
-        payload.get("projection_issue"),
-        payload.get("assignments"),
+        _set(view.application_id), _set(view.projection_issue), view.assignments
     )
     if listing is EndpointListing.NOT_LOADED:
-        print(f"Profile {payload.get('number')} is not loaded.")
+        print(f"Profile {view.number} is not loaded.")
         print("Saved profile edits do not publish routes until the profile is loaded.")
         return
-    _field("Load", payload.get("application_id"))
-    _field("Load state", payload.get("application_state"))
+    _field("Load", _set(view.application_id))
+    _field("Load state", _set(view.application_state))
     if listing is EndpointListing.HISTORY_INVALID:
         print(
             "Endpoint assignments are unavailable because stored load history is invalid."
         )
+        issue = view.projection_issue
         _field(
-            "Stored evidence",
-            _optional(payload.get("projection_issue"), "projection_issue").get(
-                "detail"
-            ),
+            "Stored evidence", None if isinstance(issue, Unset | None) else issue.detail
         )
         return
     if listing is EndpointListing.EMPTY:
@@ -196,32 +215,27 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
             "Job recipes have no endpoint; run one with vonkctl job run ALIAS (see vonkctl job --help)"
         )
         return
-    assignments = _records(payload, "assignments")
     _serving_now(
-        [
-            (item.get("alias"), item.get("recipe_title"), item.get("state"))
-            for item in assignments
-        ]
+        [(_set(item.alias), item.recipe_title, item.state) for item in assignments]
     )
     for assignment in assignments:
         print()
-        _field("Assignment", assignment.get("recipe_title"))
-        _field("Endpoint state", assignment.get("state"))
-        alias = assignment.get("alias")
-        endpoint = _optional(assignment.get("endpoint"), "endpoint")
-        if assignment.get("state") == cli_states.PUBLISHED:
+        _field("Assignment", assignment.recipe_title)
+        _field("Endpoint state", assignment.state)
+        alias = _set(assignment.alias)
+        endpoint = assignment.endpoint
+        if assignment.state == cli_states.PUBLISHED and isinstance(
+            endpoint, EndpointResponse
+        ):
             _field("Client model identifier", alias)
-            api_base = endpoint.get("api_base")
-            _field("API base (inference gateway)", api_base)
-            _field("Route generation", endpoint.get("generation"))
-            _field("Route observed at", _time(endpoint.get("observed_at")))
-            _field(
-                "Freshness",
-                _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
-            )
-            if isinstance(api_base, str) and isinstance(alias, str):
-                _connection_examples(api_base, alias)
-            _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
+            _field("API base (inference gateway)", endpoint.api_base)
+            if wide:
+                _field("Route generation", endpoint.generation)
+                _field("Route observed at", _time(endpoint.observed_at))
+                _field("Freshness", _freshness(endpoint.observed_at, view.observed_at))
+                _field("Spark backend (diagnostic)", endpoint.backend_api_base)
+            if isinstance(alias, str):
+                _connection_examples(endpoint.api_base, alias, wide=wide)
             continue
         if alias is not None:
             _field("Client model identifier", alias)
@@ -232,9 +246,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
             cli_states.ENDPOINT_WITHDRAWN: "No current published route is associated with this assignment.",
             cli_states.ENDPOINT_UNAVAILABLE: "The Controller cannot verify a current route for this assignment.",
         }
-        print(
-            messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")
-        )
+        print(messages.get(assignment.state, "Endpoint state is unavailable."))
 
 
 def _spark_labels(nodes: object, names: object) -> object:
@@ -248,7 +260,7 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
     if action in ("create", "roll"):
         _field("Key", payload.get("name"))
         _field("Models", _words(payload.get("models") or ["all"]))
-        _field("Expires", payload.get("expires_at") or "never")
+        _field("Expires", _key_expiry(payload.get("expires_at")))
         if payload.get("output") is not None:
             _field("Written to", payload.get("output"))
         else:
@@ -268,12 +280,27 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
                     row.get("name"),
                     _words(row.get("models") or ["all"]),
                     _time(row.get("created_at")),
-                    _time(row.get("expires_at")) if row.get("expires_at") else "never",
+                    _key_expiry(row.get("expires_at")),
                     _time(row.get("last_used_at")),
                 )
                 for row in rows
             ],
         )
+
+
+def _key_expired(value: object, now: datetime) -> bool:
+    """A key is expired when its expiry is a real time at or before ``now``."""
+    try:
+        return datetime.fromisoformat(str(value)) <= now
+    except ValueError:
+        return False
+
+
+def _key_expiry(value: object) -> str:
+    if not value:
+        return "never"
+    shown = _time(value)
+    return f"expired {shown}" if _key_expired(value, datetime.now(UTC)) else shown
 
 
 class EndpointListing(StrEnum):
