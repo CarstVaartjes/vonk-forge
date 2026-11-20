@@ -4,6 +4,7 @@
     "includes": [
       "src/**/*.ts",
       "src/**/*.tsx",
+      "src/styles.css",
       "e2e/**/*.ts",
       "*.ts",
       "!src/api/generated/**",

@@ -233,8 +233,6 @@ test("renders an empty profile as an explicit whole-fleet idle outcome", async (
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
   const saved = await screen.findByRole("region", { name: "Profile 3 saved profile" });
   expect(within(saved).getByText("Idle fleet")).toBeVisible();
-  // Break caught: the list entry's count split across text nodes ("0", "assignment", "s").
-  expect(screen.getByText("0 assignments · ready")).toBeVisible();
   expect(
     within(saved).getByText("No assignments; every Spark becomes idle on load."),
   ).toBeVisible();

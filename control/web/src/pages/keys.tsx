@@ -242,15 +242,11 @@ export function KeysPage({ api }: { api: ControlApi }) {
                     <tr key={key.name} className={expired ? "is-expired" : undefined}>
                       <th scope="row">{key.name}</th>
                       <td>{key.models.length ? key.models.join(", ") : "All models"}</td>
-                      <td>
-                        <Time value={key.created_at} />
-                      </td>
-                      <td>
-                        <Time value={key.last_used_at} />
-                      </td>
+                      <td>{key.created_at ? <Time value={key.created_at} /> : "Never"}</td>
+                      <td>{key.last_used_at ? <Time value={key.last_used_at} /> : "Never"}</td>
                       <td className="key-expires">
                         {expired && <StatusPill tone="bad">Expired</StatusPill>}{" "}
-                        <Time value={key.expires_at} />
+                        {key.expires_at ? <Time value={key.expires_at} /> : "Never"}
                       </td>
                       <td>
                         <div className="button-row">
