@@ -24,7 +24,7 @@ async fn sixty_five_exact_observations_use_two_bounded_native_wire_batches() {
         &plan.identity.recipe_revision_sha256,
     )
     .unwrap();
-    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.runtime.placement.endpoint_address = Some("127.0.0.2".parse().unwrap());
     plan.security.network_mode = "bridge".parse().unwrap();
     plan.validate().unwrap();
     let runtime = OciRuntime {
@@ -314,7 +314,7 @@ fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
         &plan.identity.recipe_revision_sha256,
     )
     .unwrap();
-    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.runtime.placement.endpoint_address = Some("127.0.0.2".parse().unwrap());
     plan.security.network_mode = CompiledSecurityNetworkMode::Bridge;
     runtime
         .prepare_start_with_inspection_identity(
