@@ -91,9 +91,20 @@ uv_control() {
         uv run --project "$root/control" --frozen "$@"
 }
 
+# A recipes pull deletes the files its adapter-sources.json declares (the synthetic
+# canary package among them); the recipes tool places them again, from its cache when
+# present, else from the mirror. A failure is reported, and the tests that read those
+# files fail on their own.
+place_recipe_sources() {
+    uv run --quiet --python 3.14 --no-project --with-editable "$recipe_root/contracts" \
+        python "$recipe_root/tools/fetch-adapter-sources" ||
+        echo "[WARN] recipe adapter sources were not placed in $recipe_root" >&2
+}
+
 use_recipe_library() {
     if [[ -d "$recipe_root/contracts" ]]; then
         export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+        place_recipe_sources
     elif [[ ${CI:-false} == true ]]; then
         echo "VONK_RECIPE_LIBRARY_ROOT is required in CI: $recipe_root/contracts" >&2
         return 1
@@ -157,6 +168,7 @@ run_changed_tests() {
     done <<< "$selection"
     if [[ -d "$recipe_root/contracts" ]]; then
         export VONK_RECIPE_LIBRARY_ROOT="$recipe_root"
+        place_recipe_sources
     fi
     local status=0
     local marker_args=()
