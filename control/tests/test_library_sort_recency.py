@@ -324,3 +324,37 @@ def test_unknown_sort_is_rejected_by_the_projection(
 ) -> None:
     _reject_unknown_sort(projection.models, "model library sort is invalid")
     _reject_unknown_sort(projection.recipe_library, "recipe library sort is invalid")
+
+
+def test_fits_fleet_sort_key_puts_working_recipes_first_then_newest():
+    from types import SimpleNamespace
+    from typing import Any
+
+    from vonk_control.library_projection import LibraryProjection
+
+    def item(name: str, minute: int, status: str) -> Any:
+        return SimpleNamespace(
+            updated_at=_EPOCH + timedelta(minutes=minute),
+            selector=name,
+            identity=SimpleNamespace(content_sha256=name),
+            qualification=SimpleNamespace(status=status),
+        )
+
+    rows = [
+        item("new", 3, "Untested"),
+        item("old", 1, "Working"),
+        item("mid", 2, "Working"),
+    ]
+    key: Any = LibraryProjection._recipe_sort_key("updated", working_first=True)
+    assert [r.selector for r in sorted(rows, key=key, reverse=True)] == [
+        "mid",
+        "old",
+        "new",
+    ]
+    plain: Any = LibraryProjection._recipe_sort_key("updated")
+    assert [r.selector for r in sorted(rows, key=plain, reverse=True)] == [
+        "new",
+        "mid",
+        "old",
+    ]
+    assert len(key(rows[0])) == 3

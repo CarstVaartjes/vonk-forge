@@ -17,7 +17,7 @@ import textwrap
 START_HERE = (
     ("vonkctl fleet", "What every Spark runs and what needs attention"),
     (
-        "vonkctl recipe library --fits-fleet",
+        "vonkctl recipe library --fits-fleet --limit 5",
         "Recipes that fit your Sparks, Working first",
     ),
     (
@@ -162,8 +162,6 @@ def command_help(parser: argparse.ArgumentParser) -> str:
     ]
     if arguments:
         lines += ["Arguments", *_rows(arguments), ""]
-    if example := parser.get_default("example"):
-        lines += ["Example", f"  {example}", ""]
     own = [
         action
         for action in parser._actions

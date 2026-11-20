@@ -329,43 +329,22 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     assert client.calls == []
 
 
-def test_start_here_leads_to_a_first_success_and_library_help_shows_it():
-    root = cli._parser().format_help()
-    order = [
-        root.index(f"vonkctl {step}")
-        for step in ("fleet", "recipe library --fits-fleet", "run <recipe>")
-    ] + [root.index("vonkctl profile endpoint"), root.index("vonkctl key create")]
-    assert order == sorted(order)
+def test_start_here_and_library_example_match_the_runbook():
+    from pathlib import Path
+
+    from cluster_profiles.cli_help import START_HERE
+
+    runbook = Path(__file__).parents[2] / "docs/runbooks/vonkctl.md"
+    text = runbook.read_text()
+    block = text.split("Start here, in order:\n\n```text\n", 1)[1].split("```", 1)[0]
+    assert block.splitlines() == [command for command, _ in START_HERE]
+    example = "vonkctl recipe library --fits-fleet --limit 5"
+    assert START_HERE[1][0] == example and example in text
     parser = cli._parser()
     for name in ("recipe", "library"):
         commands = subcommands(parser)
         assert commands is not None
         parser = commands.choices[name]
-    library = parser
-    text = library.format_help()
-    example = "vonkctl recipe library --fits-fleet --limit 5"
-    assert text.index(example) < text.index("Flags")
-    assert "--search" in text and "Only titles" in text
-
-
-def test_fits_fleet_lists_working_recipes_first_then_keeps_the_rest(vonkctl_json):
-    def row(slug, status):
-        return {"selector": slug, "qualification": {"status": status}}
-
-    client = Pages(
-        [
-            {
-                "recipes": [row("a", "Untested"), row("b", "Failed: recipe")],
-                "next_cursor": "two",
-            },
-            {
-                "recipes": [row("c", "Working"), row("d", "Working")],
-                "next_cursor": None,
-            },
-        ]
-    )
-    status, document = vonkctl_json(
-        "recipe", "library", "--fits-fleet", "--limit", "3", control_client=client
-    )
-    assert status == 0
-    assert [r["selector"] for r in document["recipes"]] == ["c", "d", "a"]
+    text = parser.format_help()
+    assert text.index(f"Example: {example}") < text.index("Flags")
+    assert "--search" in text

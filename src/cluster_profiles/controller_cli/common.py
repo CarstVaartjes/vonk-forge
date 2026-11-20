@@ -267,7 +267,9 @@ def _selector(
 
 def _filters(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--search", default="", help="Only titles and names containing this text"
+        "--search",
+        default="",
+        help="Only recipes or models whose name, title or description contains this text",
     )
     for name in (
         "usage",
