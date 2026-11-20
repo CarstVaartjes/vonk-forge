@@ -104,7 +104,9 @@ def activity_continuation(
 
 
 def _activity(
-    payload: Mapping[str, object], filters: Mapping[str, object] | None
+    payload: Mapping[str, object],
+    filters: Mapping[str, object] | None,
+    wide: bool = False,
 ) -> None:
     issue = unknown_membership(
         payload.get("operations"), payload.get("total"), payload.get("projection_issue")
@@ -124,26 +126,9 @@ def _activity(
         # One operation shows one id: the owner's, which `Reconnect` follows.
         # The row's own id is shown only with --wide (and in JSON).
         _field("Operation", owner.get("id", operation.get("id")))
-        if owner and (filters or {}).get("wide"):
+        if owner and wide:
             _field("Row", operation.get("id"))
-        _field("Kind", operation.get("kind"))
-        _field("State", operation.get("state"))
-        if operation.get("projection_issues") is not None:
-            for issue in _records(operation, "projection_issues"):
-                _warn(
-                    f"{_text(issue.get('field'))} unavailable: response requires "
-                    f"{_text(issue.get('observed_bytes'))} bytes; "
-                    f"reader budget {_text(issue.get('budget_bytes'))} bytes. "
-                    "Operation identity and state remain known."
-                )
-        _field("Created", _time(operation.get("created_at")))
-        _field("Targets", _words(operation.get("node_ids")))
-        if operation.get("attempt") is not None:
-            _field("Attempt", operation.get("attempt"))
         if owner:
-            _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
-            if owner.get("request_id") is not None:
-                _field("Request", owner.get("request_id"))
             owner_kind = owner.get("kind")
             owner_id = owner.get("id")
             reconnect = None
@@ -165,6 +150,23 @@ def _activity(
                 "Reconnect",
                 ENDPOINT_UNAVAILABLE if reconnect is None else shlex.join(reconnect),
             )
+            _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
+            if owner.get("request_id") is not None:
+                _field("Request", owner.get("request_id"))
+        _field("Kind", operation.get("kind"))
+        _field("State", operation.get("state"))
+        if operation.get("projection_issues") is not None:
+            for issue in _records(operation, "projection_issues"):
+                _warn(
+                    f"{_text(issue.get('field'))} unavailable: response requires "
+                    f"{_text(issue.get('observed_bytes'))} bytes; "
+                    f"reader budget {_text(issue.get('budget_bytes'))} bytes. "
+                    "Operation identity and state remain known."
+                )
+        _field("Created", _time(operation.get("created_at")))
+        _field("Targets", _words(operation.get("node_ids")))
+        if operation.get("attempt") is not None:
+            _field("Attempt", operation.get("attempt"))
         cancellation = _optional(operation.get("cancellation"), "profile cancellation")
         if cancellation:
             _field(
