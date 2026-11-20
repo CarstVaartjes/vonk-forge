@@ -27,10 +27,10 @@ configuration:
 vonkctl update --apply
 ```
 
-`vonkctl` is the local, authenticated CLI for the Controller. It has five
-operator areas: Fleet, Model, Recipe, Job, and Profile. The CLI uses the
-same current Controller routes as the operator API: `/api/fleet*`,
-`/api/model/*`, `/api/recipe/*`, `/api/artifact-jobs/*`, and `/api/profile*`. Machine-facing agent
+`vonkctl` is the local, authenticated CLI for the Controller. `vonkctl --help`
+lists its command groups (platform, metrics, fleet, model, recipe, job, profile,
+key), `run`, `completion` and `update`. It uses the same current Controller
+routes as the operator API. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
 ## Connect
@@ -68,9 +68,9 @@ Help is a map of the command tree and works offline. `vonkctl` (or
 flags, in the order to try them. `vonkctl GROUP --help` lists that group's commands as full invocations
 with their arguments, for example `vonkctl fleet detail <spark>`, and no
 options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
-flags. A group run on its own shows its current state: `vonkctl fleet`,
-`vonkctl model`, `vonkctl recipe`, `vonkctl profile` and `vonkctl key` are
-overviews. Groups
+flags. A group run on its own shows its current state: `vonkctl platform`,
+`vonkctl metrics`, `vonkctl fleet`, `vonkctl model`, `vonkctl recipe`,
+`vonkctl profile` and `vonkctl key` are overviews. Groups
 without a view of their own (`fleet enrollment`, `recipe installation`,
 `job`, `completion`) print their help. A mistyped command gets a
 suggestion (`unknown command 'detal' for 'vonkctl fleet'. Did you mean

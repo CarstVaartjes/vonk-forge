@@ -1,4 +1,4 @@
-"""Authenticated command-line adapter for the four operator nouns."""
+"""Authenticated vonkctl adapter for the Controller API."""
 
 from __future__ import annotations
 
