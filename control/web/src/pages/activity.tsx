@@ -45,6 +45,9 @@ type ActivityRecord = ActivitySummary & {
   source: "job" | "operation";
   target_names?: string[];
   operation?: OperationDetail;
+  /** The Controller's plain phrase for the event, and the workload it acts on. */
+  summary?: string;
+  subject?: string | null;
 };
 type ActivityApi = Pick<
   ControlApi,
@@ -77,38 +80,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-export function activityActionLabel(action: string): string {
-  if (action.startsWith("operation.")) {
-    const parts = action.split(".").slice(1);
-    const state = parts.pop() ?? "unknown";
-    const kind = titleCase(parts.join(" ")) || "Operation";
-    const stateLabels: Record<string, string> = {
-      cancelled: "Cancelled",
-      compensated: "Recovered",
-      compensating: "Recovering",
-      completed: "Completed",
-      failed: "Failed",
-      pending: "Pending",
-      planned: "Planned",
-      queued: "Queued",
-      running: "Running",
-      succeeded: "Completed",
-      uncertain: "Needs review",
-      waiting: "Waiting to recheck",
-      [LifecycleState.NEEDS_OPERATOR]: "Waiting for operator",
-      [LifecycleState.BACKOFF]: "Retrying",
-      [LifecycleState.OBSERVING]: "Checking",
-    };
-    return `${kind} · ${stateLabels[state] ?? titleCase(state)}`;
-  }
-  const parts = action.split(".").filter(Boolean);
-  const useful = parts.length > 1 ? parts.slice(1) : parts;
-  const label = titleCase(useful.join(" "));
-  return label
-    ? `${label.charAt(0).toUpperCase()}${label.slice(1).toLowerCase()}`
-    : "Recorded activity";
 }
 
 export function activityCategory(event: ActivitySummary): string {
@@ -353,6 +324,16 @@ function targetSummaryNames(event: ActivityRecord): string[] {
   return names;
 }
 
+/** The entry's headline: the workload (else the Sparks) it concerns, then what happened, in the Controller's words. */
+export function activityTitle(event: ActivityRecord): string {
+  const names = targetSummaryNames(event);
+  const sparks =
+    names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
+  const subject = event.subject || sparks;
+  const summary = event.summary || "Recorded activity";
+  return subject ? `${subject} · ${summary}` : summary;
+}
+
 function TargetSummary({ compact = false, event }: { compact?: boolean; event: ActivityRecord }) {
   if (event.targets.length === 0) return null;
   const names = targetSummaryNames(event);
@@ -380,14 +361,6 @@ const LIVE_JOB_STATES = new Set<string>([
   "stopping",
   "waiting",
 ]);
-
-export function activityStateLabel(state: string): string {
-  if (state === "waiting") return "Waiting to recheck";
-  if (isOperatorWait(state)) return "Waiting for operator";
-  if (state === LifecycleState.BACKOFF) return "Retrying automatically";
-  if (state === LifecycleState.OBSERVING) return "Checking the outcome";
-  return titleCase(state);
-}
 
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return (
@@ -623,7 +596,7 @@ function JobProgressDetails({
             <header className="activity-job-header">
               <div>
                 <span>Current state</span>
-                <strong>{activityStateLabel(detail.state)}</strong>
+                <strong>{detail.summary}</strong>
               </div>
               <button
                 type="button"
@@ -716,11 +689,7 @@ function JobProgressDetails({
                   {visibleOperations.map((operation) => (
                     <li key={operation.id}>
                       <div>
-                        <strong>
-                          {operation.kind === "artifact.distribution.v1"
-                            ? "Model distribution"
-                            : titleCase(operation.kind)}
-                        </strong>
+                        <strong>{operation.summary}</strong>
                         <span>{friendlyTarget(operation.node_id, targetNames)}</span>
                       </div>
                       <StatusPill
@@ -731,7 +700,12 @@ function JobProgressDetails({
                           }),
                         )}
                       >
-                        {activityStateLabel(operation.state)}
+                        {statusLabel(
+                          activityStatus({
+                            ...event,
+                            action: `operation.${operation.kind}.${operation.state}`,
+                          }),
+                        )}
                       </StatusPill>
                       {operation.progress && (
                         <LibraryAvailabilityProgress
@@ -854,7 +828,7 @@ function ActivityTimeline({
               <header>
                 <div>
                   <span className="activity-category">{activityCategory(event)}</span>
-                  <h2>{activityActionLabel(event.action)}</h2>
+                  <h2>{activityTitle(event)}</h2>
                 </div>
                 <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
               </header>
@@ -925,7 +899,7 @@ function ActivityTable({
             return (
               <tr key={`${event.source}:${event.request_id}:${index}`}>
                 <td data-label="Event">
-                  <strong>{activityActionLabel(event.action)}</strong>
+                  <strong>{activityTitle(event)}</strong>
                   <small>{activityCategory(event)}</small>
                   <TargetSummary compact event={event} />
                 </td>
@@ -1043,6 +1017,8 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
       occurred_at: detail.created_at,
       targets: detail.node_ids,
       target_names: detail.node_ids.map((id) => names.get(id) ?? ""),
+      summary: detail.summary,
+      subject: detail.subject,
       source: "job",
     };
   }
@@ -1053,6 +1029,8 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
     occurred_at: detail.created_at,
     targets: detail.node_ids,
     target_names: detail.node_ids.map((id) => names.get(id) ?? ""),
+    summary: detail.summary,
+    subject: detail.subject,
     source: "operation",
     operation: detail,
   };
@@ -1211,7 +1189,6 @@ export function activityPreviewRows(
   id: string;
   occurredAt: string | null;
   label: string;
-  targets: string;
   tone: ReturnType<typeof statusTone>;
   word: string;
 }[] {
@@ -1224,8 +1201,7 @@ export function activityPreviewRows(
       return {
         id: record.request_id,
         occurredAt: record.occurred_at ?? null,
-        label: activityActionLabel(record.action),
-        targets: targetSummaryNames(record).join(" · "),
+        label: activityTitle(record),
         tone: statusTone(status),
         word: statusLabel(status),
       };
@@ -1390,7 +1366,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       if (status && activityStatus(event) !== status) return false;
       if (!normalized) return true;
       return [
-        activityActionLabel(event.action),
+        activityTitle(event),
         activityCategory(event),
         event.action,
         event.actor,
@@ -1416,6 +1392,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
                 ? {
                     ...event,
                     action: `operation.${detail.kind}.${detail.state}`,
+                    summary: detail.summary,
                     targets: detail.targets,
                     target_names: detail.targets.map((target) => targetNames.get(target) ?? ""),
                   }
@@ -1590,7 +1567,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               <option value="">All states</option>
               {OPERATION_STATES.map((value) => (
                 <option key={value} value={value}>
-                  {activityStateLabel(value)}
+                  {titleCase(value)}
                 </option>
               ))}
             </select>

@@ -54,6 +54,7 @@ from ..models import (
 )
 from ..operation_item_contract import OperationItem, OperationOwnerReference
 from ..operation_progress import aggregate_progress, member_progress
+from ..operation_summary import workload_aliases
 from ..route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from ..route_runtime import recipe_route_run_id, verify_active_route_bundle
 from ..state_filters import state_filter
@@ -622,6 +623,7 @@ class _DurableOperationProjection:
                 )
             }
             waits = spark_busy_blockers(session, rows, now)
+            subjects = workload_aliases(session, rows)
         items = [
             self._activity_item(
                 row,
@@ -629,6 +631,7 @@ class _DurableOperationProjection:
                 request_id=owners.get(row.parent_job_id),
                 resume=row.id in resume_operation_ids,
                 wait=waits.get(row.id),
+                subject=subjects.get(row.id),
                 now=now,
             )
             for row in rows
@@ -729,6 +732,7 @@ class _DurableOperationProjection:
                 )
             }
             waits = spark_busy_blockers(session, rows, now)
+            subjects = workload_aliases(session, rows)
         return OperationListPage(
             items=[
                 self._activity_item(
@@ -737,6 +741,7 @@ class _DurableOperationProjection:
                     request_id=owners.get(row.parent_job_id),
                     resume=row.id in resume_operation_ids,
                     wait=waits.get(row.id),
+                    subject=subjects.get(row.id),
                     now=now,
                 )
                 for row in rows
@@ -772,6 +777,7 @@ class _DurableOperationProjection:
                 request_id=None if job is None else job.request_id,
                 resume=resume,
                 wait=spark_busy_blockers(session, [operation], now).get(operation.id),
+                subject=workload_aliases(session, [operation]).get(operation.id),
                 now=now,
             )
 
@@ -784,6 +790,7 @@ class _DurableOperationProjection:
         request_id: str | None,
         resume: bool,
         wait: QueueWait | None,
+        subject: str | None,
         now: datetime,
     ) -> OperationItem:
         """One agent operation as a global Activity row, owned by its job."""
@@ -794,6 +801,7 @@ class _DurableOperationProjection:
             update={
                 "created_at": _aware(operation.created_at).isoformat(),
                 "job_id": operation.parent_job_id,
+                "subject": subject,
                 "supported_actions": cls._activity_actions(
                     operation, attempt, resume=resume
                 ),

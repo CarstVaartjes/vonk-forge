@@ -124,6 +124,7 @@ from ..operation_api import (
 )
 from ..operation_contract import OperationRecoveryAction
 from ..operation_item_contract import OperationRow, operation_item
+from ..operation_summary import UNREADABLE_SUMMARY
 from ..operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
@@ -812,6 +813,7 @@ def create_app(
                 node_ids=node_ids,
                 kind="unreadable",
                 state="unavailable",
+                summary=UNREADABLE_SUMMARY,
                 attempt=0,
                 created_at=created_at,
                 owner=owner,

@@ -1,17 +1,8 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import type { components } from "../src/api/generated";
+import { expectNoSeriousAccessibilityViolations, expectReachableByKeyboard } from "./a11y";
 import { serveEmptyFleet, serveOverviewFleet } from "./fleet-fixture";
-
-async function expectNoSeriousAccessibilityViolations(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  expect(
-    results.violations,
-    results.violations.map((value) => `${value.id}: ${value.help}`).join("\n"),
-  ).toEqual([]);
-}
+import { fixtureModelPath, fixtureRecipeTitle, serveLibrary } from "./library-fixture";
 
 async function expectNoDocumentOverflow(page: Page) {
   await expect
@@ -188,6 +179,14 @@ test("a Spark page fits a phone and a desktop and passes the accessibility check
   }
 });
 
+test("API keys passes the accessibility checks", async ({ page }) => {
+  await serveEmptyFleet(page);
+  await page.route("**/api/key", (route) => route.fulfill({ json: { keys: [] } }));
+  await page.goto("/keys");
+  await expect(page.getByRole("heading", { name: /keys/i }).first()).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test("Activity shows operations and standalone jobs", async ({ page }) => {
   await serveEmptyFleet(page);
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -202,6 +201,8 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
         parent_id: null,
         kind: "recipe.start",
         state: "succeeded",
+        summary: "Recipe start finished",
+        subject: "h3video",
         attempt: 1,
         node_ids: [targetId],
         created_at: "2026-08-24T08:55:00Z",
@@ -214,6 +215,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
         parent_id: null,
         kind: "agent-upgrade",
         state: "needs-operator",
+        summary: "Agent upgrade waiting for operator",
         attempt: 1,
         node_ids: [targetId],
         created_at: "2026-08-24T08:58:00Z",
@@ -232,6 +234,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
       id: "upgrade-1",
       kind: "agent-upgrade",
       state: "needs-operator",
+      summary: "Agent upgrade waiting for operator",
       authority_revision: "a".repeat(64),
       targets: [targetId],
       target_next_cursor: null,
@@ -244,6 +247,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
           node_id: targetId,
           kind: "agent.upgrade.v1",
           state: "needs-operator",
+          summary: "Agent upgrade waiting for operator",
           attempt: 3,
           progress: null,
           updated_at: "2026-08-24T08:59:30Z",
@@ -286,9 +290,9 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recipe Start · Completed" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Agent Upgrade · Waiting for operator" }),
+    page.getByRole("heading", { name: /Agent upgrade waiting for operator$/ }),
   ).toBeVisible();
   await page.getByText("View operation progress").click();
   await expect(page.getByText("Retry queued behind safety delay")).toBeVisible();
@@ -328,4 +332,41 @@ test("the sign-in screen remains focused, accessible, and usable on small screen
     await expectNoDocumentOverflow(page);
     await expectNoSeriousAccessibilityViolations(page);
   }
+});
+
+test("Library and a Recipe pass the accessibility checks and the main navigation and primary actions work by keyboard", async ({
+  page,
+}) => {
+  await serveEmptyFleet(page);
+  await serveLibrary(page);
+  const nav = page.getByRole("navigation", { name: "Primary" }).getByRole("link");
+  await page.goto("/library");
+  await expect(
+    page.getByRole("link", { name: new RegExp(fixtureRecipeTitle) }).first(),
+  ).toBeVisible();
+  // The page starts with focus in its content, so one Shift+Tab walk reaches every primary link.
+  for (const name of ["Activity", "Library", "Workloads", "Overview"]) {
+    await expectReachableByKeyboard(page, nav.filter({ hasText: name }), "Shift+Tab");
+  }
+  // The Model page shows a Recipe row with its cache action ("Also caches ...").
+  await page.goto(fixtureModelPath);
+  await expect(page.locator(".library-cache-missing").first()).toBeVisible();
+  const recipeLink = page.getByRole("link", { name: new RegExp(fixtureRecipeTitle) }).first();
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectNoSeriousAccessibilityViolations(page);
+  }
+  await recipeLink.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/library\/recipes\//);
+  await expect(page.locator("#recipe-detail-heading")).toHaveText(fixtureRecipeTitle);
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectNoSeriousAccessibilityViolations(page);
+  }
+  await expectReachableByKeyboard(
+    page,
+    page.getByRole("button", { name: "Refresh", exact: true }),
+    "Shift+Tab",
+  );
 });

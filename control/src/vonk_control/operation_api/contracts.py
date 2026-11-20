@@ -159,6 +159,7 @@ class JobOperationResponse(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=160)
     attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
@@ -205,6 +206,10 @@ class OperationDetailResponse(StrictModel):
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
+    #: One plain phrase for kind and state ("Job running"), derived by the Controller.
+    summary: str = Field(min_length=1, max_length=160)
+    #: The workload alias the operation acts on, when it has a run.
+    subject: str | None = Field(default=None, max_length=128)
     attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     created_at: str | None = Field(default=None, min_length=1, max_length=64)
@@ -232,6 +237,7 @@ class OperationDetailResponse(StrictModel):
         document = handler(self)
         for key in (
             "projection_issues",
+            "subject",
             "failure",
             "evidence_download",
             "cancellation",
@@ -294,6 +300,8 @@ class JobDetailResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=80)
     kind: str = Field(min_length=1, max_length=80)
+    #: The same plain phrase Activity lists for this job's kind and state.
+    summary: str = Field(min_length=1, max_length=160)
     authority_revision: str = Field(min_length=1, max_length=128)
     targets: list[BoundedIdentifier] = Field(max_length=100)
     target_next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
