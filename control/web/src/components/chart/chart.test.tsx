@@ -67,12 +67,26 @@ test("a sparkline places points by time and with nothing to show renders nothing
       points={[
         { t: 50, v: 1 },
         { t: 100, v: 2 },
+        { t: 100, v: 3 },
       ]}
     />,
   );
   // t=50 of 0..100 sits halfway across the 114 px plot, not at the left edge.
   expect(container.querySelector("path.chart-line")?.getAttribute("d")).toMatch(/^M57\.0 /);
   rerender(<Sparkline start={0} end={100} label="trace" points={[{ t: 0, v: null }]} />);
+  expect(container.querySelector("svg")).toBeNull();
+  // Break caught: two samples draw a line that says nothing.
+  rerender(
+    <Sparkline
+      start={0}
+      end={100}
+      label="trace"
+      points={[
+        { t: 50, v: 1 },
+        { t: 100, v: 2 },
+      ]}
+    />,
+  );
   expect(container.querySelector("svg")).toBeNull();
 });
 

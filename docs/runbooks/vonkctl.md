@@ -275,7 +275,7 @@ database transactions that could hold a row lock; use it when a load reports
 `admission.capacity_busy`. It is empty on a SQLite Controller. `--json` returns
 `{"held": [...], "open_transactions": [...]}`.
 
-`fleet resume OPERATION_ID --yes` first checks the owner's advertised resume action.
+`fleet resume OPERATION_ID` asks first on a terminal (`--yes`, or `--no-input` with `--yes`, skips the question). It first checks the owner's advertised resume action.
 The Controller rechecks current authorization and the intent of every target
 before accepting it. Resume does not grant permission to replay superseded or
 revoked work. Already authorized retries retain their original retry budget.

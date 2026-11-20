@@ -35,7 +35,6 @@ that no longer occurs fails as stale.
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
 | Type-check diagnostics and source-site exceptions | `control/src/vonk_control/typecheck_contract.py` | none | none | CI and staged Python checks |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
-| Global container-runtime policy | `vonk-forge-web` `schemas/`, copied to `schemas/global/` | allowlisted below (read as published) | none | none |
 
 Regenerate everything with `scripts/generate-agent-wire` (wire, installer
 release schema, `generated.rs`), `scripts/generate-control-clients` (OpenAPI,
@@ -68,8 +67,6 @@ of the 50 hand-written serde types of the baseline are generated now.
 | `rust/crates/vonk-agent/src/base_images.rs` | `Manifest` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `OciLayout` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/config.rs` | `AgentConfig` | operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document |
-| `rust/crates/vonk-agent/src/oci/mod.rs` | `RuntimePolicy` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
-| `rust/crates/vonk-agent/src/oci/mod.rs` | `RuntimePolicyLabel` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
 | `rust/crates/vonk-spark-setup/src/config_files.rs` | `WrittenConfig` | TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason |
 | `rust/crates/vonk-spark-setup/src/firewall.rs` | `AddressInfo` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
 | `rust/crates/vonk-spark-setup/src/firewall.rs` | `InterfaceEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
