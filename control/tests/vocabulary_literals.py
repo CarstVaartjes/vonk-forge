@@ -945,12 +945,15 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             if path.endswith(".rs")
             else set()
         )
-        # An SVG paint value is markup, not a contract word (`fill="none"`).
+        # SVG paint and ARIA values are web-standard markup, not contract words
+        # (`fill="none"`, `role="group"`). A class name or component prop such as
+        # `value=` or `state=` can carry a contract word, so it stays scanned.
         if path.endswith((".ts", ".tsx")):
             path_components = {
                 match.start(1)
                 for match in re.finditer(
-                    r"""\b(?:fill|stroke)=(["'][^"'\n]*["'])""", source
+                    r"""(?<![\w-])(?:fill|stroke|role|aria-[\w-]+)=(["'][^"'\n]*["'])""",
+                    source,
                 )
             }
         return [

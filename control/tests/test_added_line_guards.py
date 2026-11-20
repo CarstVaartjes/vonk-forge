@@ -3,7 +3,7 @@
 import pytest
 from vonk_agent_protocol import LifecycleState
 
-from .added_line_guards import AGENT_REQUESTS, added_lines, check_source
+from .added_line_guards import AGENT_REQUESTS, added_lines, changed_lines, check_source
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -242,6 +242,40 @@ def test_patch_context_deleted_lines_and_multiple_hunks():
         modes=("vocabulary", "waits"),
         words=frozenset({"running"}),
     )
+
+
+def test_a_reflowed_contract_literal_is_not_new_but_an_extra_one_is():
+    # Wrong implementation: a formatter reflow of an old `push("error", m)` line
+    # re-reported its literal, so no edit to the file could pass.
+    path = "control/web/src/components/x.tsx"
+    old = 'const t = {error: m => push("error", m)};\n'
+    new = 'const t = {\n  error: (m) => push("error", m),\n};\n'
+    extra = new.replace("};", '  fail: (m) => push("error", m),\n};')
+
+    def check(source: str) -> list[str]:
+        body = "".join(f"+{line}\n" for line in source.splitlines())
+        patch = f"--- a/{path}\n+++ b/{path}\n@@ -1 +1,9 @@\n-{old}{body}"
+        added, removed = changed_lines(patch)
+        return check_source(
+            path,
+            source,
+            added[path],
+            modes=("vocabulary",),
+            words=frozenset({"error"}),
+            removed=removed[path],
+        )
+
+    assert check(new) == []
+    assert check(extra) == [
+        f"{path}:2: contract literal",
+        f"{path}:3: contract literal",
+    ]
+    # Per file and word: replacing one spelling with another is not more debt.
+    assert check('if (state === "error") {}\n') == []
+    assert check('if (state === "error") {}\nconst x = "error";\n') == [
+        f"{path}:1: contract literal",
+        f"{path}:2: contract literal",
+    ]
 
 
 def test_added_source_that_resembles_a_patch_header():

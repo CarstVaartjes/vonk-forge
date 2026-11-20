@@ -486,6 +486,13 @@ PR/merge-group base. Only added lines can fail. The adapter, scanners and fixtur
 tests never read Git.
 There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
+A contract literal is new only when the change spells that word more often in a
+file than its removed lines did, so a formatter reflow or an edit of an old line
+passes while an extra spelling fails every added line that carries it. In
+TypeScript, SVG paint and ARIA values (`fill=`, `stroke=`, `role=`, `aria-*=`)
+are web-standard markup and are not scanned; class names and component props
+(`className=`, `value=`, `state=`) are.
+
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
