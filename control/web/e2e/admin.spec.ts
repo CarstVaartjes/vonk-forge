@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { components } from "../src/api/generated";
 import { expectNoSeriousAccessibilityViolations, expectReachableByKeyboard } from "./a11y";
 import { serveEmptyFleet, serveOverviewFleet } from "./fleet-fixture";
-import { fixtureRecipeTitle, serveLibrary } from "./library-fixture";
+import { fixtureModelPath, fixtureRecipeTitle, serveLibrary } from "./library-fixture";
 
 async function expectNoDocumentOverflow(page: Page) {
   await expect
@@ -179,6 +179,14 @@ test("a Spark page fits a phone and a desktop and passes the accessibility check
   }
 });
 
+test("API keys passes the accessibility checks", async ({ page }) => {
+  await serveEmptyFleet(page);
+  await page.route("**/api/key", (route) => route.fulfill({ json: { keys: [] } }));
+  await page.goto("/keys");
+  await expect(page.getByRole("heading", { name: /keys/i }).first()).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test("Activity shows operations and standalone jobs", async ({ page }) => {
   await serveEmptyFleet(page);
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -326,26 +334,34 @@ test("Library and a Recipe pass the accessibility checks and the main navigation
 }) => {
   await serveEmptyFleet(page);
   await serveLibrary(page);
+  const nav = page.getByRole("navigation", { name: "Primary" }).getByRole("link");
   await page.goto("/library");
+  await expect(
+    page.getByRole("link", { name: new RegExp(fixtureRecipeTitle) }).first(),
+  ).toBeVisible();
+  // The page starts with focus in its content, so one Shift+Tab walk reaches every primary link.
+  for (const name of ["Activity", "Library", "Workloads", "Overview"]) {
+    await expectReachableByKeyboard(page, nav.filter({ hasText: name }), "Shift+Tab");
+  }
+  // The Model page shows a Recipe row with its cache action ("Also caches ...").
+  await page.goto(fixtureModelPath);
+  await expect(page.locator(".library-cache-missing").first()).toBeVisible();
   const recipeLink = page.getByRole("link", { name: new RegExp(fixtureRecipeTitle) }).first();
-  await expect(recipeLink).toBeVisible();
   for (const colorScheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme });
     await expectNoSeriousAccessibilityViolations(page);
   }
-  const nav = page.getByRole("navigation", { name: "Primary" }).getByRole("link");
-  for (const name of ["Overview", "Workloads", "Library", "Activity"]) {
-    await page.goto("/library");
-    await expectReachableByKeyboard(page, nav.filter({ hasText: name }));
-  }
-  await page.goto("/library");
-  await expectReachableByKeyboard(page, recipeLink);
+  await recipeLink.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/library\/recipes\//);
-  await expect(page.locator("h1")).toHaveCount(1);
+  await expect(page.locator("#recipe-detail-heading")).toHaveText(fixtureRecipeTitle);
   for (const colorScheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme });
     await expectNoSeriousAccessibilityViolations(page);
   }
-  await expectReachableByKeyboard(page, page.getByRole("button").first());
+  await expectReachableByKeyboard(
+    page,
+    page.getByRole("button", { name: "Refresh", exact: true }),
+    "Shift+Tab",
+  );
 });

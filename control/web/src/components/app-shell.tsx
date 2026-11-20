@@ -16,7 +16,9 @@ const LIVE_TONES = {
   disconnected: "warn",
 } as const;
 
-export type AppRoute = "overview" | "workloads" | "library" | "keys" | "activity";
+/** The routed pages: the one list the shell, the app and the accessibility guard read. */
+export const appRoutes = ["overview", "workloads", "library", "keys", "activity"] as const;
+export type AppRoute = (typeof appRoutes)[number];
 
 type Operator = {
   onDownloadCliToken(): Promise<CliTokenDownload>;

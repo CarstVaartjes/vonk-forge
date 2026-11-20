@@ -4,7 +4,7 @@ import type { ControlApi } from "./api/types";
 import { AppShell } from "./components/app-shell";
 import { ToastProvider } from "./components/toast";
 import { VersionLine } from "./components/version-line";
-import type { AppRoute } from "./components/app-shell";
+import { appRoutes, type AppRoute } from "./components/app-shell";
 import type { LiveStatus } from "./hooks/fleet-stream-state";
 import { ActivityPage } from "./pages/activity";
 import { OverviewPage } from "./pages/overview";
@@ -14,7 +14,6 @@ import { LibraryPage } from "./pages/library";
 import { WorkloadsPage } from "./pages/workloads";
 import { sparkPath, sparkRouteId } from "./lib/spark-route";
 
-const pages: AppRoute[] = ["overview", "workloads", "library", "keys", "activity"];
 function pageTitle(pathname: string): string {
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
   if (/^\/library(?:\/|$)/.test(pathname)) return "Library · Vonk Forge";
@@ -31,7 +30,7 @@ function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
   if (value === "" || value === "fleet" || sparkRouteId(pathname) !== null) return "overview";
   if (/^library(?:\/|$)/.test(value)) return "library";
-  return pages.includes(value as AppRoute) ? (value as AppRoute) : undefined;
+  return (appRoutes as readonly string[]).includes(value) ? (value as AppRoute) : undefined;
 }
 
 export function App({ api }: { api: ControlApi }) {

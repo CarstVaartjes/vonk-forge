@@ -16,10 +16,14 @@ export async function expectNoSeriousAccessibilityViolations(page: Page) {
   ).toEqual([]);
 }
 
-/** Tab from the page start until `locator` is focused, then require a visible focus ring. */
-export async function expectReachableByKeyboard(page: Page, locator: Locator) {
+/** Press `key` (Tab, or Shift+Tab when the page starts focus in its content) until `locator` is focused, then require a visible focus ring. */
+export async function expectReachableByKeyboard(
+  page: Page,
+  locator: Locator,
+  key: "Tab" | "Shift+Tab" = "Tab",
+) {
   for (let presses = 0; presses < 60; presses++) {
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(key);
     if (await locator.evaluate((element) => element === document.activeElement)) break;
   }
   await expect(locator).toBeFocused();
@@ -28,9 +32,8 @@ export async function expectReachableByKeyboard(page: Page, locator: Locator) {
     return {
       focusVisible: element.matches(":focus-visible"),
       outline: style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0,
-      shadow: style.boxShadow !== "none",
     };
   });
   expect(ring.focusVisible, "keyboard focus matches :focus-visible").toBe(true);
-  expect(ring.outline || ring.shadow, "keyboard focus draws a visible ring").toBe(true);
+  expect(ring.outline, "keyboard focus draws a visible ring").toBe(true);
 }
