@@ -697,8 +697,10 @@ class Reconciler:
         """Networks to (re-)attach, or None while an undeclared one does not exist.
 
         A network the bundle declares for the container's service that does not
-        exist is broken whatever the record says: the daemon can lose a network
-        and drop it from the record together. One that exists but is missing
+        exist is broken whatever the record says (the daemon can lose a network
+        and drop it from the record together), but only for a container that
+        should run and is still as inspected: Compose removes the network of a
+        container it stopped cleanly, and reconnects it itself. One that exists but is missing
         from the record is Compose's to attach (a redeploy may be mid-way),
         unless a pending repair owes it or this janitor recreated the network. A recorded entry is broken when it
         names an older network ID (the network was recreated) or, while
@@ -713,6 +715,12 @@ class Reconciler:
             network = self.network(name, networks)
             if network is None:
                 if self.topology.definition(self.project, name) is None:
+                    return None
+                # A container Compose stopped cleanly is Compose's to
+                # reconcile: it is removing the network and will reconnect it.
+                # Condemn only one that should run and still is in the state
+                # it was inspected in.
+                if not (should_run(container, pending) and self.observed(container)):
                     return None
                 broken.append(name)
                 continue

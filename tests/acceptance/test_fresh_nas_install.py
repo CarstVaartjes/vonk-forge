@@ -510,6 +510,10 @@ def compose_startup_diagnostics(bundle: Path) -> str:
     details = f"states: {', '.join(states) or 'none'}"
     if not broken:
         return details
+    # The image janitor heals ingress and can race Compose: its log explains a
+    # failure in another service, so it is always part of the evidence.
+    if "image-janitor" not in broken:
+        broken.append("image-janitor")
     logs = _diagnostic_command(
         bundle,
         [*reference_compose(), "logs", "--no-color", "--tail", "80", *broken],

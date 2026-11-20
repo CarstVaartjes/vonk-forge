@@ -238,6 +238,10 @@ class Networks(janitor.Docker):
         for network in self.networks.values():
             network["Containers"].pop(identity, None)
 
+    def exits_cleanly(self, identity: str) -> None:
+        """Compose stopped it: no repair journal, no restart error."""
+        self.stop(identity)
+
     def request(self, method: str, path: str, body: Any = None) -> Any:
         if self.dead:
             raise Killed
@@ -274,6 +278,8 @@ class Networks(janitor.Docker):
 
     def _mutate(self, kind: str, name: str, action: str, body: Any) -> None:
         if kind == "containers" and action == "stop":
+            if self.containers[name]["State"]["Status"] == "exited":
+                raise janitor.DockerError("Docker HTTP 304: container already stopped")
             self.stop(name)
             if self.stop_times_out:
                 raise TimeoutError("timed out")  # The daemon finished anyway.
@@ -369,6 +375,42 @@ def test_recreated_network_reattaches_the_same_stopped_container_and_runs_it(
     ticks(reconciler, clock, 2)
     assert daemon.mutations == []
     assert daemon.running(api)
+
+
+def test_compose_network_swap_is_never_fought_at_any_step(tmp_path: Path) -> None:
+    """Catches recreating a network under Compose, which then never reconnects Caddy."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    ticks(reconciler, clock, 1)
+    daemon.exits_cleanly(caddy)  # Compose stops Caddy cleanly.
+    ticks(reconciler, clock, 1)
+    del daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_ingress"]
+    ticks(reconciler, clock, 1)
+    del daemon.networks["vonk-forge_ingress"]  # The network is removed.
+    ticks(reconciler, clock, 2)
+    assert daemon.created == []
+    assert daemon.mutations == []
+
+
+def test_container_that_stops_mid_tick_does_not_condemn_a_vanished_network(
+    tmp_path: Path,
+) -> None:
+    """Catches acting on a running snapshot after Compose stopped the container."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    request = daemon.request
+
+    def flip(method: str, path: str, body: Any = None) -> Any:
+        if method == "GET" and path.endswith("/vonk-forge_ingress"):
+            daemon.exits_cleanly(caddy)
+            del daemon.containers[caddy]["NetworkSettings"]["Networks"][
+                "vonk-forge_ingress"
+            ]
+            del daemon.networks["vonk-forge_ingress"]
+        return request(method, path, body)
+
+    daemon.request = flip  # type: ignore[method-assign]
+    ticks(reconciler, clock, 1)
+    assert daemon.created == []
+    assert daemon.mutations == []
 
 
 def test_running_container_without_its_endpoint_is_reattached(tmp_path: Path) -> None:
