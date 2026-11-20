@@ -103,7 +103,7 @@ def test_caddy_serves_the_site_controller_certificate() -> None:
             "tls /run/secrets/controller-server-certificate "
             "/run/secrets/controller-server-key"
         )
-        == 4
+        == 3
     )
 
 

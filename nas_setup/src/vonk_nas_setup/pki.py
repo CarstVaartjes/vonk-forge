@@ -48,7 +48,7 @@ def pki_hostnames(
     hostname = hostname.lower()
     return [
         hostname,
-        *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents", "registry")),
+        *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents")),
     ]
 
 

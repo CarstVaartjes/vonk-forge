@@ -32,7 +32,6 @@ SERVICES = {
     "litellm",
     "prometheus",
     "caddy",
-    "registry",
 }
 
 

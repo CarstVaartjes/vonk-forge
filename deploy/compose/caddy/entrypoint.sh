@@ -35,14 +35,13 @@ normalize_hostname() {
   printf '%s' "$normalized"
 }
 
-# One control hostname names the whole controller: the enrollment, agent, and
-# registry SNI names are fixed prefixes of it (the installer's certificate
+# One control hostname names the whole controller: the enrollment and agent
+# SNI names are fixed prefixes of it (the installer's certificate
 # carries exactly these names).
 control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
 export VONK_CONTROL_HOSTNAME="$control_hostname"
 export VONK_AGENT_ENROLL_HOSTNAME="enroll.$control_hostname"
 export VONK_AGENT_HOSTNAME="agents.$control_hostname"
-export VONK_REGISTRY_HOSTNAME="registry.$control_hostname"
 
 for required_file in \
   /run/secrets/controller-server-certificate \

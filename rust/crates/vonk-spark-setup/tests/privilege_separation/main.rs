@@ -581,7 +581,6 @@ fn runner_with_private_controller_bootstrap(ca: &[u8]) -> RecordingRunner {
             "control.example.test",
             "enroll.example.test",
             "controller.example.test",
-            "registry.example.test",
         ],
     });
     RecordingRunner {

@@ -421,7 +421,6 @@ def make_agent_system(tmp_path, *, engine=None, authority=None):
                 "control.example.test",
                 "enroll.example.test",
                 "agents.example.test",
-                "registry.example.test",
             ),
         ),
     )
@@ -2922,7 +2921,6 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
             "control.example.test",
             "enroll.example.test",
             "agents.example.test",
-            "registry.example.test",
         ],
     }
     assert len(response.content) < 64 * 1024

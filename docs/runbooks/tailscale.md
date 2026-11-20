@@ -163,9 +163,8 @@ NAS and GPU nodes.
 Reserve `10.0.0.2` for the NAS and resolve these only on the management LAN:
 
 ```text
-enroll.vonk-forge.lan   10.0.0.2
-agents.vonk-forge.lan   10.0.0.2
-registry.vonk-forge.lan 10.0.0.2
+enroll.vonk-forge.lan 10.0.0.2
+agents.vonk-forge.lan 10.0.0.2
 ```
 
 Allow TCP 8443 only from `10.0.0.0/24`, preferably narrowed to reserved GPU node
