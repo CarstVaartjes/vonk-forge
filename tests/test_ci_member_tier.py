@@ -1,7 +1,8 @@
 """One selector output decides whether a run carries the full suites.
 
-A member pull request runs no CI jobs (the selector and a gate that cannot
-satisfy the required check); its integration pull request runs every suite and
+A member pull request runs only the quick tier (the selector, lint, the web
+check, Rust fmt/clippy when Rust changed, and a gate that cannot satisfy the
+required check); its integration pull request runs every suite and
 proof once. `full` from scripts/select-ci-areas owns that rule,
 so a new heavy job cannot run on every member again, no proof runs outside the
 CI gate, and no workflow re-derives the rule from the branch name.
@@ -16,10 +17,15 @@ WORKFLOWS = ROOT / ".github/workflows"
 FULL = "needs.changes.outputs.full == 'true'"
 # The only jobs a member pull request runs. The lane proof reads `lane`,
 # which the selector already folds `full` into; the gate aggregates everything.
+# The quick tier (lint, web typecheck, Rust fmt/clippy when Rust changed) is the
+# only other work a member pull request does; every other job is gated by `full`.
 MEMBER_JOBS = {
     "changes",
     "lane-proof",
     "ci-gate",
+    "lint",
+    "member-web",
+    "member-rust",
 }
 
 
@@ -97,3 +103,10 @@ def test_only_ci_yml_runs_on_pull_requests() -> None:
             assert not {"pull_request", "pull_request_target"} & set(triggers), (
                 path.name
             )
+
+
+def test_the_quick_tier_uses_standard_runners() -> None:
+    """A member pull request must not consume the big or ARM runners."""
+    jobs = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())["jobs"]
+    for name in MEMBER_JOBS - {"lane-proof"}:
+        assert jobs[name]["runs-on"] in {"ubuntu-latest", "ubuntu-24.04"}, name

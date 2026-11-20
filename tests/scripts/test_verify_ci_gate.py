@@ -32,6 +32,7 @@ def _valid(**overrides: str):
         "agent-package": "true",
         "lane": "false",
         "full": "true",
+        "rust-changed": "false",
     }
     results = {
         "shared-inputs": "success",
@@ -52,6 +53,8 @@ def _valid(**overrides: str):
         "lane-proof": "skipped",
         "supply-chain": "success",
         "consumer-probe": "success",
+        "member-web": "skipped",
+        "member-rust": "skipped",
         "agent-repair-recovery": "success",
         "client-compatibility-report": "success",
         "installed-cli-proof": "success",
@@ -203,16 +206,37 @@ def test_repository_guards_are_required_when_heavy_repository_is_skipped(
     )
 
 
-def test_member_pull_request_runs_no_jobs() -> None:
+def test_member_pull_request_runs_only_the_quick_tier() -> None:
     selected, results = _valid(full="false")
     for job in results:
         results[job] = "skipped"
+    results.update(lint="success", **{"member-web": "success"})
     assert _module().verify("success", selected, results) == []
-    # Any job that ran anyway is refused.
-    refused = dict(results, lint="success")
+    # Any full-suite job that ran anyway is refused.
+    refused = dict(results, **{"rust-tests": "success"})
     assert _module().verify("success", selected, refused) == [
-        "lint result is 'success', expected 'skipped'"
+        "rust-tests result is 'success', expected 'skipped'"
     ]
+    # The quick tier is not optional.
+    missing = dict(results, **{"member-web": "skipped"})
+    assert _module().verify("success", selected, missing) == [
+        "member-web result is 'skipped', expected 'success'"
+    ]
+
+
+@pytest.mark.parametrize("rust_changed", ["true", "false"])
+def test_member_rust_check_runs_only_when_rust_changed(rust_changed) -> None:
+    selected, results = _valid(full="false")
+    selected["rust-changed"] = rust_changed
+    for job in results:
+        results[job] = "skipped"
+    results.update(lint="success", **{"member-web": "success"})
+    results["member-rust"] = "success" if rust_changed == "true" else "skipped"
+    assert _module().verify("success", selected, results) == []
+    results["member-rust"] = "skipped" if rust_changed == "true" else "success"
+    assert any(
+        "member-rust" in e for e in _module().verify("success", selected, results)
+    )
 
 
 def test_missing_scope_selection_is_refused() -> None:

@@ -156,6 +156,19 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
     )
 
 
+# The member tier (ci.yml `member-*` jobs) lints Rust only when Rust changed.
+RUST_INPUTS = ("rust/", ".cargo/")
+RUST_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+
+
+def rust_changed(paths: Iterable[str], event: str) -> bool:
+    """Whether the change touches Rust; unknown inputs count as touching it."""
+    changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
+    if event not in DIFF_EVENTS or not changed:
+        return True
+    return any(path.startswith(RUST_INPUTS) or path in RUST_FILES for path in changed)
+
+
 # Suites no path can deselect; they retain their output names for the
 # aggregate gate and timing cache. Whether they run at all is `full`'s choice.
 FAST_AREAS = ("rust", "repository", "control", "web", "generated")
@@ -265,6 +278,7 @@ def main() -> int:
         print(f"upgrade_carry={str(carry).lower()}")
         print(f"upgrade_inputs={str(upgrade_inputs).lower()}")
         print(f"full={str(full).lower()}")
+        print(f"rust_changed={str(rust_changed(changed, arguments.event)).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
         print(
@@ -276,6 +290,7 @@ def main() -> int:
                     "upgrade_carry": carry,
                     "upgrade_inputs": upgrade_inputs,
                     "full": full,
+                    "rust_changed": rust_changed(changed, arguments.event),
                 },
                 sort_keys=True,
                 separators=(",", ":"),

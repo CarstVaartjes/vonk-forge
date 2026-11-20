@@ -72,6 +72,7 @@ jobs:
       full: ${{ steps.areas.outputs.full }}
       lane: ${{ steps.areas.outputs.lane }}
       upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
+      rust_changed: ${{ steps.areas.outputs.rust_changed }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -205,9 +206,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   lint:
+    # Also the member tier's Python check: ruff, format, types and the added-line
+    # guards on every pull request, member or full.
     name: Ruff
     needs: changes
-    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -240,6 +242,63 @@ jobs:
       - name: Check Python types
         shell: bash
         run: scripts/check-python-types
+
+  # The member tier: a few minutes on standard runners, so a member PR gets
+  # feedback without the full suites (`lint` above is its Python check, and
+  # runs the added-line guards). The full suites stay with the integration PR.
+  member-web:
+    name: Web typecheck and Biome (member PR)
+    needs: changes
+    if: needs.changes.outputs.full == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Node.js with admin web dependency cache
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: |
+            control/web/package-lock.json
+            tools/openapi-client/package-lock.json
+      - name: Prepare the contract consumers for the web checks
+        uses: ./.github/actions/python-env
+        with:
+          cli-dependencies: "false"
+      - name: Install locked admin web dependencies
+        run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Check TypeScript lint, formatting and types
+        uses: ./.github/actions/web-quality
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
+
+  member-rust:
+    # Only when the change touches Rust (scripts/select-ci-areas, rust_changed).
+    name: Rust format and clippy (member PR)
+    needs: changes
+    if: needs.changes.outputs.full == 'false' && needs.changes.outputs.rust_changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-amd64
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
+      - name: Verify Rust formatting
+        run: cargo fmt --all --check
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   supply-chain:
     name: Supply-chain evidence
@@ -1228,29 +1287,9 @@ jobs:
       - name: Compile pinned official schemas with the production compiler
         run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
       - name: Check TypeScript lint, formatting and types
-        shell: bash
-        env:
-          WEB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          cd control/web
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            # The container runs as root over a checkout the runner user owns,
-            # and the checkout action's safe.directory entry does not outlive
-            # its step. Without this, git refuses the repository; keep the
-            # listing outside a process substitution so that refusal fails the
-            # step instead of silently linting nothing.
-            git config --global --add safe.directory "$GITHUB_WORKSPACE"
-            git fetch --no-tags --depth=1 origin "${WEB_BASE_SHA:?missing base SHA}"
-            git diff --name-only -z --diff-filter=ACMR "$WEB_BASE_SHA" "$GITHUB_SHA" -- '*.ts' '*.tsx' > "$RUNNER_TEMP/changed-web"
-            mapfile -d '' -t changed_web < "$RUNNER_TEMP/changed-web"
-            if ((${#changed_web[@]})); then
-              node_modules/.bin/biome check --no-errors-on-unmatched "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
-            fi
-          else
-            npm run lint
-          fi
-          npm run typecheck
+        uses: ./.github/actions/web-quality
+        with:
+          base-sha: ${{ github.event.pull_request.base.sha }}
       - name: Run complete admin web suite against the actual corpus
         env:
           VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
@@ -1747,7 +1786,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, shared-inputs, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
+    needs: [changes, shared-inputs, lint, member-web, member-rust, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1782,8 +1821,11 @@ jobs:
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
           SELECTED_LANE: ${{ needs.changes.outputs.lane }}
           SELECTED_FULL: ${{ needs.changes.outputs.full }}
+          SELECTED_RUST_CHANGED: ${{ needs.changes.outputs.rust_changed }}
           SHARED_INPUTS_RESULT: ${{ needs.shared-inputs.result }}
           LINT_RESULT: ${{ needs.lint.result }}
+          MEMBER_WEB_RESULT: ${{ needs.member-web.result }}
+          MEMBER_RUST_RESULT: ${{ needs.member-rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
@@ -1821,8 +1863,11 @@ jobs:
             --selected "agent-package=$SELECTED_AGENT_PACKAGE" \
             --selected "lane=$SELECTED_LANE" \
             --selected "full=$SELECTED_FULL" \
+            --selected "rust-changed=$SELECTED_RUST_CHANGED" \
             --result "shared-inputs=$SHARED_INPUTS_RESULT" \
             --result "lint=$LINT_RESULT" \
+            --result "member-web=$MEMBER_WEB_RESULT" \
+            --result "member-rust=$MEMBER_RUST_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
             --result "rust-tests=$RUST_TESTS_RESULT" \
