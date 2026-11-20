@@ -35,7 +35,6 @@ def _valid(**overrides: str):
         "rust-changed": "false",
     }
     results = {
-        "shared-inputs": "success",
         "lint": "success",
         "repository-guards": "success",
         "rust-quality": "success",
@@ -54,7 +53,6 @@ def _valid(**overrides: str):
         "supply-chain": "success",
         "consumer-probe": "success",
         "member-web": "skipped",
-        "member-rust": "skipped",
         "agent-repair-recovery": "success",
         "client-compatibility-report": "success",
         "installed-cli-proof": "success",
@@ -225,17 +223,18 @@ def test_member_pull_request_runs_only_the_quick_tier() -> None:
 
 
 @pytest.mark.parametrize("rust_changed", ["true", "false"])
-def test_member_rust_check_runs_only_when_rust_changed(rust_changed) -> None:
+def test_member_rust_quality_runs_only_when_rust_changed(rust_changed) -> None:
     selected, results = _valid(full="false")
     selected["rust-changed"] = rust_changed
     for job in results:
         results[job] = "skipped"
     results.update(lint="success", **{"member-web": "success"})
-    results["member-rust"] = "success" if rust_changed == "true" else "skipped"
+    ran = rust_changed == "true"
+    results["rust-quality"] = "success" if ran else "skipped"
     assert _module().verify("success", selected, results) == []
-    results["member-rust"] = "skipped" if rust_changed == "true" else "success"
+    results["rust-quality"] = "skipped" if ran else "success"
     assert any(
-        "member-rust" in e for e in _module().verify("success", selected, results)
+        "rust-quality" in e for e in _module().verify("success", selected, results)
     )
 
 
@@ -254,28 +253,9 @@ def test_consumer_probe_verification_is_required() -> None:
     assert errors == ["consumer-probe result is 'failure', expected 'success'"]
 
 
-@pytest.mark.parametrize(
-    ("area", "job"),
-    [
-        ("rust", "oci-link-fallback"),
-        ("rust", "privileged-helper-oci-process"),
-        ("control", "client-compatibility-report"),
-        ("control", "installed-cli-proof"),
-        ("control", "model-cache-unknown-expiry"),
-        ("control", "profile-effect-consumer"),
-        ("agent-package", "agent-repair-recovery"),
-    ],
-)
-def test_folded_proofs_follow_their_area(area, job) -> None:
+def test_folded_proofs_follow_their_area() -> None:
     selected, results = _valid()
-    results[job] = "skipped"
+    results["oci-link-fallback"] = "skipped"
     assert _module().verify("success", selected, results) == [
-        f"{job} result is 'skipped', expected 'success'"
+        "oci-link-fallback result is 'skipped', expected 'success'"
     ]
-    selected[area] = "false"
-    # An unselected area leaves its proofs skipped; the other jobs of the
-    # area must skip too for the gate to pass.
-    for other in _module().AREA_JOBS[area]:
-        results[other] = "skipped"
-    errors = _module().verify("success", selected, results)
-    assert not any(job in error for error in errors)

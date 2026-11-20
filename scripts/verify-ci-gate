@@ -71,7 +71,6 @@ def verify(
             )
 
     for job in (
-        "shared-inputs",
         "supply-chain",
         "repository-guards",
         "consumer-probe",
@@ -79,8 +78,8 @@ def verify(
         expect(job, full)
 
     # The member tier: the Python check (lint) runs on every pull request, the
-    # web check on a member pull request, and the Rust check on a member pull
-    # request that changes Rust.
+    # web check on a member pull request, and rust-quality on a member pull
+    # request that changes Rust (or any other full run).
     rust_changed = selected.get("rust-changed")
     if rust_changed not in {"true", "false"}:
         errors.append(
@@ -88,7 +87,6 @@ def verify(
         )
     expect("lint", True)
     expect("member-web", not full)
-    expect("member-rust", not full and rust_changed == "true")
 
     def chosen(area: str) -> bool:
         return selected.get(area) == "true" and full
@@ -102,7 +100,7 @@ def verify(
         else:
             for job in AREA_JOBS[area]:
                 expect(job, chosen(area))
-    expect("rust-quality", chosen("rust"))
+    expect("rust-quality", chosen("rust") or (not full and rust_changed == "true"))
     expect("rust-tests", chosen("rust"))
     expect("control-image-build", chosen("control") and chosen("nas-install"))
     expect("controller-spark-wire", chosen("rust") or chosen("control"))

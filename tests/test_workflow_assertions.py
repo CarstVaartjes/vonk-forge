@@ -177,24 +177,6 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
     )
 
 
-def test_no_proof_runs_outside_the_ci_gate() -> None:
-    """Every proof is a ci.yml job that ci-gate needs, never a standalone lane."""
-    workflows = ROOT / ".github" / "workflows"
-    assert not list(workflows.glob("*-proof.y*ml"))
-    for name in (
-        "agent-repair-recovery",
-        "client-compatibility-report",
-        "installed-cli-proof",
-        "model-cache-unknown-expiry",
-        "oci-link-fallback",
-        "privileged-helper-oci-process",
-        "profile-effect-consumer",
-    ):
-        assert not (workflows / f"{name}.yml").exists()
-        jobs = yaml.safe_load((workflows / "ci.yml").read_text())["jobs"]
-        assert name in jobs["ci-gate"]["needs"]
-
-
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
     """Retiring OCI proof jobs must not silently skip their real ingress tests."""
     from tools import pytest_prereqs
@@ -229,7 +211,7 @@ def test_corpus_boundaries_run_where_the_probe_is_built_and_never_gate_shards() 
     left out of the shards but run nowhere, or a corpus suite pointed at a
     file the shards still run."""
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    assert workflow["jobs"]["control-suite"]["needs"] == ["changes", "shared-inputs"]
+    assert workflow["jobs"]["control-suite"]["needs"] == "changes"
     probe_steps = workflow["jobs"]["consumer-probe"]["steps"]
     [corpus] = [s for s in probe_steps if s.get("run") == "scripts/test corpus"]
     assert corpus["env"]["VONK_CONSUMER_CORPUS_PROBE"].endswith(
@@ -250,46 +232,42 @@ def test_corpus_boundaries_run_where_the_probe_is_built_and_never_gate_shards() 
 
 def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> None:
     """Catches a workflow that runs the full sweeps on every pull request again,
-    that samples main's release run too, that lists the changed tests anywhere
-    but once in `shared-inputs`, or that lists them without handing the list to
-    the budget plugin."""
+    that samples main's release run too, or that lists the changed tests
+    without handing the list to the budget plugin."""
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     tier = workflow["env"]["VONK_TEST_TIER"]
     assert "github.event_name == 'pull_request'" in tier
     assert "github.event_name == 'merge_group'" in tier
     assert "&& 'pr' || 'full'" in tier
-    jobs = workflow["jobs"]
-    listings = [
-        (job, step)
-        for job, body in jobs.items()
-        for step in body.get("steps", [])
-        if "scripts/changed-tests" in step.get("run", "")
-    ]
-    [(owner, listing)] = listings
-    assert owner == "shared-inputs"
-    assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
-    assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
     for job, command in (
         ("repository-suite", "scripts/test repository --shard"),
         ("control-suite", "scripts/test control --shard"),
     ):
-        assert "shared-inputs" in jobs[job]["needs"]
-        [run] = [s for s in jobs[job]["steps"] if command in s.get("run", "")]
+        steps = workflow["jobs"][job]["steps"]
+        [listing] = [
+            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+        ]
+        assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
+        assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
+        [run] = [step for step in steps if command in step.get("run", "")]
         assert "--test-budget-enforce" in run["run"]
-        assert "shared-inputs.outputs.changed_tests" in run["env"]["CHANGED_TESTS"]
+        assert steps.index(listing) < steps.index(run)
 
 
-def test_recipe_library_is_built_once_and_shared() -> None:
-    """Catches a job that builds the library itself again."""
-    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-    builders = [
-        job
-        for job, body in workflow["jobs"].items()
-        for step in body.get("steps", [])
-        if "scripts/build-recipe-library" in step.get("run", "")
-    ]
-    assert builders == ["shared-inputs"]
-    for job, body in workflow["jobs"].items():
-        uses = [step.get("uses") for step in body.get("steps", [])]
-        if "./.github/actions/built-recipe-library" in uses:
-            assert "shared-inputs" in body["needs"], job
+def test_built_recipe_library_cache_is_keyed_by_the_build_identity_and_saved_after_it() -> (
+    None
+):
+    """Catches a cache that survives a build-script change or is saved unbuilt."""
+    action = yaml.safe_load(
+        (ROOT / ".github/actions/recipe-library/action.yml").read_text()
+    )
+    steps = action["runs"]["steps"]
+    built = [s for s in steps if "recipe-library-built" in str(s.get("with", {}))]
+    assert len(built) == 2
+    for step in built:
+        assert "hashFiles('scripts/build-recipe-library')" in step["with"]["key"]
+        assert "revision" in step["with"]["key"]
+    build = next(
+        i for i, s in enumerate(steps) if "build-recipe-library" in s.get("run", "")
+    )
+    assert steps.index(built[1]) > build

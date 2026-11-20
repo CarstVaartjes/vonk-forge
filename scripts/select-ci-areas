@@ -156,17 +156,31 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
     )
 
 
-# The member tier (ci.yml `member-*` jobs) lints Rust only when Rust changed.
-RUST_INPUTS = ("rust/", ".cargo/")
-RUST_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+# The member tier runs rust-quality (fmt, clippy) only when Rust changed. The
+# Rust build also reads Python, schema and lock inputs (its build.rs exports the
+# wire schema from them); build.rs is the one owner of that list, read here.
+RUST_INPUTS = ("rust/", ".cargo/", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+WIRE_BUILD_SCRIPT = "rust/crates/vonk-agent-protocol/build.rs"
+
+
+def rust_build_inputs() -> tuple[str, ...] | None:
+    """The paths vonk-agent-protocol's build.rs re-runs on; None if unreadable."""
+    try:
+        text = (ROOT / WIRE_BUILD_SCRIPT).read_text(encoding="utf-8")
+        block = re.search(r"for input in \[(.*?)\]", text, re.DOTALL)
+        inputs = tuple(re.findall(r'"([^"]+)"', block.group(1))) if block else ()
+    except (OSError, UnicodeError):
+        return None
+    return inputs or None
 
 
 def rust_changed(paths: Iterable[str], event: str) -> bool:
-    """Whether the change touches Rust; unknown inputs count as touching it."""
+    """Whether the change touches Rust or its build inputs; unknown counts as yes."""
     changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
-    if event not in DIFF_EVENTS or not changed:
+    inputs = rust_build_inputs()
+    if event not in DIFF_EVENTS or not changed or inputs is None:
         return True
-    return any(path.startswith(RUST_INPUTS) or path in RUST_FILES for path in changed)
+    return any(path.startswith((*RUST_INPUTS, *inputs)) for path in changed)
 
 
 # Suites no path can deselect; they retain their output names for the

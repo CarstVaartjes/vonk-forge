@@ -17,7 +17,7 @@ WORKFLOWS = ROOT / ".github/workflows"
 FULL = "needs.changes.outputs.full == 'true'"
 # The only jobs a member pull request runs. The lane proof reads `lane`,
 # which the selector already folds `full` into; the gate aggregates everything.
-# The quick tier (lint, web typecheck, Rust fmt/clippy when Rust changed) is the
+# The quick tier (lint, web typecheck, rust-quality when Rust changed) is the
 # only other work a member pull request does; every other job is gated by `full`.
 MEMBER_JOBS = {
     "changes",
@@ -25,7 +25,7 @@ MEMBER_JOBS = {
     "ci-gate",
     "lint",
     "member-web",
-    "member-rust",
+    "rust-quality",
 }
 
 

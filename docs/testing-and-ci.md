@@ -23,7 +23,7 @@ Every change lands through an integration PR: a same-repository
 
 | Run | What runs |
 | --- | --- |
-| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`member-rust`) only when the change touches Rust (`rust_changed` in `scripts/select-ci-areas`). No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (targeted tests, `scripts/test-local --changed`, the fast guards); its integration PR proves it. |
+| Member PR | The quick tier only, a few minutes on standard runners: `Ruff` (lint, format, Python types, the added-line guards), the web typecheck and Biome (`member-web`), and `cargo fmt` plus clippy (`rust-quality`) only when the change touches Rust or an input of the Rust build (`rust_changed` in `scripts/select-ci-areas`, which reads the input list from the wire crate's `build.rs`). A member push costs about 5-6 standard runner-minutes (Ruff, web, and Rust when it changed), which compete with batch CI for the concurrency limit. No full suite, proof or acceptance. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. The quick tier is a fast signal, not proof: check member work locally (targeted tests, `scripts/test-local --changed`, the fast guards); its integration PR proves it. |
 | Dependabot PR | Nothing, not even the selector or the gate: every job that could start on its own skips a PR authored by `dependabot[bot]`, so it uses no runner. Its skipped gate keeps the raw name expression, never the required `CI gate`. Fold it into an integration PR, which runs CI once (`tests/test_dependabot_updates.py`). |
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
 | Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. |
@@ -197,8 +197,8 @@ tiering; the tier never skips a test outright.
 
 The per-test budget is a gate for the tests a change adds or touches.
 `scripts/changed-tests` reads the pull request's diff and the tree and lists
-every test function with an added line (`path::function`). The `shared-inputs` job lists
-it once for a pull-request or merge-queue run; each suite shard passes it as
+every test function with an added line (`path::function`). Each pull-request
+and merge-queue suite shard diffs against the base commit, passes that list as
 `--test-budget-enforce`, and such a test over its budget without a slow mark
 fails. An untouched overrun stays report-only until someone edits that test,
 and main's full run enforces nothing because it has no diff.
@@ -391,11 +391,11 @@ a secret. Catalog, canonical-consumer, and acceptance-recipe tests read the real
 library through it and fail at collection when it is unset, so export it before
 running the root or control suites. The recipe repository does not commit its
 catalog index or packages: generate them once per checkout revision with
-`scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`. CI does it once per
-run in the `shared-inputs` job (revision from
-`tests/acceptance/recipe-library-revision.txt`, build from the script) and
-every job that needs the built library takes it from there with
-`.github/actions/built-recipe-library`; no other job builds it.
+`scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`. In CI the
+`recipe-library` action does it with `build: "true"` and caches the built tree
+under the reviewed revision plus the hash of `scripts/build-recipe-library`
+(the build's identity); main saves it after the build, and a job that finds it
+skips the build without waiting on any other job.
 
 The native Rust agent and its wire contract build only for Linux. The
 `control/tests/*_wire_bridge.py` suites consume probes produced by

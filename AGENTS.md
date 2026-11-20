@@ -316,8 +316,8 @@ workflow exists, `tests/test_workflow_assertions.py`). Main's Release runs the
 complete CI unless it reuses the integration PR's run for the identical tree,
 and its own release acceptance. Adding the label re-runs `ci.yml` in full at
 once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
-reads `rust-toolchain.toml`. The recipe library is built, and the changed tests are listed, once per run in
-the `shared-inputs` job; other jobs use the shared result, never rebuild it.
+reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe
+library by revision and build-script hash.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.

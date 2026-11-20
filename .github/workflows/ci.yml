@@ -150,62 +150,6 @@ jobs:
             printf '%s=%s\n' "$suite" "$compact" >> "$GITHUB_OUTPUT"
           done
 
-  shared-inputs:
-    # Built once per run and shared with every job that needs them: the recipe
-    # library with its catalog index and packages (a function of the reviewed
-    # revision, tests/acceptance/recipe-library-revision.txt, and
-    # scripts/build-recipe-library), and the tests this change adds or touches.
-    # The changed tests need the Controller test environment, which the
-    # selector job does not install.
-    name: Shared inputs (recipe library, changed tests)
-    needs: changes
-    if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
-    outputs:
-      changed_tests: ${{ steps.changed.outputs.changed_tests }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Provide the canonical recipe library
-        uses: ./.github/actions/recipe-library
-      - name: Prepare the locked Python environment
-        uses: ./.github/actions/python-env
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
-      - name: Pack the built recipe library
-        run: |
-          set -euo pipefail
-          mkdir "$RUNNER_TEMP/recipe-library-built"
-          tar -czf "$RUNNER_TEMP/recipe-library-built/recipe-library.tar.gz" .recipe-library
-      - name: Share the built recipe library
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: recipe-library-built
-          path: ${{ runner.temp }}/recipe-library-built/recipe-library.tar.gz
-          compression-level: 0
-          retention-days: 1
-          if-no-files-found: error
-      - name: List the tests this change adds or touches
-        id: changed
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
-            tests control/tests deploy/compose/tests |
-            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
-          {
-            echo 'changed_tests<<CHANGED_TESTS_END'
-            cat "$RUNNER_TEMP/changed-tests.txt"
-            echo 'CHANGED_TESTS_END'
-          } >> "$GITHUB_OUTPUT"
-
   lint:
     # Also the member tier's Python check: ruff, format, types and the added-line
     # guards on every pull request, member or full.
@@ -275,32 +219,6 @@ jobs:
         with:
           base-sha: ${{ github.event.pull_request.base.sha }}
 
-  member-rust:
-    # Only when the change touches Rust (scripts/select-ci-areas, rust_changed).
-    name: Rust format and clippy (member PR)
-    needs: changes
-    if: needs.changes.outputs.full == 'false' && needs.changes.outputs.rust_changed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
-      - name: Set up Rust
-        uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-amd64
-      - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
-      - name: Verify Rust formatting
-        run: cargo fmt --all --check
-      - name: Lint Rust workspace
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
   supply-chain:
     name: Supply-chain evidence
     needs: changes
@@ -337,9 +255,11 @@ jobs:
           retention-days: 30
 
   rust-quality:
+    # Also the member tier's Rust check (fmt and clippy), when the change
+    # touches Rust or an input of the Rust build (rust_changed).
     name: Rust workspace lint
     needs: changes
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_changed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -438,7 +358,7 @@ jobs:
 
   controller-spark-wire:
     name: Controller and Spark wire contract
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true' && (needs.changes.outputs.control == 'true' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -447,10 +367,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Install pinned Rust toolchain
         run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
       - name: Restore Rust dependency cache
@@ -960,7 +882,7 @@ jobs:
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # Hang bound, well above a shard's runtime.
@@ -975,20 +897,32 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Install supported completion shells
         uses: ./.github/actions/apt-install
         with:
           packages: zsh
+      - name: List the tests this change adds or touches
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            tests control/tests deploy/compose/tests |
+            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete repository suite
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
           SHARD_TOTAL: ${{ strategy.job-total }}
-          CHANGED_TESTS: ${{ needs.shared-inputs.outputs.changed_tests }}
           TIMING_DATA: ${{ needs.changes.outputs.repository_timings }}
           VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
         run: |
@@ -996,8 +930,7 @@ jobs:
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
           enforce=()
-          if [[ -n "$CHANGED_TESTS" ]]; then
-            printf '%s\n' "$CHANGED_TESTS" > "$RUNNER_TEMP/changed-tests.txt"
+          if [[ -f "$RUNNER_TEMP/changed-tests.txt" ]]; then
             enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
           fi
           scripts/test repository --shard "$SHARD/$SHARD_TOTAL" \
@@ -1026,7 +959,7 @@ jobs:
     # source and runs the consumer corpus boundaries against it here, so the
     # control shards start without waiting for a Cargo build.
     name: Build actual native consumer probe
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -1038,10 +971,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare locked Python environment
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Install pinned Rust toolchain
         run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
       - name: Restore read-only Rust dependencies
@@ -1064,7 +999,7 @@ jobs:
 
   control-suite:
     name: Complete control suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true'
     permissions:
       contents: read
@@ -1083,10 +1018,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Provide the Controller image ingress tool
         uses: ./.github/actions/apt-install
         with:
@@ -1101,12 +1038,22 @@ jobs:
           password: ${{ github.token }}
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres python
+      - name: List the tests this change adds or touches
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            tests control/tests deploy/compose/tests |
+            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete control suite
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
           SHARD_TOTAL: ${{ strategy.job-total }}
-          CHANGED_TESTS: ${{ needs.shared-inputs.outputs.changed_tests }}
           TIMING_DATA: ${{ needs.changes.outputs.control_timings }}
           VONK_CI_PREREQUISITES: needs_skopeo
         run: |
@@ -1114,8 +1061,7 @@ jobs:
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
           enforce=()
-          if [[ -n "$CHANGED_TESTS" ]]; then
-            printf '%s\n' "$CHANGED_TESTS" > "$RUNNER_TEMP/changed-tests.txt"
+          if [[ -f "$RUNNER_TEMP/changed-tests.txt" ]]; then
             enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
           fi
           scripts/test control --shard "$SHARD/$SHARD_TOTAL" \
@@ -1144,7 +1090,7 @@ jobs:
     # cache, then runs the fast built_image checks against them. Those tests
     # are deselected from the control shards and never build an image.
     name: Controller image build tests
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true' && needs.changes.outputs.nas_install == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -1163,10 +1109,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Free runner disk
         uses: ./.github/actions/free-runner-disk
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true
@@ -1517,7 +1465,7 @@ jobs:
 
   model-cache-unknown-expiry:
     name: Unknown cancellation expiry through fresh exact artifact claim
-    needs: [changes, shared-inputs]
+    needs: changes
     if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -1530,10 +1478,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Provide the built recipe library
-        uses: ./.github/actions/built-recipe-library
       - name: Prepare locked Python dependencies
         uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true
@@ -1787,7 +1737,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, shared-inputs, lint, member-web, member-rust, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
+    needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1823,10 +1773,8 @@ jobs:
           SELECTED_LANE: ${{ needs.changes.outputs.lane }}
           SELECTED_FULL: ${{ needs.changes.outputs.full }}
           SELECTED_RUST_CHANGED: ${{ needs.changes.outputs.rust_changed }}
-          SHARED_INPUTS_RESULT: ${{ needs.shared-inputs.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           MEMBER_WEB_RESULT: ${{ needs.member-web.result }}
-          MEMBER_RUST_RESULT: ${{ needs.member-rust.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
@@ -1865,10 +1813,8 @@ jobs:
             --selected "lane=$SELECTED_LANE" \
             --selected "full=$SELECTED_FULL" \
             --selected "rust-changed=$SELECTED_RUST_CHANGED" \
-            --result "shared-inputs=$SHARED_INPUTS_RESULT" \
             --result "lint=$LINT_RESULT" \
             --result "member-web=$MEMBER_WEB_RESULT" \
-            --result "member-rust=$MEMBER_RUST_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
             --result "rust-tests=$RUST_TESTS_RESULT" \
