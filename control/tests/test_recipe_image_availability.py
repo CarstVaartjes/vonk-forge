@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, OperationProgress, SecurityRefusalReason
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
@@ -76,6 +77,7 @@ from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
+    RecipeImageAvailabilityUnknown,
 )
 from vonk_control.recipe_image_availability_api import (
     _recipe_error,
@@ -4706,3 +4708,38 @@ def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it
         assert stopped.cancellation is not None
     finally:
         cache.close()
+
+
+def test_unknown_outcome_is_raised_not_failed_and_same_key_succeeds(
+    tmp_path: Path,
+) -> None:
+    """Catch an unaccepted request becoming a synthetic terminal FAILED view."""
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        revision = _add_revision(session, "unknown-outcome", recipe)
+        _add_head(session, revision)
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=None,
+        clock=lambda: datetime(2026, 10, 8, tzinfo=UTC),
+    )
+    request_id = "00000000-0000-4000-8000-000000000077"
+    plan = SimpleNamespace(
+        recipe_build_id="build", recipe_revision_id="unknown-outcome"
+    )
+
+    with pytest.raises(RecipeImageAvailabilityUnknown):
+        service.start("unknown-outcome", actor="operator", request_id=request_id)
+    with pytest.raises(RecipeImageAvailabilityUnknown):
+        service.prepare_install(plan, "operator", "install-1")  # type: ignore[arg-type]
+
+    service._authority = lambda *_a, **_k: (recipe, _runtime())
+    view = service.start("unknown-outcome", actor="operator", request_id=request_id)
+    assert view.state != LifecycleState.FAILED.value
+    assert view.request_id == request_id

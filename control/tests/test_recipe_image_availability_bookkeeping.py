@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
 from vonk_control.job_documents import AvailabilityJobPayload
@@ -16,6 +16,7 @@ from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
+    RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
 )
 from vonk_control.recipe_image_availability_view_contract import (
@@ -154,11 +155,10 @@ def test_damaged_request_observes_then_ends_and_fresh_request_heals(
         job = session.get(Job, operation.id)
         assert job is not None
         job.payload = {**job.payload, "request": {"kind": "not-an-intent"}}
-    ended = service.start(
-        "bookkeeping-revision", actor="operator", request_id="bookkeeping"
-    )
-    assert ended.state in {LifecycleState.FAILED.value, LifecycleState.CANCELLED.value}
-    assert ended.artifact is None
+    with pytest.raises(RecipeImageAvailabilityUnknown):
+        service.start(
+            "bookkeeping-revision", actor="operator", request_id="bookkeeping"
+        )
     fresh = service.start(
         "bookkeeping-revision", actor="operator", request_id="after-damaged-request"
     )
@@ -417,12 +417,10 @@ def test_metadata_observation_retries_before_admission_and_then_accepts(
     engine.dispose()
 
 
-def test_exhausted_metadata_observation_ends_without_holds_and_fresh_request_works(
+def test_exhausted_metadata_observation_stays_unknown_and_same_key_recovers(
     tmp_path: Path,
 ) -> None:
-    """Permanent observation damage must not strand a request or synthesize a plan."""
-    from .non_blocking import assert_ended_without_blocking
-
+    """Catch an unavailable peer becoming a terminal failure or a held claim."""
     engine, sessions, service, _ = _started(tmp_path)
     authority = service._authority
 
@@ -430,25 +428,22 @@ def test_exhausted_metadata_observation_ends_without_holds_and_fresh_request_wor
         raise OSError("metadata peer unavailable")
 
     service._authority = unavailable
-    observed = service.start(
+    with pytest.raises(RecipeImageAvailabilityUnknown):
+        service.start(
+            "bookkeeping-revision", actor="operator", request_id="metadata-unavailable"
+        )
+    with sessions() as session:
+        assert (
+            session.scalars(
+                select(Job).where(Job.request_id == "metadata-unavailable")
+            ).first()
+            is None
+        )
+    service._authority = authority
+    recovered = service.start(
         "bookkeeping-revision", actor="operator", request_id="metadata-unavailable"
     )
-    assert observed.failure_evidence is not None
-    assert observed.residue is not None
-    assert observed.build_input_sha256 is None
-    # This is a failed pre-admission observation, not a fabricated accepted Job.
-    with sessions() as session:
-        assert session.get(Job, observed.id) is None
-    service._authority = authority
-    assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        observed,
-        end=lambda receipt: receipt,
-        fresh=lambda _: service.start(
-            "bookkeeping-revision", actor="operator", request_id="metadata-restored"
-        ),
-        assert_reason=_assert_typed_failure,
-    )
+    assert recovered.state == LifecycleState.QUEUED.value
     engine.dispose()
 
 

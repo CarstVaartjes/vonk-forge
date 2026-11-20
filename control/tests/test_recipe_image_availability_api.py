@@ -27,6 +27,7 @@ from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     OPERATION_KIND,
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityUnknown,
     RecipeImageAvailabilityView,
 )
 from vonk_control.recipe_image_availability_api import (
@@ -747,3 +748,21 @@ def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_
     third = download(3)
     service.run_pending()
     assert service.get(third).state == LifecycleState.SUCCEEDED.value
+
+
+def test_download_unknown_outcome_answers_503_retry_after_with_the_same_key() -> None:
+    """Catch an unknown outcome being sent as a terminal 202 failure."""
+    service = Mock()
+    service.start_selector.side_effect = (
+        RecipeImageAvailabilityUnknown(
+            RecipeImageCode.DATABASE_BUSY, "Request ownership evidence is unavailable"
+        ),
+        RecipeImageAvailabilityUnknown(RecipeImageCode.DATABASE_BUSY, "busy"),
+    )
+    first = _download(service)
+    second = _download(service)
+
+    assert first.status_code == second.status_code == 503
+    assert RecipeImageCode.DATABASE_BUSY in first.json()["detail"]
+    keys = [c.kwargs["request_id"] for c in service.start_selector.call_args_list]
+    assert keys == [_REQUEST_KEY, _REQUEST_KEY]

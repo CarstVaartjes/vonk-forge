@@ -36,7 +36,7 @@ from ..job_documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
+from ..lifecycle.evidence import Residue
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,
@@ -47,9 +47,7 @@ from ..operation_blockers import (
     OperationBlocker,
     make_blocker,
 )
-from ..operation_contract import AvailabilityOperationFailure
 from ..recipe_availability_intent import (
-    RecipeAvailabilityIntent,
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
@@ -74,7 +72,6 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _canonical_recipe,
     _digest,
-    _iso,
     _known_total,
     _optional_digest,
     _progress,
@@ -83,6 +80,9 @@ from .contracts import (
 )
 
 REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
+_PROGRESS_UNAVAILABLE = (
+    "Preparing progress is currently unavailable; the Controller retries observation."
+)
 
 
 if TYPE_CHECKING:
@@ -283,7 +283,17 @@ def ensure_preparation(
     namespace = uuid.NAMESPACE_URL
     request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
     for _ in range(2):
-        view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
+        try:
+            view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
+        except RecipeImageAvailabilityUnknown:
+            # Not accepted yet and not failed: the load asks again next pass.
+            return (
+                make_blocker(
+                    RecipeImageCode.PREPARING,
+                    _PROGRESS_UNAVAILABLE,
+                    severity=ProfileReasonSeverity.INFO.value,
+                ),
+            )
         if view.state in _SUCCEEDED:
             # The caller asks only because its plan still lacks the image
             # or model, so an earlier success is stale (the image was
@@ -349,7 +359,7 @@ def ensure_preparation(
             RecipeImageCode.PREPARING,
             f"Preparing the model and runtime image ({view.measurement.phase})."
             if view.measurement is not None
-            else "Preparing progress is currently unavailable; the Controller retries observation.",
+            else _PROGRESS_UNAVAILABLE,
             severity="info",
         ),
     )
@@ -388,8 +398,9 @@ def _start_request(
     """Bound metadata/admission observation before any accepted image effect.
 
     Replays are reconciled by the ordinary admission path on every attempt.
-    Exhaustion ends this observation with evidence, holding no claim or gate;
-    a later request may try again without retiring poisoned bookkeeping.
+    Exhaustion re-raises the last typed unknown (the route answers 503 with
+    ``Retry-After``; the caller asks again with the same request key). It holds
+    no claim or gate and invents no terminal state.
     """
     deadline = time.monotonic() + REQUEST_OBSERVATION_BUDGET_SECONDS
     delay = 0.01
@@ -407,85 +418,19 @@ def _start_request(
         except SQLAlchemyError:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return _unaccepted_request_end(
-                    self,
-                    intent,
-                    actor=actor,
-                    request_id=request_id,
-                    error=RecipeImageAvailabilityUnknown(
-                        RecipeImageCode.DATABASE_BUSY,
-                        "Request ownership evidence is unavailable",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    ),
-                    attempts=attempts,
-                )
+                raise RecipeImageAvailabilityUnknown(
+                    RecipeImageCode.DATABASE_BUSY,
+                    "Request ownership evidence is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from None
             time.sleep(min(delay, remaining))
             delay = min(delay * 2, 0.05)
-        except RecipeImageAvailabilityUnknown as error:
+        except RecipeImageAvailabilityUnknown:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return _unaccepted_request_end(
-                    self,
-                    intent,
-                    actor=actor,
-                    request_id=request_id,
-                    error=error,
-                    attempts=attempts,
-                )
+                raise
             time.sleep(min(delay, remaining))
             delay = min(delay * 2, 0.05)
-
-
-def _unaccepted_request_end(
-    self: RecipeImageAvailabilityService,
-    intent: RecipeAvailabilityIntent,
-    *,
-    actor: str,
-    request_id: str,
-    error: RecipeImageAvailabilityUnknown,
-    attempts: int,
-) -> RecipeImageAvailabilityView:
-    """No effect was accepted: report a typed end without inventing a plan."""
-    now = self._clock()
-    return RecipeImageAvailabilityView(
-        id=str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"vonk:availability-observation:{actor}:{request_id}",
-            )
-        ),
-        request_id=request_id,
-        request=intent,
-        kind=OPERATION_KIND,
-        state=LifecycleState.FAILED.value,
-        attempt=attempts,
-        recipe_revision_id=(
-            intent.recipe_revision_id
-            if isinstance(intent, RecipeRevisionIntent)
-            else None
-        ),
-        recipe_content_sha256=None,
-        model_digest=None,
-        build_input_sha256=None,
-        progress=None,
-        image_progress=None,
-        result=None,
-        failure=AvailabilityOperationFailure(
-            code=error.code,
-            detail=error.detail,
-            retryable=False,
-            recovery_actions=[],
-        ),
-        supported_actions=(),
-        created_at=_iso(now),
-        updated_at=_iso(now),
-        residue=retire_as_unknown(
-            "recipe-image.admission",
-            request_id,
-            BookkeepingReason.EVIDENCE_UNAVAILABLE,
-            error.detail,
-        ),
-    )
 
 
 def _identity_conflict(
