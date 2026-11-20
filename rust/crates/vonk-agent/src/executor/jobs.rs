@@ -514,6 +514,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     );
                 }
                 JobScopeCleanup::new(&self.runtime, &job_scope).retain();
+                // The job loads like a run: one drop now, then every interval
+                // until it exits, on every way out. Keyed by the job, so it
+                // never ends a serving run's phase.
+                let load = crate::page_cache::LoadPhases::for_helper(self.helper_socket)
+                    .begin(request.job_id);
+                load.drop_now().await;
                 let dispatched = Instant::now();
                 let outcome = run_interruptible_job(
                     self.execute_host_runtime_plan_outcome(

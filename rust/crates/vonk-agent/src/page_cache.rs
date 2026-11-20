@@ -4,6 +4,8 @@
 //! A start holds its run's load phase from just before its container starts
 //! until it is ready or the start ends; a rank launch, whose readiness another
 //! phase waits for, leaves its run loading until its accepted start deadline.
+//! A job holds its own phase, keyed by its job id, from just before its
+//! container starts until it exits.
 //! Nothing here can fail or delay a start beyond one bounded ask.
 use std::{
     collections::BTreeMap,

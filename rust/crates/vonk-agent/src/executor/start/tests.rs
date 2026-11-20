@@ -470,3 +470,32 @@ fn every_workload_container_start_drops_the_page_cache_first() {
         .any(|line| line.contains("load.drop_now().await"));
     assert!(body, "launch_after_drop drops before it starts");
 }
+
+#[test]
+fn every_job_container_start_holds_a_page_cache_load_phase() {
+    // Guard: the job plan is built at one site, which begins a phase and drops
+    // the cache first, so no job path can load without the drop loop.
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/executor/jobs.rs"),
+    )
+    .unwrap();
+    let lines: Vec<&str> = source.lines().collect();
+    let sites: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.contains("HostRuntimePlan::JobRun(") && !line.contains("=>"))
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(sites.len(), 1, "JobRun plans built at {sites:?}");
+    let before = &lines[..sites[0]];
+    let begin = before
+        .iter()
+        .rposition(|line| line.contains(".begin(request.job_id)"))
+        .expect("a job begins a load phase before its container starts");
+    assert!(
+        before[begin..]
+            .iter()
+            .any(|line| line.contains("load.drop_now().await")),
+        "the job drops the cache before it starts"
+    );
+}

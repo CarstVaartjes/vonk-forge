@@ -185,3 +185,19 @@ async fn a_load_after_the_cadence_ended_starts_it_again() {
     assert_eq!(load.finish().unwrap().drops, 2);
     assert_eq!(drops.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_jobs_phase_ends_with_the_job_and_never_ends_a_runs_phase() {
+    let (phases, drops) = counting(None);
+    let (run, job) = (Uuid::new_v4(), Uuid::new_v4());
+    let serving = phases.begin(run);
+    let job_phase = phases.begin(job);
+    tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
+    drop(job_phase);
+    tokio::time::sleep(INTERVAL).await;
+    assert!(ticking(&phases), "the run still loads");
+    assert_eq!(serving.finish().unwrap().drops, 2);
+    tokio::time::sleep(INTERVAL * 2).await;
+    assert!(!ticking(&phases));
+    assert_eq!(drops.load(Ordering::SeqCst), 2);
+}
