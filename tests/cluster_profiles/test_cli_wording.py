@@ -432,3 +432,14 @@ def test_fleet_workload_route_is_plain_words(printed):
     ]
     text = "\n".join(printed(render_payload, payload, "fleet"))
     assert "not taking requests" in text and "withdrawn" not in text
+
+
+def test_fleet_failed_route_names_the_publication_outcome(printed):
+    node = _WORKLOADS["nodes"][0]
+    payload = _stopped_fleet([])
+    cast(list[dict[str, Any]], payload["nodes"])[0]["loaded"] = [
+        {**node["loaded"][0], "route_state": "failed"}
+    ]
+    assert "route publication failed" in "\n".join(
+        printed(render_payload, payload, "fleet")
+    )

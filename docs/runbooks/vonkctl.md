@@ -131,8 +131,9 @@ queries the Controller.
 
 ## Fleet
 
-`vonkctl fleet` groups identical installed-but-stopped recipes into one line
-with a count (`(x2)`), shows the first ten, and ends with
+`vonkctl fleet` groups installed-but-stopped rows with the same recipe title on the same
+Sparks into one line with a count (`(x2)`; they may be different revisions,
+`--wide` tells them apart), shows the first ten, and ends with
 `+K more; vonkctl fleet --wide lists every installation`. `--wide` lists every
 installation with its id. A run's route reads in plain words (`taking requests`,
 `not taking requests`); `--json` is unchanged.

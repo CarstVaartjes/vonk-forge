@@ -58,7 +58,7 @@ _ROUTE_WORDS = {
     RouteState.WITHDRAWN: "not taking requests",
     RouteState.PENDING: "about to take requests",
     RouteState.PUBLISHED: "taking requests",
-    RouteState.FAILED: "could not take requests",
+    RouteState.FAILED: "route publication failed",
 }
 
 
