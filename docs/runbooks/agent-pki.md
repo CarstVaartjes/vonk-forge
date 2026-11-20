@@ -4,7 +4,8 @@ The Controller signs agent enrollment and renewal certificates locally using
 `local_ca.py`. Certificates retain the existing root and intermediate and the
 fixed thirty-day client certificate policy. Enrollment and renewal issue in the
 API; the worker also needs the signer for issuance and revocation recovery.
-Both run as UID/GID 10001 after the API's secret-staging pre-exec.
+Both run as UID/GID 10001 and read the secrets the `runtime-init` helper
+staged for them.
 
 The NAS installer creates and preserves these secret files:
 

@@ -75,10 +75,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: service:tailscale-gateway
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/tailscale/configure.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
+    entrypoint: [/bin/sh, /run/vonk-runtime-assets/tailscale/configure.sh]
     volumes:
       - tailscale-socket:/var/run/tailscale
       - runtime-assets:/run/vonk-runtime-assets:ro
@@ -88,8 +85,8 @@ services:
       tailscale-gateway:
         condition: service_started
         restart: true
-      control-api:
-        condition: service_started
+      runtime-init:
+        condition: service_healthy
         required: false
         restart: true
       caddy:

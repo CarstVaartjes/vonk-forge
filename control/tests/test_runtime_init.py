@@ -565,3 +565,26 @@ def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_se
         source, destination, gateway_master_key=tmp_path / "gateway" / "master-key"
     )
     assert not projected.exists()
+
+
+def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Catches a resident helper that reports healthy unstaged, or busy-loops."""
+    monkeypatch.setattr(runtime_init.signal, "signal", lambda *_args: None)
+    marker = tmp_path / "runtime-staged"
+    idles: list[str] = []
+
+    def unavailable() -> None:
+        raise OSError("volume observation unavailable")
+
+    monkeypatch.setattr(runtime_init, "stage_runtime", unavailable)
+    with pytest.raises(OSError):
+        runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
+    assert not marker.exists()
+    assert idles == []
+
+    monkeypatch.setattr(runtime_init, "stage_runtime", lambda: None)
+    runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
+    assert marker.read_text() == "staged\n"
+    assert idles == ["idle"]

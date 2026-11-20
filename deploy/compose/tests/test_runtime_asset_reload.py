@@ -1,10 +1,11 @@
-"""A redeploy restages runtime assets after their consumers have started.
+"""A restage reaches consumers that are already running.
 
-Compose restarts every consumer once control-api has *started*
-(``depends_on: restart: true``); the API pre-exec stages the pulled release's
-assets only afterwards. A consumer that reads its assets once at start keeps
-the previous release's copy. That is how ``NasComposeBundleStale`` shipped in
-``alerts.yaml`` and never fired in production.
+A consumer that reads its assets once at start keeps the previous release's
+copy until its next restart. Before runtime-init, Compose restarted consumers
+before the restage, which is how ``NasComposeBundleStale`` shipped in
+``alerts.yaml`` and never fired in production. Compose now restarts them after
+runtime-init has staged (``restart: true``); these reloads apply a restage
+without depending on that order.
 """
 
 from __future__ import annotations
@@ -38,8 +39,8 @@ ROOT = Path(__file__).resolve().parents[3]
 # is a known instance of the class above; a new consumer must reload or be
 # named here with its reason.
 RESTART_ONLY = {
-    "postgres": "Compose does not restart it with the Controller (no control-api "
-    "dependency: the database must not bounce with it); init scripts run only on "
+    "postgres": "Compose does not restart it with a restage (no restart edge on "
+    "runtime-init: the database must not bounce with it); init scripts run only on "
     "an empty data directory, and entrypoint and backup-loop changes apply from "
     "its next start",
     "litellm": "the supervisor rereads bootstrap-config.json every poll; "
@@ -169,7 +170,6 @@ def test_prometheus_started_on_old_assets_applies_the_restaged_rules(
     for path in (assets, *assets.rglob("*")):
         path.chmod(0o755 if path.is_dir() else 0o444)
 
-    script = prometheus["entrypoint"][2].replace("$$", "$")
     command = [str(argument) for argument in prometheus["command"]]
     # The control: the production command minus reloading, as before the fix.
     without_reload = [a for a in command if not a.startswith("--config.auto-reload")]
@@ -187,12 +187,7 @@ def test_prometheus_started_on_old_assets_applies_the_restaged_rules(
             str(prometheus["user"]),
             "-v",
             f"{assets}:/run/vonk-runtime-assets:ro",
-            "--entrypoint",
-            prometheus["entrypoint"][0],
             prometheus["image"],
-            prometheus["entrypoint"][1],
-            script,
-            *prometheus["entrypoint"][3:],
             *arguments,
         )
     reloading, start_only = containers
@@ -202,7 +197,7 @@ def test_prometheus_started_on_old_assets_applies_the_restaged_rules(
         assert time.monotonic() < deadline, _docker("logs", reloading)
         time.sleep(0.5)
 
-    # The pulled release's pre-exec restages its kit into the shared volume.
+    # The pulled release's runtime-init restages its kit into the shared volume.
     stage_runtime_assets(_kit(tmp_path / "pulled", None), assets)
 
     shipped = _shipped_rules()
@@ -321,9 +316,7 @@ def test_caddy_started_on_old_assets_applies_the_restaged_caddyfile(
             "--entrypoint",
             caddy["entrypoint"][0],
             caddy["image"],
-            caddy["entrypoint"][1],
-            caddy["entrypoint"][2].replace("$$", "$"),
-            *caddy["entrypoint"][3:],
+            *caddy["entrypoint"][1:],
             *arguments,
         )
     watching, start_only = containers
@@ -333,7 +326,7 @@ def test_caddy_started_on_old_assets_applies_the_restaged_caddyfile(
         assert time.monotonic() < deadline, _docker_logs(watching)
         time.sleep(0.5)
 
-    # The pulled release's pre-exec restages its kit into the shared volume.
+    # The pulled release's runtime-init restages its kit into the shared volume.
     # Its route reads a variable the entrypoint exports, as production's do.
     pulled = "pulled {$VONK_AGENT_HOSTNAME}"
     stage_runtime_assets(_caddy_kit(tmp_path / "pulled", _caddyfile(pulled)), assets)
@@ -494,9 +487,7 @@ def test_caddy_never_persists_the_proxy_auth_secret(
                 "--entrypoint",
                 caddy["entrypoint"][0],
                 caddy["image"],
-                caddy["entrypoint"][1],
-                caddy["entrypoint"][2].replace("$$", "$"),
-                *caddy["entrypoint"][3:],
+                *caddy["entrypoint"][1:],
             )
             started[name] = (container, assets)
 

@@ -23,6 +23,7 @@ IMAGES = {
     "litellm_image": "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
 }
 SERVICES = {
+    "runtime-init",
     "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",

@@ -7,7 +7,9 @@ import errno
 import logging
 import os
 import secrets
+import signal
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,7 +33,7 @@ GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
 
 @dataclass(frozen=True)
 class SharedRuntimePaths:
-    """Shared named-volume roots initialized by the control API pre-exec."""
+    """Shared named-volume roots initialized by runtime-init."""
 
     agent_artifacts: Path = Path("/state/agent-artifacts")
     model_cache: Path = Path("/state/model-cache")
@@ -638,3 +640,50 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def stage_runtime() -> None:
+    """Stage everything other services read before they start.
+
+    The ``runtime-init`` Compose helper runs this as root, without network or
+    database, before its dependants start: private secrets for each consumer,
+    this release's runtime kit, and the ownership of the shared volume roots.
+    """
+    if os.geteuid() != 0:
+        raise RuntimeError("runtime-init must start as root")
+    stage_compose_secrets()
+    stage_runtime_assets()
+    prepare_shared_volumes()
+
+
+# Per container start: the tmpfs begins empty, so a restart or a recreated
+# container is unhealthy until its own staging run has completed.
+STAGED_MARKER = Path("/tmp/runtime-staged")
+
+
+def _stop(_signum: int, _frame: object) -> None:
+    raise SystemExit(0)
+
+
+def main(
+    *, marker: Path = STAGED_MARKER, idle: Callable[[], object] = signal.pause
+) -> None:
+    """Stage once, mark this run healthy, then stay resident without work.
+
+    Some NAS Docker UIs show a project with an exited container as failed, so
+    the staging container stays up. A failed run exits with its traceback and
+    Docker's restart backoff runs it again; every file is replaced atomically,
+    so the previous staging stays intact for the dependants, which start
+    anyway.
+    """
+    # As PID 1 the default SIGTERM action is ignored; stop promptly instead.
+    signal.signal(signal.SIGTERM, _stop)
+    stage_runtime()
+    marker.write_text("staged\n", encoding="utf-8")
+    # Blocks until a signal is handled; SIGTERM exits. Any other wake ends the
+    # process and the restart policy stages again.
+    idle()
+
+
+if __name__ == "__main__":
+    main()

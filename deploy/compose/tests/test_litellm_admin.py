@@ -88,7 +88,6 @@ def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health
     service = _rendered("compose.yaml")["services"]["litellm"]
 
     assert service["environment"] == {
-        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",
         "DISABLE_ADMIN_UI": "False",
         "HOME": "/root",
         "LITELLM_DATABASE_URL_FILE": "/run/vonk-normalized-secrets/litellm-database-url",

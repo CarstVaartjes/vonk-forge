@@ -397,8 +397,8 @@ def test_configurator_has_no_profile_dependency() -> None:
     assert not configurator.get("environment")
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_started", "required": True, "restart": True},
-        "control-api": {
-            "condition": "service_started",
+        "runtime-init": {
+            "condition": "service_healthy",
             "required": False,
             "restart": True,
         },
