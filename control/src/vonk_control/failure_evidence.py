@@ -55,6 +55,7 @@ from .operation_contract import OperationEvidenceDownload
 from .operation_item_contract import OperationItem, OperationResultFacts, operation_item
 from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
+from .summary_cut import summary_cut
 
 MAX_LOG_BYTES = LOG_TAIL_BYTES
 MAX_LOG_LINES = 32
@@ -492,7 +493,7 @@ def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBun
             rank=item.rank,
         ),
         collected_at=now.isoformat(),
-        summary=safe_text(str(summary))[:512],
+        summary=summary_cut(safe_text(str(summary)), 512),
         error_code=error_code,
         detail=detail,
         exit_code=result.exit_code,

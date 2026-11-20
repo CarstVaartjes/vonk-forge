@@ -26,8 +26,7 @@ Each GPU node is independently installed and enrolled. Its stable `spk_…` iden
 comes from the node key and certificate, while its current management address is
 fresh authenticated presence evidence. DHCP reservations are useful operationally
 but are never control-plane authority. Local DNS is optional: operators may map
-`<NAS_MANAGEMENT_IP>` to `<ENROLLMENT_HOSTNAME>`, `<CONTROLLER_HOSTNAME>`, and
-`<REGISTRY_HOSTNAME>` in `/etc/hosts` on the NAS and GPU nodes without changing
+`<NAS_MANAGEMENT_IP>` to `<ENROLLMENT_HOSTNAME>` and `<CONTROLLER_HOSTNAME>` in `/etc/hosts` on the NAS and GPU nodes without changing
 the trust model.
 
 ```mermaid
@@ -521,7 +520,7 @@ master key. That key is staged in the API-only gateway directory, outside the
 normalized secret volume shared with the worker.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
-registry publication, and inference networks separate. Only Caddy
+and inference networks separate. Only Caddy
 publishes a host port. LiteLLM alone joins GPU node-facing cluster egress; the
 worker and API do not.
 
@@ -742,7 +741,7 @@ lacks only the image still gets it: its grant names the objects of the accepted
 compiled plan, not the NAS set, and the agent skips the objects it holds.
 Serving a model object still checks it against the stored NAS set. Library readiness follows the same rule through the same predicate.
 
-Applying a ready, digest-bound profile fans exact model and recipe-image
+Loading a ready, digest-bound profile fans exact model and recipe-image
 preparation out to the target Sparks in parallel. Each target skips an asset it
 already has locally, then the Controller stops affected workloads safely before
 replacing them and records durable per-target progress. Routes are published

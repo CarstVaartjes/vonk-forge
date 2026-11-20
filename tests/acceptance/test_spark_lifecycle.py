@@ -207,7 +207,6 @@ LOCAL_CONTROL_HOSTNAME = (
 )
 ENROLLMENT_HOST = f"enroll.{LOCAL_CONTROL_HOSTNAME}"
 AGENT_HOST = f"agents.{LOCAL_CONTROL_HOSTNAME}"
-REGISTRY_HOST = f"registry.{LOCAL_CONTROL_HOSTNAME}"
 DISABLED_TAILSCALE_CREDENTIAL = "tailscale-disabled-for-spark-acceptance"
 FORBIDDEN_SPARK_TAILNET_INPUTS = (
     "VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX",
@@ -3141,7 +3140,6 @@ class SparkLifecycle:
                 self.control_hostname,
                 ENROLLMENT_HOST,
                 AGENT_HOST,
-                REGISTRY_HOST,
             ]
             or not isinstance(ca_sha256, str)
             or SHA256.fullmatch(ca_sha256) is None

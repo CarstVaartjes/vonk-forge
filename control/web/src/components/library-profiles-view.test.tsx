@@ -590,7 +590,7 @@ test("unsaved edits survive selecting another profile", async () => {
   expect(await screen.findByLabelText("Assignment name")).toHaveValue("kept-edit");
 });
 
-test("the profile screen reviews the changes before Apply", async () => {
+test("the profile screen reviews the changes before Load", async () => {
   const reviewed = {
     ...preview,
     steps: [{ index: 0, kind: "switch", label: "Switch Spark A to Qwen Code", node_ids: [nodeA] }],

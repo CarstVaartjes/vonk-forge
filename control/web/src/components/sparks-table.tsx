@@ -22,7 +22,10 @@ import { interceptPlainClick } from "../lib/plain-click";
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
 
-/** Every Spark in one sortable table with a search; a name opens that Spark. */
+/** With this many Sparks or fewer the whole fleet fits on screen and a search would only add a row. */
+const SEARCH_FROM = 5;
+
+/** Every Spark in one sortable table, with a search once there are more than four; a name opens that Spark. */
 export function SparksTable({
   nodes,
   now,
@@ -57,20 +60,22 @@ export function SparksTable({
 
   return (
     <>
-      <section className="fleet-discovery" aria-label="Find a Spark">
-        <label className="fleet-search">
-          <span>Find a Spark</span>
-          <input
-            type="search"
-            value={query}
-            placeholder="Friendly name or technical name"
-            onChange={(event) => setQuery(event.currentTarget.value)}
-          />
-        </label>
-        <span role="status">
-          Showing {visibleNodes.length} of {nodes.length}
-        </span>
-      </section>
+      {nodes.length >= SEARCH_FROM && (
+        <section className="fleet-discovery" aria-label="Find a Spark">
+          <label className="fleet-search">
+            <span>Find a Spark</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="Friendly name or technical name"
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </label>
+          <span role="status">
+            Showing {visibleNodes.length} of {nodes.length}
+          </span>
+        </section>
+      )}
       {visibleNodes.length === 0 && (
         <EmptyState title="No Sparks" description="" filtered onClearFilters={() => setQuery("")} />
       )}

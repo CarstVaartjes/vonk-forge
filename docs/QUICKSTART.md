@@ -28,7 +28,7 @@ continue.
 
 The Spark management network defaults to the controller host's own /24. To narrow it (for
 example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
-`agents.vonk-forge.local`, and `registry.vonk-forge.local`, all pointing to the
+and `agents.vonk-forge.local`, all pointing to the
 controller host address. On a small lab network, equivalent host-file entries can be used.
 
 ## Start and trust HTTPS
@@ -51,7 +51,7 @@ limited to your trusted LAN and do not forward port 8443 from the internet.
 Create a one-use enrollment grant with **Enroll Spark** on the Overview page,
 or on the command line with `vonkctl fleet enroll NAME --output grant.json`.
 On the Spark, run the generated install command; it already carries the
-controller host's LAN address. The Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
+controller host's LAN address. The Spark must resolve the `enroll` and `agents` hostnames above
 to that same address. Import the local CA certificate on any client that needs
 to connect to the controller or Spark-facing HTTPS endpoints.
 

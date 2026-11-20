@@ -1084,7 +1084,6 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
             "vonk-forge-acceptance.tailnet.example",
             "enroll.vonk-forge-spark-local.spark.acceptance.invalid",
             "agents.vonk-forge-spark-local.spark.acceptance.invalid",
-            "registry.vonk-forge-spark-local.spark.acceptance.invalid",
         ],
         "token": "t" * 43,
     }

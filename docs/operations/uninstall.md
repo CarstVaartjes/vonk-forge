@@ -12,7 +12,7 @@ cache is a copy of it and goes with the Spark. The parts are independent: you ca
 
 | Part | Removed by the default steps | Kept by default | Removed by the optional step |
 | --- | --- | --- | --- |
-| Controller (NAS) | containers, networks, images | named volumes (database, model cache, image registry, CA state) and the `vonk-forge/` project directory with `.env` and `secrets/` | volumes, then the directory |
+| Controller (NAS) | containers, networks, images | named volumes (database, model cache, CA state) and the `vonk-forge/` project directory with `.env` and `secrets/` | volumes, then the directory |
 | Spark | package (agent, helper, monitor), units, configuration, identity, workloads, runtime images, swap file, firewall rules | the `vonk-agent` account | the `vonk-agent` account |
 
 ## 1. Remove a Spark
@@ -189,13 +189,20 @@ a UI's delete action does not always remove them.
 
 The volumes are `postgres-data` (database), `control-state`, `agent-artifacts`,
 `model-cache`, `caddy-data`, `caddy-config`, `litellm-supervisor-state`,
-`prometheus-data`, `registry-data`, `route-publications`,
+`prometheus-data`, `route-publications`,
 `normalized-private-keys`, `runtime-assets`, `image-janitor-state`, and, for
 Secure remote, `tailscale-state` and `tailscale-socket`. List yours:
 
 ```sh
 sudo docker volume ls --filter label=com.docker.compose.project=vonk-forge
 ```
+
+Installs from before the standing image registry was removed may keep an orphan
+`registry-data` volume. It is unused; remove it with
+`sudo docker volume rm vonk-forge_registry-data`.
+If a redeploy did not remove the orphan container, check with
+`sudo docker ps -a --filter label=com.docker.compose.service=registry` and
+remove it with `sudo docker rm -f <container>`.
 
 ### 2b. Optional: remove the data
 
@@ -242,7 +249,7 @@ install, and the scoped OAuth client. See the
 ### 2e. Lab mode only: LAN names and trust
 
 Remove the DNS or hosts entries for `vonk-forge.local`, `enroll.vonk-forge.local`,
-`agents.vonk-forge.local` and `registry.vonk-forge.local`, and delete the
+`agents.vonk-forge.local` (older installs also `registry.vonk-forge.local`), and delete the
 `secrets/step-ca/root-certificate` you imported into browsers and clients.
 
 ## 3. Remove `vonkctl`

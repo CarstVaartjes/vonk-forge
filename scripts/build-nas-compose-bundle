@@ -49,7 +49,6 @@ SERVICES = {
     "litellm",
     "prometheus",
     "caddy",
-    "registry",
 }
 SECRET_FILES = {
     "admin-password": "admin-password",

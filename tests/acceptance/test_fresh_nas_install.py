@@ -15,17 +15,12 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import yaml
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests.acceptance.runtime import (
     AcceptanceError,
@@ -54,7 +49,6 @@ DEFAULT_SERVICES = {
     "litellm",
     "postgres",
     "prometheus",
-    "registry",
     "tailscale-configurator",
     "tailscale-gateway",
 }
@@ -1172,75 +1166,10 @@ def _tailnet_request(
     )
 
 
-def issue_registry_client_certificate(
-    bundle: Path, directory: Path
-) -> tuple[Path, Path]:
-    secret_root = bundle / "secrets"
-    try:
-        password = (secret_root / "step-ca-password").read_bytes().strip()
-        intermediate_key = serialization.load_pem_private_key(
-            (secret_root / "step-ca/intermediate-key").read_bytes(), password=password
-        )
-        intermediate = x509.load_pem_x509_certificate(
-            (secret_root / "step-ca/intermediate-certificate").read_bytes()
-        )
-    except (OSError, TypeError, ValueError) as error:
-        raise AcceptanceError(
-            "registry client certificate authority is unavailable"
-        ) from error
-    if not isinstance(intermediate_key, ed25519.Ed25519PrivateKey):
-        raise AcceptanceError("registry client certificate authority is invalid")
-    node_id = "spk_" + "a" * 32
-    client_key = ed25519.Ed25519PrivateKey.generate()
-    now = datetime.now(UTC)
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
-        .issuer_name(intermediate.subject)
-        .public_key(client_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=1))
-        .not_valid_after(now + timedelta(minutes=10))
-        .add_extension(
-            x509.KeyUsage(True, False, False, False, False, False, False, False, False),
-            critical=True,
-        )
-        .add_extension(
-            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
-        )
-        .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{node_id}"
-                    )
-                ]
-            ),
-            critical=False,
-        )
-        .sign(intermediate_key, algorithm=None)
-    )
-    certificate_path = directory / "registry-client-certificate.pem"
-    key_path = directory / "registry-client-key.pem"
-    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    key_path.write_bytes(
-        client_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    certificate_path.chmod(0o600)
-    key_path.chmod(0o600)
-    return certificate_path, key_path
-
-
 def verify_routed_service_behavior(
     bundle: Path,
     *,
-    nas_ip: str,
     control_hostname: str,
-    registry_hostname: str,
 ) -> None:
     litellm_key = _bundle_secret(bundle, "litellm-master-key")
     for headers in ({}, {"Authorization": "Bearer acceptance-wrong-key"}):
@@ -1265,45 +1194,6 @@ def verify_routed_service_behavior(
     )
     if not isinstance(models, dict) or not isinstance(models.get("data"), list):
         raise AcceptanceError("LiteLLM models response is invalid")
-
-    root = bundle / "secrets/step-ca/root-certificate"
-    try:
-        https_over_command(
-            _tcp_tunnel(nas_ip, 8443),
-            server_hostname=registry_hostname,
-            path="/v2/",
-            cwd=bundle,
-            environment=host_command_environment(),
-            ca_file=root,
-            timeout=30,
-        )
-    except AcceptanceError:
-        pass
-    else:
-        raise AcceptanceError(
-            "registry accepted a request without client authentication"
-        )
-    with tempfile.TemporaryDirectory(
-        prefix="vonk-registry-client-", dir=bundle.parent
-    ) as directory:
-        certificate, key = issue_registry_client_certificate(bundle, Path(directory))
-        registry = _http_json(
-            https_over_command(
-                _tcp_tunnel(nas_ip, 8443),
-                server_hostname=registry_hostname,
-                path="/v2/",
-                cwd=bundle,
-                environment=host_command_environment(),
-                ca_file=root,
-                client_certificate=certificate,
-                client_key=key,
-                accepted_statuses={200},
-                timeout=30,
-            ),
-            label="registry",
-        )
-    if registry != {}:
-        raise AcceptanceError("registry route returned an unexpected API response")
 
 
 def _json_object_without_duplicate_keys(
@@ -1796,7 +1686,6 @@ def exercise_compose(
     nas_ip: str,
     control_hostname: str,
     enrollment_hostname: str,
-    registry_hostname: str,
     tailnet_suffix: str,
     control_service: str = "svc:vonk-forge",
     require_external_tailnet_client: bool = True,
@@ -1924,9 +1813,7 @@ def exercise_compose(
         )
         verify_routed_service_behavior(
             bundle,
-            nas_ip=nas_ip,
             control_hostname=control_hostname,
-            registry_hostname=registry_hostname,
         )
         verify_tailscale_services(
             bundle,
@@ -2079,7 +1966,6 @@ def main() -> None:
                 nas_ip=nas_ip,
                 control_hostname=control_hostname,
                 enrollment_hostname=enrollment_hostname,
-                registry_hostname=f"registry.{control_hostname}",
                 tailnet_suffix=tailnet_suffix,
                 control_service=services["control"],
                 require_external_tailnet_client=require_external_tailnet_client,

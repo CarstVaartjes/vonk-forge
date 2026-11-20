@@ -23,7 +23,7 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
     <div aria-label="Cache removal review">
       {review.fleet && (
         <section aria-label="Fleet removal effects">
-          <h3>NAS cache</h3>
+          <h3>Controller cache</h3>
           <p>
             {review.fleet.nas_remove ? "Remove unused model files" : "Retain model files"}:{" "}
             {review.fleet.nas_detail}
@@ -60,7 +60,7 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
       )}
       {review.fleet && (
         <p>
-          NAS bytes that can be freed:{" "}
+          Controller bytes that can be freed:{" "}
           {review.nas_reclaimable_bytes === null || review.nas_reclaimable_bytes === undefined
             ? AssetAvailability.UNKNOWN
             : String(review.nas_reclaimable_bytes)}

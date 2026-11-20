@@ -22,7 +22,6 @@ CADDY_IMAGE = "caddy:2.11.7@sha256:3095ad245c353e3bdb27a38f22a095c1cfa9e295ab21c
 HOSTNAMES = (
     "enroll.control.test.example",
     "agents.control.test.example",
-    "registry.control.test.example",
 )
 CONTROL_HOSTNAME = "control.test.example"
 
@@ -245,8 +244,6 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         # rather than waiting for Docker's external DNS timeout.
         "--add-host",
         "control-api:127.0.0.1",
-        "--add-host",
-        "registry:127.0.0.1",
         "--volume",
         f"{ROOT / 'deploy/compose/Caddyfile'}:/run/vonk-runtime-assets/caddy/Caddyfile:ro",
         "--volume",
@@ -321,20 +318,16 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         with pytest.raises((ssl.SSLError, ConnectionError, OSError)):
             _tls_request(tls_port, HOSTNAMES[1], material["root"], "/agent/claim")
 
-        for hostname, path in (
-            (HOSTNAMES[1], "/agent/claim"),
-            (HOSTNAMES[2], "/v2/"),
-        ):
-            peer, response = _tls_request(
-                tls_port,
-                hostname,
-                material["root"],
-                path,
-                client_certificate=material["client-certificate"],
-                client_key=material["client-key"],
-            )
-            assert peer == expected_der
-            assert response.startswith(b"HTTP/1.1 502")
+        peer, response = _tls_request(
+            tls_port,
+            HOSTNAMES[1],
+            material["root"],
+            "/agent/claim",
+            client_certificate=material["client-certificate"],
+            client_key=material["client-key"],
+        )
+        assert peer == expected_der
+        assert response.startswith(b"HTTP/1.1 502")
 
         browser_port = _published_port(docker, container, 8080)
         with socket.create_connection(

@@ -1,3 +1,4 @@
+import { formatDate } from "../../lib/time";
 /** A linear map from a data domain to a pixel range. A flat domain maps to the range start. */
 export function linearScale(
   [d0, d1]: readonly [number, number],
@@ -24,11 +25,9 @@ export function niceTicks(min: number, max: number, count = 4): number[] {
 
 /** Local clock text for a Unix-seconds timestamp: time of day, or date and time on spans over two days. */
 export function timeLabel(seconds: number, spanSeconds: number): string {
-  const options: Intl.DateTimeFormatOptions =
-    spanSeconds > 86400 * 2
-      ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
-      : { hour: "2-digit", minute: "2-digit" };
-  return new Date(seconds * 1000).toLocaleString([], options);
+  const at = new Date(seconds * 1000);
+  const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return spanSeconds > 86400 * 2 ? `${formatDate(at)}, ${clock}` : clock;
 }
 
 export type Point = { t: number; v: number | null };

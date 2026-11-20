@@ -43,6 +43,7 @@ from ..strict_json import (
     serialize_json_value,
     warn_unreadable_once,
 )
+from ..summary_cut import summary_cut
 from .constants import NodeIdentifier
 from .contracts import (
     JobDetailResponse,
@@ -277,7 +278,7 @@ def _item_failure(item: OperationItem) -> OperationFailure | None:
         )
         return OperationFailureEvidence(
             error_code=OperationFailureCode.ARTIFACT_PROCESS_FAILED,
-            summary=reason[:256],
+            summary=summary_cut(reason),
             detail=reason,
         )
     return _failure_projection(item.result)

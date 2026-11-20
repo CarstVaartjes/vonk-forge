@@ -540,13 +540,13 @@ export function LibraryWorkcell({
           </select>
         </label>
         <label>
-          Usage
+          Capabilities
           <select
-            aria-label="Filter usage"
+            aria-label="Filter capabilities"
             value={filters.usage}
             onChange={(event) => onFiltersChange({ ...filters, usage: event.target.value })}
           >
-            <option value="">All usage</option>
+            <option value="">All capabilities</option>
             {[...new Set(records.flatMap((record) => record.capabilities))].sort().map((value) => (
               <option key={value} value={value}>
                 {words.label(value)}

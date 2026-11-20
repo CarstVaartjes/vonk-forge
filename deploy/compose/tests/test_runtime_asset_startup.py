@@ -39,7 +39,6 @@ def _commands() -> list[tuple[str, str]]:
         "litellm",
         "prometheus",
         "caddy",
-        "registry",
         "tailscale-configurator",
     }, "a changed entrypoint must not silently remove its recovery proof"
     return commands
@@ -127,7 +126,5 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
     assert calls.exists()
     if '"$@"' in command:
         assert calls.read_text() == "a b\nline\nbreak\n"
-    elif service == "registry":
-        assert calls.read_text() == f"{asset}\n"
     else:
         assert calls.read_text() == "\n"

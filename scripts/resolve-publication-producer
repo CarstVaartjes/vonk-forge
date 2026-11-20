@@ -164,7 +164,6 @@ PRODUCERS = {
             "deploy/compose/uv-bootstrap.lock",
             "deploy/compose/postgres/**",
             "deploy/compose/prometheus/**",
-            "deploy/compose/registry/config.yml",
             "deploy/compose/tailscale/compose.yaml",
             "deploy/compose/tailscale/configure.sh",
             "deploy/compose/tests/test.env",
