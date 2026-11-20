@@ -262,3 +262,5 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
   .header-utility .operator-summary{min-width:2.75rem;justify-content:center}
 }
 .brand{color:inherit;text-decoration:none}
+.form-error{margin:0;padding:.7rem .85rem;border:1px solid color-mix(in srgb,var(--bad) 40%,var(--panel));border-radius:var(--r-ctl);background:color-mix(in srgb,var(--bad) 10%,var(--panel));color:var(--ink)}
+.field-hint{color:var(--muted);font-size:.75rem}

@@ -264,3 +264,16 @@ test("the header shows the live state as a word, and nothing when unknown", () =
   );
   expect(screen.getByText("delayed")).toBeVisible();
 });
+
+test("the top-left brand links to the Overview", () => {
+  const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
+  render(
+    <AppShell activeRoute="library" onNavigate={onNavigate}>
+      {null}
+    </AppShell>,
+  );
+  const brand = screen.getByRole("link", { name: "Vonk Forge Controller, Overview" });
+  expect(brand).toHaveAttribute("href", "/overview");
+  brand.click();
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "overview");
+});
