@@ -255,3 +255,11 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
   .shell>main{padding-bottom:5.5rem}
   .toast-region{bottom:4.5rem}
 }
+/* Phone header: the brand shrinks to its mark so mark, live pill, theme toggle and avatar fit one row at 320px. */
+@media(max-width:34rem){
+  .app-header .brand-text,.header-utility .operator-disclosure-indicator{display:none}
+  .header-utility{gap:.35rem}
+  .header-utility .status-pill{padding:.2rem .45rem;font-size:.72rem}
+  .header-utility .operator-summary{min-width:2.75rem;justify-content:center}
+}
+.brand{color:inherit;text-decoration:none}
