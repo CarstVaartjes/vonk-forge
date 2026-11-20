@@ -18,8 +18,7 @@ import os
 
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check_environment import ensure_web
-from protocol_wheel import protocol_wheel_name
+from check_environment import ensure_control, ensure_web
 from hook_words_generated import HookFailureCode, HookFailureKind
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,21 +122,37 @@ ADDED_LINE_PATHS = [
 ]
 
 
-def check_added_lines() -> None:
-    """Run CI's added-line guards on the staged diff, or skip with a message."""
-    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
-    if not environment.is_absolute():
-        environment = ROOT / environment
-    python = environment / "bin/python"
-    wheel = ROOT / "inventory/wheels" / protocol_wheel_name(ROOT)
-    if not python.is_file() or not wheel.is_file():
+def check_added_lines(changed: list[str]) -> None:
+    """Run CI's added-line guards on the staged diff.
+
+    A path with unstaged edits is skipped for this commit (its index and disk
+    line numbers differ); CI still gates it.
+    """
+    scope = tuple(f"{path}/" for path in ADDED_LINE_PATHS)
+    staged = [file for file in changed if file.startswith(scope)]
+    if not staged:
+        return
+    unstaged = set(
+        subprocess.check_output(
+            ["git", "diff", "--name-only", "-z", "--", *ADDED_LINE_PATHS],
+            cwd=ROOT,
+            timeout=30,
+        )
+        .decode()
+        .split("\0")
+    )
+    partial = sorted(unstaged.intersection(staged))
+    if partial:
         print(
-            "added-line guards skipped: control environment or protocol wheel "
-            "missing; run scripts/build-control-wheel and "
-            "`uv sync --project control --frozen` (CI still runs them)",
+            "added-line guards skipped: staged files also have unstaged changes "
+            f"({', '.join(partial)}); stage them fully to check here (CI still runs them)",
             file=sys.stderr,
         )
         return
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = ROOT / environment
+    ensure_control(ROOT, environment)
     patch = subprocess.check_output(
         [
             "git",
@@ -153,14 +168,13 @@ def check_added_lines() -> None:
         cwd=ROOT,
         timeout=30,
     )
-    if patch:
-        subprocess.run(
-            [str(python), "-m", "control.tests.added_line_guards"],
-            cwd=ROOT,
-            input=patch,
-            check=True,
-            timeout=600,
-        )
+    subprocess.run(
+        [str(environment / "bin/python"), "-m", "control.tests.added_line_guards"],
+        cwd=ROOT,
+        input=patch,
+        check=True,
+        timeout=600,
+    )
 
 
 def main() -> None:
@@ -196,7 +210,7 @@ def main() -> None:
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])
-    check_added_lines()
+    check_added_lines(changed)
     if web or web_inputs:
         directory = ROOT / "control/web"
         biome = directory / "node_modules/.bin/biome"

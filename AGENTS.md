@@ -306,7 +306,7 @@ calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
 guards on the staged diff, so a violation fails before push; it skips with a
-message when the control environment or protocol wheel is missing.
+message only when a staged file also has unstaged edits.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 

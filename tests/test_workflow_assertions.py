@@ -304,3 +304,21 @@ def test_every_action_is_pinned_at_one_sha() -> None:
             pins.setdefault(action, set()).add(sha)
     assert pins
     assert {a: sorted(s) for a, s in pins.items() if len(s) > 1} == {}
+
+
+def test_pre_commit_added_line_paths_match_ci() -> None:
+    """The hook checks the same pathspec as ci.yml's added-line step."""
+    import importlib.machinery
+    import importlib.util
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)
+    assert match
+    loader = importlib.machinery.SourceFileLoader(
+        "check_staged_code", str(ROOT / "scripts/check-staged-code")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec
+    hook = importlib.util.module_from_spec(spec)
+    loader.exec_module(hook)
+    assert hook.ADDED_LINE_PATHS == match.group(1).split()
