@@ -54,7 +54,7 @@ jobs:
       contents: read
       actions: read
       pull-requests: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.areas.outputs.rust }}
@@ -155,7 +155,7 @@ jobs:
     # guards on every pull request, member or full.
     name: Ruff
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -195,7 +195,7 @@ jobs:
     name: Web typecheck and Biome (member PR)
     needs: changes
     if: needs.changes.outputs.full == 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -223,7 +223,7 @@ jobs:
     name: Supply-chain evidence
     needs: changes
     if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -536,7 +536,7 @@ jobs:
     name: Generated control clients
     needs: changes
     if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -559,7 +559,7 @@ jobs:
     name: Compose integration
     needs: changes
     if: needs.changes.outputs.full == 'true' && needs.changes.outputs.compose == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -1735,7 +1735,7 @@ jobs:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
     needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
@@ -1861,7 +1861,8 @@ jobs:
     name: Main branch CI status summary
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [ci-gate, supply-chain]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -1891,7 +1892,8 @@ jobs:
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
     needs: [ci-gate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
@@ -2007,7 +2009,8 @@ jobs:
   validate-release-images:
     name: Validate accepted release images
     needs: [lint, generated-clients, compose-integration, supply-chain, release-metadata, build-agent-package]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       attestations: read
       contents: read
@@ -2150,7 +2153,8 @@ jobs:
   publish-images:
     name: Publish public container images
     needs: [validate-release-images, release-metadata]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     environment: platform-release
     concurrency:
       group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
@@ -2367,7 +2371,8 @@ jobs:
   release-manifest:
     name: Publish container release manifest
     needs: [release-metadata, publish-images, build-agent-package, supply-chain]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -2466,7 +2471,7 @@ jobs:
     name: Publish verified ARM64 Spark agent package to apt
     needs: [release-metadata, build-agent-package, release-manifest]
     if: needs.release-manifest.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: apt-release
     concurrency:
