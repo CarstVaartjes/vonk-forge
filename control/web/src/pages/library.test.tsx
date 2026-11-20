@@ -279,3 +279,14 @@ test("exiting the Spark workspace moves focus to the heading", async () => {
   await waitFor(() => expect(location.search).toBe(""));
   await waitFor(() => expect(screen.getByRole("heading", { name: "Library" })).toHaveFocus());
 });
+
+test("a modified click on an in-app link is left to the browser; a plain click navigates", async () => {
+  history.replaceState(null, "", "/library");
+  render(<App api={libraryApi as unknown as ControlApi} />);
+  const link = await screen.findByRole("link", { name: "Models" });
+  // fireEvent returns false when the default was prevented.
+  expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+  expect(location.search).toBe("");
+  expect(fireEvent.click(link)).toBe(false);
+  await waitFor(() => expect(location.search).toContain("view=models"));
+});
