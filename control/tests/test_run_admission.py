@@ -61,6 +61,7 @@ def setup(
     github_release_source=False,
     engine=None,
     stored_family=False,
+    job=False,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
     Base.metadata.create_all(engine)
@@ -69,7 +70,7 @@ def setup(
     node = "spk_" + "1" * 32
     document = json.loads(
         resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-source-build.json")
+        .joinpath("examples", "recipe-job.json" if job else "recipe-source-build.json")
         .read_text()
     )
     document["identity"]["slug"] = "qwen"
