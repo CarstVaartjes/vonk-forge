@@ -210,6 +210,28 @@ def test_only_a_sole_active_claim_owner_is_charged_with_the_use(
     assert observed == (280 if attributed else None)
 
 
+def test_a_job_run_records_its_peak_and_admission_reads_it(tmp_path) -> None:
+    """Catches job runs being left out of the one observed-peak mechanism.
+
+    A job recipe's run holds the sole memory claim like a serving run; a sample
+    landing during the job writes its (content, role) peak, the same row
+    admission reads for any run of that content.
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE, job=True)
+    service, observed = _serve(
+        sessions, now, node, installation, lowest_available=_FREE - 280
+    )
+    assert observed == 280
+    role = service.plan_run(installation, alias="qwen", now=now).nodes[0].role
+    with sessions() as session:
+        digest = session.scalars(
+            select(CatalogDocumentRevision.content_digest).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).one()
+        assert observed_role_peaks(session, digest) == {role: 280}
+
+
 def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
     """Catches the observed peak leaving with the run's or installation's rows.
 
