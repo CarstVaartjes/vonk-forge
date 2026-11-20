@@ -331,16 +331,6 @@ def _compose_rows(raw: str) -> list[dict[str, object]]:
     return document
 
 
-#: Compose one-shots: done when they exited 0, never `running`.
-ONE_SHOT_SERVICES = frozenset({"runtime-init"})
-
-
-def compose_service_settled(service: str, row: dict[str, object]) -> bool:
-    if service in ONE_SHOT_SERVICES:
-        return row.get("State") == "exited" and row.get("ExitCode") == 0
-    return row.get("State") == "running" and row.get("Health") == "healthy"
-
-
 def assert_compose_services_healthy(raw: str, expected: set[str]) -> None:
     rows = _compose_rows(raw)
     observed: dict[str, dict[str, object]] = {}
@@ -358,7 +348,7 @@ def assert_compose_services_healthy(raw: str, expected: set[str]) -> None:
     broken = sorted(
         service
         for service, row in observed.items()
-        if not compose_service_settled(service, row)
+        if row.get("State") != "running" or row.get("Health") != "healthy"
     )
     if broken:
         raise AcceptanceError(f"Compose services are not healthy: {', '.join(broken)}")

@@ -477,10 +477,11 @@ when the operation is already authorized. This exception does not permit SSH
 Spark rollouts or bypass a Controller authorization decision.
 
 Compose dependency edges order startup and never gate it (`required: false` on
-any condition other than `service_started`). The only setup container is the
-`runtime-init` one-shot, which stages secrets, the runtime kit and volume
-ownership as root. Its readers start after it exits and never poll for a staged
-file; see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
+any condition other than `service_started`). Every service is long-running: NAS
+Docker UIs show an exited container as a failed project. The `runtime-init`
+helper stages secrets, the runtime kit and volume ownership as root, then idles
+healthy. Its readers start once it is healthy and never poll for a staged file;
+see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
 
 Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
 derived from what the installers create. A change that makes an installer, the

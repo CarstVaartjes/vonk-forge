@@ -6,6 +6,8 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
+from vonk_control.runtime_init import STAGED_MARKER
+
 ROOT = Path(__file__).resolve().parents[3]
 STAGED = "runtime-init"
 STAGED_VOLUMES = ("runtime-assets", "normalized-private-keys")
@@ -54,23 +56,26 @@ def test_every_staged_volume_reader_starts_after_runtime_init_and_never_polls() 
     for name in readers:
         service = services[name]
         assert service["depends_on"][STAGED] == {
-            "condition": "service_completed_successfully",
+            "condition": "service_healthy",
             "required": False,
             **({"restart": True} if name in RESTART_WITH_KIT else {}),
         }, name
         assert "until [" not in str(service.get("entrypoint", "")), name
 
 
-def test_runtime_init_is_the_one_staging_writer_and_runs_once_per_up() -> None:
-    """Catches a second staging writer or a one-shot that loops or reaches out."""
+def test_runtime_init_is_the_one_staging_writer_and_healthy_per_run() -> None:
+    """Catches a second staging writer, a stale health marker, or network use."""
     services = _services()
     init = services[STAGED]
     assert init["image"] == services["control-api"]["image"]
     assert init["entrypoint"] == ["python", "-m", "vonk_control.runtime_init"]
-    # A restart policy would hold `compose up`, and every dependant, on a
-    # staging run that keeps failing; the next `up` runs it again instead.
-    assert init["restart"] == "no"
+    # Resident: an exited container shows the project as failed in NAS UIs.
+    # A failed run exits and the restart policy runs it again.
+    assert init["restart"] == "unless-stopped"
     assert init["network_mode"] == "none"
+    # The marker is on a tmpfs, so every start begins unhealthy.
+    assert init["tmpfs"] == ["/tmp"]
+    assert init["healthcheck"]["test"] == ["CMD", "cat", str(STAGED_MARKER)]
     assert init["cap_add"] == ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
     writers = {
         name

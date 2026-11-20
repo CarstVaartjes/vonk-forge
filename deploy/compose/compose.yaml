@@ -46,16 +46,18 @@ services:
       retries: 1
       start_period: 1m
 
-  # One-shot, root, no network: stages each consumer's private secrets, this
-  # release's runtime kit (configs and entrypoints from the Controller image)
-  # and the ownership of the shared volume roots, then exits. Dependants start
-  # after it ends (required: false orders, never gates: a failed run leaves the
-  # previous staging in the volumes and the next `compose up` runs it again).
+  # Root, no network: on each start stages each consumer's private secrets,
+  # this release's runtime kit (configs and entrypoints from the Controller
+  # image) and the ownership of the shared volume roots, then marks itself
+  # healthy and idles (NAS Docker UIs show an exited container as a failed
+  # project). Dependants start once it is healthy; required: false orders,
+  # never gates: after a failed run they start on the previous staging kept in
+  # the volumes while the restart policy runs it again.
   runtime-init:
     # The Controller API image: it ships the kit and the staging code.
     image: &control-api-image ${CONTROL_API_IMAGE:?set a version-pinned control-api image}
     entrypoint: [python, -m, vonk_control.runtime_init]
-    restart: "no"
+    restart: unless-stopped
     logging: *bounded-logging
     read_only: true
     user: "0:0"
@@ -65,6 +67,13 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     network_mode: none
+    # The health marker lives here: empty on every container start.
+    tmpfs: [/tmp]
+    healthcheck:
+      test: [CMD, cat, /tmp/runtime-staged]
+      interval: 5s
+      timeout: 5s
+      retries: 3
     secrets: [host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
@@ -121,7 +130,7 @@ services:
     # No restart edge: the database must not bounce with every release; a new
     # entrypoint applies from its next start.
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false}
+      runtime-init: {condition: service_healthy, required: false}
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control && psql -U control -d control -tAc 'SELECT 1' | grep -qx 1"]
       interval: 10s
@@ -163,7 +172,7 @@ services:
     # No dependency on PostgreSQL: startup retries the database connection
     # until it is ready.
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false}
+      runtime-init: {condition: service_healthy, required: false}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -199,7 +208,7 @@ services:
     # Start order only: a down dependency must never leave this service Created.
     # The worker itself waits for the API-owned schema (wait_for_database).
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false}
+      runtime-init: {condition: service_healthy, required: false}
       postgres: {condition: service_started}
       control-api: {condition: service_started}
     healthcheck:
@@ -242,7 +251,7 @@ services:
       - /root:exec,mode=0700,uid=10002,gid=10001
     networks: [litellm-data, cluster-egress, litellm-edge, litellm-metrics]
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
+      runtime-init: {condition: service_healthy, required: false, restart: true}
       postgres: {condition: service_started}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
@@ -278,7 +287,7 @@ services:
     tmpfs: [/tmp]
     networks: [application, litellm-metrics]
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
+      runtime-init: {condition: service_healthy, required: false, restart: true}
     healthcheck:
       test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9090/-/ready"]
       interval: 10s
@@ -320,7 +329,7 @@ services:
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, tailnet-web-edge, litellm-edge]
     depends_on:
-      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
+      runtime-init: {condition: service_healthy, required: false, restart: true}
     healthcheck:
       # The loopback listener is independent of every network; the default
       # route exists only while `ingress` (the one non-internal network) is

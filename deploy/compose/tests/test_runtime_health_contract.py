@@ -72,13 +72,12 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         if isinstance(service, dict) and "profiles" not in service
     }
     assert set(defaults) == DEFAULT_SERVICES
-    # A one-shot's readiness is its exit status (service_completed_successfully).
-    assert "healthcheck" not in defaults.pop("runtime-init")
     assert services["tailscale-gateway"]["profiles"] == ["secure-remote"]
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
     expected_evidence = {
         "image-janitor": ("unused.json", "network-tick-ok", "st_mtime"),
+        "runtime-init": ("/tmp/runtime-staged",),
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),

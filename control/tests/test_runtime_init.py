@@ -567,10 +567,12 @@ def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_se
     assert not projected.exists()
 
 
-def test_runtime_init_retries_unavailable_staging_then_ends_for_the_next_up(
-    monkeypatch: pytest.MonkeyPatch,
+def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Catches a one-shot that loops forever or reports success unstaged."""
+    """Catches a resident helper that reports healthy unstaged, or busy-loops."""
+    monkeypatch.setattr(runtime_init.signal, "signal", lambda *_args: None)
+    marker = tmp_path / "runtime-staged"
     attempts: list[str] = []
 
     def unavailable() -> None:
@@ -579,13 +581,26 @@ def test_runtime_init_retries_unavailable_staging_then_ends_for_the_next_up(
 
     monkeypatch.setattr(runtime_init, "stage_runtime", unavailable)
     with pytest.raises(SystemExit) as ended:
-        runtime_init.main()
+        runtime_init.main(marker=marker)
     assert ended.value.code == 1
     assert attempts == ["stage"] * 3
+    assert not marker.exists()
+
+    class Stopped(Exception):
+        pass
+
+    idles: list[str] = []
+
+    def idle() -> None:
+        idles.append("idle")
+        raise Stopped
 
     monkeypatch.setattr(runtime_init, "stage_runtime", lambda: attempts.append("ok"))
-    runtime_init.main()
+    with pytest.raises(Stopped):
+        runtime_init.main(marker=marker, idle=idle)
     assert attempts[-1] == "ok"
+    assert marker.read_text() == "staged\n"
+    assert idles == ["idle"]
 
 
 def test_runtime_init_stages_secrets_kit_and_volumes(

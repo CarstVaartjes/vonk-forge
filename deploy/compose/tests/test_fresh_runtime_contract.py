@@ -18,8 +18,6 @@ DEFAULT_SERVICES = {
     "prometheus",
 }
 SECURE_REMOTE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
-# The one setup container: it stages and exits; nothing waits on it in a loop.
-ONE_SHOT_SERVICES = {"runtime-init"}
 ALL_SERVICES = DEFAULT_SERVICES | SECURE_REMOTE_SERVICES
 # A service image is pinned by a digest or by an explicit version tag; a bare
 # or floating reference pins nothing.
@@ -92,8 +90,8 @@ def test_canonical_model_has_step_ca_without_an_overlay() -> None:
     assert not (COMPOSE_ROOT / "compose.dev.yaml").exists()
 
 
-def test_every_runtime_service_but_the_one_shot_is_long_running() -> None:
-    """Catches a second exited setup container or a sleeping helper."""
+def test_every_runtime_service_is_long_running() -> None:
+    """Keeps the canonical NAS project free of exited setup containers."""
     model = _canonical_model()
     services = model["services"]
     assert isinstance(services, dict)
@@ -102,13 +100,8 @@ def test_every_runtime_service_but_the_one_shot_is_long_running() -> None:
         assert isinstance(service, dict), name
         assert not _is_sleep_only(service.get("command")), name
         assert not _is_sleep_only(service.get("entrypoint")), name
-        assert (service.get("restart") == "no") == (name in ONE_SHOT_SERVICES), name
-        for dependency, condition in zip(
-            service.get("depends_on", {}), _dependency_conditions(service), strict=True
-        ):
-            assert (condition == "service_completed_successfully") == (
-                dependency in ONE_SHOT_SERVICES
-            ), (name, dependency)
+        assert service.get("restart") != "no", name
+        assert "service_completed_successfully" not in _dependency_conditions(service)
 
 
 def test_canonical_model_has_healthchecks_and_version_pinned_images() -> None:
@@ -119,8 +112,7 @@ def test_canonical_model_has_healthchecks_and_version_pinned_images() -> None:
 
     for name, service in services.items():
         assert isinstance(service, dict), name
-        # A one-shot's readiness is its exit status.
-        assert ("healthcheck" in service) != (name in ONE_SHOT_SERVICES), name
+        assert "healthcheck" in service, name
         image = service.get("image")
         assert isinstance(image, str), name
         if ":?set " in image:

@@ -308,20 +308,6 @@ def test_compose_health_parser_rejects_exited_or_unhealthy_services() -> None:
         assert_compose_services_healthy(healthy, {"api", "db", "worker"})
 
 
-def test_compose_health_parser_settles_a_one_shot_only_on_exit_zero() -> None:
-    def status(exit_code: int) -> str:
-        return json.dumps(
-            [
-                {"Service": "api", "State": "running", "Health": "healthy"},
-                {"Service": "runtime-init", "State": "exited", "ExitCode": exit_code},
-            ]
-        )
-
-    assert_compose_services_healthy(status(0), {"api", "runtime-init"})
-    with pytest.raises(AcceptanceError):
-        assert_compose_services_healthy(status(1), {"api", "runtime-init"})
-
-
 def test_compose_compatibility_exercises_every_declared_parser_fixture(
     tmp_path: Path,
 ) -> None:

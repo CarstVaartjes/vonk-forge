@@ -7,7 +7,9 @@ import errno
 import logging
 import os
 import secrets
+import signal
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -654,16 +656,38 @@ def stage_runtime() -> None:
     prepare_shared_volumes()
 
 
-def main() -> None:
+# Per container start: the tmpfs begins empty, so a restart or a recreated
+# container is unhealthy until its own staging run has completed.
+STAGED_MARKER = Path("/tmp/runtime-staged")
+
+
+def _stop(_signum: int, _frame: object) -> None:
+    raise SystemExit(0)
+
+
+def main(
+    *, marker: Path = STAGED_MARKER, idle: Callable[[], object] = signal.pause
+) -> None:
+    """Stage once, mark this run healthy, then stay resident without work.
+
+    Some NAS Docker UIs show a project with an exited container as failed, so
+    the staging container stays up. A failed run exits for the restart policy;
+    every file is replaced atomically, so the previous staging stays intact
+    for the dependants, which start anyway.
+    """
+    # As PID 1 the default SIGTERM action is ignored; stop promptly instead.
+    signal.signal(signal.SIGTERM, _stop)
     for _attempt in range(3):
         try:
             stage_runtime()
-            return
+            break
         except (OSError, UnknownOutcomeError):
             _LOGGER.warning("runtime staging observation is unavailable")
-    # Every file is replaced atomically, so the previous staging stays intact
-    # for the dependants, which start anyway; the next `compose up` reruns this.
-    raise SystemExit(1)
+    else:
+        raise SystemExit(1)
+    marker.write_text("staged\n", encoding="utf-8")
+    while True:
+        idle()
 
 
 if __name__ == "__main__":

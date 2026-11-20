@@ -1,7 +1,7 @@
 # Controller startup failure boundaries
 
 This inventory covers API composition, agent composition, worker composition,
-API pre-exec and the `runtime-init` one-shot. It describes source behavior, not
+API pre-exec and the `runtime-init` staging helper. It describes source behavior, not
 deployment acceptance.
 
 The API now guards 18 capabilities independently. Worker composition also
@@ -32,7 +32,7 @@ provenance remains a separate observation.
 | Worker due-wait selector and upgrade reconciliation | In-memory cursor/callback binding; release HTTP transport is lazy | Reviewed pure/core wiring; owner failures remain row-scoped during the existing worker pass |
 | Worker prebuilt importer, telemetry/history collectors, storage demands/collector, maintenance cadence, heartbeat and memory monitor | Fixed budgets and retained paths | Reviewed wiring; existing per-source worker containment handles tick/sample failures |
 | `Settings.from_env_and_secrets`, engine/session creation | Missing/invalid database URL or inaccessible database authority | Required core dependency; database identity is never substituted |
-| `runtime_init.stage_runtime` (`runtime-init` one-shot) | Privilege, secret normalization, runtime kit staging, shared-volume ownership | Root, no network, no database; three attempts, then exit 1. Dependants start anyway on the previous staging (`required: false`) and the next `compose up` runs it again |
+| `runtime_init.stage_runtime` (`runtime-init` helper) | Privilege, secret normalization, runtime kit staging, shared-volume ownership | Root, no network, no database; three attempts, then exit 1 and the restart policy runs it again. Dependants start anyway on the previous staging (`required: false`); healthy only after its own completed run |
 | `api_preexec.prepare_owned_state` and `db.initialize_database` | Privilege, migration/schema conflict, administrator bootstrap | Existing privileged/core startup boundary; bookkeeping adoption already uses its own savepoint and logs/degrades without undoing schema reconciliation |
 
 Construction attempts use a nonblocking per-capability owner. Failure produces

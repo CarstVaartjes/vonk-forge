@@ -686,7 +686,7 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
         "required": True,
     }
     assert services["litellm"]["depends_on"]["runtime-init"] == {
-        "condition": "service_completed_successfully",
+        "condition": "service_healthy",
         "required": False,
         "restart": True,
     }

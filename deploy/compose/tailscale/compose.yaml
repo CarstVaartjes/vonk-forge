@@ -86,7 +86,7 @@ services:
         condition: service_started
         restart: true
       runtime-init:
-        condition: service_completed_successfully
+        condition: service_healthy
         required: false
         restart: true
       caddy:

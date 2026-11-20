@@ -109,7 +109,8 @@ address and serves the browser UI with the generated local CA certificate;
 Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
 control authority and Step CA is the agent identity authority. There is no
 runtime Git checkout, host updater, migration helper, or A/B agent supervisor.
-The one setup container is `runtime-init` (below); it exits after each run.
+The one setup service is `runtime-init` (below); like every service it stays
+running.
 
 ## Upgrade
 
@@ -131,7 +132,7 @@ redeploy. Keep named volumes during normal upgrades.
 
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
 Prometheus and LiteLLM supervisor files) ships inside the
-Controller API image. The `runtime-init` one-shot, which runs that image, stages
+Controller API image. The `runtime-init` helper, which runs that image, stages
 it into the `runtime-assets` volume that the other services read (see
 [Runtime staging](#runtime-staging-runtime-init)). A pull and redeploy therefore
 rolls out configuration too; the installer only needs to run again when `.env`,
@@ -180,9 +181,9 @@ platform self-heals.
 
 ## Runtime staging (`runtime-init`)
 
-`runtime-init` is a one-shot on the Controller API image (`restart: "no"`, root
+`runtime-init` runs the Controller API image (`restart: unless-stopped`, root
 with only `CHOWN`, `FOWNER` and `DAC_OVERRIDE`, no network, no database). Each
-`compose up` runs it once, before the services that read what it stages:
+time its container starts it stages, before the services that read it start:
 
 - each consumer's private copy of the installer's Compose secrets in
   `normalized-private-keys` (owner and mode per consumer), and the gateway
@@ -194,25 +195,30 @@ with only `CHOWN`, `FOWNER` and `DAC_OVERRIDE`, no network, no database). Each
 
 Every file is a bounded regular file (at most 64 KiB) published with fsync and
 atomic replacement, so a reader sees the old or the new copy, never a partial
-one. A staging run retries three times and then exits 1.
+one. A staging run retries three times and then exits 1, and the restart policy
+runs it again.
 
-Its readers declare `runtime-init: {condition: service_completed_successfully,
-required: false}`. Compose starts them only after it has exited, so nothing
-polls for a staged file. The edge orders startup and never gates it: after a
-failed run they still start on the previous staging kept in the volumes, and
-the next `compose up` runs `runtime-init` again. A restart policy on the one-shot
-would hold `compose up` and every recreated dependant while staging keeps
-failing, so it has none. Caddy, LiteLLM, Prometheus and the Tailscale
-configurator also declare `restart: true`: when a new image recreates
-`runtime-init`, Compose restarts them after the new kit is staged. PostgreSQL
-does not restart with a release. The API keeps only the database half of
-startup (schema and administrator) in its pre-exec, because PostgreSQL itself
-starts from the staged entrypoint.
+After a completed run it writes a marker on its own tmpfs (`/tmp/runtime-staged`)
+and idles in a blocking wait, doing no work. Its healthcheck reads the marker.
+The tmpfs is empty on every container start, so a restarted or recreated
+container is unhealthy until its own run has completed. It stays running
+because NAS Docker UIs (UGREEN) show a project with an exited container as
+failed.
 
-After a NAS reboot Docker restarts the long-running services by their restart
-policy, without Compose, so `runtime-init` does not run. The services start
-from the retained volumes. `compose ps` shows `runtime-init` as `exited (0)`
-after a successful run.
+Its readers declare `runtime-init: {condition: service_healthy, required:
+false}`. Compose starts them only once it is healthy, so nothing polls for a
+staged file. The edge orders startup and never gates it: after a failed run
+Compose starts them anyway on the previous staging kept in the volumes, while
+the restart policy keeps running `runtime-init`. Caddy, LiteLLM, Prometheus and
+the Tailscale configurator also declare `restart: true`: when a new image
+recreates `runtime-init`, Compose restarts them after the new kit is staged.
+PostgreSQL does not restart with a release. The API keeps only the database
+half of startup (schema and administrator) in its pre-exec, because PostgreSQL
+itself starts from the staged entrypoint.
+
+After a NAS reboot Docker restarts every service by its restart policy, without
+Compose ordering. `runtime-init` restages the same release while the others
+start from the retained volumes.
 
 ## NAS daemon platform-image retention and network repair
 
