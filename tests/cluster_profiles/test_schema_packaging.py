@@ -8,33 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "src/cluster_profiles/schemas"
 MIRROR = ROOT / "schemas"
-STANDALONE_SCHEMAS = {
-    "install-release-manifest.schema.json",
-}
-# CLI response schemas are generated directly into the installed package;
-# qualification documents retain their repository mirrors.
-PACKAGE_ONLY_SCHEMAS = {
-    "control-openapi.json",
-    "cli-update-contract.schema.json",
-    "cli-release-projection.schema.json",
-}
 
 
-def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
-    canonical_names = {
-        path.name
-        for path in CANONICAL.glob("*.json")
-        if path.name not in PACKAGE_ONLY_SCHEMAS
+def test_no_schema_file_exists_twice() -> None:
+    duplicated = {path.name for path in CANONICAL.glob("*.json")} & {
+        path.name for path in MIRROR.glob("*.json")
     }
-    mirror_names = {
-        path.name
-        for path in MIRROR.glob("*.json")
-        if path.name not in STANDALONE_SCHEMAS
-    }
-
-    assert mirror_names == canonical_names
-    for name in sorted(canonical_names):
-        assert (MIRROR / name).read_bytes() == (CANONICAL / name).read_bytes()
+    assert duplicated == set()
 
 
 def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
