@@ -130,7 +130,7 @@ dropped from `.env` and listed in the installer output. Place the resulting dire
 redeploy. Keep named volumes during normal upgrades.
 
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
-Prometheus, registry and LiteLLM supervisor files) ships inside the
+Prometheus and LiteLLM supervisor files) ships inside the
 Controller API image. On every start the API stages it into the
 `runtime-assets` volume that the other services read, and those services
 restart with it. A pull and redeploy therefore rolls out configuration too; the
@@ -293,8 +293,7 @@ embedded script. Its named state volume must survive upgrades.
 This daemon store is separate from recipe availability: recipe preparation
 copies registry bytes with skopeo into the Controller's `image-cache/oci` layout,
 and the existing unused-storage and image-store collectors expire receipts and
-unreferenced OCI blobs there. They do not operate the NAS Docker daemon. The
-registry container's `registry-data` volume is another separate store.
+unreferenced OCI blobs there. They do not operate the NAS Docker daemon.
 
 ## Remove it
 

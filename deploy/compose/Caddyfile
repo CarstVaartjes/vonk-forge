@@ -439,35 +439,3 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 	}
 	respond 404
 }
-
-# Signed OCI artifacts are pull-only for authenticated agents. Operator
-# publication uses the private registry network, never this SNI.
-https://{$VONK_REGISTRY_HOSTNAME:registry.example.invalid}:{$VONK_BACKEND_PORT:8443} {
-	import edge_guards
-	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
-		client_auth {
-			trust_pool file /run/secrets/agent-client-ca
-			mode require_and_verify
-		}
-	}
-
-	@registry_ping {
-		method GET HEAD
-		path /v2/
-	}
-	handle @registry_ping {
-		reverse_proxy registry:5000
-	}
-	@registry_digest {
-		method GET HEAD
-		path_regexp registry_digest "^/v2/[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*/(?:manifests|blobs)/sha256:[0-9a-f]{64}$"
-	}
-	handle @registry_digest {
-		reverse_proxy registry:5000
-	}
-	@registry_api path /v2 /v2/*
-	handle @registry_api {
-		respond 405
-	}
-	respond 404
-}

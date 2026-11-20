@@ -66,9 +66,6 @@ deploy/compose/litellm/*
 !deploy/compose/litellm/patch-vllm-passthrough.py
 !deploy/compose/prometheus/
 !deploy/compose/prometheus/**
-!deploy/compose/registry/
-deploy/compose/registry/*
-!deploy/compose/registry/config.yml
 !deploy/compose/tailscale/
 deploy/compose/tailscale/*
 !deploy/compose/tailscale/configure.sh

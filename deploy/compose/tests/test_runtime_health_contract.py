@@ -17,7 +17,6 @@ DEFAULT_SERVICES = {
     "litellm",
     "postgres",
     "prometheus",
-    "registry",
 }
 
 
@@ -83,7 +82,6 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         "litellm": ("/health/readiness",),
         "prometheus": ("/-/ready",),
         "caddy": ("127.0.0.1:8082/healthz", "ip route", "^default"),
-        "registry": ("127.0.0.1:5000/v2/",),
         "tailscale-gateway": ("BackendState", "Running"),
         "tailscale-configurator": ("TS_HEALTHCHECK_ONLY=1",),
     }
