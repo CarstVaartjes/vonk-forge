@@ -171,8 +171,7 @@ class Canary:
         last_state = None
         while True:
             code, document = self.controller.call(
-                "profile",
-                "progress",
+                *["profile", "progress"],
                 "--load",
                 application,
                 timeout=60,

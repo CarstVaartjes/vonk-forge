@@ -8,6 +8,7 @@ from pathlib import Path
 from ..cli_artifact_jobs import (
     add_artifact_job_commands,
 )
+from ..cli_json_contract import Word
 from .common import (
     MAX_LOG_LINES,
     _action_flags,
@@ -208,7 +209,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(evidence)
 
     resume = fleet_actions.add_parser(
-        "resume",
+        Word.RESUME,
         help="Resume an operation that waits for an operator",
     )
     resume.set_defaults(outcome_context="mutation")
@@ -243,7 +244,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(model_detail)
     model_download = model_actions.add_parser(
-        "download",
+        Word.DOWNLOAD,
         help="Download a model variant to the Controller (NAS cache)",
     )
     _selector(model_download, "model", help="Exact model selector or friendly name")
@@ -361,7 +362,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(recipe_detail)
     recipe_download = recipe_actions.add_parser(
-        "download",
+        Word.DOWNLOAD,
         help="Download a recipe and its missing model to the Controller (NAS cache)",
     )
     _selector(recipe_download, "recipe", help="Exact recipe selector or friendly name")
@@ -384,7 +385,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Show the Controller-owned removal impact without submitting it",
     )
     recipe_retry = recipe_actions.add_parser(
-        "retry",
+        Word.RETRY,
         help="Start a failed recipe preparation again",
     )
     recipe_retry.add_argument("operation_id", type=_uuid_argument)
@@ -477,7 +478,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _profile_edit_flags(profile_add)
     _selection_controls(profile_add)
     profile_remove = profile_actions.add_parser(
-        "remove",
+        Word.REMOVE,
         help="Remove a recipe alias or Spark members from the profile",
     )
     profile_remove.add_argument("assignment", metavar="ALIAS")
@@ -555,7 +556,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(profile_load)
     _add_output(profile_load)
     profile_cancel = profile_actions.add_parser(
-        "cancel",
+        Word.CANCEL,
         help="Cancel one profile load and reconcile its effects",
     )
     profile_cancel.set_defaults(outcome_context="mutation", requires_profile=True)

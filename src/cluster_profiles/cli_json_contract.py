@@ -57,6 +57,9 @@ class Word(StrEnum):
     UPLOAD = "upload"
     SUBMIT = "submit"
     RESULT = "result"
+    RESUME = "resume"
+    RETRY = "retry"
+    REMOVE = "remove"
 
 
 class Reconcile(TypedDict):
