@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,7 +25,10 @@ from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
 from ..capability_contract import ControllerCapability
 from ..catalog_service import CatalogService
-from ..catalog_sync import ManagedRecipeCatalogSyncService, run_automatic_sync
+from ..catalog_sync import (
+    ManagedRecipeCatalogSyncService,
+    catalog_sync_failure_reason,
+)
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
@@ -67,11 +70,59 @@ from .application import create_app
 from .common import _LOGGER, SpaFiles
 
 
-def reconcile_library_observations(
-    visual_library: LibraryProjection, gateway_keys: GatewayKeyService
-) -> bool | UnknownError:
-    visual_library.refresh_catalog()
-    return gateway_keys.ensure_default()
+class LibraryObservations:
+    """Keep the API's in-memory library view current.
+
+    The worker owns the catalog sync and the API only reads what it applied: a
+    newly finished sync run is noticed on the next tick and the library is
+    re-read at once. Without one, the library (with its storage bytes) is
+    observed again every ``interval_seconds``. A failed read waits for the
+    next sync or the next interval, never the next tick.
+    """
+
+    def __init__(
+        self,
+        library: LibraryProjection,
+        last_sync: Callable[[], object],
+        *,
+        interval_seconds: float,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._library = library
+        self._last_sync = last_sync
+        self._interval = interval_seconds
+        self._monotonic = monotonic
+        self._seen: object = None
+        self._next_full = monotonic()
+
+    def tick(self) -> None:
+        try:
+            now = self._monotonic()
+            marker = self._last_sync()
+            if marker == self._seen and now < self._next_full:
+                return
+            self._next_full = now + self._interval
+            self._seen = marker
+            self._library.refresh_catalog()
+        except Exception as error:  # noqa: BLE001 - this loop is the only owner; it must keep running
+            _LOGGER.warning(
+                "library observation unavailable: %s",
+                catalog_sync_failure_reason(error),
+            )
+
+
+def observe_default_key(ensure_default: Callable[[], bool | UnknownError]) -> None:
+    """One periodic default-key observation; it heals after ``keep_default_key`` ends."""
+    try:
+        observed = ensure_default()
+    except Exception as error:  # noqa: BLE001 - this loop is the only owner; it must keep running
+        _LOGGER.warning(
+            "default gateway key observation unavailable: %s",
+            catalog_sync_failure_reason(error),
+        )
+    else:
+        if isinstance(observed, UnknownError):
+            _LOGGER.warning("default gateway key observation: %s", observed.reason)
 
 
 async def _keep_recipe_routes(
@@ -100,8 +151,21 @@ async def _keep_recipe_routes(
                 "gateway route grants unavailable; next check in %ss", interval_seconds
             )
 
+    await _keep(
+        "route reconciliation", reconcile, stop, interval_seconds=interval_seconds
+    )
+
+
+async def _keep(
+    name: str,
+    reconcile: Callable[[], None],
+    stop: asyncio.Event,
+    *,
+    interval_seconds: float,
+) -> None:
+    """Run ``reconcile`` in a thread every ``interval_seconds`` until ``stop``."""
     if interval_seconds <= 0:
-        raise ValueError("route reconciliation interval must be positive")
+        raise ValueError(f"{name} interval must be positive")
     loop = asyncio.get_running_loop()
     completion: asyncio.Future[None] = loop.create_future()
     task: asyncio.Task[None] | None = None
@@ -120,7 +184,8 @@ async def _keep_recipe_routes(
         error = finished.exception()
         if error is not None:
             _LOGGER.error(
-                "route reconciliation task failed",
+                "%s task failed",
+                name,
                 exc_info=(type(error), error, error.__traceback__),
             )
             completion.set_exception(error)
@@ -523,7 +588,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     recipe_image_production = build_recipe_image_availability(
         sessions,
         settings=settings,
-        managed_catalog_sync=managed_catalog_sync,
         recipe_builds=recipe_builds,
         recipe_operations=recipe_operations,
         model_cache=model_cache,
@@ -543,41 +607,48 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         recipe_image_production.service.cancel_profile_preparation
     )
 
-    automatic_sync_task: asyncio.Task[None] | None = None
-    automatic_sync_stop = asyncio.Event()
+    observations_stop = asyncio.Event()
+    library_observations = LibraryObservations(
+        visual_library,
+        managed_catalog_sync.last_completed_at,
+        interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        nonlocal automatic_sync_task
         capabilities.start_recovery()
-        automatic_sync_task = asyncio.create_task(
-            run_automatic_sync(
-                managed_catalog_sync,
-                automatic_sync_stop,
-                interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                reconcile=lambda: reconcile_library_observations(
-                    visual_library, gateway_keys
-                ),
+        library_task = asyncio.create_task(
+            _keep(
+                "library observation",
+                library_observations.tick,
+                observations_stop,
+                interval_seconds=5.0,
             )
         )
         route_task = asyncio.create_task(
             _keep_recipe_routes(
                 RecipeOperationWorker(sessions, recipe_routes, clock=clock),
                 gateway_keys,
-                automatic_sync_stop,
+                observations_stop,
             )
         )
         default_key_task = asyncio.create_task(
-            keep_default_key(gateway_keys, automatic_sync_stop)
+            keep_default_key(gateway_keys, observations_stop)
+        )
+        key_task = asyncio.create_task(
+            _keep(
+                "default gateway key",
+                lambda: observe_default_key(gateway_keys.ensure_default),
+                observations_stop,
+                interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+            )
         )
         try:
             yield
         finally:
-            automatic_sync_stop.set()
+            observations_stop.set()
             await capabilities.stop_recovery()
-            tasks = [default_key_task, route_task]
-            if automatic_sync_task is not None:
-                tasks.append(automatic_sync_task)
+            tasks = [default_key_task, key_task, route_task, library_task]
             for task in tasks:
                 task.cancel()
             await asyncio.wait(tasks, timeout=5.0)

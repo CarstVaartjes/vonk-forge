@@ -868,7 +868,19 @@ def assemble_production_worker(
         ),
     )
     worker_background_services = tuple(background_services)
+    automatic_catalog = None
+    if catalog_sync is not None:
+        from .catalog_sync import AutomaticCatalogSync
+        from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+
+        # The one automatic catalog sync; the API only reads what it applied.
+        automatic_catalog = AutomaticCatalogSync(
+            catalog_sync, interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+        )
+        worker_background_services += (automatic_catalog.tick,)
     worker_background_closers = (*background_closers, upgrades.close)
+    if automatic_catalog is not None:
+        worker_background_closers += (automatic_catalog.close,)
     memory_sources: list[object] = [model_cache, artifact_phase_executor]
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
@@ -904,7 +916,6 @@ def assemble_production_worker(
         image_production = build_recipe_image_availability(
             sessions,
             artifact_root=recipe_image_artifact_root,
-            managed_catalog_sync=None,
             recipe_builds=recipe_builds,
             recipe_operations=lifecycle,
             model_cache=model_cache,
@@ -1053,11 +1064,9 @@ def assemble_production_worker(
         return enrollment.reconcile_revocations(str(key[0]))
 
     def catalog(key: RowKey, kind: WaitOwnerKind) -> object:
-        from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-
-        if catalog_sync is None:
+        if automatic_catalog is None:
             return unavailable(kind)
-        return catalog_sync.redrive(str(key[0]), RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS)
+        return automatic_catalog.tick()
 
     advancers: dict[WaitOwnerKind, AdvanceWait] = {
         WaitOwnerKind.COORDINATOR: lambda key, wait: worker.redrive_coordinator(
@@ -1244,7 +1253,6 @@ if __name__ == "__main__":
     from .catalog_service import CatalogService
     from .catalog_sync import ManagedRecipeCatalogSyncService
     from .recipe_packages import RecipePackageClient
-    from .settings import RECIPE_LIBRARY_API_URL, RECIPE_LIBRARY_ASSET_URL
     from .source_bundles import DatabaseSourceBundleStore
 
     catalog_sync = capabilities.guard(
@@ -1258,10 +1266,10 @@ if __name__ == "__main__":
                 cursors=TokenCodec(settings.token_signing_key).cursor_codec(),
                 source_bundles=DatabaseSourceBundleStore(sessions),
             ),
+            # GitHub directly over the worker's artifact-egress network; the
+            # Caddy relay serves only the API, which has no egress.
             reader=RecipePackageClient(
                 cache_root=settings.state_path / "recipe-library-packages",
-                api_url=RECIPE_LIBRARY_API_URL,
-                asset_url=RECIPE_LIBRARY_ASSET_URL,
                 release=settings.recipe_library_release,
             ),
             clock=clock,

@@ -673,10 +673,14 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
     from vonk_agent_protocol import CatalogSyncCode, CatalogSyncState
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog_sync import (
+        AutomaticCatalogSync,
+        ManagedRecipeCatalogSyncService,
+    )
     from vonk_control.models import RecipeLibrarySyncRun
 
     from .test_catalog_sync import Reader, _fixture
+    from .test_catalog_sync_retry import Inline
 
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
     available = [False]
@@ -708,23 +712,26 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     assert waiting is not None and waiting.wait is not None
     assert step.failures == 1 and len(jitter) == 1
     assert waiting.wait.next_check == NOW + timedelta(seconds=step.delay_seconds)
-    # The API cadence did not run: the backstop takes over one interval late.
-    now[0] = waiting.wait.next_check + timedelta(seconds=90)
+    # A restarted worker's backstop runs the sync once its recorded check is due.
+    now[0] = waiting.wait.next_check
     available[0] = True
-    reconstructed = construct()
+    service = construct()
+    reconstructed = AutomaticCatalogSync(
+        service, interval_seconds=90, executor=Inline()
+    )
     backstop = DueWaitBackstop(
         sessions,
         [
             WaitSource(
                 RecipeLibrarySyncRun,
                 frozenset({WaitOwnerKind.CATALOG_SYNC}),
-                lambda key, wait: reconstructed.redrive(str(key[0]), 90),
+                lambda key, wait: reconstructed.tick(),
             )
         ],
         clock=lambda: now[0],
     )
     backstop.tick()
-    recovered = reconstructed.latest()
+    recovered = service.latest()
     assert recovered is not None and recovered.state is CatalogSyncState.CURRENT
     assert recovered.wait is not None
     assert recovered.wait.reason is CatalogSyncCode.REFRESH_SCHEDULED

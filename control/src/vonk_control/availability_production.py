@@ -42,7 +42,6 @@ from .admission_locking import (
 )
 from .bounded_json import require_mapping
 from .catalog_revision_contract import read_catalog_document
-from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text
@@ -270,7 +269,6 @@ def build_recipe_image_availability(
     *,
     settings: Any | None = None,
     artifact_root: Any | None = None,
-    managed_catalog_sync: Any | None,
     recipe_builds: Any,
     recipe_operations: Any,
     model_cache: Any | None = None,
@@ -395,20 +393,14 @@ def build_recipe_image_availability(
         *,
         force: bool = False,
     ) -> tuple[RecipeDefinition, AvailabilityRuntime]:
+        # A recipe the catalog does not hold yet waits for the worker's next
+        # sync; this only rides out a local read that failed once.
         unknown: AvailabilityUnsettled | None = None
-        for attempt in range(3):
+        for _attempt in range(3):
             try:
                 return authority(recipe_revision_id, force=force)
             except AvailabilityUnsettled as error:
                 unknown = error
-            # Ingestion runs outside SQL and retains the selected content identity.
-            if attempt < 2 and managed_catalog_sync is not None:
-                try:
-                    managed_catalog_sync.automatic()
-                except SecurityRefusalError:
-                    raise
-                except (CatalogSyncError, OSError, RuntimeError, TypeError, ValueError):
-                    pass
         assert unknown is not None
         raise unknown
 
