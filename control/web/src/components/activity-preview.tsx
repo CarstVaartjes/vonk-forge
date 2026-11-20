@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { ControlApi, VisualFleetNode } from "../api/types";
 import { activityPreviewRows } from "../pages/activity";
 import { nodeDisplayName } from "../lib/fleet";
-import { exactTime } from "../lib/time";
+import { exactTime, formatDate } from "../lib/time";
 import { StatusPill } from "./status-pill";
 
 const ROWS = 7;
@@ -11,13 +11,13 @@ const REFRESH_MS = 30_000;
 
 type Rows = ReturnType<typeof activityPreviewRows>;
 
-/** Today's rows read as a time, older ones as a short day. */
+/** Today's rows read as a time, older ones as a date. */
 function whenText(value: string | null, now: Date): string {
   const at = value ? new Date(value) : null;
   if (!at || Number.isNaN(at.getTime())) return "";
   return at.toDateString() === now.toDateString()
     ? at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })
-    : at.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    : formatDate(at);
 }
 
 /** The latest activity, read from the same operations list the Activity page uses, and read again every 30 seconds. */

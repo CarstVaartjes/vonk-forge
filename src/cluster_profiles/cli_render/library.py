@@ -112,7 +112,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     )
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
-    _field("Usage", _capability_words(item.get("usage")))
+    _field("Capabilities", _capability_words(item.get("usage")))
     _field("Disk", _bytes(resources.disk_bytes))
     if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
@@ -129,7 +129,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             explained: set[str] = set()
             for key, label in (
                 ("fleet_fit", "Fleet fit"),
-                ("cache", "Exact NAS assets"),
+                ("cache", "Exact Controller assets"),
                 ("readiness", "Readiness"),
             ):
                 check = _object(assessment.get(key), key)

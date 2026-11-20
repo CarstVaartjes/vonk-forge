@@ -108,7 +108,7 @@ profile choice binds the exact model artifact set and required runtime image;
 profile creation and updates must not select an uncached or merely Spark-local
 asset. If an existing choice is no longer fully cached and verified, apply is
 blocked with typed, actionable reasons and offers the cache-preparation
-operation. Apply must not silently fetch from upstream, choose another
+operation. Load must not silently fetch from upstream, choose another
 revision, or recover the authority from a Spark copy.
 
 After the cache gate succeeds, the Controller distributes the exact digest- and

@@ -399,7 +399,7 @@ vonkctl recipe library --cached
 vonkctl recipe library --model "Qwen 3.8"
 vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2   # 2 Sparks or fewer
 vonkctl recipe library --ready
-vonkctl recipe detail qwen-code         # Usage and the status Meaning use the release's published words
+vonkctl recipe detail qwen-code         # Capabilities and the status Meaning use the release's published words
 vonkctl recipe detail qwen-code --watch
 vonkctl recipe download qwen-code       # repeat to refresh a completed copy
 vonkctl recipe download qwen-code --detach

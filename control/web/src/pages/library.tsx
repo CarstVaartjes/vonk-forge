@@ -15,6 +15,7 @@ import type {
 } from "../api/types";
 import { CatalogSyncStatusLine } from "../components/catalog-sync-status";
 import { Time } from "../components/time";
+import { formatDate } from "../lib/time";
 import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
 import { LibraryBrowser } from "../components/library-browser";
@@ -410,7 +411,7 @@ export function LibraryPage({
         {snapshot?.library && (
           <p className="library-release">
             Recipe library v{snapshot.library.version} · updated{" "}
-            {new Date(snapshot.library.updated_at).toLocaleDateString()}
+            {formatDate(new Date(snapshot.library.updated_at))}
           </p>
         )}
         <CatalogSyncStatusLine api={api} />

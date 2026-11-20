@@ -148,13 +148,13 @@ export function LibraryModelsView({
           </select>
         </label>
         <label>
-          Usage
+          Capabilities
           <select
-            aria-label="Filter model usage"
+            aria-label="Filter model capabilities"
             value={filters.usage}
             onChange={(event) => updateFilters({ usage: event.target.value })}
           >
-            <option value="">All usage</option>
+            <option value="">All capabilities</option>
             {[...new Set(models.flatMap((model) => model.usage))].sort().map((value) => (
               <option key={value} value={value}>
                 {words.label(value)}
