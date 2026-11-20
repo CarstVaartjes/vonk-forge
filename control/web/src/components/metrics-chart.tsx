@@ -35,14 +35,6 @@ function seriesColor(labels: Record<string, string>, names: Record<string, strin
   return sparkColor(position >= 0 ? position : index);
 }
 
-/** "12 days", "5 hours", "20 minutes": the time left, in the largest whole unit. */
-export function formatTimeLeft(seconds: number): string {
-  const [size, name] =
-    seconds >= 86400 ? [86400, "day"] : seconds >= 3600 ? [3600, "hour"] : [60, "minute"];
-  const count = Math.max(1, Math.floor(seconds / size));
-  return `${count} ${name}${count === 1 ? "" : "s"}`;
-}
-
 export function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
   const node = labels.node_id;
   if (node) return names[node] ?? node;

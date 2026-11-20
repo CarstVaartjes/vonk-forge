@@ -107,6 +107,13 @@ test("without readings a figure is a muted dash with a plain reason, not a displ
     expect(tile(name)).toHaveTextContent("Not reported");
 });
 
+test("a figure still being read has no reason yet", () => {
+  // Break caught: loading reads "Gateway metrics unavailable".
+  render(<FleetPulse {...none} output={undefined} tokens={null} nodes={fleet} />);
+  expect(tile("Output now")).not.toHaveTextContent("Gateway metrics unavailable");
+  expect(tile("Output now").querySelector(".pulse-fig")).toHaveClass("is-muted");
+});
+
 test("a gateway that answers without traffic says so", () => {
   const idle = { ...tokens, series: [{ labels: {}, points: [], summary: {} }] };
   render(

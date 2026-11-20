@@ -27,12 +27,12 @@ function Tile({
   return (
     <section className="pulse-tile" aria-label={label}>
       <h2 className="pulse-label">{label}</h2>
-      {unavailable ? (
+      {unavailable !== undefined ? (
         <>
           <p className="pulse-fig is-muted" aria-hidden="true">
             —
           </p>
-          <p className="pulse-caption">{unavailable}</p>
+          {unavailable && <p className="pulse-caption">{unavailable}</p>}
         </>
       ) : (
         <>
@@ -48,9 +48,9 @@ function Tile({
   );
 }
 
-/** No series (loading or a failed read) is a gateway problem; a series without a value is an idle gateway. */
+/** Still reading says nothing; a finished read with no series is a gateway problem; a series without a value is idle. */
 const noReading = (series: MetricsSeriesResponse | null | undefined) =>
-  series ? "No inference traffic" : "Gateway metrics unavailable";
+  series === undefined ? "" : series ? "No inference traffic" : "Gateway metrics unavailable";
 
 /**
  * Five fleet figures in one band. Each is the Controller's fleet line or total of a metric (output speed,

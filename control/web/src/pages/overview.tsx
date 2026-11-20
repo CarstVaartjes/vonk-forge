@@ -50,7 +50,7 @@ export function OverviewPage({
   const [submitting, setSubmitting] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
-  const [failedToday, setFailedToday] = useState(0);
+  const [unsuccessful, setUnsuccessful] = useState(0);
   async function upgradeAll() {
     setUpgradeBusy(true);
     try {
@@ -174,15 +174,15 @@ export function OverviewPage({
       <FleetFeedback fleet={fleet} />
       {fleet.snapshot && (
         <p className="fleet-status-line">
-          {fleetStatusLine(fleet.snapshot, fleet.now, failedToday)}
-          {failedToday > 0 && (
+          {fleetStatusLine(fleet.snapshot, fleet.now)}
+          {unsuccessful > 0 && (
             <>
               {" · "}
               <a
                 href={FAILED_ACTIVITY}
                 onClick={onNavigate && ((event) => onNavigate(event, FAILED_ACTIVITY))}
               >
-                {failedToday} failed {failedToday === 1 ? "operation" : "operations"} today
+                {unsuccessful} unsuccessful
               </a>
             </>
           )}
@@ -240,7 +240,7 @@ export function OverviewPage({
               api={api}
               nodes={nodes}
               now={fleet.now}
-              onFailedToday={setFailedToday}
+              onUnsuccessful={setUnsuccessful}
               onViewAll={onNavigate && ((event) => onNavigate(event, "/activity"))}
             />
           </div>

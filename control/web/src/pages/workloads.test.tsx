@@ -3,7 +3,7 @@ vi.mock("../components/metrics-chart", async (importOriginal) => ({
   MetricsChart: () => null,
 }));
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { WorkloadsPage } from "./workloads";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
@@ -230,7 +230,7 @@ test("with no workload loaded the page says so and still lists every Spark", () 
   nodes = [];
 });
 
-test("an expiring or expired certificate is one warning near the top, not a footer line", async () => {
+test("an expired certificate is one warning near the top; a certificate with days left is none", async () => {
   // Break caught: certificate expiry is buried under the trend charts, or an expired one reads "expires in now".
   nodes = [spark("Alpha", 40, 250)];
   const id = (nodes[0] as { id: string }).id;
@@ -253,6 +253,11 @@ test("an expiring or expired certificate is one warning near the top, not a foot
     banner.compareDocumentPosition(screen.getByRole("heading", { name: "All Sparks" })) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
+  reads = { certificate_expiry: certificate(20 * 86400) };
+  cleanup();
+  render(<WorkloadsPage api={api} />);
+  await screen.findByRole("heading", { name: "All Sparks" });
+  await waitFor(() => expect(screen.queryByRole("status", { name: "Certificates" })).toBeNull());
   reads = {};
   nodes = [];
 });

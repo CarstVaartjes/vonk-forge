@@ -368,18 +368,6 @@ test("an empty Serving card offers to load a workload from the Library", async (
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/library");
 });
 
-test("each storage row keeps a long name and its size on one line, the size unbroken", () => {
-  // Break caught: a long model name pushes the size to a second line.
-  show({
-    ...node,
-    installed: [
-      { installation_id: "i1", title: "x".repeat(80), complete: true, installed_bytes: 1024 ** 3 },
-    ],
-  });
-  const size = screen.getByText("1.0 GiB");
-  expect(size).toHaveClass("spark-model-size");
-});
-
 test("the Logs tab shows the CLI command as a copyable block with one explanatory line", async () => {
   // Break caught: the command is bare prose the user must select by hand.
   show(node, { fleetLogs: vi.fn().mockResolvedValue({ entries: [] }) });

@@ -1,7 +1,7 @@
 import "./activity-preview.css";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import type { ControlApi, VisualFleetNode } from "../api/types";
-import { activityPreviewRows } from "../pages/activity";
+import { activityPreviewRows, unsuccessfulCount } from "../pages/activity";
 import { nodeDisplayName } from "../lib/fleet";
 import { exactTime } from "../lib/time";
 import { StatusPill } from "./status-pill";
@@ -26,19 +26,22 @@ export function ActivityPreview({
   nodes,
   now,
   onViewAll,
-  onFailedToday,
+  onUnsuccessful: onUnsuccessfulProp,
 }: {
   api: Pick<ControlApi, "operations">;
   nodes: VisualFleetNode[];
   now: Date;
-  /** How many of the rows shown ended unsuccessfully today, so the page's status line agrees with this rail. */
-  onFailedToday?(count: number): void;
+  /** How many operations in the page this rail reads ended unsuccessfully, for the page's link to Activity. */
+  onUnsuccessful?(count: number): void;
   onViewAll?(event: MouseEvent<HTMLAnchorElement>): void;
 }) {
   // undefined: not read yet; null: the last read failed, which is not the same as nothing happening
   const [rows, setRows] = useState<Rows | null>();
   // Each read names Sparks as they are called now.
   const names = useRef(new Map<string, string>());
+  // The read effect must not restart when the parent re-renders.
+  const onUnsuccessful = useRef(onUnsuccessfulProp);
+  onUnsuccessful.current = onUnsuccessfulProp;
   names.current = new Map(nodes.map((node) => [node.id, nodeDisplayName(node)]));
   useEffect(() => {
     const controller = new AbortController();
@@ -46,12 +49,17 @@ export function ActivityPreview({
       api.operations(undefined, controller.signal).then(
         (response) => {
           // Unknown membership is not "nothing happened".
-          if (!controller.signal.aborted)
-            setRows(
-              response.operations === null
-                ? null
-                : activityPreviewRows(response.operations, names.current, ROWS),
-            );
+          if (controller.signal.aborted) return;
+          setRows(
+            response.operations === null
+              ? null
+              : activityPreviewRows(response.operations, names.current, ROWS),
+          );
+          onUnsuccessful.current?.(
+            response.operations === null
+              ? 0
+              : unsuccessfulCount(response.operations, names.current),
+          );
         },
         () => {
           if (!controller.signal.aborted) setRows(null);
@@ -64,15 +72,6 @@ export function ActivityPreview({
       clearInterval(timer);
     };
   }, [api]);
-  useEffect(() => {
-    const failed = (rows ?? []).filter(
-      (row) =>
-        row.tone === "bad" &&
-        row.occurredAt !== null &&
-        new Date(row.occurredAt).toDateString() === now.toDateString(),
-    ).length;
-    onFailedToday?.(failed);
-  }, [rows, now, onFailedToday]);
   return (
     <section className="card activity-preview" aria-labelledby="activity-preview-heading">
       <header>

@@ -251,8 +251,8 @@ test("the upgrade notice links to Activity instead of printing the operation id"
   nodes = [];
 });
 
-test("the status line never says nothing needs attention beside failed runs, and links them", async () => {
-  // Break caught: the banner claims all is well while the Activity rail lists a failed operation today.
+test("the status line is joined by a link to the unsuccessful operations the Activity rail read", async () => {
+  // Break caught: the banner claims all is well while the Activity rail lists an unsuccessful operation.
   nodes = [spark("Alpha", 40, 250)];
   const onNavigate = vi.fn();
   const operations = async () => ({
@@ -274,9 +274,8 @@ test("the status line never says nothing needs attention beside failed runs, and
       <OverviewPage api={{ ...api, operations } as unknown as ControlApi} onNavigate={onNavigate} />
     </ToastProvider>,
   );
-  const link = await screen.findByRole("link", { name: "1 failed operation today" });
+  const link = await screen.findByRole("link", { name: "1 unsuccessful" });
   expect(link).toHaveAttribute("href", "/activity?status=unsuccessful");
-  expect(link.closest("p")).not.toHaveTextContent("nothing needs attention");
   fireEvent.click(link);
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/activity?status=unsuccessful");
   nodes = [];

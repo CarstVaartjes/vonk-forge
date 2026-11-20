@@ -1,10 +1,11 @@
 import type { MetricsSeriesResponse } from "../api/types";
-import { formatTimeLeft, seriesName } from "./metrics-chart";
+import { seriesName } from "./metrics-chart";
 
-/** A certificate with less than this left (or already expired) is worth a banner. */
-const WARN_SECONDS = 30 * 86400;
-
-/** One line per certificate that is expired or expires soon, from the Controller's `certificate_expiry` read. */
+/**
+ * One line per certificate that has expired, from the Controller's `certificate_expiry` read. Agent certificates
+ * renew at half their life, so time left alone is no warning (the Prometheus alert covers expiry soon); an
+ * expired one means renewal failed.
+ */
 export function expiringCertificates(
   data: MetricsSeriesResponse | null | undefined,
   names: Record<string, string>,
@@ -13,13 +14,8 @@ export function expiringCertificates(
     const last = [...series.points].reverse().find((point) => point.value !== null);
     if (!last) return [];
     const left = Number(last.value);
-    if (left >= WARN_SECONDS) return [];
-    const name = seriesName(series.labels, names);
-    return [
-      left <= 0
-        ? `${name}: certificate expired`
-        : `${name}: certificate expires in ${formatTimeLeft(left)}`,
-    ];
+    if (left > 0) return [];
+    return [`${seriesName(series.labels, names)}: certificate expired`];
   });
 }
 
@@ -29,7 +25,7 @@ export function CertificateNotice({ lines }: { lines: string[] }) {
   return (
     <section className="certificate-notice" role="status" aria-label="Certificates">
       <strong>
-        {lines.length === 1 ? "A certificate needs renewing" : "Certificates need renewing"}
+        {lines.length === 1 ? "A certificate has expired" : "Certificates have expired"}
       </strong>
       <ul>
         {lines.map((line) => (
