@@ -302,8 +302,9 @@ protocol wheel the `control` project installs is built locally, not kept in git.
 
 Every change lands through an integration PR (same-repository `integration/*`
 head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
-owns that rule. A member PR runs no CI jobs: only the selector and a gate that
-reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
+owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
+typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
+gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
 itself. Check member work locally (targeted tests, fast guards); the integration
 PR proves it. A member PR is done when its review has passed.
 A Dependabot PR runs nothing at all (every root job skips its author,

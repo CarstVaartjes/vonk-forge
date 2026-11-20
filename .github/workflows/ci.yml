@@ -66,7 +66,8 @@ jobs:
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
       # The one owner of the member/integration rule (scripts/select-ci-areas):
-      # a member pull request runs no jobs (only this selector and the gate);
+      # a member pull request runs only the quick tier (lint, web check, Rust
+      # fmt/clippy when Rust changed) and the gate;
       # every other run, including an integration pull request, runs every
       # suite and proof.
       full: ${{ steps.areas.outputs.full }}

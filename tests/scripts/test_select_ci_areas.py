@@ -221,6 +221,7 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "generated": "true", "compose": "true", "nas-install": "true",
         "agent-package": "true", "lane": "false", "full": "true",
     }  # fmt: skip
+    selected["rust-changed"] = "false"
     # Every job the gate knows is green; only the lane is not selected.
     results = {job: "success" for jobs in gate["AREA_JOBS"].values() for job in jobs}
     results.update(
@@ -228,7 +229,7 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         | {"repository-guards": "success"}
         | {job: "success" for job in ("consumer-probe", "rust-quality", "rust-tests")}
         | {job: "success" for job in ("control-image-build", "controller-spark-wire")}
-        | {"lane-proof": "skipped"}
+        | {"member-web": "skipped", "member-rust": "skipped", "lane-proof": "skipped"}
     )
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
@@ -506,3 +507,20 @@ def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
 )
 def test_only_a_member_pull_request_skips_the_full_suites(event, payload, full) -> None:
     assert _module().full_suites(event, payload) is full
+
+
+@pytest.mark.parametrize(
+    ("paths", "event", "expected"),
+    [
+        (["rust/crates/vonk-agent/src/lib.rs"], "pull_request", True),
+        (["Cargo.lock"], "pull_request", True),
+        (["rust-toolchain.toml"], "merge_group", True),
+        (["control/web/src/app.tsx", "docs/a.md"], "pull_request", False),
+        ([], "pull_request", True),
+        (["control/src/x.py"], "push", True),
+    ],
+)
+def test_the_member_tier_lints_rust_only_when_rust_changed(
+    paths: list[str], event: str, expected: bool
+) -> None:
+    assert _module().rust_changed(paths, event) is expected
