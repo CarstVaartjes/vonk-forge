@@ -15,7 +15,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `npm run build && npm exec vite preview -- --host 127.0.0.1 --port ${previewPort}`,
+    // CI builds dist once in an earlier step; serve it instead of rebuilding.
+    command: `${process.env.CI ? "" : "npm run build && "}npm exec vite preview -- --host 127.0.0.1 --port ${previewPort}`,
     port: previewPort,
     reuseExistingServer: false,
   },

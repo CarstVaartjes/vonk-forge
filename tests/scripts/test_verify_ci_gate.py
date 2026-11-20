@@ -34,6 +34,7 @@ def _valid(**overrides: str):
         "full": "true",
     }
     results = {
+        "shared-inputs": "success",
         "lint": "success",
         "repository-guards": "success",
         "rust-quality": "success",
