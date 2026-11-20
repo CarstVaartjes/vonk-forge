@@ -1,51 +1,146 @@
-"""A mutation that returned without writing its owner row is retryable, not a 409."""
+"""A mutation whose owner row is not there is retryable (503), never a settled 409."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
+from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
-from vonk_agent_protocol import LifecycleState, OperatorActionName
-from vonk_control.auth import Actor
+from fastapi import HTTPException, Response
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
+from vonk_agent_protocol import OperatorActionName
+from vonk_control.api import create_app
+from vonk_control.auth import AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
+from vonk_control.jobs import JobService
+from vonk_control.models import Base
 from vonk_control.operator_acceptance import (
     AcceptanceArguments,
     OperatorReceiptResolver,
 )
-from vonk_control.operator_projection_api.contracts import FleetActionResponse
 from vonk_control.operator_receipt_contract import ReceiptPolicy
+from vonk_control.recipe_availability_intent import RecipeSelectorIntent
+from vonk_control.recipe_image_availability import requests
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityUnknown,
+    RecipeImageCode,
+)
 
-KEY = "11111111-1111-4111-8111-111111111111"
-DIGEST = "a" * 64
+from .test_fleet_profile_api import _headers
 
 
-def test_missing_job_is_retryable_then_resolves_once_written() -> None:
-    """Catches MissingRecord (an InvalidRequestError) answering a permanent 409."""
-    actor = Actor("owner", "administrator")
-    rows: dict[str, object] = {}
+class _Recipes:
+    """The real `_start_request` budget loop over an owner that can be unsure."""
 
-    def get(identity: str) -> object:
-        if identity not in rows:
-            raise MissingRecord(identity)
-        return rows[identity]
+    def __init__(self) -> None:
+        self.unsure = True
+        self.rows: dict[str, object] = {}
+        self.handler_runs = 0
+        self._clock = lambda: datetime.now(UTC)
 
-    resolver = OperatorReceiptResolver(jobs=SimpleNamespace(get=get))  # type: ignore[arg-type]
-    result = FleetActionResponse(
-        action="upgrade",
-        state=LifecycleState.QUEUED,
-        operation_id="job-1",
-        plan_digest=DIGEST,
+    def start_selector(self, selector: str, *, actor: str, request_id: str):
+        self.handler_runs += 1
+        return requests._start_request(
+            self,  # type: ignore[arg-type]
+            RecipeSelectorIntent(selector=selector),
+            actor=actor,
+            request_id=request_id,
+        )
+
+    def get_operator_request(self, request_key: str, *, actor: str):
+        if request_key not in self.rows:
+            raise MissingRecord(request_key)
+        return self.rows[request_key]
+
+
+def test_unconfirmed_recipe_request_answers_503_then_same_key_is_accepted(
+    monkeypatch,
+) -> None:
+    """Catches an outcome-unknown submission (no Job row) answering a permanent 409."""
+    recipes = _Recipes()
+    monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
+    ended: list[Any] = []
+
+    def once(service, intent, *, actor, request_id, update_claim):
+        if recipes.unsure:
+            raise RecipeImageAvailabilityUnknown(
+                RecipeImageCode.BUILD_INPUT_MISSING, "build input is not ready yet"
+            )
+        view = ended[0].model_copy(update={"state": "queued", "failure": None})
+        recipes.rows[request_id] = view
+        return view
+
+    real_end = requests._unaccepted_request_end
+
+    def remember(*args, **kwargs):
+        ended.append(real_end(*args, **kwargs))
+        return ended[0]
+
+    monkeypatch.setattr(requests, "_start_request_once", once)
+    monkeypatch.setattr(requests, "_unaccepted_request_end", remember)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+    Base.metadata.create_all(engine)
+    codec = TokenCodec(b"missing-acceptance-retryable-key32")
+    api = TestClient(
+        create_app(
+            jobs=JobService(sessionmaker(engine), clock=lambda: datetime.now(UTC)),
+            tokens=codec,
+            now=lambda: 1,
+            recipe_image_availability=recipes,
+        )
+    )
+    headers = _headers(codec, "operator")
+    body = {"request_key": str(uuid4())}
+    refused = api.post("/api/recipe/example/download", json=body, headers=headers)
+    assert refused.status_code == 503, refused.text
+    assert refused.headers["Retry-After"]
+    assert "x-vonk-receipt" not in refused.headers
+    recipes.unsure = False
+    accepted = api.post("/api/recipe/example/download", json=body, headers=headers)
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.headers["x-vonk-receipt"]
+    assert recipes.handler_runs == 2
+
+
+def test_agent_receipt_with_no_owner_row_is_retryable() -> None:
+    """Catches a missing agent-output owner row escaping the resolver as a 500."""
+    identity = AgentIdentity("spk_" + "a" * 32, "serial", "fingerprint", True)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [],
+            "path_params": {"job_id": "job-1", "sha256": "a" * 64},
+            "vonk.agent_identity": identity,
+        }
+    )
+
+    def missing(_job_id: str) -> object:
+        raise MissingRecord("job-1")
+
+    resolver = OperatorReceiptResolver(artifacts=SimpleNamespace(get=missing))  # type: ignore[arg-type]
     arguments = AcceptanceArguments(
-        actor, KEY, None, None, None, OperatorActionName.RESUME, None, None
+        None,
+        None,
+        None,
+        None,
+        None,
+        OperatorActionName.RESUME,
+        request,
+        None,
     )
     with pytest.raises(HTTPException) as refused:
-        resolver.resolve(ReceiptPolicy.FLEET_ACTION, result, arguments)
+        resolver.resolve(
+            ReceiptPolicy.AGENT_OUTPUT,
+            Response(),
+            arguments,
+        )
     assert refused.value.status_code == 503
-    assert refused.value.headers and refused.value.headers["retry-after"]
-    rows["job-1"] = SimpleNamespace(
-        request_id=KEY, actor="owner", payload_digest=DIGEST
-    )
-    receipt = resolver.resolve(ReceiptPolicy.FLEET_ACTION, result, arguments)
-    assert receipt.id == "job-1" and receipt.request_id == KEY

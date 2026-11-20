@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from vonk_agent_protocol import (
     EnrollmentGrantState,
     InvalidRequestError,
+    InvalidRequestReason,
     OperatorActionName,
     UnknownError,
     UnknownOutcomeError,
@@ -23,7 +24,6 @@ from vonk_agent_protocol import (
 
 from .api_availability import AVAILABILITY_ERRORS
 from .auth import Actor
-from .categorized_errors import MissingRecord
 from .operator_receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
@@ -239,9 +239,16 @@ class OperatorReceiptResolver:
             assert isinstance(result, Response)
             try:
                 return resolve_agent_receipt(self, policy, result, arguments)
-            except (UnknownOutcomeError, MissingRecord, *AVAILABILITY_ERRORS):
+            except (UnknownOutcomeError, *AVAILABILITY_ERRORS):
                 raise _refused(
                     "The agent receipt owner is unavailable; retry the same request",
+                    unavailable=True,
+                ) from None
+            except InvalidRequestError as error:
+                if error.typed_reason is not InvalidRequestReason.NOT_FOUND:
+                    raise
+                raise _refused(
+                    "The owner cannot yet observe its acceptance receipt",
                     unavailable=True,
                 ) from None
 
@@ -523,18 +530,17 @@ class OperatorReceiptResolver:
                     request_id=request_key,
                     content_digest=result.plan_digest,
                 )
-        except (MissingRecord, UnknownOutcomeError):
-            # No owner row yet is an unknown outcome: same request, retry.
-            raise _refused(
-                "The owner cannot yet observe its acceptance receipt", unavailable=True
-            ) from None
         except InvalidRequestError as error:
+            if error.typed_reason is InvalidRequestReason.NOT_FOUND:
+                # The mutation succeeded but its owner row is not there (yet):
+                # the outcome is unknown, so the same request retries.
+                raise _refused(
+                    "The owner cannot yet observe its acceptance receipt",
+                    unavailable=True,
+                ) from None
             raise HTTPException(
                 status_code=409,
-                detail=(
-                    "The owner refused the acceptance receipt: "
-                    f"{type(error).__name__}: {str(error)[:200]}"
-                ),
+                detail=str(error)[:256],
                 headers={
                     "x-vonk-error-code": str(
                         getattr(error, "code", ReceiptCode.MISMATCH)
