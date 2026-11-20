@@ -941,8 +941,9 @@ plan has changed since.
 
 ### Batched recipe qualification
 
-`vonk-fleet-qualify-campaign` runs a qualification authority batch by batch on
-one dedicated profile. The profile is labelled
+`vonk-fleet-qualify-campaign` (install `vonkctl[qualify]`: the extra adds the
+Pillow image decoder the GLB fixture checks need) runs a qualification authority
+batch by batch on one dedicated profile. The profile is labelled
 `qualification-authority=<authority ID>` on first use; a profile carrying any
 other label is never overwritten. Two single-Spark recipes share a batch;
 a dual-Spark recipe has a batch of its own.

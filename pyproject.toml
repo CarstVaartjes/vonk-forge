@@ -8,14 +8,18 @@ version = "0.1.1"
 description = "Vonk Forge cluster workload-profile contracts"
 requires-python = ">=3.14"
 dependencies = [
-  "argon2-cffi>=25.1.0",
   "attrs>=26.1.0",
   "httpx2[socks]>=2.13.1",
   "jsonschema>=4.23",
-  "pillow>=12.3.0",
   "securesystemslib[crypto]>=1.5.1",
   "tuf>=7.0.1",
 ]
+
+[project.optional-dependencies]
+# Image decoding for the qualification fixtures (GLB JPEG/WebP checks); vonkctl
+# itself never needs it. Install with `vonkctl[qualify]` to run
+# vonk-fleet-qualify-campaign.
+qualify = ["pillow>=12.3.0"]
 
 [project.scripts]
 vonkctl = "cluster_profiles.cli:main"
@@ -24,6 +28,7 @@ vonk-fleet-qualify-campaign = "cluster_profiles.fleet_qualification_campaign_cli
 [dependency-groups]
 dev = [
     "hatchling>=1.32.4",
+    "pillow>=12.3.0",
     "pytest>=9.1.1",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",

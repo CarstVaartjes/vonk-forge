@@ -48,6 +48,8 @@ dev = [
     "openapi-python-client>=0.29.1",
     # The nodejs extra ships Node as a wheel, so pyright never downloads it.
     "pyright[nodejs]>=1.1.414",
+    # pyright resolves the qualification fixtures' PIL import.
+    "pillow>=12.3.0",
     "pytest>=9.1.1",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
