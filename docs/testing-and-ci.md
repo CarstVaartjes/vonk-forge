@@ -394,7 +394,7 @@ catalog index or packages: generate them once per checkout revision with
 `scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"`. In CI the
 `recipe-library` action does it with `build: "true"` and caches the built tree
 under the reviewed revision plus the hash of `scripts/build-recipe-library`
-(the build's identity); main saves it after the build, and a job that finds it
+(the build's identity); `ci-cache-warm.yml` builds and saves it on main when the revision, the build script or the action changes, and a job that finds it
 skips the build without waiting on any other job.
 
 The native Rust agent and its wire contract build only for Linux. The
