@@ -1484,10 +1484,10 @@ mod tests {
 
     #[test]
     fn system_runner_streams_a_large_artifact_to_a_bounded_preopened_file() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 4096];
             let mut received = 0;
             while received < request.len()
@@ -1528,10 +1528,10 @@ mod tests {
 
     #[test]
     fn curl_enforces_the_download_body_limit() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
-            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
                 .unwrap();

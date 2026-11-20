@@ -386,13 +386,13 @@ async fn body_limit_refusals_report_the_layer_without_guessing_from_empty_bodies
         ),
         (None, None),
     ] {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
         let header = code
             .map(|code| format!("X-Vonk-Error-Code: {code}\r\n"))
             .unwrap_or_default();
         let peer = thread::spawn(move || {
-            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

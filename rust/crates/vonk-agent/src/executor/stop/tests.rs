@@ -33,7 +33,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
         .join(request.installation_id.to_string());
     fs::create_dir_all(&installation).unwrap();
     fs::write(installation.join("spec.json"), b"damaged plan").unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
     let peer = std::thread::spawn(move || {
@@ -42,7 +42,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
         for _ in 0..2 {
             let mut stream = loop {
                 assert!(Instant::now() < deadline);
-                match crate::loopback_probe::accept(&listener) {
+                match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(1))

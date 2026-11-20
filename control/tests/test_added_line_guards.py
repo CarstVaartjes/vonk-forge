@@ -4438,19 +4438,20 @@ def test_unknown_outcome_handlers_cannot_build_terminal_values(source, rejected)
     assert bool([h for h in hits if "unknown outcome turned terminal" in h]) is rejected
 
 
-_ACCEPT_PATH = "rust/crates/vonk-agent/src/health.rs"
-_ACCEPT_SRC = (
+_BIND_PATH = "rust/crates/vonk-agent/src/health.rs"
+_BIND_SRC = (
     "#[cfg(test)]\nmod tests {\n"
-    "    fn a() { let (s, _) = listener.accept().unwrap(); }\n"
-    "    fn b() { let (s, _) = helper.accept().unwrap(); } // unix-socket\n"
-    "    fn c() { let (s, _) = crate::loopback_probe::accept(&listener).unwrap(); }\n"
+    '    fn a() { let l = TcpListener::bind("127.0.0.1:0").unwrap(); }\n'
+    '    fn b() { let l = TcpListener::bind(("127.0.0.1", 0)).await.unwrap(); }\n'
+    "    fn c() { let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap(); }\n"
+    "    fn d() { let l = TcpListener::bind(FIXTURE_BIND).unwrap(); }\n"
+    "    fn e() { let l = UnixListener::bind(&path).unwrap(); }\n"
     "}\n"
 )
 
 
-def test_a_raw_tcp_accept_in_an_agent_test_is_rejected_but_unix_and_helper_are_not():
+def test_a_test_fixture_bound_on_127_0_0_1_is_rejected_but_the_test_address_and_unix_are_not():
     hits = check_source(
-        _ACCEPT_PATH, _ACCEPT_SRC, _all_lines(_ACCEPT_SRC), modes=("loopback-accept",)
+        _BIND_PATH, _BIND_SRC, _all_lines(_BIND_SRC), modes=("loopback-bind",)
     )
-    assert len(hits) == 1
-    assert ":3" in hits[0]
+    assert [h.split(":")[1] for h in hits] == ["3", "4", "5"]

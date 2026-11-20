@@ -338,7 +338,7 @@ fn add(reading: &mut EngineReading, field: Field, value: f64) {
 mod tests {
     use super::*;
 
-    const LOOPBACK: IpAddr = IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+    const LOOPBACK: IpAddr = crate::client::test_support::FIXTURE_IP;
 
     #[test]
     fn the_captured_tensorfold_metrics_give_the_vector_reading() {
@@ -375,14 +375,14 @@ mod tests {
     }
 
     async fn serve(body: Option<String>) -> u16 {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+            .await
+            .unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             for _ in 0..16 {
-                let (mut socket, _) = crate::loopback_probe::accept_async(&listener)
-                    .await
-                    .unwrap();
+                let (mut socket, _) = listener.accept().await.unwrap();
                 let body = body.clone();
                 tokio::spawn(async move {
                     let mut request = [0_u8; 1024];

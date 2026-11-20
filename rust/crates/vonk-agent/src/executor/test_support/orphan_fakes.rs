@@ -50,7 +50,7 @@ pub(in crate::executor) struct FakeController {
 
 impl FakeController {
     pub(in crate::executor) fn new() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
         let state = Arc::new(Mutex::new(ControllerState::default()));
@@ -59,7 +59,7 @@ impl FakeController {
         thread::spawn(move || {
             let deadline = Instant::now() + SERVE_FOR;
             while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
-                match crate::loopback_probe::accept(&listener) {
+                match listener.accept() {
                     Ok((stream, _)) => {
                         // A slow answer must not hold up the others.
                         let shared = shared.clone();

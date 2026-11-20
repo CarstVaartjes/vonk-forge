@@ -331,7 +331,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
     let receipt = job_receipt(&request, 0, Instant::now(), manifest, None);
     runtime.persist_job_completion(&receipt).unwrap();
 
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
     let peer = std::thread::spawn(move || {
@@ -343,7 +343,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
                     Instant::now() < deadline,
                     "bounded output peer did not receive a request"
                 );
-                match crate::loopback_probe::accept(&listener) {
+                match listener.accept() {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(1))

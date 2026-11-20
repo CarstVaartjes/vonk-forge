@@ -16,7 +16,7 @@ const WINDOW: Duration = Duration::from_millis(400);
 /// Serve each ranged request whole, split into `chunks` parts: write the first
 /// `sent` of them one `pause` apart, then hold the connection open in silence.
 fn dripping_server(body: &'static [u8], chunks: usize, sent: usize, pause: Duration) -> String {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = std::net::TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     std::thread::spawn(move || {
         for stream in listener.incoming() {

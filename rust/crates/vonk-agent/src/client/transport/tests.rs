@@ -84,7 +84,7 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     for activation_status in [204, 403] {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         let first_received = Arc::new(tokio::sync::Notify::new());
         let release_first = Arc::new(tokio::sync::Notify::new());
@@ -96,13 +96,10 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
             spawn_async_peer(async move {
                 let mut handlers = Vec::new();
                 for index in 0..4 {
-                    let (mut stream, _) = tokio::time::timeout(
-                        PEER_BUDGET,
-                        crate::loopback_probe::accept_async(&listener),
-                    )
-                    .await
-                    .expect("fixture I/O deadline")
-                    .unwrap();
+                    let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())
+                        .await
+                        .expect("fixture I/O deadline")
+                        .unwrap();
                     let first_received = first_received.clone();
                     let release_first = release_first.clone();
                     let first_finished = first_finished.clone();
@@ -219,7 +216,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
     // certificate request while activation can revoke that certificate.
     let budget = ROTATION_REQUEST_TIMEOUT * 2 + HEARTBEAT_REQUEST_TIMEOUT * 2;
     let deadline = tokio::time::Instant::now() + budget;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let activation_received = Arc::new(tokio::sync::Notify::new());
     let expected_progress = progress();
@@ -237,7 +234,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
         tokio::time::timeout_at(deadline, async move {
             let mut requests = Vec::new();
             for index in 0..4 {
-                let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, crate::loopback_probe::accept_async(&listener)).await.expect("fixture I/O deadline").unwrap();
+                let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept()).await.expect("fixture I/O deadline").unwrap();
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 let header_end = loop {
@@ -271,7 +268,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
                 if index == 0 {
                     received.notify_one();
                     assert!(tokio::time::timeout(
-                        Duration::from_millis(200), crate::loopback_probe::accept_async(&listener)
+                        Duration::from_millis(200), listener.accept()
                     ).await.is_err(), "old request overlapped activation");
                     // Withhold all response bytes. The real reqwest
                     // activation deadline must close this exact socket.

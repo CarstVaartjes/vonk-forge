@@ -132,10 +132,10 @@ async fn a_conflicting_result_response_is_not_an_acknowledgement() {
     // outcome" (204) from "the Controller refused it because the attempt is
     // no longer current" (409).  Treating both as accepted is what let a
     // refused result be deleted locally as though it had landed.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
-        let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
         let mut request = Vec::new();
         let mut buffer = [0_u8; 4096];
         while !request.windows(4).any(|value| value == b"\r\n\r\n") {
@@ -173,10 +173,10 @@ async fn a_validation_rejected_result_response_is_typed_for_local_custody() {
     // generic "protocol response is invalid" and from a transport failure,
     // so the loop can record the bounded reason and continue.  Treating it
     // as a bare non-retryable controller error is what exited the agent.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
-        let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
         let mut request = Vec::new();
         let mut buffer = [0_u8; 4096];
         while !request.windows(4).any(|value| value == b"\r\n\r\n") {

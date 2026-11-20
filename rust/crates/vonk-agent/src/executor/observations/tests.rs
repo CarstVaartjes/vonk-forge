@@ -789,7 +789,8 @@ async fn an_observation_names_the_generation_of_its_run() {
         &plan.identity.recipe_revision_sha256,
     )
     .unwrap();
-    plan.runtime.placement.endpoint_address = Some("127.0.0.1".parse().unwrap());
+    plan.runtime.placement.endpoint_address =
+        Some(crate::client::test_support::FIXTURE_HOST.parse().unwrap());
     plan.security.network_mode = "bridge".parse().unwrap();
     let runtime = OciRuntime {
         runner: &NoProcess,

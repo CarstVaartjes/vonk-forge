@@ -6,7 +6,7 @@ use super::*;
 
 #[tokio::test]
 async fn collective_readiness_retries_inspection_without_repreparing_a_launched_rank() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
     let data = tempdir().unwrap();
@@ -20,7 +20,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         .compiled_execution_plan
         .runtime
         .placement
-        .endpoint_address = Some("127.0.0.1".parse().unwrap());
+        .endpoint_address = Some(crate::client::test_support::FIXTURE_HOST.parse().unwrap());
     request.compiled_execution_plan.runtime.placement.port = Some(address.port());
     let request = request.clone();
     let mut install = claim.clone();
@@ -55,7 +55,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         let mut requests = Vec::new();
         while !peer_done.load(Ordering::SeqCst) {
             assert!(Instant::now() < deadline);
-            let mut stream = match crate::loopback_probe::accept(&listener) {
+            let mut stream = match listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(1));
@@ -217,7 +217,7 @@ async fn collective_start_with_drops(
     dropper: crate::page_cache::Dropper,
     unready: usize,
 ) -> ExecutionResult {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
     let data = tempdir().unwrap();
@@ -231,7 +231,7 @@ async fn collective_start_with_drops(
         .compiled_execution_plan
         .runtime
         .placement
-        .endpoint_address = Some("127.0.0.1".parse().unwrap());
+        .endpoint_address = Some(crate::client::test_support::FIXTURE_HOST.parse().unwrap());
     request.compiled_execution_plan.runtime.placement.port = Some(address.port());
     let request = request.clone();
     let mut install = claim.clone();
@@ -266,7 +266,7 @@ async fn collective_start_with_drops(
         let mut probes = 0;
         while !peer_done.load(Ordering::SeqCst) {
             assert!(Instant::now() < deadline);
-            let mut stream = match crate::loopback_probe::accept(&listener) {
+            let mut stream = match listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(1));

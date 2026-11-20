@@ -125,10 +125,10 @@ mod tests {
     /// response open silently for several windows. The server is detached:
     /// each process under test ends on its own body or stall window.
     fn trickle(chunks: usize, pause: Duration) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         thread::spawn(move || {
-            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
             // Read the whole request first: closing a socket that still holds
             // unread request bytes sends a TCP RST, which can make curl fail
             // (exit 56) before it reads the body.
