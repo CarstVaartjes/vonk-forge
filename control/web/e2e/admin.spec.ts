@@ -1,17 +1,8 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import type { components } from "../src/api/generated";
+import { expectNoSeriousAccessibilityViolations, expectReachableByKeyboard } from "./a11y";
 import { serveEmptyFleet, serveOverviewFleet } from "./fleet-fixture";
-
-async function expectNoSeriousAccessibilityViolations(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  expect(
-    results.violations,
-    results.violations.map((value) => `${value.id}: ${value.help}`).join("\n"),
-  ).toEqual([]);
-}
+import { fixtureRecipeTitle, serveLibrary } from "./library-fixture";
 
 async function expectNoDocumentOverflow(page: Page) {
   await expect
@@ -328,4 +319,33 @@ test("the sign-in screen remains focused, accessible, and usable on small screen
     await expectNoDocumentOverflow(page);
     await expectNoSeriousAccessibilityViolations(page);
   }
+});
+
+test("Library and a Recipe pass the accessibility checks and the main navigation and primary actions work by keyboard", async ({
+  page,
+}) => {
+  await serveEmptyFleet(page);
+  await serveLibrary(page);
+  await page.goto("/library");
+  const recipeLink = page.getByRole("link", { name: new RegExp(fixtureRecipeTitle) }).first();
+  await expect(recipeLink).toBeVisible();
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectNoSeriousAccessibilityViolations(page);
+  }
+  const nav = page.getByRole("navigation", { name: "Primary" }).getByRole("link");
+  for (const name of ["Overview", "Workloads", "Library", "Activity"]) {
+    await page.goto("/library");
+    await expectReachableByKeyboard(page, nav.filter({ hasText: name }));
+  }
+  await page.goto("/library");
+  await expectReachableByKeyboard(page, recipeLink);
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/library\/recipes\//);
+  await expect(page.locator("h1")).toHaveCount(1);
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectNoSeriousAccessibilityViolations(page);
+  }
+  await expectReachableByKeyboard(page, page.getByRole("button").first());
 });

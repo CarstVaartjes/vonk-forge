@@ -758,6 +758,8 @@
 .library-model-pane > ul > li, .library-recipe-pane > ul > li { display: contents; }
 .library-model-pane > ul > li > a, .library-recipe-pane > ul > li > a, .library-empty-recipe, .library-selected-model-context { display: grid; gap: .25rem; padding: .75rem .8rem; color: var(--ink); background: var(--panel); text-decoration: none; }
 .library-model-pane > ul > li > a:hover, .library-recipe-pane > ul > li > a:hover { background: var(--raised); }
+/* Row actions sit on the panel, not on the 1px list gap, so their text keeps its contrast. */
+.library-recipe-pane > ul > li > :not(a) { margin: 0; padding: .35rem .8rem; background: var(--panel); }
 .library-model-pane > ul > li > a > span { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
 .library-model-pane > ul > li > a > span.is-selected { display: grid; gap: .25rem; margin: -.35rem -.45rem; padding: .35rem .45rem; border-left: 2px solid var(--green); background: var(--raised); }
 .library-model-pane strong, .library-recipe-pane strong { font-size: .84rem; }

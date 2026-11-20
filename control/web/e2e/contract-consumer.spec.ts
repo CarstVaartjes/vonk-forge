@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+import { expectNoSeriousAccessibilityViolations, expectReachableByKeyboard } from "./a11y";
 
 interface HttpCase {
   id: string;
@@ -134,6 +135,10 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
   }, source);
   const seed = page.getByRole("textbox", { name: "Seed", exact: true });
   await expect(seed).toHaveValue("9007199254740993");
+  // The job form passes the same accessibility check and is reachable by keyboard.
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.locator("body").click({ position: { x: 0, y: 0 } });
+  await expectReachableByKeyboard(page, seed);
   await seed.fill("9007199254740995");
   await expect(seed).toHaveValue("9007199254740995");
   await page.getByRole("button", { name: "Submit artifact job" }).click();
