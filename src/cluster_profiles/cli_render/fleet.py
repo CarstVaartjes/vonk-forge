@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
 
 from ..cli_states_generated import (
@@ -44,6 +45,7 @@ from .common import (
     _table,
     _text,
     _time,
+    _utc,
     _warn,
     _words,
 )
@@ -303,7 +305,7 @@ def _gpu_clock(node: object) -> str:
         f"last applied {clock_range(applied)} (helper receipt); desired {clock_range(desired)}; "
         f"reported max graphics {metric(clock.max_graphics_mhz, GpuClockMetric.MAX_GRAPHICS)} / SM {metric(clock.max_sm_mhz, GpuClockMetric.MAX_SM)} MHz; "
         f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle reasons {throttle}; "
-        f"{_clock_reading(clock.apply_state)}; next {_clock_reading(clock.next_attempt_at)}; deadline {_clock_reading(clock.deadline)}; "
+        f"{_clock_reading(clock.apply_state)}; next {_clock_epoch(clock.next_attempt_at)}; deadline {_clock_epoch(clock.deadline)}; "
         f"{_clock_reading(clock.detail)}"
         + (
             f"; receipt {clock.receipt_detail}"
@@ -372,8 +374,8 @@ def _swap(node: object) -> str:
             if reason is not None and not isinstance(reason, Unset)
             else ""
         )
-        + f"; next {_clock_reading(receipt.next_attempt_at)}"
-        + f"; deadline {_clock_reading(receipt.deadline)}"
+        + f"; next {_clock_epoch(receipt.next_attempt_at)}"
+        + f"; deadline {_clock_epoch(receipt.deadline)}"
         + f"; {_clock_reading(receipt.detail)}"
     )
 
@@ -382,6 +384,13 @@ def _clock_reading(value: object) -> str:
     if value is None or isinstance(value, Unset):
         return UNKNOWN
     return _text(value.value if isinstance(value, Enum) else value)
+
+
+def _clock_epoch(value: object) -> str:
+    """The helper reports retry times as Unix seconds."""
+    if type(value) is int:
+        return _utc(datetime.fromtimestamp(value, UTC))
+    return _clock_reading(value)
 
 
 def _cpu_clock(node: Mapping[str, object]) -> str:

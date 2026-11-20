@@ -21,7 +21,7 @@ from .fleet import _fleet_overview, _node
 from .library import _library
 from .metrics import _metric_list, _metric_series
 from .operations import _application, _job, _operation, _run_result
-from .profile import _gateway_keys, _profile, _profile_endpoints, _route_details
+from .profile import _gateway_keys, _profile, _profile_endpoints
 from .removal_review import _cache_removal_review, _unused_removal
 from .review import _preview
 
@@ -160,9 +160,7 @@ def render_payload(
             _run_result(payload)
         elif noun == "profile":
             if action == "endpoint":
-                _profile_endpoints(payload)
-                if wide:
-                    _route_details(payload)
+                _profile_endpoints(payload, wide=wide)
             elif action == "list":
                 rows = _records(payload, "profiles")
                 if not rows:

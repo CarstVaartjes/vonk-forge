@@ -1106,9 +1106,9 @@ per published route. The Fleet page's "Serving now" block shows the same lines
 for the loaded Profile, each with the same connection example.
 
 Per alias the default output is short: the assignment, its state, the `API base`,
-the `Client model identifier`, and the connection example. `--wide` adds a
-`Route detail` block per alias: `Route generation`, `Route observed at`, `Freshness` and
-`Spark backend (diagnostic)`.
+the `Client model identifier`, and the setup and `curl` examples. `--wide` adds
+`Route generation`, `Route observed at`, `Freshness` and
+`Spark backend (diagnostic)`, plus the Python example and the per-request note.
 
 Every time vonkctl prints for people is UTC to the second, for example
 `2026-10-02 14:22:58Z`. `--json` keeps the Controller's own timestamps.

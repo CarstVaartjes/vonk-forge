@@ -91,7 +91,7 @@ def _application(payload: Mapping[str, object]) -> None:
                 f"{_text(child['startup_budget_seconds'])} seconds",
             )
         if child.get("start_deadline") is not None:
-            _field("initial start deadline", child["start_deadline"])
+            _field("initial start deadline", _time(child["start_deadline"]))
         if operation:
             _field("Progress", progress_line({"progress": operation}))
     _field("Updated", _time(payload.get("updated_at")))

@@ -138,18 +138,18 @@ CONNECTION_NOTE = (
 )
 
 
-def _connection_examples(api_base: str, alias: str) -> None:
+def _connection_examples(api_base: str, alias: str, wide: bool = False) -> None:
     """Print the examples; the key is only ever read from the key file."""
     snippets = connection_snippets(terminal_text(api_base), terminal_text(alias))
-    for title, name in (
-        ("Client setup", "setup"),
-        ("curl example", "curl"),
-        ("Python example (openai client)", "python"),
-    ):
+    shown = [("Client setup", "setup"), ("curl example", "curl")]
+    if wide:
+        shown.append(("Python example (openai client)", "python"))
+    for title, name in shown:
         print(title + ":")
         for line in snippets[name].split("\n"):
             print(("  " + line) if line else "")
-    print(CONNECTION_NOTE)
+    if wide:
+        print(CONNECTION_NOTE)
 
 
 def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
@@ -168,7 +168,7 @@ def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
         print(f"{_text(alias)} · {_text(title)} · {_text(state)}")
 
 
-def _profile_endpoints(payload: Mapping[str, object]) -> None:
+def _profile_endpoints(payload: Mapping[str, object], wide: bool = False) -> None:
     listing = endpoint_listing(
         payload.get("application_id"),
         payload.get("projection_issue"),
@@ -214,8 +214,16 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
             _field("Client model identifier", alias)
             api_base = endpoint.get("api_base")
             _field("API base (inference gateway)", api_base)
+            if wide:
+                _field("Route generation", endpoint.get("generation"))
+                _field("Route observed at", _time(endpoint.get("observed_at")))
+                _field(
+                    "Freshness",
+                    _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
+                )
+                _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             if isinstance(api_base, str) and isinstance(alias, str):
-                _connection_examples(api_base, alias)
+                _connection_examples(api_base, alias, wide=wide)
             continue
         if alias is not None:
             _field("Client model identifier", alias)
@@ -229,24 +237,6 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         print(
             messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")
         )
-
-
-def _route_details(payload: object) -> None:
-    """``--wide``: the route facts behind each published alias."""
-    document = _object(payload, "endpoints")
-    for assignment in _records(document, "assignments"):
-        endpoint = _optional(assignment.get("endpoint"), "endpoint")
-        if assignment.get("state") != cli_states.PUBLISHED:
-            continue
-        print()
-        _field("Route detail", assignment.get("alias"))
-        _field("Route generation", endpoint.get("generation"))
-        _field("Route observed at", _time(endpoint.get("observed_at")))
-        _field(
-            "Freshness",
-            _freshness(endpoint.get("observed_at"), document.get("observed_at")),
-        )
-        _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
 
 
 def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
@@ -281,15 +271,19 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
         )
 
 
+def _key_expired(value: object, now: datetime) -> bool:
+    """A key is expired when its expiry is a real time at or before ``now``."""
+    try:
+        return datetime.fromisoformat(str(value)) <= now
+    except ValueError:
+        return False
+
+
 def _key_expiry(value: object) -> str:
     if not value:
         return "never"
     shown = _time(value)
-    try:
-        expired = datetime.fromisoformat(str(value)) <= datetime.now(UTC)
-    except (ValueError, TypeError):
-        return shown
-    return f"expired {shown}" if expired else shown
+    return f"expired {shown}" if _key_expired(value, datetime.now(UTC)) else shown
 
 
 class EndpointListing(StrEnum):
