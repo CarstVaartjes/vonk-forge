@@ -305,6 +305,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     recipe_library = recipe_actions.add_parser(
         "library", help="List compatible recipes"
     )
+    recipe_library.set_defaults(example="vonkctl recipe library --fits-fleet --limit 5")
     _filters(recipe_library)
     _value_list(recipe_library, "--model", "model", "Only recipes serving this model")
     recipe_library.add_argument(
@@ -317,7 +318,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--fits-fleet",
         action="store_true",
         default=None,
-        help="Require a placement fitting fresh current fleet capacity",
+        help="Require a placement fitting fresh current fleet capacity; Working "
+        "recipes come first, then the newest",
     )
     _value_list(
         recipe_library,

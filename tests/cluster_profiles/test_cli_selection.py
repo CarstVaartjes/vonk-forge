@@ -7,6 +7,7 @@ import pytest
 from library_route_fixtures import _recipe_projection
 
 from cluster_profiles import cli, controller_cli
+from cluster_profiles.cli_help import subcommands
 from cluster_profiles.cli_select import SelectorError
 from cluster_profiles.control_client import ControlClientError
 from control.tests.consumer_outcomes import not_adopted
@@ -326,3 +327,45 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     )
     assert controller_cli._resolve_recipe_selector(client, "one/code") == "one/code"
     assert client.calls == []
+
+
+def test_start_here_leads_to_a_first_success_and_library_help_shows_it():
+    root = cli._parser().format_help()
+    order = [
+        root.index(f"vonkctl {step}")
+        for step in ("fleet", "recipe library --fits-fleet", "run <recipe>")
+    ] + [root.index("vonkctl profile endpoint"), root.index("vonkctl key create")]
+    assert order == sorted(order)
+    parser = cli._parser()
+    for name in ("recipe", "library"):
+        commands = subcommands(parser)
+        assert commands is not None
+        parser = commands.choices[name]
+    library = parser
+    text = library.format_help()
+    example = "vonkctl recipe library --fits-fleet --limit 5"
+    assert text.index(example) < text.index("Flags")
+    assert "--search" in text and "Only titles" in text
+
+
+def test_fits_fleet_lists_working_recipes_first_then_keeps_the_rest(vonkctl_json):
+    def row(slug, status):
+        return {"selector": slug, "qualification": {"status": status}}
+
+    client = Pages(
+        [
+            {
+                "recipes": [row("a", "Untested"), row("b", "Failed: recipe")],
+                "next_cursor": "two",
+            },
+            {
+                "recipes": [row("c", "Working"), row("d", "Working")],
+                "next_cursor": None,
+            },
+        ]
+    )
+    status, document = vonkctl_json(
+        "recipe", "library", "--fits-fleet", "--limit", "3", control_client=client
+    )
+    assert status == 0
+    assert [r["selector"] for r in document["recipes"]] == ["c", "d", "a"]

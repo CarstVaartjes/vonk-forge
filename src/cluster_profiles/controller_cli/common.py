@@ -266,7 +266,9 @@ def _selector(
 
 
 def _filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--search", default="")
+    parser.add_argument(
+        "--search", default="", help="Only titles and names containing this text"
+    )
     for name in (
         "usage",
         "family",
@@ -276,12 +278,16 @@ def _filters(parser: argparse.ArgumentParser) -> None:
         "alignment",
     ):
         _value_list(parser, f"--{name}", name, f"Only this {name}")
-    parser.add_argument("--updated-since")
+    parser.add_argument(
+        "--updated-since", help="Only what changed since this date or time (ISO 8601)"
+    )
     parser.add_argument(
         "--cached", action="store_true", help="Only what is already in the cache"
     )
     parser.add_argument("--sort", choices=("updated", "name"), default="updated")
-    parser.add_argument("--cursor")
+    parser.add_argument(
+        "--cursor", help="Continue from the cursor a previous page printed"
+    )
     parser.add_argument(
         "--limit",
         type=_page_limit,

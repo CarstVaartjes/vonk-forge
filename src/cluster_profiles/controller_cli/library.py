@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import cast
 
 from ..cli_artifact_jobs import (
     ArtifactJobClient,
     run_artifact_job,
 )
 from ..cli_render.vocabulary import use_vocabulary
+from ..cli_states_generated import QualificationStatus
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -24,7 +26,7 @@ from .cache_submission import (
     _submit_recipe_cancellation,
     _submit_recipe_retry,
 )
-from .common import ControllerClient, _query, _quoted, _request_key
+from .common import MAX_PAGE_LIMIT, ControllerClient, _query, _quoted, _request_key
 from .fleet import _overview
 from .installation import _recipe_installation_reconcile
 from .observation import _cache_progress, _follow_mutation, _poll_path, _watch_resource
@@ -58,6 +60,32 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
             creator=getattr(args, "creator", []),
         )
     return _query(**values)
+
+
+def _is_working(row: object) -> bool:
+    status = row.get("qualification") if isinstance(row, Mapping) else None
+    return (
+        isinstance(status, Mapping)
+        and status.get("status") == QualificationStatus.WORKING
+    )
+
+
+def _fits_fleet_library(client: ControllerClient, args: argparse.Namespace):
+    """Recipes that fit the fleet: Working first, then the Controller's order
+    (newest), cut to ``--limit``. The others stay listed."""
+    query = {**_library_query(args, recipe=True), "limit": MAX_PAGE_LIMIT}
+    query.pop("cursor", None)
+    page = client.request("GET", "/api/recipe/library", query=query)
+    document, rows = dict(page), list(cast(list[object], page["recipes"]))
+    seen: set[str] = set()
+    while isinstance(cursor := page.get("next_cursor"), str) and cursor not in seen:
+        seen.add(cursor)
+        page = client.request(
+            "GET", "/api/recipe/library", query={**query, "cursor": cursor}
+        )
+        rows += cast(list[object], page["recipes"])
+    rows.sort(key=lambda row: not _is_working(row))
+    return {**document, "recipes": rows[: args.limit], "next_cursor": None}
 
 
 def _release_words(client: ControllerClient, args: argparse.Namespace) -> None:
@@ -197,6 +225,8 @@ def _recipe(
             raise _fleet_job_progress_hint(client, args, error) from error
     if action is None:
         return _overview(client, "recipe", args)
+    if action == "library" and args.fits_fleet and args.sort == "updated":
+        return _fits_fleet_library(client, args)
     if action == "library":
         return client.request(
             "GET",
