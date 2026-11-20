@@ -847,7 +847,8 @@ def _deliver_inputs(
     if preparation(job) == READY or (
         declarations
         and all(
-            uploaded_by_name.get(cast(str, item["name"])) == item
+            uploaded_by_name.get(cast(str, item["name"]))
+            == accepted_by_name.get(cast(str, item["name"]))
             for item in declarations
         )
         and preparation(job) is None

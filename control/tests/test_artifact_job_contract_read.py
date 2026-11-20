@@ -404,19 +404,3 @@ def test_an_input_media_type_comes_from_its_name_and_the_slot(
     from vonk_control.artifact_jobs.contracts import slot_input_media_type
 
     assert slot_input_media_type(_slot(media_types, extensions), name) == expected
-
-
-def test_an_input_that_fits_no_extension_is_refused_with_the_accepted_list() -> None:
-    from types import SimpleNamespace
-
-    from vonk_agent_protocol import RecipeJobInputRequest
-    from vonk_control.artifact_jobs.contracts import _derive_inputs
-
-    contract = SimpleNamespace(
-        input=SimpleNamespace(slots=[_slot(["audio/flac"], [".flac"])])
-    )
-    request = RecipeJobInputRequest(
-        slot="in", name="song.aiff", size_bytes=1, sha256="a" * 64
-    )
-    with pytest.raises(ArtifactJobInvalid, match=r"extensions: \.flac"):
-        _derive_inputs(contract, [request])  # type: ignore[arg-type]

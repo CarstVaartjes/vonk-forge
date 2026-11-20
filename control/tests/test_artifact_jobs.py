@@ -1275,6 +1275,39 @@ def test_artifact_job_server_contract_rejects_client_escalation(
         create_artifact_job(service, **request)
 
 
+def test_artifact_job_refuses_an_input_name_that_fits_no_declared_extension(
+    tmp_path,
+) -> None:
+    def transform(document: dict[str, object]) -> None:
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        interface["input"] = {
+            "required": True,
+            "media_types": ["image/png"],
+            "max_bytes": 4096,
+            "slots": [
+                {
+                    "id": "input",
+                    "label": "Input",
+                    "description": "Source image",
+                    "media_types": ["image/png"],
+                    "extensions": [".png"],
+                    "min_files": 1,
+                    "max_files": 1,
+                    "max_file_bytes": 1024,
+                    "max_total_bytes": 4096,
+                }
+            ],
+        }
+
+    _sessions, _operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path, recipe_transform=transform)
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000107")
+    request["inputs"][0]["name"] = "input.exe"
+    with pytest.raises(ArtifactJobError, match=r"extensions: \.png"):
+        create_artifact_job(service, **request)
+
+
 @pytest.mark.parametrize(
     ("media_type", "extension"),
     [

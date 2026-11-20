@@ -492,19 +492,18 @@ EXTENSION_MEDIA_TYPES: Mapping[str, str] = {
 def slot_input_media_type(slot: ArtifactSlotContract, name: str) -> str | None:
     """The slot's media type for a file name, or ``None`` when it fits none."""
     lowered = name.lower()
-    extensions = [ext for ext in slot.extensions if lowered.endswith(ext)]
-    if slot.extensions and not extensions:
+    declared = slot.extensions or tuple(EXTENSION_MEDIA_TYPES)
+    matching = [ext for ext in declared if lowered.endswith(ext)]
+    if slot.extensions and not matching:
         return None
     candidates = {
         EXTENSION_MEDIA_TYPES[ext]
-        for ext in extensions
+        for ext in matching
         if EXTENSION_MEDIA_TYPES.get(ext) in slot.media_types
     }
     if candidates:
         return min(candidates)
-    if not slot.extensions and len(slot.media_types) == 1:
-        return slot.media_types[0]
-    return None
+    return slot.media_types[0] if len(slot.media_types) == 1 else None
 
 
 def _derive_inputs(
@@ -550,12 +549,7 @@ def _validate_inputs_against_contract(
 ) -> None:
     slots = {item.id: item for item in parsed.input.slots}
     for item in inputs:
-        slot = slots.get(item.slot)
-        if slot is None:
-            raise ArtifactJobInvalid(
-                f"artifact input slot {item.slot} is undeclared",
-                reason=InvalidRequestReason.UNKNOWN_FIELD,
-            )
+        slot = slots[item.slot]
         if item.size_bytes > slot.max_file_bytes:
             raise ArtifactJobInvalid(
                 f"artifact input {item.name} exceeds its slot limit",

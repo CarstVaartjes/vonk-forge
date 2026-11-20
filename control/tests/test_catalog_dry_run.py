@@ -141,16 +141,14 @@ def test_every_declared_input_extension_resolves_to_a_slot_media_type(
     extension a recipe's input slot declares must map to one of its types."""
 
     recipe = read_recipe(_document(slug))
-    interfaces = [i.adapter for i in recipe.interfaces if i.adapter != "openai"]
-    if len(interfaces) != 1:
-        return
-    contract = compile_artifact_contract(recipe, interfaces[0])
-    for input_slot in contract.input.slots:
-        for extension in input_slot.extensions:
-            assert slot_input_media_type(input_slot, f"file{extension}"), (
-                f"slot {input_slot.id} extension {extension} maps to none of "
-                f"{input_slot.media_types}"
-            )
+    for interface in (i.adapter for i in recipe.interfaces if i.adapter != "openai"):
+        contract = compile_artifact_contract(recipe, interface)
+        for input_slot in contract.input.slots:
+            for extension in input_slot.extensions:
+                assert slot_input_media_type(input_slot, f"file{extension}"), (
+                    f"slot {input_slot.id} extension {extension} maps to none of "
+                    f"{input_slot.media_types}"
+                )
 
 
 @pytest.mark.parametrize("slug", _params())
