@@ -1658,6 +1658,50 @@ def test_job_run_flags_are_checked_against_the_contract(
     assert not [c for c in client.calls if c[0] == "POST"]
 
 
+def test_job_input_media_type_comes_from_the_slot_not_the_host(
+    tmp_path, vonkctl_json, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "mimetypes.guess_type", lambda *_a, **_k: ("audio/x-flac", None)
+    )
+    document = _contract_for_flags()
+    contract = document["contract"]
+    assert isinstance(contract, dict)
+    slot = contract["input"]["slots"][0]
+    slot["media_types"] = ["audio/flac", "audio/wav"]
+    slot["extensions"] = [".flac", ".wav"]
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = document
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"a")
+    status, _ = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={song}",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 0
+    body, _ = _create_call(client)
+    assert [i["media_type"] for i in body["inputs"]] == ["audio/flac"]
+
+    other = tmp_path / "song.aiff"
+    other.write_bytes(b"a")
+    status, error = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={other}",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 2
+    assert ".flac, .wav" in json.dumps(error)
+
+
 def _typed_knobs_contract() -> dict[str, object]:
     document = _contract_for_flags()
     contract = document["contract"]

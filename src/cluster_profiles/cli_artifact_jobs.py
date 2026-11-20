@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import math
-import mimetypes
 import os
 import re
 import shlex
@@ -465,6 +464,48 @@ def _resolve_run(client: ArtifactJobClient, selector: str | None) -> str:
     )
 
 
+# Fixed extension -> media type table (never the host's mime tables), used only
+# to choose among the media types the slot itself declares.
+_EXTENSION_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".txt": "text/plain",
+    ".json": "application/json",
+    ".glb": "model/gltf-binary",
+}
+
+
+def _slot_media_type(slot_id: str, slot: Any, name: str) -> str:
+    """The media type of an input file, from the slot's own declared contract."""
+    suffix = Path(name).suffix.lower()
+    extensions = [str(item).lower() for item in slot.extensions]
+    if extensions and suffix not in extensions:
+        raise ValueError(
+            f"{name} does not fit slot '{slot_id}'; it takes the extensions: "
+            + ", ".join(extensions)
+        )
+    if len(slot.media_types) == 1:
+        return slot.media_types[0]
+    declared = _EXTENSION_MEDIA_TYPES.get(suffix, "")
+    if declared in slot.media_types:
+        return declared
+    raise ValueError(
+        f"cannot tell the media type of {name} for slot '{slot_id}'; "
+        f"it takes: {', '.join(slot.media_types)}"
+    )
+
+
 def _binding_from_flags(
     args: argparse.Namespace,
     client: ArtifactJobClient,
@@ -494,16 +535,7 @@ def _binding_from_flags(
     paths: dict[str, Path] = {}
     for slot_id, slot in slots.items():
         for path in chosen[slot_id]:
-            guessed = mimetypes.guess_type(path.name)[0]
-            if guessed in slot.media_types:
-                media_type = guessed
-            elif len(slot.media_types) == 1:
-                media_type = slot.media_types[0]
-            else:
-                raise ValueError(
-                    f"cannot tell the media type of {path.name} for slot "
-                    f"'{slot_id}'; it takes: {', '.join(slot.media_types)}"
-                )
+            media_type = _slot_media_type(slot_id, slot, path.name)
             if path.name in paths:
                 raise ValueError(f"two inputs are named {path.name}")
             paths[path.name] = path
