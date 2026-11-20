@@ -13,7 +13,7 @@ import {
 import type { WireNumber } from "../api/contract-numeric";
 import { validateControlParameters } from "../api/contract-json";
 import { ApiError } from "../api/client";
-import { ProfileDocumentState, ProfileSwitchChildKind } from "../api/vocabulary.generated";
+import { ProfileAction, ProfileDocumentState } from "../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../api/types";
 import type {
   ControlApi,
@@ -237,7 +237,6 @@ async function submitProfileLoad(
   }
 }
 
-/** A load is offered when it can be admitted now, or once the Controller has prepared what it lacks. */
 /** The profile the page opens on: the requested one, else the loaded one, else the first. */
 function openingProfile(profiles: FleetProfileRead[]) {
   const requested = requestedProfile();
@@ -254,24 +253,23 @@ const loadedFirst = (left: FleetProfileRead, right: FleetProfileRead) =>
   Number(right.status === ProfileDocumentState.LOADED) -
     Number(left.status === ProfileDocumentState.LOADED) || compareWire(left.number, right.number);
 
-/** A saved profile that is not loaded reads saved; draft means unsaved edits. */
+/** The profile state shown to people: the Controller's word, spaces for hyphens. */
 const profileStateLabel = (status: string | undefined) =>
-  status === ProfileDocumentState.DRAFT
-    ? "saved"
-    : (status?.replaceAll("-", " ") ?? "Status unavailable");
+  status?.replaceAll("-", " ") ?? "Status unavailable";
+
+const KEEP = ProfileAction.KEEP;
 
 /** The workloads a load stops, from the reviewed effects `vonkctl run` also leads with. */
 function stoppedAliases(preview: FleetProfilePreview | undefined): string[] {
   const effects = preview?.effects;
   if (!effects) return [];
-  const aliases = (effects.runs ?? [])
-    .filter((run) => run.action === ProfileSwitchChildKind.STOP)
-    .map((r) => r.alias);
+  const aliases = (effects.runs ?? []).filter((run) => run.action !== KEEP).map((r) => r.alias);
   for (const adopted of effects.adopted ?? [])
     for (const stop of adopted.stops ?? []) aliases.push(stop.effect.alias);
   return [...new Set(aliases)].sort();
 }
 
+/** A load is offered when it can be admitted now, or once the Controller has prepared what it lacks. */
 const loadable = (preview: FleetProfilePreview | undefined) =>
   preview?.allowed === true || preview?.waits_for_preparation === true;
 
@@ -1233,11 +1231,7 @@ export function LibraryProfilesView({
                 disabled={!draftValid || saving}
                 onClick={() => void saveDraft()}
               >
-                {saving
-                  ? "Saving profile…"
-                  : draft.number !== undefined
-                    ? "Save profile"
-                    : "Save profile"}
+                {saving ? "Saving profile…" : "Save profile"}
               </button>
             </footer>
           </div>

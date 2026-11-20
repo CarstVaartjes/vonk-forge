@@ -257,12 +257,12 @@ test("shows a refused profile load without resubmitting it", async () => {
   expect(loadProfile).toHaveBeenCalledTimes(1);
 });
 
-test("opens on the loaded profile, reads saved not draft, and names what Load stops", async () => {
+test("opens on the loaded profile, pins it first, and names what Load stops", async () => {
   const other = {
     ...profile,
     number: 1,
     id: "99999999-9999-4999-8999-999999999999",
-    status: "draft",
+    status: "saved",
   };
   const loaded = { ...profile, status: "loaded", loaded_revision: 4 } as unknown as FleetProfile;
   const stopping = {
@@ -296,6 +296,8 @@ test("opens on the loaded profile, reads saved not draft, and names what Load st
   expect(await screen.findByText("Will stop: glm, qwen")).toBeInTheDocument();
   expect(screen.getByText(/· saved$/)).toBeInTheDocument();
   expect(screen.getByText(/loaded · revision/)).toBeInTheDocument();
+  const list = screen.getByLabelText("Saved profiles");
+  expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Profile 2");
   expect(screen.queryByText(/draft/)).toBeNull();
 });
 

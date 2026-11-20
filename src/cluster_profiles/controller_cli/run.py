@@ -47,9 +47,9 @@ def _run(
     """Run one exact library recipe; the Controller prepares what the load needs.
 
     Two separate effects follow one invocation. The recipe is first saved into
-    the selected profile as a draft (the Controller can only review a saved
+    the selected profile (the Controller can only review a saved
     profile; the running fleet is unchanged), then the reviewed load starts it.
-    The load follows only a confirmed draft save; its owner decides admission.
+    The load follows only a confirmed save; its owner decides admission.
     """
     number = _profile_number(args)
     _require_confirmation(args, "run")

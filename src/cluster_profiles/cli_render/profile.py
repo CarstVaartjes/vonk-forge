@@ -25,17 +25,11 @@ from .common import (
 from .library import _option_choices
 
 
-def profile_state(status: object) -> object:
-    """A saved profile that is not loaded reads "saved"; "draft" is unsaved edits."""
-
-    return "saved" if status == cli_states.DRAFT else status
-
-
 def _profile(payload: Mapping[str, object]) -> None:
     print(f"Profile {_text(payload.get('number'))}: {_text(payload.get('name'))}")
     _field("Revision", payload.get("revision"))
     _field("Loaded revision", payload.get("loaded_revision"))
-    _field("State", profile_state(payload.get("status")))
+    _field("State", payload.get("status"))
     if (
         payload.get("definition") is None
         and payload.get("projection_issue") is not None
