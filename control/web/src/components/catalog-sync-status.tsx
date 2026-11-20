@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { CatalogSyncStatus, LibraryApi, LibraryViewSnapshot } from "../api/types";
 import { lastSyncAt } from "../lib/catalog-sync";
+import { formatDate } from "../lib/time";
 import { Time } from "./time";
 import { StatusPill } from "./status-pill";
 import type { StatusTone } from "./status-pill";
@@ -55,8 +56,7 @@ export function CatalogSyncStatusLine({
       <summary>Details</summary>
       {release && (
         <p>
-          Library release v{release.version}, updated{" "}
-          {new Date(release.updated_at).toLocaleDateString()}.
+          Library release v{release.version}, updated {formatDate(new Date(release.updated_at))}.
         </p>
       )}
       {body}

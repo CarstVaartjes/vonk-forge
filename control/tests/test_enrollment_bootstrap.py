@@ -85,7 +85,6 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
             "control.example.test",
             "enroll.example.test",
             "agents.example.test",
-            "registry.example.test",
         ),
     )
 
@@ -99,7 +98,6 @@ def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> No
             "control.example.test",
             "enroll.example.test",
             "agents.example.test",
-            "registry.example.test",
         ),
     )
 

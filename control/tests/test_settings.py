@@ -55,7 +55,6 @@ def test_production_defaults_and_derived_service_names(secrets_root: Path) -> No
         "vonk-forge.tail1234.ts.net",
         "enroll.vonk-forge.tail1234.ts.net",
         "agents.vonk-forge.tail1234.ts.net",
-        "registry.vonk-forge.tail1234.ts.net",
     )
     assert (
         settings.agent_controller_origin

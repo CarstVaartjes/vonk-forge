@@ -12,25 +12,25 @@ preview changes, and operate one Spark or a fleet.
 [Browse recipes](https://vonkforge.ai/recipes) ·
 [Read the operator docs](docs/README.md)
 
-![Vonk Forge Fleet showing Spark health, model placement, capacity, and blockers](docs/assets/controller-fleet.webp)
+![Vonk Forge Overview showing Spark health, model placement, capacity, and blockers](docs/assets/controller-fleet.webp)
 
 > The screenshot is produced by the repository's fixture-backed browser
 > acceptance suite. It contains no live fleet data.
 
 ## What it gives you
 
-- **One place to operate local AI.** Fleet, Library, Activity, and reusable
-  fleet profiles share one controller and one source of truth.
-- **Cache-backed profiles.** Profile choices and apply admission come from the
-  trusted local NAS/Controller cache, which resolves exact model and
+- **One place to operate local AI.** Overview, Workloads, Library, Activity, and reusable
+  fleet profiles share one Controller and one source of truth.
+- **Cache-backed profiles.** Profile choices and load admission come from the
+  trusted local Controller cache, which resolves exact model and
   recipe-image identities.
 - **One profile for the fleet.** Reviews include every current enrolled,
   non-revoked Spark and show unassigned Sparks as idle. A membership change
-  before applying requires a fresh review. The
+  before loading requires a fresh review. The
   [operator guide](docs/runbooks/vonkctl.md#profile) describes target behavior
   when Sparks later join or leave.
 - **A safer change path.** See compatibility, placement, downloads, memory,
-  and the exact planned change before you apply it.
+  and the exact planned change before you load it.
 - **Reproducible model recipes.** Recipes bind model, runtime, topology,
   capacity, source, and qualification facts to immutable identities.
 - **No routine Spark SSH.** A native Rust agent connects outbound and executes
@@ -53,9 +53,9 @@ flowchart LR
 ```
 
 The public website is documentation and catalog—not a hosted admin surface.
-The trusted local NAS/Controller cache is the authority for profile choices and
-apply admission. Model and recipe-image assets remain tied to immutable
-identities there before an apply distributes them to Sparks. Spark-local copies
+The trusted local Controller cache is the authority for profile choices and
+load admission. Model and recipe-image assets remain tied to immutable
+identities there before a load distributes them to Sparks. Spark-local copies
 are execution caches, not profile authority; normal cache trust does not imply
 costly repeated full hashing.
 
@@ -193,9 +193,9 @@ agent upgrade; certificate replacement is an explicit Fleet re-enrollment.
 | --- | --- |
 | Find | Cache-backed model and recipe choices filtered against the fleet you own |
 | Preview | Compatibility, placement, capacity, exact assets, and actionable blockers |
-| Prepare | Resolve missing NAS model or recipe-image assets with the prepare-cache action |
-| Apply | A ready, digest-bound plan prepares exact assets in parallel, skips local copies, and safely replaces workloads |
-| Observe | Live Fleet state, per-target progress, warnings, recovery, and audit history |
+| Prepare | Resolve missing Controller model or recipe-image assets with the prepare-cache action |
+| Load | A ready, digest-bound plan prepares exact assets in parallel, skips local copies, and safely replaces workloads |
+| Observe | Live Overview and Workloads state, per-target progress, warnings, recovery, and audit history |
 
 The private Web Controller is the guided path. `vonkctl` exposes the same API,
 filters, previews, mutations, and JSON output for repeatable operations. See the
@@ -214,7 +214,7 @@ filters, previews, mutations, and JSON output for repeatable operations. See the
   captured diagnostics.
 - Model weights and recipe images are resolved from immutable identities in the
   local cache, then prepared on target Sparks; already-local assets are skipped.
-  They do not pass through the public catalog. NAS cleanup removes unused local
+  They do not pass through the public catalog. Controller cleanup removes unused local
   model-cache entries while preserving profile and active-workload references.
 
 For the trust and network model, see the

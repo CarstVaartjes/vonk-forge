@@ -307,9 +307,9 @@ export function LibrarySetupStrip({
             onChange={(quantization) => set({ quantization })}
           />
           <FilterSelect
-            label="Usage"
-            name="Filter usage"
-            all="All usage"
+            label="Capabilities"
+            name="Filter capabilities"
+            all="All capabilities"
             value={filters.usage}
             options={sorted(
               records.flatMap((r) =>

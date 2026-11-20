@@ -80,9 +80,9 @@ def _group(
 def _fleet(
     fleet: FleetModelRemovalEffects, nas_bytes: object, *, verbose: bool
 ) -> None:
-    _field("NAS removal", fleet.nas_remove)
-    _field("NAS bytes freed", _bytes(nas_bytes))
-    _field("NAS reason", fleet.nas_detail)
+    _field("Controller removal", fleet.nas_remove)
+    _field("Controller bytes freed", _bytes(nas_bytes))
+    _field("Controller reason", fleet.nas_detail)
     for target in fleet.targets:
         _field("Spark", target.node_id)
         _field("  Observation available", target.observation_available)
@@ -279,13 +279,13 @@ def _unused_removal(payload: object) -> None:
         sparks = _object(entry.get("sparks"), "unused removal Spark bytes")
         freed = ", ".join(f"{node} {_bytes(size)}" for node, size in sparks.items())
         _field("Remove", entry.get("selector"))
-        _field("  NAS bytes freed", _bytes(entry.get("nas_bytes")))
+        _field("  Controller bytes freed", _bytes(entry.get("nas_bytes")))
         if freed:
             _field("  Spark bytes freed", freed)
     if not remove:
         print("Nothing to remove: every cached model is kept or already gone.")
     else:
-        _field("Total NAS bytes freed", _bytes(totals.get("nas_bytes")))
+        _field("Total Controller bytes freed", _bytes(totals.get("nas_bytes")))
         for node, size in _object(totals.get("sparks"), "totals").items():
             _field(f"Total {node} bytes freed", _bytes(size))
     for entry in _records(document, "retained"):

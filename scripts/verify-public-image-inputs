@@ -26,7 +26,6 @@ INPUTS = (
     "deploy/compose/litellm/entrypoint.sh",
     "deploy/compose/litellm/config_supervisor.py",
     "deploy/compose/prometheus",
-    "deploy/compose/registry/config.yml",
     "deploy/compose/tailscale/configure.sh",
     # Read only to embed the Compose template digest.
     "deploy/compose/compose.yaml",

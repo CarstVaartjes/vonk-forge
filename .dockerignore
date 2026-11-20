@@ -28,8 +28,6 @@ control/web/playwright-report
 install/*
 !schemas/
 schemas/*
-!schemas/global/
-schemas/global/*
 !schemas/install-release-manifest.schema.json
 !tools/
 tools/*
@@ -66,9 +64,6 @@ deploy/compose/litellm/*
 !deploy/compose/litellm/patch-vllm-passthrough.py
 !deploy/compose/prometheus/
 !deploy/compose/prometheus/**
-!deploy/compose/registry/
-deploy/compose/registry/*
-!deploy/compose/registry/config.yml
 !deploy/compose/tailscale/
 deploy/compose/tailscale/*
 !deploy/compose/tailscale/configure.sh

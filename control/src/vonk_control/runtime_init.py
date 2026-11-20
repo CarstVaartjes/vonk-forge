@@ -352,8 +352,8 @@ def _stage_runtime_assets_once(
 ) -> None:
     """Publish this release's public runtime configs to the shared volume.
 
-    Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus, the
-    registry and the Tailscale configurator) reads
+    Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus and the
+    Tailscale configurator) reads
     its configuration from this volume, so a pulled Controller image is the
     whole configuration rollout. Files a release no longer ships are removed.
     """

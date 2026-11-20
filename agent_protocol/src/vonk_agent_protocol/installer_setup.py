@@ -122,7 +122,7 @@ class NasStepCaControllerFiles(WireModel):
 
 
 class NasStepCaControllerRequest(WireModel):
-    #: The control hostname; the enrollment, agent and registry names are fixed
+    #: The control hostname; the enrollment and agent names are fixed
     #: prefixes of it, so one value names the whole controller.
     hostname_env: str
     provisioner_name: str

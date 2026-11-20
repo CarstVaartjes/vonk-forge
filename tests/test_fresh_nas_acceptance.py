@@ -524,7 +524,6 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
         nas_ip="127.0.0.1",
         control_hostname="control.acceptance.example.test",
         enrollment_hostname="enroll.acceptance.example.test",
-        registry_hostname="registry.acceptance.example.test",
         tailnet_suffix="acceptance.example.test",
         tailscale_mode="disabled",
     )
@@ -1149,27 +1148,12 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     calls: list[tuple[list[str], _RequestKwargs]] = []
     monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(fixture))
 
-    client_certificate = tmp_path / "client.pem"
-    client_key = tmp_path / "client.key"
-    client_certificate.write_text("certificate")
-    client_key.write_text("key")
-    monkeypatch.setattr(
-        acceptance,
-        "issue_registry_client_certificate",
-        lambda *_: (client_certificate, client_key),
-    )
-
     def request(command: list[str], **kwargs: Unpack[_RequestKwargs]) -> bytes:
         calls.append((command, kwargs))
         path = kwargs["path"]
         headers = kwargs.get("headers", {})
         assert isinstance(path, str)
         assert isinstance(headers, dict)
-        if kwargs.get("server_hostname") == "registry.acceptance.example.test":
-            if kwargs.get("client_certificate") is None:
-                raise AcceptanceError("registry requires a client certificate")
-            assert path == "/v2/"
-            return b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"
         if path == "/v1/models":
             status = (
                 "200 OK"
@@ -1184,28 +1168,17 @@ def test_routed_service_checks_require_authentication_and_expected_data(
 
     acceptance.verify_routed_service_behavior(
         tmp_path,
-        nas_ip="192.0.2.20",
         control_hostname="vonk-forge.acceptance.example.test",
-        registry_hostname="registry.acceptance.example.test",
     )
 
     assert all(
         command == acceptance._tailnet_tunnel("vonk-forge.acceptance.example.test", 443)
-        for command, kwargs in calls
-        if kwargs["server_hostname"] != "registry.acceptance.example.test"
+        for command, _kwargs in calls
     )
     requests = {kwargs["path"]: kwargs for _, kwargs in calls}
     models = requests["/v1/models"]
     assert models["headers"] == {"Authorization": "Bearer litellm-secret"}
     assert models["accepted_statuses"] == {200}
-    registry = next(
-        kwargs
-        for _, kwargs in calls
-        if kwargs["server_hostname"] == "registry.acceptance.example.test"
-        and kwargs.get("client_certificate") is not None
-    )
-    assert registry["ca_file"] == secrets / "step-ca/root-certificate"
-    assert registry["client_certificate"] == client_certificate
 
 
 @pytest.mark.parametrize(

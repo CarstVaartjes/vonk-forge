@@ -214,7 +214,7 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
     assert!(agent_config.contains("fabric_bandwidth_mbps = 200000\n"));
     assert_eq!(
         fs::read_to_string(&install_paths.hosts).unwrap(),
-        "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n192.168.1.231 control.example.test enroll.example.test controller.example.test registry.example.test\n# END VONK FORGE MANAGED HOSTS\n"
+        "127.0.0.1 localhost\n# BEGIN VONK FORGE MANAGED HOSTS\n192.168.1.231 control.example.test enroll.example.test controller.example.test\n# END VONK FORGE MANAGED HOSTS\n"
     );
     assert_eq!(
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),

@@ -15,7 +15,6 @@ DEFAULT_SERVICES = {
     "litellm",
     "postgres",
     "prometheus",
-    "registry",
 }
 SECURE_REMOTE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
 ALL_SERVICES = DEFAULT_SERVICES | SECURE_REMOTE_SERVICES

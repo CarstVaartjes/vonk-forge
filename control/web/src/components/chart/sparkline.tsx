@@ -5,11 +5,13 @@ import { linePath, linearScale, type Point, runsOf, washPath } from "./scale";
 const W = 120;
 const H = 36;
 const PAD = 5;
+/** One or two samples are a dot, not a trend: the trace waits for a third. */
+const MIN_SAMPLES = 3;
 
 /**
  * A trace with a soft wash and an end dot, no axes: the number beside it is the label. Points sit at
- * their time between start and end; a missing sample leaves a gap. With nothing to draw it renders
- * nothing, so the caller says "Not reported".
+ * their time between start and end; a missing sample leaves a gap. With fewer than three samples it renders
+ * nothing, so the caller says "Not reported" or just shows the figure.
  */
 export function Sparkline({
   points,
@@ -30,7 +32,7 @@ export function Sparkline({
 }) {
   const id = useId();
   const present = points.flatMap((point) => (point.v === null ? [] : [point.v]));
-  if (!present.length) return null;
+  if (present.length < MIN_SAMPLES) return null;
   const lo = min ?? Math.min(...present);
   const hi = max ?? Math.max(...present);
   const x = linearScale([start, end], [0, W - 6]);

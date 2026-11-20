@@ -1,18 +1,12 @@
 import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ControlApi, MetricRange, MetricSpec, MetricsSeriesResponse } from "../api/types";
-import { RangeSwitch } from "./range-switch";
 import { MetricsChart, SeriesChart } from "./metrics-chart";
 
 /** The page owns the range; this is the smallest page. */
-function Ranged(props: Omit<ComponentProps<typeof MetricsChart>, "range">) {
+function Ranged(props: Omit<ComponentProps<typeof MetricsChart>, "range" | "onRangeChange">) {
   const [range, setRange] = useState<MetricRange>("6h");
-  return (
-    <>
-      <RangeSwitch range={range} onChange={setRange} />
-      <MetricsChart {...props} range={range} />
-    </>
-  );
+  return <MetricsChart {...props} range={range} onRangeChange={setRange} />;
 }
 
 const spec = (
@@ -104,21 +98,16 @@ const stable = (value: number): MetricsSeriesResponse => ({
   ],
 });
 
-test("shows memory in GiB with Spark names and the certificate as a time left", async () => {
-  // Break caught: raw bytes or node ids reach the page, or the certificate stays a chart of seconds.
+test("shows memory in GiB with Spark names", async () => {
+  // Break caught: raw bytes or node ids reach the page.
   const metricsSeries = vi.fn(async (metric: string) =>
-    metric === "host_memory_used"
-      ? stable(64 * 1024 ** 3)
-      : metric === "certificate_expiry"
-        ? stable(12 * 86400 + 600)
-        : stable(10),
+    metric === "host_memory_used" ? stable(64 * 1024 ** 3) : stable(10),
   );
   render(<Ranged api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
 
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
   expect(memory).toHaveTextContent("60.0 GiB");
-  expect(await screen.findByText("Kitchen: certificate expires in 12 days")).toBeVisible();
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
 
@@ -187,15 +176,12 @@ test("one range switch re-reads every tile for the Spark, models included", asyn
   );
 });
 
-test("an expired certificate says expired, never 'expires in now'", async () => {
-  // Break caught: a zero or negative time left reads "certificate expires in now".
-  const metricsSeries = vi.fn(async (metric: string) =>
-    metric === "certificate_expiry" ? stable(0) : stable(10),
-  );
-  render(<Ranged api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
-
-  expect(await screen.findByText("Kitchen: certificate expired")).toBeVisible();
-  expect(screen.queryByText(/expires in/)).toBeNull();
+test("the range switch and Refresh sit in the Trends header, not below it", () => {
+  // Break caught: the heading, the range and Refresh sit on three separate rows.
+  render(<Ranged api={fakeApi(vi.fn(async () => stable(10)))} />);
+  const header = screen.getByRole("heading", { name: "Trends" }).closest("header")!;
+  expect(within(header).getByRole("group", { name: "Range" })).toBeVisible();
+  expect(within(header).getByRole("button", { name: "Refresh metrics" })).toBeVisible();
 });
 
 test("a Spark has the same colour in every tile, by its place in the enrolment order", async () => {

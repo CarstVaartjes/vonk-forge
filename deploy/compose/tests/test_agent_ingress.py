@@ -43,7 +43,6 @@ def _environment() -> dict[str, str]:
         # for tests that adapt the Caddyfile without the entrypoint.
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.control.test.example",
         "VONK_AGENT_HOSTNAME": "agents.control.test.example",
-        "VONK_REGISTRY_HOSTNAME": "registry.control.test.example",
     }
 
 
@@ -112,8 +111,6 @@ def _adapted_caddy(environment: dict[str, str], caddyfile: str | None = None) ->
             f"VONK_AGENT_ENROLL_HOSTNAME={environment.get('VONK_AGENT_ENROLL_HOSTNAME', 'enroll.' + environment['VONK_CONTROL_HOSTNAME'])}",
             "-e",
             f"VONK_AGENT_HOSTNAME={environment.get('VONK_AGENT_HOSTNAME', 'agents.' + environment['VONK_CONTROL_HOSTNAME'])}",
-            "-e",
-            f"VONK_REGISTRY_HOSTNAME={environment.get('VONK_REGISTRY_HOSTNAME', 'registry.' + environment['VONK_CONTROL_HOSTNAME'])}",
             "-e",
             "VONK_AGENT_PROXY_AUTH=test-proxy-secret",
             DEV_CADDY_IMAGE,
@@ -378,7 +375,6 @@ def test_development_image_compose_enables_local_ca_agent_settings(
         "agent-proxy",
         "ingress",
         "litellm-edge",
-        "registry-edge",
         "tailnet-web-edge",
     }
     assert set(api["networks"]) == {
@@ -981,16 +977,14 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
     for hostname in (
         "enroll.control.test.example",
         "agents.control.test.example",
-        "registry.control.test.example",
     ):
         assert hostname not in tailnet
 
     assert "enroll.control.test.example" in backend
     assert "agents.control.test.example" in backend
-    assert "registry.control.test.example" in backend
     # Lab mode also serves the browser surface on the LAN HTTPS listener.
     # Secure remote browser traffic still enters through the separate tailnet
-    # listener above; node-only agent and registry routes remain on 8443.
+    # listener above; node-only agent routes remain on 8443.
     assert "control.test.example" in backend
     assert "litellm:4000" not in backend
 
@@ -1111,9 +1105,9 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
             "/bin/sh",
             "-c",
             (
-                'printf "%s %s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
+                'printf "%s %s %s %s" "$VONK_AGENT_PROXY_AUTH" '
                 '"$VONK_CONTROL_HOSTNAME" "$VONK_AGENT_ENROLL_HOSTNAME" '
-                '"$VONK_AGENT_HOSTNAME" "$VONK_REGISTRY_HOSTNAME"'
+                '"$VONK_AGENT_HOSTNAME"'
             ),
         ),
     )
@@ -1124,7 +1118,6 @@ def test_caddy_proxy_auth_is_one_canonical_base64url_like_line(tmp_path: Path) -
         "control.test.example",
         "enroll.control.test.example",
         "agents.control.test.example",
-        "registry.control.test.example",
     ]
 
     invalid_values = (

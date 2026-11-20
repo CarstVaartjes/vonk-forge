@@ -1,5 +1,5 @@
 {
-  "comment": "Capability labels and status meanings for the Controller web Library and `vonkctl recipe detail`. `vocabulary` is a hand-kept excerpt in the contract's published shape (only the entries the cases use), so a newer release never turns a test red. The web test renders each case under that vocabulary and compares the capability chips' text and titles and the status badge title; the vonkctl test renders the same input and compares the printed `Usage` and `Meaning` lines. Both must equal the literals here exactly. A capability the release does not list shows its name; none declared shows `Not reported`.",
+  "comment": "Capability labels and status meanings for the Controller web Library and `vonkctl recipe detail`. `vocabulary` is a hand-kept excerpt in the contract's published shape (only the entries the cases use), so a newer release never turns a test red. The web test renders each case under that vocabulary and compares the capability chips' text and titles and the status badge title; the vonkctl test renders the same input and compares the printed `Capabilities` and `Meaning` lines. Both must equal the literals here exactly. A capability the release does not list shows its name; none declared shows `Not reported`.",
   "vocabulary": {
     "categories": [
       {
@@ -53,7 +53,7 @@
         "Language: Holds a conversation in turns.",
         "Code: Writes and edits program code."
       ],
-      "vonkctl": "Usage: Chat, Code generation"
+      "vonkctl": "Capabilities: Chat, Code generation"
     },
     {
       "name": "a capability the release does not list shows its name",
@@ -69,7 +69,7 @@
         "Language: Holds a conversation in turns.",
         null
       ],
-      "vonkctl": "Usage: Chat, hologram"
+      "vonkctl": "Capabilities: Chat, hologram"
     },
     {
       "name": "none declared",
@@ -80,7 +80,7 @@
       "web_titles": [
         null
       ],
-      "vonkctl": "Usage: Not reported"
+      "vonkctl": "Capabilities: Not reported"
     }
   ],
   "statuses": [

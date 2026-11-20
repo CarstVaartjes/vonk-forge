@@ -7,11 +7,18 @@ import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
 import { useToast } from "../components/toast";
 import { SortHeader, useSort } from "../components/sort-header";
+import { StatusPill } from "../components/status-pill";
 import { Time } from "../components/time";
 import { safeErrorText } from "../lib/error-display";
 
 function failure(error: unknown, fallback: string): string {
   return safeErrorText(error instanceof Error ? error.message : fallback);
+}
+
+/** A key is expired once its expiry time has passed; an unparsable time is not claimed expired. */
+export function isExpired(expiresAt: string | null | undefined, now: number): boolean {
+  const at = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+  return Number.isFinite(at) && at <= now;
 }
 
 export function KeysPage({ api }: { api: ControlApi }) {
@@ -27,6 +34,7 @@ export function KeysPage({ api }: { api: ControlApi }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const now = Date.now();
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -228,37 +236,39 @@ export function KeysPage({ api }: { api: ControlApi }) {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((key) => (
-                  <tr key={key.name}>
-                    <th scope="row">{key.name}</th>
-                    <td>{key.models.length ? key.models.join(", ") : "All models"}</td>
-                    <td>
-                      <Time value={key.created_at} />
-                    </td>
-                    <td>
-                      <Time value={key.last_used_at} />
-                    </td>
-                    <td>{key.expires_at ? <Time value={key.expires_at} /> : "Never"}</td>
-                    <td>
-                      <div className="button-row">
-                        <button
-                          type="button"
-                          className="button secondary"
-                          onClick={() => setRolling(key.name)}
-                        >
-                          Roll<span className="sr-only"> {key.name}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="button secondary"
-                          onClick={() => setRevoking(key.name)}
-                        >
-                          Revoke<span className="sr-only"> {key.name}</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {sorted.map((key) => {
+                  const expired = isExpired(key.expires_at, now);
+                  return (
+                    <tr key={key.name} className={expired ? "is-expired" : undefined}>
+                      <th scope="row">{key.name}</th>
+                      <td>{key.models.length ? key.models.join(", ") : "All models"}</td>
+                      <td>{key.created_at ? <Time value={key.created_at} /> : "Never"}</td>
+                      <td>{key.last_used_at ? <Time value={key.last_used_at} /> : "Never"}</td>
+                      <td className="key-expires">
+                        {expired && <StatusPill tone="bad">Expired</StatusPill>}{" "}
+                        {key.expires_at ? <Time value={key.expires_at} /> : "Never"}
+                      </td>
+                      <td>
+                        <div className="button-row">
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => setRolling(key.name)}
+                          >
+                            Roll<span className="sr-only"> {key.name}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => setRevoking(key.name)}
+                          >
+                            Revoke<span className="sr-only"> {key.name}</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

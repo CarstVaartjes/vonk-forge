@@ -72,12 +72,7 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "agent-proxy",
         "ingress",
         "litellm-edge",
-        "registry-edge",
         "tailnet-web-edge",
-    }
-    assert set(services["registry"]["networks"]) == {
-        "registry-edge",
-        "registry-publisher",
     }
     assert set(services["control-worker"]["networks"]) == {"data", "artifact-egress"}
     assert not services["control-worker"].get("ports")
@@ -381,7 +376,7 @@ def test_control_api_waits_out_startup_and_asset_waits_have_one_owner() -> None:
     services = _rendered()["services"]
 
     assert services["control-api"]["healthcheck"]["start_period"] == "2m0s"
-    waiting = ["postgres", "litellm", "prometheus", "caddy", "registry"]
+    waiting = ["postgres", "litellm", "prometheus", "caddy"]
     for name in waiting:
         service = services[name]
         text = str(service.get("entrypoint", "")) + str(service.get("command", ""))

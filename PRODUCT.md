@@ -20,11 +20,11 @@ Make it easy to run any model on one or more Sparks and make the resulting endpo
 
 ## Positioning
 
-Vonk Forge joins a curated model-and-recipe library to a trusted local NAS/Controller cache, authenticated live DGX Spark capacity, atomic multi-Spark placement, and reusable desired-state fleet profiles. The browser shows the same model, recipe, placement, installation, run, and health truth from either the fleet or model perspective.
+Vonk Forge joins a curated model-and-recipe library to a trusted local Controller cache, authenticated live DGX Spark capacity, atomic multi-Spark placement, and reusable desired-state fleet profiles. The browser shows the same model, recipe, placement, installation, run, and health truth from either the fleet or model perspective.
 
 ## Operating Context
 
-The control plane runs on one local computer with Docker Compose—a laptop, a NAS, or a local server. Sparks enroll through an outbound native agent; PostgreSQL owns fleet and operational state, while the local NAS/Controller model and recipe-image cache is authoritative for profile authoring and apply admission. Profile choices must come from that cache and resolve to exact immutable identities. Routine operation does not require SSH, Git, direct browser-to-Spark access, or manually edited agent configuration. Models can have multiple immutable recipe revisions and topologies. A recipe may be installed on several complete Spark groups and may be running on zero or more groups.
+The control plane runs on one local computer with Docker Compose—a laptop, a NAS, or a local server. Sparks enroll through an outbound native agent; PostgreSQL owns fleet and operational state, while the local Controller model and recipe-image cache is authoritative for profile authoring and load admission. Profile choices must come from that cache and resolve to exact immutable identities. Routine operation does not require SSH, Git, direct browser-to-Spark access, or manually edited agent configuration. Models can have multiple immutable recipe revisions and topologies. A recipe may be installed on several complete Spark groups and may be running on zero or more groups.
 
 Current architecture and storage ownership are defined in
 [the architecture overview](docs/architecture-overview.md). PostgreSQL owns
@@ -55,14 +55,14 @@ available to its dependencies, and failed work must not block unrelated work.
   assignments. The Controller also checks accepted running assignments for
   live-state drift and reconciles them through the existing run and route
   recovery paths.
-- Applying a ready profile shows live-versus-desired differences, prepares
+- Loading a ready profile shows live-versus-desired differences, prepares
   exact model and recipe-image assets on target Sparks in parallel, skips assets
   already local, safely stops and replaces workloads, and reports durable
   progress.
-- NAS reconciliation removes unused local model-cache entries while preserving profile and active-workload references. Spark-local copies are execution caches, not profile authority, and trusted NAS cache entries do not imply repeated full hashing.
+- Controller reconciliation removes unused local model-cache entries while preserving profile and active-workload references. Spark-local copies are execution caches, not profile authority, and trusted Controller cache entries do not imply repeated full hashing.
 - Individual Spark management and whole-fleet profiles use the same primitives and terminology.
 - This is a clean-slate product. There are no production installations to migrate and no requirement to retain legacy pages, schemas, adapters, routes, or data.
-- Repository work must not mutate the live NAS or Sparks.
+- Repository work must not mutate the live Controller or Sparks.
 
 ## Brand Commitments
 
@@ -74,7 +74,7 @@ The repository contains real Fleet telemetry, inventory, installation, run, plac
 
 ## Product Principles
 
-1. One system, two perspectives: Fleet answers “where”; Library answers “what”; every object cross-links.
+1. One system, two perspectives: Overview and Workloads answer “where”; Library answers “what”; every object cross-links.
 2. State before controls: show health, current workload, installed inventory, capacity, and drift before asking for a decision.
 3. Desired versus live: every change begins with an understandable diff and ends with observable progress.
 4. Model-first language: recipes make a model runnable; internal pipelines never become the user’s navigation.

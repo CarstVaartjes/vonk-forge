@@ -202,7 +202,7 @@ test("offers the same model filters as vonkctl model library", () => {
   renderModels();
   fireEvent.click(screen.getByText("Filters"));
   for (const name of [
-    "Filter usage",
+    "Filter capabilities",
     "Filter family",
     "Filter version",
     "Filter quantization",

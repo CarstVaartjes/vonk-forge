@@ -33,7 +33,7 @@ const RECOVERY_ACTION_LABELS: Record<RecoveryAction, string> = {
   open_model_access: "Open the selected Model access page",
   configure_hf_token: "Configure the existing protected HF token file",
   check_access_and_resume: "Check access and resume",
-  free_space: "Free NAS space, then retry",
+  free_space: "Free Controller disk space, then retry",
   inspect: "Inspect the operation details",
 };
 

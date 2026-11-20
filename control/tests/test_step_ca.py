@@ -321,7 +321,6 @@ def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleName
             "control.example.test",
             "enroll.example.test",
             "agents.example.test",
-            "registry.example.test",
         ),
         install_channel="stable",
         controller_ca_path=material["root_path"],

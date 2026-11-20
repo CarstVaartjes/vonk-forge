@@ -200,7 +200,7 @@ test("offers the same recipe filters as vonkctl recipe library", () => {
   );
   fireEvent.click(screen.getByText("Filters"));
   for (const name of [
-    "Filter usage",
+    "Filter capabilities",
     "Filter family",
     "Filter version",
     "Filter quantization",

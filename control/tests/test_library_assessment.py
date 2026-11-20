@@ -149,7 +149,7 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         render_payload(response.json(), "recipe", action="library", wide=True)
         rendered = capsys.readouterr().out
         assert "Fleet fit: ready" in rendered
-        assert "Exact NAS assets: not cached" in rendered
+        assert "Exact Controller assets: not cached" in rendered
         assert "Readiness: needs download" in rendered
         token = tmp_path / "client-token"
         token.write_text("fixture-token")

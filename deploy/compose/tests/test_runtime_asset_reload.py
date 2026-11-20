@@ -44,7 +44,6 @@ RESTART_ONLY = {
     "its next start",
     "litellm": "the supervisor rereads bootstrap-config.json every poll; "
     "entrypoint.sh and config_supervisor.py are its own process code",
-    "registry": "distribution has no configuration reload",
     "tailscale-configurator": "configure.sh is its own reconcile loop; the "
     "healthcheck already runs the restaged copy",
 }
@@ -366,7 +365,7 @@ def _caddy_secrets(secrets: Path, hostname: str, proxy_auth: str) -> None:
     now = datetime.now(UTC)
     names = [
         hostname,
-        *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents", "registry")),
+        *(f"{prefix}.{hostname}" for prefix in ("enroll", "agents")),
     ]
     certificate = (
         x509.CertificateBuilder()

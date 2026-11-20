@@ -1138,3 +1138,50 @@ test("leads with the workload the Controller names, else with the Sparks", async
     screen.getByRole("heading", { name: /Mia Lab Spark.* · Recipe start finished/ }),
   ).toBeVisible();
 });
+
+test("Refresh operation is offered for work in progress, not for a finished operation", async () => {
+  // Break caught: a completed operation keeps a button that can only re-read the same answer.
+  const finished = canonicalOperation({
+    id: "done",
+    kind: "recipe.start",
+    state: "succeeded",
+    failure: null,
+  });
+  render(<ActivityPage api={canonicalApi([finished])} now={NOW} />);
+  await screen.findByText(/Attempt 1/);
+  expect(screen.queryByRole("button", { name: "Refresh operation" })).toBeNull();
+});
+
+test("an operation waiting for an operator keeps Refresh operation", async () => {
+  // Break caught: Refresh is hidden on live work whose state is not "in progress".
+  const waiting = canonicalOperation({
+    id: "waiting",
+    kind: "recipe.start",
+    state: "needs_operator",
+    failure: null,
+  });
+  render(<ActivityPage api={canonicalApi([waiting])} now={NOW} />);
+  expect(await screen.findByRole("button", { name: "Refresh operation" })).toBeVisible();
+});
+
+test("the filters are one row with More filters, and ?status= opens the page filtered", async () => {
+  // Break caught: seven stacked filters push the events below the fold, and a linked count opens unfiltered.
+  history.replaceState(null, "", "/activity?status=unsuccessful");
+  const user = userEvent.setup();
+  render(<ActivityPage api={canonicalApi(recordedOperations())} now={NOW} />);
+  expect(await screen.findByRole("combobox", { name: "Status" })).toHaveValue("unsuccessful");
+  // The link's status is the page's own filter from here on, not a URL it must keep in step.
+  expect(location.search).toBe("");
+  expect(
+    screen.getByRole("group", { name: "Activity view" }).closest(".page-header-actions"),
+  ).not.toBeNull();
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+  const more = screen.getByRole("button", { name: "More filters" });
+  expect(more).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("combobox", { name: "Operator" })).toBeNull();
+  await user.click(more);
+  expect(screen.getByRole("combobox", { name: "Operator" })).toBeVisible();
+  await user.selectOptions(screen.getByRole("combobox", { name: "Sort" }), "attention");
+  expect(screen.getByRole("button", { name: "More filters (1)" })).toBeVisible();
+  history.replaceState(null, "", "/");
+});

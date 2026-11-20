@@ -127,3 +127,28 @@ test("a create failure does not reappear after the panel is closed and reopened"
   fireEvent.click(toggle);
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+test("an expired key is badged and a key without expiry reads Never", async () => {
+  // Break caught: an expired key looked like a live one; "never" casing differed per column.
+  const expired = { ...key, name: "old", expires_at: "2020-01-01T00:00:00Z" };
+  render(
+    <ToastProvider>
+      <KeysPage
+        api={
+          {
+            gatewayKeys: vi.fn().mockResolvedValue({ keys: [expired, key] }),
+          } as unknown as ControlApi
+        }
+      />
+    </ToastProvider>,
+  );
+  const rows = await screen.findAllByRole("row");
+  const old = rows.find((row) => within(row).queryByRole("rowheader", { name: "old" }));
+  expect(within(old as HTMLElement).getByText("Expired")).toBeVisible();
+  expect(old).toHaveClass("is-expired");
+  const live = rows.find((row) =>
+    within(row).queryByRole("rowheader", { name: "laptop" }),
+  ) as HTMLElement;
+  expect(within(live).queryByText("Expired")).toBeNull();
+  expect(within(live).getAllByText("Never")).toHaveLength(3);
+});

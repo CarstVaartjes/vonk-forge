@@ -259,7 +259,7 @@ def test_status_meaning_line_is_the_vector_line(case, printed, published_words):
 
 def test_without_the_vocabulary_the_names_show_and_no_meaning(printed):
     lines = _recipe_lines(printed, usage=["chat"])
-    assert "Usage: chat" in lines
+    assert "Capabilities: chat" in lines
     assert not any(line.startswith("Meaning:") for line in lines)
 
 

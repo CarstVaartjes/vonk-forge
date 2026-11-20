@@ -1,6 +1,6 @@
 import type { VisualFleetNode } from "../api/types";
 import { hostCheckLines, UNDO_LABEL } from "../lib/host-checks";
-import { CopyButton } from "./copy-button";
+import { CommandBlock } from "./command-block";
 
 /** Informative host advice from the Controller; never attention, and absent when there is none. */
 export function SparkHostChecks({ node }: { node: VisualFleetNode }) {
@@ -22,12 +22,7 @@ export function SparkHostChecks({ node }: { node: VisualFleetNode }) {
                     <strong>{command}</strong>
                   </p>
                 ) : (
-                  <div className="host-check-command" key={command}>
-                    <pre>
-                      <code>{command}</code>
-                    </pre>
-                    <CopyButton label="command" value={command} />
-                  </div>
+                  <CommandBlock key={command} command={command} />
                 ),
               )}
             </li>

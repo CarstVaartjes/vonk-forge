@@ -279,7 +279,8 @@ def _filters(parser: argparse.ArgumentParser) -> None:
         "publisher",
         "alignment",
     ):
-        _value_list(parser, f"--{name}", name, f"Only this {name}")
+        what = "capability" if name == "usage" else name
+        _value_list(parser, f"--{name}", name, f"Only this {what}")
     parser.add_argument(
         "--updated-since", help="Only what changed since this date or time (ISO 8601)"
     )
