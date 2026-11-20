@@ -5,6 +5,7 @@
 //! accepts first and counts requests would take that probe for the client under
 //! test. The probe is recognised by its `User-Agent` header and dropped; every
 //! other connection, including a silent or empty one, is returned unchanged.
+#![cfg(test)]
 
 use std::io;
 use std::net::SocketAddr;
@@ -85,7 +86,6 @@ pub(crate) async fn accept_async(
     }
 }
 
-#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
