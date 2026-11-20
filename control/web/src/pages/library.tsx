@@ -408,13 +408,13 @@ export function LibraryPage({
           ) : undefined
         }
       >
-        {snapshot?.library && (
-          <p className="library-release">
-            Recipe library v{snapshot.library.version} · updated{" "}
-            {formatDate(new Date(snapshot.library.updated_at))}
-          </p>
-        )}
-        <CatalogSyncStatusLine api={api} />
+        <CatalogSyncStatusLine
+          api={api}
+          release={snapshot?.library}
+          attention={Boolean(snapshot?.storage_observation?.storage_reason)}
+        >
+          {snapshot && <LibraryStorageObservation snapshot={snapshot} />}
+        </CatalogSyncStatusLine>
       </PageHeader>
       {preferredNodeId && (
         <aside
@@ -473,7 +473,6 @@ export function LibraryPage({
       {snapshot && (
         <LibraryVocabularyProvider vocabulary={vocabulary}>
           <LibraryNodeNamesProvider names={names}>
-            <LibraryStorageObservation snapshot={snapshot} />
             <LibraryBrowser
               api={api}
               detail={observedDetail}
@@ -503,7 +502,7 @@ export function LibraryStorageObservation({ snapshot }: { snapshot: LibraryViewS
   const observation = snapshot.storage_observation;
   if (!observation) return null;
   return (
-    <p role="status">
+    <p>
       Storage bytes:{" "}
       {observation.storage_observed_at ? (
         <>

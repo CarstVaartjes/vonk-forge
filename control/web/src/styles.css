@@ -2480,12 +2480,6 @@ progress {
   outline: 2px solid var(--green);
   outline-offset: 2px;
 }
-.library-cached-filter {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .page-header {
   display: flex;
   flex-wrap: wrap;

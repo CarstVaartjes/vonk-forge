@@ -5,7 +5,7 @@ import {
   multiplyWire,
   type WireNumber,
 } from "../api/contract-numeric";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import type {
   ControlApi,
@@ -14,6 +14,7 @@ import type {
   LibraryViewRecipe,
   LibraryViewRecipeDetail,
   LibraryViewSnapshot,
+  ModelDisplay,
   VisualFleetSnapshot,
   RecipeReadinessState,
 } from "../api/types";
@@ -195,6 +196,39 @@ export function activeFilterSummary(filters: LibraryWorkcellFilters, query: stri
     parts.push(`updated: ${LIBRARY_RECENCY_LABELS[filters.updated].toLocaleLowerCase()}`);
   if (query.trim()) parts.push(`search: ${query.trim()}`);
   return parts;
+}
+
+/** The Model an exact variant belongs to: its display lineage `family/line/model`.
+ * Variants (quantizations, derivatives) fold into it. A model with no lineage
+ * (a helper, drafter or encoder, or a display not yet synced) is not a Model and
+ * has no key: it is left out of every Model list and count, as on the public
+ * site. Every "N models" figure counts this key, never the exact variant. */
+export function modelFoldKey(display: ModelDisplay | null | undefined): string | null {
+  const lineage = display?.lineage;
+  return lineage ? `${lineage.family}/${lineage.line}/${lineage.model}` : null;
+}
+/** Which variant stands for its Model: base first, then the shortest title, then the key. */
+function representativeOrder(a: LibraryRecipeRecord, b: LibraryRecipeRecord): number {
+  const base = (record: LibraryRecipeRecord) =>
+    record.modelDisplay?.lineage?.variant_kind === "base" ? 0 : 1;
+  return (
+    base(a) - base(b) ||
+    a.modelTitle.length - b.modelTitle.length ||
+    (a.modelKey < b.modelKey ? -1 : a.modelKey > b.modelKey ? 1 : 0)
+  );
+}
+export function recordModelKey(record: LibraryRecipeRecord): string | null {
+  return modelFoldKey(record.modelDisplay);
+}
+/** Distinct Models among exact variants. */
+export function countModels(models: LibraryViewModel[]): number {
+  return new Set(models.flatMap((model) => modelFoldKey(model.model_display) ?? [])).size;
+}
+/** Distinct exact variants of the counted Models. */
+export function countVariants(models: LibraryViewModel[]): number {
+  return new Set(
+    models.flatMap((model) => (modelFoldKey(model.model_display) ? [modelKey(model.model)] : [])),
+  ).size;
 }
 
 function modelTitle(model: LibraryViewModel): string {
@@ -410,6 +444,25 @@ export function EmptyLibrary({
   );
 }
 
+const SHOW_STEP = 40;
+/** Bounds a long list: the first page, a "Show more" button, back to one page when `resetKey` changes. */
+export function useShowMore(resetKey: string, total: number, atLeast = 0, noun = "rows") {
+  const [pages, setPages] = useState(1);
+  useEffect(() => setPages(1), [resetKey]);
+  const limit = Math.max(pages * SHOW_STEP, atLeast);
+  const more =
+    total > limit ? (
+      <button
+        type="button"
+        className="button secondary library-load-more"
+        onClick={() => setPages(Math.ceil(limit / SHOW_STEP) + 1)}
+      >
+        Show more ({total - limit} more {noun})
+      </button>
+    ) : null;
+  return { limit, more };
+}
+
 function NavigateLink({
   current,
   href,
@@ -466,17 +519,44 @@ export function LibraryWorkcell({
   const words = useCapabilityWords();
   const records = buildLibraryRecipeRecords(snapshot);
   const matching = filterLibraryRecipeRecords(records, filters, query);
-  const models = [...new Map(records.map((record) => [record.modelKey, record])).values()].filter(
-    (record) => !query.trim() || matching.some((item) => item.modelKey === record.modelKey),
-  );
-  const modelOptions = [
-    ...new Map(records.map((record) => [record.modelKey, record.modelTitle])).entries(),
+  // One entry per Model: variants fold into it (see `modelFoldKey`). The list,
+  // its "x of y" count and the Spark/Any counts all use this one predicate. The
+  // row stands for the Model, so its representative comes from the whole library
+  // (the base variant when there is one), never from what a filter leaves.
+  const requestedKey = route.kind === LibraryPath.MODELS ? route.modelKey : filters.model;
+  const variantKeys = new Map<string, Set<string>>();
+  const reps = new Map<string, LibraryRecipeRecord>();
+  for (const record of records) {
+    const key = recordModelKey(record);
+    if (key === null) continue;
+    variantKeys.set(key, (variantKeys.get(key) ?? new Set()).add(record.modelKey));
+    const rep = reps.get(key);
+    if (!rep || representativeOrder(record, rep) < 0) reps.set(key, record);
+  }
+  const shown = new Set(matching.flatMap((record) => recordModelKey(record) ?? []));
+  const models = [...reps].filter(([key]) => shown.has(key)).map(([, record]) => record);
+  const totalModels = reps.size;
+  const requested = records.find((record) => record.modelKey === requestedKey);
+  const requestedFold = requested ? recordModelKey(requested) : null;
+  const selectedModel =
+    models.find((record) => recordModelKey(record) === requestedFold) ??
+    (requested ? undefined : models[0]);
+  const selectedFold = selectedModel ? recordModelKey(selectedModel) : undefined;
+  // A recipe is listed once, however many variants of the Model it serves.
+  const selectedRecipes = [
+    ...new Map(
+      matching
+        .filter((record) => recordModelKey(record) === selectedFold && record.recipe)
+        .map((record) => [record.recipe!.recipe_id, record]),
+    ).values(),
   ];
-  const selectedModelKey =
-    route.kind === LibraryPath.MODELS ? route.modelKey : filters.model || models[0]?.modelKey;
-  const selectedModel = models.find((record) => record.modelKey === selectedModelKey);
-  const selectedRecipes = matching.filter(
-    (record) => record.modelKey === selectedModelKey && record.recipe,
+  const selectedIndex = models.findIndex((record) => recordModelKey(record) === selectedFold);
+  const selectedVariants = selectedFold ? (variantKeys.get(selectedFold)?.size ?? 0) : 0;
+  const { limit, more } = useShowMore(
+    JSON.stringify([filters, query]),
+    models.length,
+    selectedIndex + 1,
+    "models",
   );
   const recipePaneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -489,7 +569,7 @@ export function LibraryWorkcell({
     if (recipePaneRef.current && typeof recipePaneRef.current.scrollIntoView === "function")
       recipePaneRef.current.scrollIntoView({ block: "start" });
     recipePaneRef.current?.focus({ preventScroll: true });
-  }, [filters.model, route.kind, selectedModelKey]);
+  }, [filters.model, route.kind, selectedFold]);
   // A recipe download also caches the model artifacts it needs, so name the
   // models that are not cached yet before the operator commits.
   const controllerByModel = new Map(
@@ -512,291 +592,48 @@ export function LibraryWorkcell({
         query={query}
         noun="recipes"
         onFiltersChange={onFiltersChange}
+        onQueryChange={onQueryChange}
       />
       <div className="library-workcell-toolbar">
-        <label>
-          Find models or recipes
-          <input
-            type="search"
-            aria-label="Search Library"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search names, slugs, capabilities"
-          />
-        </label>
-        <label>
-          Exact model
-          <select
-            aria-label="Filter exact model"
-            value={filters.model}
-            onChange={(event) => onFiltersChange({ ...filters, model: event.target.value })}
-          >
-            <option value="">All models</option>
-            {modelOptions.map(([key, title]) => (
-              <option key={key} value={key}>
-                {title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Capabilities
-          <select
-            aria-label="Filter capabilities"
-            value={filters.usage}
-            onChange={(event) => onFiltersChange({ ...filters, usage: event.target.value })}
-          >
-            <option value="">All capabilities</option>
-            {[...new Set(records.flatMap((record) => record.capabilities))].sort().map((value) => (
-              <option key={value} value={value}>
-                {words.label(value)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Family
-          <select
-            aria-label="Filter family"
-            value={filters.family}
-            onChange={(event) => onFiltersChange({ ...filters, family: event.target.value })}
-          >
-            <option value="">All families</option>
-            {[...new Set(records.map(recordFamily).filter(Boolean))].sort().map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Version
-          <select
-            aria-label="Filter version"
-            value={filters.version}
-            onChange={(event) => onFiltersChange({ ...filters, version: event.target.value })}
-          >
-            <option value="">All versions</option>
-            {[
-              ...new Set(
-                records
-                  .map((record) => record.modelDocument?.identity.version)
-                  .filter((value): value is string => Boolean(value)),
-              ),
-            ]
-              .sort()
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Quantization
-          <select
-            aria-label="Filter quantization"
-            value={filters.quantization}
-            onChange={(event) => onFiltersChange({ ...filters, quantization: event.target.value })}
-          >
-            <option value="">All quantization</option>
-            {[
-              ...new Set(
-                records
-                  .map((record) => record.modelDocument?.format.quantization)
-                  .filter((value): value is string => Boolean(value)),
-              ),
-            ]
-              .sort()
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Engine
-          <select
-            aria-label="Filter engine"
-            value={filters.engine}
-            onChange={(event) => onFiltersChange({ ...filters, engine: event.target.value })}
-          >
-            <option value="">All engines</option>
-            {[
-              ...new Set(
-                records.flatMap((record) => (record.recipe ? [recipeEngine(record.recipe)] : [])),
-              ),
-            ]
-              .sort()
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Creator
-          <select
-            aria-label="Filter creator"
-            value={filters.creator}
-            onChange={(event) => onFiltersChange({ ...filters, creator: event.target.value })}
-          >
-            <option value="">All creators</option>
-            {[
-              ...new Set(
-                records.flatMap((record) => {
-                  const creator = record.recipe ? recipeCreator(record.recipe) : undefined;
-                  return creator ? [creator] : [];
-                }),
-              ),
-            ]
-              .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Alignment
-          <select
-            aria-label="Filter alignment"
-            value={filters.alignment}
-            onChange={(event) => onFiltersChange({ ...filters, alignment: event.target.value })}
-          >
-            <option value="">All alignments</option>
-            {[
-              ...new Set(
-                records.flatMap((record) =>
-                  record.recipe?.recipe_display?.alignment
-                    ? [record.recipe.recipe_display.alignment]
-                    : [],
-                ),
-              ),
-            ]
-              .sort()
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label>
-          Sparks
-          <select
-            aria-label="Filter Sparks"
-            value={filters.sparks}
-            onChange={(event) => onFiltersChange({ ...filters, sparks: event.target.value })}
-          >
-            <option value="">Any Sparks</option>
-            {[
-              ...new Set(
-                records
-                  .map((record) => String(record.recipe?.recipe_document.topology.node_count ?? ""))
-                  .filter(Boolean),
-              ),
-            ]
-              .sort((a, b) => Number(a) - Number(b))
-              .map((value) => (
-                <option key={value} value={value}>
-                  {value} or fewer
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className="library-cached-filter">
-          <input
-            type="checkbox"
-            checked={filters.cached}
-            onChange={(event) => onFiltersChange({ ...filters, cached: event.target.checked })}
-          />{" "}
-          Cached only
-        </label>
-        <label className="library-cached-filter">
-          <input
-            type="checkbox"
-            checked={filters.fits}
-            onChange={(event) => onFiltersChange({ ...filters, fits: event.target.checked })}
-          />{" "}
-          Fits fleet
-        </label>
-        <label>
-          Sort
-          <select
-            aria-label="Sort Library"
-            value={filters.sort}
-            onChange={(event) =>
-              onFiltersChange({
-                ...filters,
-                sort: librarySortFromValue(event.target.value),
-              })
-            }
-          >
-            {LIBRARY_SORTS.map((value) => (
-              <option key={value} value={value}>
-                {LIBRARY_SORT_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Updated
-          <select
-            aria-label="Filter updated"
-            value={filters.updated}
-            onChange={(event) =>
-              onFiltersChange({
-                ...filters,
-                updated: libraryRecencyFromValue(event.target.value),
-              })
-            }
-          >
-            {LIBRARY_RECENCY_VALUES.map((value) => (
-              <option key={value} value={value}>
-                {LIBRARY_RECENCY_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
         <LibraryRecipeUpdateAction api={api} onUpdated={refresh} />
       </div>
       <div className="library-paired-list" aria-label="Model and recipe list">
         <div className="library-paired-heading">
           <span>
-            Models · {models.length} of {new Set(records.map((record) => record.modelKey)).size}
+            Models · {models.length} of {totalModels}
           </span>
           <span>Recipes for selected Model · {selectedRecipes.length}</span>
         </div>
         <div className="library-paired-panes">
           <div className="library-model-pane" aria-label="Models">
             <ul>
-              {models.map((model) => (
-                <li key={model.modelKey}>
+              {models.slice(0, limit).map((model) => (
+                <li key={recordModelKey(model)!}>
                   <NavigateLink
-                    current={model.modelKey === selectedModelKey}
+                    current={recordModelKey(model) === selectedFold}
                     href={modelLibraryPath(model.modelKey)}
                     onNavigate={onNavigate}
                   >
                     <span
-                      className={model.modelKey === selectedModelKey ? "is-selected" : undefined}
+                      className={recordModelKey(model) === selectedFold ? "is-selected" : undefined}
                     >
                       <strong>{model.modelTitle}</strong>
                       <small>
-                        {model.model?.publisher}/{model.model?.slug}
+                        {(variantKeys.get(recordModelKey(model)!)?.size ?? 0) > 1
+                          ? `${variantKeys.get(recordModelKey(model)!)!.size} variants`
+                          : `${model.model?.publisher}/${model.model?.slug}`}
                       </small>
-                      <small>
-                        {formatWire(model.modelFileCount)} files · {formatBytes(model.modelBytes)}
-                      </small>
-                      <em>{model.capabilities.map(words.label).join(" · ") || NOT_REPORTED}</em>
+                      <em>
+                        {(model.modelCapabilities ?? model.capabilities)
+                          .map(words.label)
+                          .join(" · ") || NOT_REPORTED}
+                      </em>
                     </span>
                   </NavigateLink>
                 </li>
               ))}
             </ul>
+            {more}
             {models.length === 0 && (
               <EmptyLibrary
                 noun="recipes"
@@ -820,11 +657,17 @@ export function LibraryWorkcell({
               <div className="library-selected-model-context">
                 <strong>{selectedModel.modelTitle}</strong>
                 <span>
-                  {formatWire(selectedModel.modelFileCount)} files ·{" "}
-                  {formatBytes(selectedModel.modelBytes)} ·{" "}
-                  {selectedModel.capabilities.map(words.label).join(" · ") || NOT_REPORTED}
+                  {selectedVariants <= 1 && (
+                    <>
+                      {formatWire(selectedModel.modelFileCount)} files ·{" "}
+                      {formatBytes(selectedModel.modelBytes)} ·{" "}
+                    </>
+                  )}
+                  {(selectedModel.modelCapabilities ?? selectedModel.capabilities)
+                    .map(words.label)
+                    .join(" · ") || NOT_REPORTED}
                 </span>
-                {selectedModel.cacheUsage && (
+                {selectedVariants <= 1 && selectedModel.cacheUsage && (
                   <span>
                     {formatBytes(selectedModel.cacheUsage.unique_bytes)} unique ·{" "}
                     {formatBytes(selectedModel.cacheUsage.shared_bytes)} shared
