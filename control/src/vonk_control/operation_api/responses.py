@@ -43,6 +43,7 @@ from ..strict_json import (
     serialize_json_value,
     warn_unreadable_once,
 )
+from ..summary_cut import summary_cut
 from .constants import NodeIdentifier
 from .contracts import (
     JobDetailResponse,
@@ -277,23 +278,10 @@ def _item_failure(item: OperationItem) -> OperationFailure | None:
         )
         return OperationFailureEvidence(
             error_code=OperationFailureCode.ARTIFACT_PROCESS_FAILED,
-            summary=_summary_cut(reason),
+            summary=summary_cut(reason),
             detail=reason,
         )
     return _failure_projection(item.result)
-
-
-def _summary_cut(text: str, limit: int = 256) -> str:
-    """The text itself, or its start ending at a whole word within `limit` (detail keeps the full text)."""
-
-    if len(text) <= limit:
-        return text
-    head = text[:limit]
-    # A cut that lands exactly between words keeps the whole last word.
-    if text[limit].isspace():
-        return head.rstrip()
-    words = head.rsplit(None, 1)
-    return words[0] if len(words) == 2 else head
 
 
 def _advertised_actions(value: object) -> list[str] | None:

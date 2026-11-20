@@ -2299,7 +2299,7 @@ def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> Non
 
 
 def test_failure_summary_ends_at_a_whole_word() -> None:
-    from vonk_control.operation_api.responses import _summary_cut
+    from vonk_control.summary_cut import summary_cut as _summary_cut
 
     assert _summary_cut("short reason") == "short reason"
     text = "word " * 100

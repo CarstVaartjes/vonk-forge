@@ -54,6 +54,7 @@ from .operation_contract import (
     sanitize_failure_evidence,
 )
 from .strict_json import StrictModel, read_stored_model
+from .summary_cut import summary_cut
 from .wait_contract import QueueWait
 
 #: The wire word for an agent operation kind.
@@ -203,7 +204,7 @@ def _bounded_failure(raw: Mapping[str, object]) -> OperationFailureEvidence | No
         detail = safe.get("detail")
         return OperationFailureEvidence(
             error_code=error_code,
-            summary=str(summary)[:256],
+            summary=summary_cut(str(summary)),
             detail=detail if isinstance(detail, str) else None,
             retryable=safe.get("retryable") is True,
             uncertain=safe.get("uncertain") is True,
