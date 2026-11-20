@@ -620,13 +620,18 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
         stderr="",
     )
     outputs = iter((status, logs))
-    monkeypatch.setattr(
-        acceptance, "_diagnostic_command", lambda _bundle, _command: next(outputs)
-    )
+    commands: list[list[str]] = []
+
+    def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess:
+        commands.append(command)
+        return next(outputs)
+
+    monkeypatch.setattr(acceptance, "_diagnostic_command", run)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
 
     diagnostics = acceptance.compose_startup_diagnostics(tmp_path)
 
+    assert commands[-1][-2:] == ["tailscale-configurator", "image-janitor"]
     assert secret not in diagnostics
     assert "authentication failed for <redacted>" in diagnostics
     assert "postgres=running/healthy/exit-0" in diagnostics
