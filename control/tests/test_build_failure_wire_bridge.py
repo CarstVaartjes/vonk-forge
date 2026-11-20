@@ -237,7 +237,6 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         sessions,
         artifact_root=tmp_path / "runtime-images",
         storage=FilesystemRuntimeImageStorage(tmp_path / "runtime-images"),
-        managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=operations,
         clock=clock,

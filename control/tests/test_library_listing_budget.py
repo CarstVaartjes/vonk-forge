@@ -878,28 +878,17 @@ def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F
 @pytest.mark.parametrize("error_class", [OSError, PermissionError])
 def test_production_owner_survives_storage_hang_failure_and_recovers(
     assessed_library,  # noqa: F811
-    monkeypatch,
-    tmp_path,
     previously_observed,
     error_class,
     caplog,
     capsys,
 ):
-    """A stuck/raising walk must not starve keys or sync; the same owner heals it."""
-    import asyncio
+    """A stuck/raising walk never stops the library owner; the same owner heals it."""
     from datetime import timedelta
-    from functools import partial
 
-    import httpx2
-    from vonk_control.api.production import reconcile_library_observations
-    from vonk_control.catalog_sync import run_automatic_sync
-    from vonk_control.gateway_keys import GatewayKeyService
+    from vonk_control.api.production import LibraryObservations
 
     from cluster_profiles.cli_render import render_payload
-
-    from .test_catalog_sync_retry import _PeriodicCatalog
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
-    from .test_gateway_keys import MASTER, FakeLiteLlm, _authorizes
 
     original, sessions, *_ = assessed_library
     model = original.models().models[0]
@@ -918,38 +907,16 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
         return {model.identity.content_sha256: usage}
 
     projection, app = _model_storage_app(sessions, provider, lambda: observed[0])
-    peer = FakeLiteLlm()
-    key_path = tmp_path / "client-key"
-    gateway = GatewayKeyService(
-        master_key=lambda: MASTER,
-        transport=httpx2.MockTransport(peer.handle),
-        intent_root=tmp_path / "mutations",
+    elapsed = [0.0]
+    owner = LibraryObservations(
+        projection,
+        lambda: None,
+        interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+        monotonic=lambda: elapsed[0],
     )
-    ensure = gateway.ensure_default
-    key_checks = []
 
-    def ensure_default():
-        key_checks.append(True)
-        return ensure(key_path)
-
-    monkeypatch.setattr(gateway, "ensure_default", ensure_default)
-    stop = asyncio.Event()
-    syncs = []
-    item = _item(_example("recipe-source-build.json"))
-    catalog = _Catalog(None)
-
-    class Catalog(_PeriodicCatalog):
-        def automatic(self):
-            syncs.append(True)
-            return _sync(tmp_path, catalog, item)
-
-    phase = 0
-
-    async def advance(awaitable, *, timeout):
-        nonlocal phase
-        awaitable.close()
-        if not timeout:
-            raise TimeoutError
+    def observe(phase):
+        owner.tick()
         worker = projection._storage_observer._thread
         assert worker is not None
         with TestClient(app) as client:
@@ -1010,28 +977,16 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
                 assert detail.storage_observed_at == observed[0]
                 assert detail.cache_usage == usage
                 assert all(page.storage_observed_at == observed[0] for page in pages)
-                stop.set()
-        assert len(key_checks) == len(syncs) == phase + 1
-        assert _authorizes(peer, key_path.read_text().strip())
-        phase += 1
-        raise TimeoutError
+        elapsed[0] += RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
-    monkeypatch.setattr(asyncio, "wait_for", advance)
     try:
-        asyncio.run(
-            run_automatic_sync(
-                Catalog(),
-                stop,
-                interval_seconds=60,
-                settle_seconds=0,
-                reconcile=partial(reconcile_library_observations, projection, gateway),
-            )
-        )
+        for phase in range(4 if previously_observed else 3):
+            observe(phase)
     finally:
         release.set()
         if projection._storage_observer._thread is not None:
             projection._storage_observer._thread.join(timeout=30)
-    assert "automatic managed recipe catalog sync failed" not in caplog.text
+    assert "observation unavailable" not in caplog.text
 
 
 @pytest.mark.parametrize(

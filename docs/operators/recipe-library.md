@@ -273,14 +273,14 @@ mapping: changing them needs a reload, which reuses the cached model and image
 recipe, so a stored value that revision no longer offers falls back to the
 default and is reported in the profile's warnings.
 
-In the production Compose topology the control API retains no general outbound
-network. Its GitHub client uses internal Caddy listeners that accept only
-repository-scoped `GET` requests and remove credentials: `:8083` relays the
-release lookup to `api.github.com` (one unauthenticated REST call per sync),
-and `:8085` relays release asset downloads to `github.com` and GitHub's release
-asset origin, `release-assets.githubusercontent.com`, scoped to the recipe
-repository's numeric ID. The NAS therefore needs ordinary outbound HTTPS and
-DNS access, but it never needs a GitHub token.
+In the production Compose topology the control worker runs the sync and reads
+GitHub directly over its outbound `artifact-egress` network: the release
+lookup at `api.github.com` (one unauthenticated conditional REST call per
+sync) and the release asset from `github.com`, following only the redirect to
+GitHub's release asset origin, `release-assets.githubusercontent.com`. The
+control API retains no general outbound network and never contacts GitHub; it
+reads the imported catalog from PostgreSQL. The NAS therefore needs ordinary
+outbound HTTPS and DNS access, but it never needs a GitHub token.
 
 ## Custom libraries
 

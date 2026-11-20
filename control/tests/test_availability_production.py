@@ -14,7 +14,7 @@ import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentFailureResult,
@@ -157,7 +157,6 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     kwargs = {
         "sessions": sessions,
         "settings": Settings(),
-        "managed_catalog_sync": None,
         "recipe_builds": object(),
         "recipe_operations": object(),
         "clock": lambda: datetime.now(UTC),
@@ -211,100 +210,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         build_archive_available=storage.build_archive_available,
         prepared_builds=storage.find_build,
     )
-    original_document = revision.document
-    with sessions() as session:
-        dependencies = [
-            row.document
-            for row in session.scalars(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "model"
-                )
-            )
-        ]
-        current = session.get(CatalogDocumentRevision, revision.id)
-        assert current is not None
-        source_digest = current.source_bundle_sha256
-        assert isinstance(source_digest, str)
-    catalog = CatalogService(
-        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
-    )
-
-    class CatalogReobserver:
-        calls = 0
-
-        def automatic(self):
-            self.calls += 1
-            catalog.import_recipe_library(
-                "test",
-                library_commit="a" * 40,
-                source_path="recipe.json",
-                document=original_document,
-                expected_content_sha256=revision.content_digest,
-                dependency_documents=dependencies,
-                source_bundle_sha256=source_digest,
-            )
-
-    reobserver = CatalogReobserver()
-    if damage == "source":
-        # Current ingestion policy supplies the build fixture's inputs too.
-        reobserver.automatic()
-        catalog.refresh_build_policy()
-        from vonk_control.catalog_revision_contract import (
-            read_catalog_projection,
-            write_catalog_projection,
-        )
-
-        with sessions.begin() as session:
-            current = session.get(CatalogDocumentRevision, revision.id)
-            assert current is not None
-            session.execute(
-                update(CatalogDocumentRevision)
-                .where(CatalogDocumentRevision.id == revision.id)
-                .values(
-                    projected=write_catalog_projection(
-                        read_catalog_projection(current).model_copy(
-                            update={"build_model_artifacts": None}
-                        )
-                    )
-                )
-            )
-        reobserver.calls = 0
-        from vonk_control.inventory_repository import (
-            InventoryRepository,
-            NodeInventoryReport,
-        )
-
-        now += timedelta(seconds=1)
-        inventory = InventoryRepository(sessions, clock=lambda: now)
-        inventory.record(
-            NodeInventoryReport.model_validate_json(
-                canonical_message(
-                    {
-                        "node_id": node_id,
-                        "observed_at": now,
-                        "disk_total_bytes": 2 * 1024**4,
-                        "disk_free_bytes": 1024**4,
-                        "host_memory_total_bytes": 1024**4,
-                        "host_memory_free_bytes": 1024**4,
-                        "gpu_memory_total_bytes": 1024**4,
-                        "gpu_memory_free_bytes": 1024**4,
-                        "gpu_count": 1,
-                        "artifact_store_read_only": False,
-                        "capabilities": (
-                            "recipe.build.v1",
-                            "recipe.build.egress-proxy.v1",
-                            "recipe.image.import.v1",
-                            "runtime.vonk.v1",
-                            "recipe.image.pull.v1",
-                        ),
-                        "memory_pool": "separate",
-                        "schema_version": 1,
-                        "nvidia_driver_version": "unknown",
-                        "container_runtime_version": "unknown",
-                    }
-                )
-            )
-        )
     plan = builds.plan(revision.id, node_id, now=now)
     archive = b"verified cached source-build OCI archive"
     archive_digest = hashlib.sha256(archive).hexdigest()
@@ -346,13 +251,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
             raise AssertionError("a verified cached build must not be dispatched")
 
     operations = Operations()
-    if damage == "source":
-        with sessions.begin() as session:
-            session.execute(
-                update(CatalogDocumentRevision)
-                .where(CatalogDocumentRevision.id == revision.id)
-                .values(document={"damaged": True})
-            )
     if damage in {"runtime", "runtime-exhaustion"}:
         compile_owner = availability_production._compile_consistent_runtime
         compile_calls = []
@@ -374,7 +272,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         sessions,
         artifact_root=artifact_root,
         storage=FilesystemRuntimeImageStorage(artifact_root),
-        managed_catalog_sync=reobserver,
         recipe_builds=builds,
         recipe_operations=operations,
         clock=lambda: now,
@@ -406,9 +303,6 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         assert completed.result["image_digest"] == image_digest
         assert completed.result["oci_archive_sha256"] == archive_digest
         assert operations.build_calls == 0
-        assert reobserver.calls == (
-            0 if damage is None else 2 if damage == "runtime-exhaustion" else 1
-        )
         fresh = production.service.start(
             revision.id, actor="operator", request_id=str(uuid.uuid4())
         )
@@ -494,7 +388,6 @@ def test_source_build_without_builder_queues_provisional_parent(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
         clock=lambda: now,
@@ -609,7 +502,6 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=object(),
         clock=lambda: now,
@@ -715,7 +607,6 @@ def test_authority_resolves_builds_without_an_open_transaction(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
         clock=lambda: now,
@@ -849,7 +740,6 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -1015,7 +905,6 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -1217,7 +1106,6 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -1408,7 +1296,6 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -1690,7 +1577,6 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=operations,
         clock=lambda: now,
@@ -2049,7 +1935,6 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -2140,7 +2025,6 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=object(),
         clock=lambda: datetime.now(UTC),
@@ -2340,7 +2224,6 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=builds,
         recipe_operations=Operations(),
         clock=lambda: now,
@@ -2543,7 +2426,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
         sessions,
         settings=Settings(),
         storage=FilesystemRuntimeImageStorage(Settings.agent_artifact_root),
-        managed_catalog_sync=None,
         recipe_builds=Builds(),
         recipe_operations=Operations(),
         model_cache=model_cache,
