@@ -328,6 +328,9 @@ and its own release acceptance. Adding the label re-runs `ci.yml` in full at
 once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
 reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe
 library by revision and build-script hash.
+Before the upgrade the carry's checks require only what any release provides;
+`test_carry_baseline_phase_accepts_an_older_release_shape` runs them against an
+older release's shape (see `docs/testing-and-ci.md`).
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.

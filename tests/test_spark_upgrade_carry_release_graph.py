@@ -19,6 +19,7 @@ import yaml
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
+from tests.acceptance import runtime
 from tests.acceptance import spark_upgrade_carry as carry
 from tests.acceptance.test_spark_lifecycle import (
     COMPOSE_IMAGE_ROLES,
@@ -591,35 +592,133 @@ def test_controller_health_failure_keeps_service_and_signer_logs_in_carry_report
     assert "diagnostic-test-secret" not in job_log + output.read_text()
 
 
-def test_carry_does_not_start_candidate_only_services_on_the_published_baseline(
+#: Caddy's waiting start of an older release (``sh -c`` plus an argv sentinel).
+_OLDER_CADDY_WAIT = (
+    "attempts=0; until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; "
+    "do sleep 1; done; "
+    'exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh "$$@"'
+)
+
+
+def _older_release_bundle(bundle: Path) -> set[str]:
+    """An older release as its own installer leaves it (4523053e's shape).
+
+    A standing registry Caddy depends on, no runtime-init, a root API, Caddy's
+    waiting wrapper and the Tailscale pair without a ``profiles:`` key. Returns
+    the services the lane starts from it.
+    """
+    services: dict[str, dict[str, object]] = {
+        name: {}
+        for name in (
+            "image-janitor",
+            "postgres",
+            "control-worker",
+            "litellm",
+            "prometheus",
+            "registry",
+            "tailscale-gateway",
+            "tailscale-configurator",
+        )
+    }
+    services["control-api"] = {
+        "user": "0:0",
+        "command": ["python", "-m", "vonk_control.api"],
+        "volumes": ["control-state:/state", "runtime-assets:/runtime-assets"],
+    }
+    services["caddy"] = {
+        "ports": [{"target": 8443, "published": 8443, "protocol": "tcp"}],
+        "volumes": ["runtime-assets:/run/vonk-runtime-assets:ro"],
+        "entrypoint": ["/bin/sh", "-c", _OLDER_CADDY_WAIT, "vonk-caddy-entrypoint"],
+        "networks": ["ingress", "agent-proxy", "registry-edge"],
+        "depends_on": {"registry": {"condition": "service_started"}},
+    }
+    networks = ("ingress", "agent-proxy", "registry-edge", "cluster-egress")
+    bundle.mkdir()
+    (bundle / ".env").write_text("NAS_LAN_IP=127.0.0.1\n")
+    (bundle / "docker-compose.yaml").write_text(
+        yaml.safe_dump(
+            {"services": services, "networks": {name: {} for name in networks}}
+        )
+    )
+    return set(services) - {"tailscale-gateway", "tailscale-configurator"}
+
+
+def _running(services: set[str]) -> str:
+    return "\n".join(
+        json.dumps({"Service": name, "State": "running", "Health": "healthy"})
+        for name in sorted(services)
+    )
+
+
+def test_carry_baseline_phase_accepts_an_older_release_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches a newly added NAS service making the next release's carry impossible."""
-    lifecycle_module = sys.modules[SparkLifecycle.__module__]
-    baseline_services = set(lifecycle_module.LOCAL_CONTROLLER_SERVICES)
-    candidate_services = baseline_services | {"candidate-only-service"}
-    monkeypatch.setattr(
-        lifecycle_module, "LOCAL_CONTROLLER_SERVICES", candidate_services
-    )
-    lane = object.__new__(carry.UpgradeCarryLifecycle)
-    lane.project = "carry-added-service"
-    lane.bundle = tmp_path
+    """Every check the carry runs before the upgrade passes on an older release.
+
+    The harness is newer than the baseline it installs. #2646, #2654 and #2658
+    each held the baseline to the candidate's shape and failed only after an
+    hour of Release; a candidate-only expectation leaking into the baseline
+    phase fails here instead. After the upgrade the candidate stays exact.
+    """
+    lifecycle = sys.modules[SparkLifecycle.__module__]
+    bundle = tmp_path / "vonk-forge"
+    started = _older_release_bundle(bundle)
+    caddyfile = "header_up X-Vonk-Agent-Source {http.request.remote.host}\n"
     baseline = SimpleNamespace(
-        generation="b" * 64, compose_image_roles=COMPOSE_IMAGE_ROLES
+        generation="b" * 64,
+        compose_image_roles=COMPOSE_IMAGE_ROLES,
+        caddyfile=caddyfile,
     )
-    candidate = SimpleNamespace(
-        generation="c" * 64, compose_image_roles=COMPOSE_IMAGE_ROLES
-    )
+    candidate = SimpleNamespace(**{**vars(baseline), "generation": "c" * 64})
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    lane.project = "carry-older-release"
+    lane.bundle = bundle
     monkeypatch.setattr(lane, "baseline", baseline, raising=False)
     monkeypatch.setattr(lane, "candidate", candidate, raising=False)
-    (tmp_path / "docker-compose.yaml").write_text(
-        yaml.safe_dump({"services": {name: {} for name in baseline_services}})
-    )
     lane.controller_generation = baseline.generation
-    assert lane._expected_controller_services() == baseline_services
-    assert "candidate-only-service" not in lane._local_controller_up_command()
+    lane.synthetic_fabric_octet = 20
+    lane.control_hostname = lifecycle.LOCAL_CONTROL_HOSTNAME
+    monkeypatch.setattr(
+        lane, "arguments", SimpleNamespace(channel="dev"), raising=False
+    )
+    # The receipt relay's directory ownership is the only host command.
+    monkeypatch.setattr(lane, "_run_command", lambda *_args, **_kwargs: None)
+
+    # The lane's own edits to the installed bundle (Caddy, ports, receipt relay).
+    lane._reapply_controller_site()
+    # The services it starts and requires running and healthy.
+    expected = lane._expected_controller_services()
+    assert expected == started
+    up = lane._local_controller_up_command()
+    assert started <= set(up)
+    assert not {"runtime-init", *carry.TAILSCALE_SERVICES} & set(up)
+    runtime.assert_compose_services_healthy(_running(started), expected)
+    # The enrollment grant an older Controller issues (four service names).
+    grant = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "enrollment_endpoint": f"https://{lifecycle.ENROLLMENT_HOST}:8443",
+        "controller_endpoint": f"https://{lifecycle.AGENT_HOST}:8443",
+        "controller_address": lifecycle.CONTROLLER_ADDRESS,
+        "service_hostnames": [
+            lifecycle.LOCAL_CONTROL_HOSTNAME,
+            lifecycle.ENROLLMENT_HOST,
+            lifecycle.AGENT_HOST,
+            f"registry.{lifecycle.LOCAL_CONTROL_HOSTNAME}",
+        ],
+        "ca_fingerprint": "a" * 64,
+        "token": "t" * 43,
+        "installer_url": "https://install.vonkforge.ai/dev/spark",
+        "purpose": "new-node",
+        "expires_at": "2026-11-20T20:00:00Z",
+    }
+    control = SimpleNamespace(request=lambda *_request: (201, {"grant": dict(grant)}))
+    monkeypatch.setattr(lane, "control", control, raising=False)
+    assert lane._create_grant()[0] == grant["id"]
+
+    # After the upgrade the candidate's roster is exact: the older shape fails.
     lane.controller_generation = candidate.generation
-    # The candidate remains exact: absence from an old file must not hide a
-    # service the new installer was required to deliver.
-    assert lane._expected_controller_services() == candidate_services
-    assert "candidate-only-service" in lane._local_controller_up_command()
+    assert lane._expected_controller_services() == lifecycle.LOCAL_CONTROLLER_SERVICES
+    with pytest.raises(runtime.AcceptanceError):
+        runtime.assert_compose_services_healthy(
+            _running(started), lane._expected_controller_services()
+        )
