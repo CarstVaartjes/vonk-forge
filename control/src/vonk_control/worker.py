@@ -916,7 +916,6 @@ def assemble_production_worker(
         image_production = build_recipe_image_availability(
             sessions,
             artifact_root=recipe_image_artifact_root,
-            managed_catalog_sync=None,
             recipe_builds=recipe_builds,
             recipe_operations=lifecycle,
             model_cache=model_cache,

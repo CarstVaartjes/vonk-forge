@@ -878,22 +878,17 @@ def test_model_reads_never_invoke_storage_provider(assessed_library):  # noqa: F
 @pytest.mark.parametrize("error_class", [OSError, PermissionError])
 def test_production_owner_survives_storage_hang_failure_and_recovers(
     assessed_library,  # noqa: F811
-    tmp_path,
     previously_observed,
     error_class,
     caplog,
     capsys,
 ):
-    """A stuck/raising walk must not starve the default key; the same owner heals it."""
+    """A stuck/raising walk never stops the library owner; the same owner heals it."""
     from datetime import timedelta
 
-    import httpx2
     from vonk_control.api.production import LibraryObservations
-    from vonk_control.gateway_keys import GatewayKeyService
 
     from cluster_profiles.cli_render import render_payload
-
-    from .test_gateway_keys import MASTER, FakeLiteLlm, _authorizes
 
     original, sessions, *_ = assessed_library
     model = original.models().models[0]
@@ -912,23 +907,9 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
         return {model.identity.content_sha256: usage}
 
     projection, app = _model_storage_app(sessions, provider, lambda: observed[0])
-    peer = FakeLiteLlm()
-    key_path = tmp_path / "client-key"
-    gateway = GatewayKeyService(
-        master_key=lambda: MASTER,
-        transport=httpx2.MockTransport(peer.handle),
-        intent_root=tmp_path / "mutations",
-    )
-    key_checks = []
-
-    def ensure_default():
-        key_checks.append(True)
-        return gateway.ensure_default(key_path)
-
     elapsed = [0.0]
     owner = LibraryObservations(
         projection,
-        ensure_default,
         lambda: None,
         interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
         monotonic=lambda: elapsed[0],
@@ -996,8 +977,6 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
                 assert detail.storage_observed_at == observed[0]
                 assert detail.cache_usage == usage
                 assert all(page.storage_observed_at == observed[0] for page in pages)
-        assert len(key_checks) == phase + 1
-        assert _authorizes(peer, key_path.read_text().strip())
         elapsed[0] += RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
     try:

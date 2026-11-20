@@ -25,7 +25,10 @@ from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
 from ..capability_contract import ControllerCapability
 from ..catalog_service import CatalogService
-from ..catalog_sync import ManagedRecipeCatalogSyncService
+from ..catalog_sync import (
+    ManagedRecipeCatalogSyncService,
+    catalog_sync_failure_reason,
+)
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
@@ -68,25 +71,24 @@ from .common import _LOGGER, SpaFiles
 
 
 class LibraryObservations:
-    """Keep the API's library view and the default gateway client key current.
+    """Keep the API's in-memory library view current.
 
     The worker owns the catalog sync and the API only reads what it applied: a
     newly finished sync run is noticed on the next tick and the library is
-    re-read at once. Without one, the library (with its storage bytes) and the
-    default key are observed again every ``interval_seconds``.
+    re-read at once. Without one, the library (with its storage bytes) is
+    observed again every ``interval_seconds``. A failed read waits for the
+    next sync or the next interval, never the next tick.
     """
 
     def __init__(
         self,
         library: LibraryProjection,
-        default_key: Callable[[], bool | UnknownError],
         last_sync: Callable[[], object],
         *,
         interval_seconds: float,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._library = library
-        self._default_key = default_key
         self._last_sync = last_sync
         self._interval = interval_seconds
         self._monotonic = monotonic
@@ -100,18 +102,27 @@ class LibraryObservations:
             if marker == self._seen and now < self._next_full:
                 return
             self._next_full = now + self._interval
-            self._library.refresh_catalog()
             self._seen = marker
-            observed = self._default_key()
-            if isinstance(observed, UnknownError):
-                _LOGGER.warning(
-                    "default gateway client key observation: %s", observed.reason
-                )
+            self._library.refresh_catalog()
         except Exception as error:  # noqa: BLE001 - this loop is the only owner; it must keep running
             _LOGGER.warning(
-                "library or default gateway key observation unavailable: %s",
-                type(error).__name__,
+                "library observation unavailable: %s",
+                catalog_sync_failure_reason(error),
             )
+
+
+def observe_default_key(ensure_default: Callable[[], bool | UnknownError]) -> None:
+    """One periodic default-key observation; it heals after ``keep_default_key`` ends."""
+    try:
+        observed = ensure_default()
+    except Exception as error:  # noqa: BLE001 - this loop is the only owner; it must keep running
+        _LOGGER.warning(
+            "default gateway key observation unavailable: %s",
+            catalog_sync_failure_reason(error),
+        )
+    else:
+        if isinstance(observed, UnknownError):
+            _LOGGER.warning("default gateway key observation: %s", observed.reason)
 
 
 async def _keep_recipe_routes(
@@ -577,7 +588,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     recipe_image_production = build_recipe_image_availability(
         sessions,
         settings=settings,
-        managed_catalog_sync=managed_catalog_sync,
         recipe_builds=recipe_builds,
         recipe_operations=recipe_operations,
         model_cache=model_cache,
@@ -600,7 +610,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     observations_stop = asyncio.Event()
     library_observations = LibraryObservations(
         visual_library,
-        gateway_keys.ensure_default,
         managed_catalog_sync.last_completed_at,
         interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
     )
@@ -626,12 +635,20 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         default_key_task = asyncio.create_task(
             keep_default_key(gateway_keys, observations_stop)
         )
+        key_task = asyncio.create_task(
+            _keep(
+                "default gateway key",
+                lambda: observe_default_key(gateway_keys.ensure_default),
+                observations_stop,
+                interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+            )
+        )
         try:
             yield
         finally:
             observations_stop.set()
             await capabilities.stop_recovery()
-            tasks = [default_key_task, route_task, library_task]
+            tasks = [default_key_task, key_task, route_task, library_task]
             for task in tasks:
                 task.cancel()
             await asyncio.wait(tasks, timeout=5.0)

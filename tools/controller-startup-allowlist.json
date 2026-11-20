@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Reviewed constructors without external startup effects, plus required core configuration/database wiring. New direct constructors must be isolated; allowances only fall. See docs/controller-startup-inventory.md.",
+  "note": "Reviewed constructors without external startup effects, plus required core configuration/database wiring. A new direct constructor is either isolated behind a factory or listed here after review that its construction has no startup effects. See docs/controller-startup-inventory.md.",
   "boundaries": [
     {
       "path": "control/src/vonk_control/api/production.py",

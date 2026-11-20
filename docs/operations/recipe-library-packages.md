@@ -2,9 +2,10 @@
 
 Controllers read signed GitHub releases of the recipe repository
 (see [the recipe library](../operators/recipe-library.md#development-versus-production)).
-Release assets are always downloaded through the Controller's in-project
-Caddy relay (`http://caddy:8085`, built in); `VONK_RECIPE_LIBRARY_RELEASE` is
-the only operator setting and optionally holds an exact release. There is no
+The control worker downloads them directly from GitHub over its outbound
+`artifact-egress` network; the control API never contacts GitHub.
+`VONK_RECIPE_LIBRARY_RELEASE` is the only operator setting and optionally
+holds an exact release. There is no
 unsigned package source.
 
 Each release carries one asset, `recipe-library.tar`: `SHA256SUMS`, its

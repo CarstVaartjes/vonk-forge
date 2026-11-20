@@ -24,7 +24,7 @@ provenance remains a separate observation.
 | API and worker route publisher | Directory permissions, symlinks, retained marker/state | Guarded publisher; existing routes are untouched by construction failure |
 | API recipe route service | Invalid management policy | Guarded service; no route withdrawal during initialization |
 | API artifact jobs and worker blob store | Blob directories, reconciliation, SQL references | Guarded construction/reconciliation; other worker lanes continue |
-| API and worker recipe package client | Local package directory, URL configuration, client construction | Guarded package reader; the worker's automatic catalog sync owns refresh, the API reads through the Caddy relay only for a request-led re-read |
+| API and worker recipe package client | Local package directory, URL configuration, client construction | Guarded package reader; only the worker's automatic catalog sync reads with it |
 | API gateway key client | Missing master key, unavailable LiteLLM, readiness refusal | Guarded client/readiness check; retained client is probed again after backoff |
 | Worker image collector | Nested runtime image directory construction | Guarded collector; references are still required before any deletion |
 | API/worker SQL repositories, projections, admissions, operation services, profile builder, metrics registry, transport, upgrade client and scheduler wiring | Fixed budgets and in-memory wiring | Reviewed direct constructors, without startup I/O; effects remain in existing request/worker methods |
@@ -43,14 +43,15 @@ worker; the API keeps only what needs the gateway master key or its own memory.
 | Loop | Process | Needs | Cadence |
 | --- | --- | --- | --- |
 | Automatic catalog sync (`AutomaticCatalogSync`) | worker, a pass source and the `CATALOG_SYNC` due-wait owner; the sync itself runs on one thread of its own, so a release download never blocks the worker loop | PostgreSQL; GitHub releases of the recipe repository directly over `artifact-egress` | The persisted wait (one minute, jittered backoff from 30 s after a failure); a live request-led import is left to finish |
-| Library observation (`LibraryObservations`) | API | Its in-memory library view; the gateway master key and `/gateway-secrets` for the default key; the LiteLLM key relay `caddy:8087` on `agent-proxy` | Every 5 s it compares the newest finished sync run and re-reads the library at once when one finished; library, storage bytes and the default key every minute |
+| Library observation (`LibraryObservations`) | API | Its in-memory library view; PostgreSQL | Every 5 s it compares the newest finished sync run and re-reads the library at once when one finished; library and storage bytes every minute. A failed read waits for the next sync or the next minute |
+| Default key (`observe_default_key`) | API | The gateway master key, `/gateway-secrets`, the LiteLLM key relay `caddy:8087` on `agent-proxy` | Every minute, independent of the library |
 | Route and grant reconcile (`_keep_recipe_routes`) | API | `/routes`, the gateway master key, `caddy:8087` | Every 5 s |
-| Default key startup observation (`keep_default_key`) | API | The gateway master key, `/gateway-secrets`, `caddy:8087` | Six attempts after start, then the library observation keeps it |
+| Default key startup observation (`keep_default_key`) | API | The gateway master key, `/gateway-secrets`, `caddy:8087` | Six attempts after start, then the periodic default-key observation keeps it |
 | Capability recovery timers | API, for its own capabilities (the worker retries one when a pass uses it) | The capability's own dependency | 1 s backoff, capped at 60 s |
 
-The API still reaches the recipe library through the Caddy relay (`caddy:8083`
-and `:8085`, it has no egress) when an image availability check re-reads a
-recipe the catalog does not hold yet. That path is request-led, not a loop.
+The API has no sync path: an image availability check for a recipe the
+catalog does not hold yet waits with a typed reason and heals on the worker's
+next sync.
 
 Construction attempts use a nonblocking per-capability owner. Failure produces
 one canonical `CapabilityReason`, availability and next-attempt timestamp.

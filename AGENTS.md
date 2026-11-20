@@ -168,7 +168,7 @@ total complexity; do not build a second job scheduler out of JSON files.
 Each periodic background loop runs in exactly one process. Key-free loops
 (the automatic catalog sync) run in the worker, which has egress; the API keeps
 only the loops that need the gateway master key (default key, route grants) or
-its in-memory library view. See
+its in-memory library view, and never contacts GitHub. See
 [Background loops](docs/controller-startup-inventory.md#background-loops).
 
 Per-Spark facts have one owner: agent-reported data uses one canonical typed
