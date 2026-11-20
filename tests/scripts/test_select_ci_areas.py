@@ -221,14 +221,14 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "generated": "true", "compose": "true", "nas-install": "true",
         "agent-package": "true", "lane": "false", "full": "true",
     }  # fmt: skip
-    results = {
-        "lint": "success", "supply-chain": "success", "repository-guards": "success",
-        "rust-quality": "success", "rust-tests": "success", "rust-platform": "success",
-        "repository": "success", "control": "success", "web": "success",
-        "generated": "success", "compose": "success", "nas-install": "success",
-        "agent-package": "success", "control-image-build": "success",
-        "controller-spark-wire": "success", "lane-proof": "skipped",
-    }  # fmt: skip
+    # Every job the gate knows is green; only the lane is not selected.
+    results = {job: "success" for jobs in gate["AREA_JOBS"].values() for job in jobs}
+    results.update(
+        {job: "success" for job in ("lint", "supply-chain", "repository-guards")}
+        | {job: "success" for job in ("consumer-probe", "rust-quality", "rust-tests")}
+        | {job: "success" for job in ("control-image-build", "controller-spark-wire")}
+        | {"lane-proof": "skipped"}
+    )
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
     assert gate["verify"]("success", selected, results)
