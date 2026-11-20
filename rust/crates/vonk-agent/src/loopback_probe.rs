@@ -15,6 +15,12 @@ const PROBE_AGENT: &[u8] = b"user-agent: go-http-client";
 /// The probe sends its request at once; a client that is slower is not a probe.
 const PROBE_WAIT: Duration = Duration::from_millis(250);
 const PEEK_BYTES: usize = 512;
+/// A fixture that never sees a client fails instead of waiting forever.
+const ACCEPT_BUDGET: Duration = Duration::from_secs(60);
+
+fn timed_out() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "loopback accept deadline")
+}
 
 fn is_probe(peeked: &[u8]) -> bool {
     peeked.starts_with(b"GET / ")
@@ -32,10 +38,11 @@ fn complete(peeked: &[u8]) -> bool {
 pub(crate) fn accept(
     listener: &std::net::TcpListener,
 ) -> io::Result<(std::net::TcpStream, SocketAddr)> {
-    loop {
+    let accept_deadline = std::time::Instant::now() + ACCEPT_BUDGET;
+    while std::time::Instant::now() < accept_deadline {
         let (stream, address) = listener.accept()?;
         stream.set_nonblocking(true)?;
-        let started = std::time::Instant::now();
+        let deadline = std::time::Instant::now() + PROBE_WAIT;
         let mut buffer = [0_u8; PEEK_BYTES];
         let probe = loop {
             match stream.peek(&mut buffer) {
@@ -47,7 +54,7 @@ pub(crate) fn accept(
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
                 Err(_) => break false,
             }
-            if started.elapsed() >= PROBE_WAIT {
+            if std::time::Instant::now() >= deadline {
                 break false;
             }
             std::thread::sleep(Duration::from_millis(2));
@@ -58,31 +65,38 @@ pub(crate) fn accept(
         stream.set_nonblocking(false)?;
         return Ok((stream, address));
     }
+    Err(timed_out())
 }
 
 /// `tokio::net::TcpListener::accept` that drops port probes.
 pub(crate) async fn accept_async(
     listener: &tokio::net::TcpListener,
 ) -> io::Result<(tokio::net::TcpStream, SocketAddr)> {
-    loop {
+    let accept_deadline = std::time::Instant::now() + ACCEPT_BUDGET;
+    while std::time::Instant::now() < accept_deadline {
         let (stream, address) = listener.accept().await?;
-        let mut buffer = [0_u8; PEEK_BYTES];
-        let probe = tokio::time::timeout(PROBE_WAIT, async {
-            loop {
-                match stream.peek(&mut buffer).await {
-                    Ok(size) if size == 0 || complete(&buffer[..size]) || size == PEEK_BYTES => {
-                        return is_probe(&buffer[..size]);
-                    }
-                    Ok(_) => tokio::time::sleep(Duration::from_millis(2)).await,
-                    Err(_) => return false,
-                }
-            }
-        })
-        .await
-        .unwrap_or(false);
-        if !probe {
+        if !is_probe_async(&stream).await {
             return Ok((stream, address));
         }
+    }
+    Err(timed_out())
+}
+
+async fn is_probe_async(stream: &tokio::net::TcpStream) -> bool {
+    let deadline = std::time::Instant::now() + PROBE_WAIT;
+    let mut buffer = [0_u8; PEEK_BYTES];
+    loop {
+        match stream.peek(&mut buffer).await {
+            Ok(size) if size == 0 || complete(&buffer[..size]) || size == PEEK_BYTES => {
+                return is_probe(&buffer[..size]);
+            }
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
     }
 }
 
