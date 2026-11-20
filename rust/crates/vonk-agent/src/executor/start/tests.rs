@@ -410,6 +410,9 @@ async fn a_loading_workload_is_dropped_until_it_is_ready() {
     assert!(matches!(result, ExecutionResult::Done(_)), "{result:?}");
     let made = drops.load(Ordering::SeqCst);
     assert!(made >= 2, "drops while loading: {made}");
+    // The start is over and its socket I/O done: let the cadence's clock run
+    // instantly to prove no later drop.
+    tokio::time::pause();
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(drops.load(Ordering::SeqCst), made, "no drop after ready");
 }

@@ -1048,6 +1048,9 @@ async fn a_job_holds_hygiene_drops_until_it_exits() {
             .iter()
             .all(|purpose| *purpose == PageCacheDropPurpose::Hygiene)
     );
+    // The run is over and its socket I/O done: let the cadence's clock run
+    // instantly to prove no later drop.
+    tokio::time::pause();
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(asked.lock().unwrap().len(), made, "no drop after the exit");
 }
