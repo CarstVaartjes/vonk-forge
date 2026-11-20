@@ -3132,6 +3132,8 @@ class SparkLifecycle:
         controller = grant.get("controller_endpoint")
         ca_sha256 = grant.get("ca_fingerprint")
         token = grant.pop("token", None)
+        hostnames = grant.get("service_hostnames")
+        required_hostnames = {self.control_hostname, ENROLLMENT_HOST, AGENT_HOST}
         if (
             not isinstance(grant_id, str)
             or re.fullmatch(r"[0-9a-f-]{36}", grant_id) is None
@@ -3139,12 +3141,11 @@ class SparkLifecycle:
             or enrollment != f"https://{ENROLLMENT_HOST}:8443"
             or controller != f"https://{AGENT_HOST}:8443"
             or grant.get("controller_address") != CONTROLLER_ADDRESS
-            or grant.get("service_hostnames")
-            != [
-                self.control_hostname,
-                ENROLLMENT_HOST,
-                AGENT_HOST,
-            ]
+            # The Spark setup needs these names mapped; extra names are
+            # harmless. The harness is newer than the baseline Controller it
+            # also drives, so it must not pin the candidate's exact list.
+            or not isinstance(hostnames, list)
+            or not required_hostnames <= set(hostnames)
             or not isinstance(ca_sha256, str)
             or SHA256.fullmatch(ca_sha256) is None
             or not isinstance(token, str)
