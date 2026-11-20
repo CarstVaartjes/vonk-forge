@@ -188,3 +188,23 @@ async fn a_load_after_the_cadence_ended_starts_it_again() {
     assert_eq!(load.finish().unwrap().drops, 2);
     assert_eq!(drops.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_tick_asks_load_while_any_phase_loads_and_hygiene_after() {
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = Arc::clone(&asked);
+    let dropper: Dropper = Arc::new(move |purpose| {
+        log.lock().unwrap().push(purpose);
+        Box::pin(async move { report(None) })
+    });
+    let phases = LoadPhases::new(dropper, INTERVAL);
+    let _job = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Hygiene);
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
+    tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
+    load.finish();
+    tokio::time::sleep(INTERVAL).await;
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [PageCacheDropPurpose::Load, PageCacheDropPurpose::Hygiene]
+    );
+}

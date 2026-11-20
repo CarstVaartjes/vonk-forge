@@ -6,8 +6,6 @@
 //! phase waits for, leaves its run loading until its accepted start deadline.
 //! A job holds its own hygiene phase, keyed by its job id, from just before its
 //! container starts until it exits: drops only, never a load for the guard.
-//! A job holds its own phase, keyed by its job id, from just before its
-//! container starts until it exits.
 //! Nothing here can fail or delay a start beyond one bounded ask.
 use std::{
     collections::BTreeMap,
@@ -162,25 +160,20 @@ impl LoadPhases {
     /// released or dropped.
     pub fn begin(self: &Arc<Self>, run: Uuid, purpose: PageCacheDropPurpose) -> LoadPhase {
         let mut state = self.lock();
-        state
-            .runs
-            .entry(run)
-            .or_insert_with(|| Run {
-                purpose,
-                evidence: PageCacheDropEvidence {
-                    drops: 0,
-                    problems: 0,
-                    reclaimed_bytes: 0,
-                    first: None,
-                    last: None,
-                    last_problem: None,
-                },
-                deadline: None,
-            })
-            .deadline = None;
-        if let Some(held) = state.runs.get_mut(&run) {
-            held.purpose = purpose;
-        }
+        let held = state.runs.entry(run).or_insert_with(|| Run {
+            purpose,
+            evidence: PageCacheDropEvidence {
+                drops: 0,
+                problems: 0,
+                reclaimed_bytes: 0,
+                first: None,
+                last: None,
+                last_problem: None,
+            },
+            deadline: None,
+        });
+        held.deadline = None;
+        held.purpose = purpose;
         if !state.ticking {
             state.ticking = true;
             let phases = Arc::clone(self);

@@ -436,7 +436,8 @@ fn every_workload_container_start_drops_the_page_cache_first() {
         ["HostRuntimePlan::", "JobRun("],
     ]
     .map(|parts| parts.concat());
-    let mut pending = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut pending = vec![root.clone()];
     let mut sites = Vec::new();
     let mut unguarded = Vec::new();
     while let Some(path) = pending.pop() {
@@ -448,7 +449,8 @@ fn every_workload_container_start_drops_the_page_cache_first() {
             );
             continue;
         }
-        if path.to_string_lossy().contains("tests") {
+        let relative = path.strip_prefix(&root).unwrap().to_string_lossy();
+        if relative.contains("tests") {
             continue;
         }
         let source = fs::read_to_string(&path).unwrap();
@@ -461,24 +463,29 @@ fn every_workload_container_start_drops_the_page_cache_first() {
             {
                 continue;
             }
-            sites.push(format!("{}:{}", path.display(), index + 1));
+            let matched = patterns
+                .iter()
+                .find(|pattern| line.contains(pattern.as_str()))
+                .unwrap();
+            sites.push((matched.clone(), format!("{}:{}", path.display(), index + 1)));
             let start = lines[..index]
                 .iter()
                 .rposition(|line| line.trim_start().contains("fn ") && line.contains('('))
                 .unwrap();
-            let end = lines[index..]
-                .iter()
-                .position(|line| line.starts_with("    async fn ") || line.starts_with("fn "))
-                .map_or(lines.len(), |offset| index + offset);
-            if !lines[start..end]
+            if !lines[start..index]
                 .iter()
                 .any(|line| line.contains("load.drop_now().await"))
             {
-                unguarded.push(sites.last().unwrap().clone());
+                unguarded.push(sites.last().unwrap().1.clone());
             }
         }
     }
-    assert_eq!(sites.len(), 2, "launch plans built at {sites:?}");
+    for pattern in &patterns {
+        assert!(
+            sites.iter().any(|(matched, _)| matched == pattern),
+            "no {pattern} site found: the guard has gone blind"
+        );
+    }
     assert!(
         unguarded.is_empty(),
         "no drop before launch at {unguarded:?}"

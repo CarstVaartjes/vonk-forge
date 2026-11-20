@@ -526,7 +526,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     );
                 }
                 JobScopeCleanup::new(&self.runtime, &job_scope).retain();
-                // The job loads like a run: one drop now, then every interval
+                // A hygiene phase for the job: one drop now, then every interval
                 // until it exits, on every way out. Keyed by the job, so it
                 // never ends a serving run's phase.
                 let load = self.job_hygiene_phase(request.job_id);

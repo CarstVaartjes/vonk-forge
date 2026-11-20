@@ -238,12 +238,14 @@ pub fn handle(
     // Drop first, then compact: the freed clean cache pages give compaction
     // more free memory to regroup, and pages about to be dropped are never
     // migrated first.
-    report.compaction = COMPACTION.for_load(
-        Path::new("/"),
-        entering,
-        MEMORY_COMPACTION_TIMEOUT,
-        rustix::param::page_size() as u64,
-    );
+    if request.purpose == PageCacheDropPurpose::Load {
+        report.compaction = COMPACTION.for_load(
+            Path::new("/"),
+            entering,
+            MEMORY_COMPACTION_TIMEOUT,
+            rustix::param::page_size() as u64,
+        );
+    }
     record_load_ask(request.purpose, Instant::now());
     Ok(Some(report))
 }
