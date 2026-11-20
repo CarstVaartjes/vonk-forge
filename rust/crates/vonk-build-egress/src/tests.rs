@@ -1,7 +1,8 @@
 use super::*;
 
-/// The retained-resolver list is process-global and supervision reaps every
-/// entry, so tests that retain children run one at a time.
+/// The retained-resolver list is process-global and every resolver call
+/// supervises (kills and reaps) all of it, so the tests that reach it run one
+/// at a time.
 static RETAINED_RESOLVERS_TESTS: Mutex<()> = Mutex::new(());
 
 #[test]
@@ -44,6 +45,9 @@ fn a_retained_resolver_writer_cannot_extend_the_deadline() {
 
 #[test]
 fn stalled_resolver_is_reaped_and_fresh_work_is_admitted() {
+    let _serial = RETAINED_RESOLVERS_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let temp = tempfile::tempdir().unwrap();
     let pidfile = temp.path().join("resolver.pid");
     for _ in 0..4 {
@@ -289,6 +293,9 @@ fn strips_hop_headers_and_rejects_proxy_credentials_and_bodies() {
 
 #[test]
 fn failed_termination_retains_child_and_exhausted_owners_recover_after_reaping() {
+    let _serial = RETAINED_RESOLVERS_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Wrong implementation: dropping a child after failed kill releases its
     // claim, lets repeated timeouts accumulate processes, or leaves a zombie.
     static OWNERS: AtomicUsize = AtomicUsize::new(0);

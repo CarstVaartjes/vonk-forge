@@ -406,7 +406,7 @@ with Cargo's default test threads; CI sets no `RUST_TEST_THREADS`). A Rust test
 must own its state (a unique `tempfile` directory, an ephemeral port) or
 serialise explicitly with a narrow lock. Explicit exceptions: the containerd
 fixture's runner-wide `flock` (`vonk-agent/tests/recipe_builder/main.rs`), the
-build-egress tests that share the process-global retained-resolver list (one
+build-egress tests that reach the retained-resolver list (one
 static mutex), and `listener_recovery.rs`'s fixed port (alone in its binary).
 Held file locks release explicitly on drop (`held_lock.rs`), so a child forked
 by another test thread cannot keep one busy.
