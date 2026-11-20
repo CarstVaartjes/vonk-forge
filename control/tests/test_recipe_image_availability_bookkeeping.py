@@ -10,7 +10,12 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
+from vonk_agent_protocol import (
+    Disposition,
+    LifecycleState,
+    OperationProgress,
+    RecipeImageCode,
+)
 from vonk_control.job_documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
@@ -18,6 +23,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
+    requests,
 )
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
@@ -147,9 +153,10 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_damaged_request_observes_then_ends_and_fresh_request_heals(
-    tmp_path: Path,
+def test_damaged_request_stays_unknown_and_fresh_request_heals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
     engine, sessions, service, operation = _started(tmp_path)
     with sessions.begin() as session:
         job = session.get(Job, operation.id)
@@ -418,9 +425,10 @@ def test_metadata_observation_retries_before_admission_and_then_accepts(
 
 
 def test_exhausted_metadata_observation_stays_unknown_and_same_key_recovers(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catch an unavailable peer becoming a terminal failure or a held claim."""
+    monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
     engine, sessions, service, _ = _started(tmp_path)
     authority = service._authority
 
@@ -444,6 +452,31 @@ def test_exhausted_metadata_observation_stays_unknown_and_same_key_recovers(
         "bookkeeping-revision", actor="operator", request_id="metadata-unavailable"
     )
     assert recovered.state == LifecycleState.QUEUED.value
+    engine.dispose()
+
+
+def test_busy_catalog_lock_raises_database_busy_and_same_key_is_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catch the nowait lock timeout becoming a synthetic terminal view."""
+    from sqlalchemy.exc import OperationalError
+
+    monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
+    engine, _sessions, service, _ = _started(tmp_path)
+    once = requests._start_request_once
+
+    def locked(*_args, **_kwargs):
+        raise OperationalError("SELECT ... FOR UPDATE NOWAIT", {}, Exception("locked"))
+
+    monkeypatch.setattr(requests, "_start_request_once", locked)
+    with pytest.raises(RecipeImageAvailabilityUnknown) as busy:
+        service.start("bookkeeping-revision", actor="operator", request_id="busy-key")
+    assert busy.value.code == RecipeImageCode.DATABASE_BUSY
+    monkeypatch.setattr(requests, "_start_request_once", once)
+    admitted = service.start(
+        "bookkeeping-revision", actor="operator", request_id="busy-key"
+    )
+    assert admitted.state == LifecycleState.QUEUED.value
     engine.dispose()
 
 

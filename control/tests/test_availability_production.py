@@ -52,11 +52,12 @@ from vonk_control.recipe_builds import (
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityService,
-    RecipeImageAvailabilityUnknown,
 )
 from vonk_control.recipe_image_availability import requests as availability_requests
 from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
@@ -613,11 +614,11 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
         recipe_operations=object(),
         clock=lambda: now,
     )
-    with pytest.raises(RecipeImageAvailabilityUnknown):
+    with pytest.raises(RecipeImageAvailabilityRefused) as refused:
         production.service.start(
             "policy-revision", actor="operator", request_id="p" * 36
         )
-    assert builds.calls > 1
+    assert refused.value.code == SOURCE_POLICY_REFUSED_CODE
     builds.damaged = False
     monkeypatch.setattr(
         availability_production,

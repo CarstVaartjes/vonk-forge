@@ -4711,9 +4711,14 @@ def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it
 
 
 def test_unknown_outcome_is_raised_not_failed_and_same_key_succeeds(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catch an unaccepted request becoming a synthetic terminal FAILED view."""
+    monkeypatch.setattr(
+        "vonk_control.recipe_image_availability.requests."
+        "REQUEST_OBSERVATION_BUDGET_SECONDS",
+        0,
+    )
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

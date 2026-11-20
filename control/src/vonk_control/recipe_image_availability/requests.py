@@ -80,9 +80,6 @@ from .contracts import (
 )
 
 REQUEST_OBSERVATION_BUDGET_SECONDS = 0.25
-_PROGRESS_UNAVAILABLE = (
-    "Preparing progress is currently unavailable; the Controller retries observation."
-)
 
 
 if TYPE_CHECKING:
@@ -283,17 +280,7 @@ def ensure_preparation(
     namespace = uuid.NAMESPACE_URL
     request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
     for _ in range(2):
-        try:
-            view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
-        except RecipeImageAvailabilityUnknown:
-            # Not accepted yet and not failed: the load asks again next pass.
-            return (
-                make_blocker(
-                    RecipeImageCode.PREPARING,
-                    _PROGRESS_UNAVAILABLE,
-                    severity=ProfileReasonSeverity.INFO.value,
-                ),
-            )
+        view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
         if view.state in _SUCCEEDED:
             # The caller asks only because its plan still lacks the image
             # or model, so an earlier success is stale (the image was
@@ -359,7 +346,7 @@ def ensure_preparation(
             RecipeImageCode.PREPARING,
             f"Preparing the model and runtime image ({view.measurement.phase})."
             if view.measurement is not None
-            else _PROGRESS_UNAVAILABLE,
+            else "Preparing progress is currently unavailable; the Controller retries observation.",
             severity="info",
         ),
     )
@@ -404,9 +391,7 @@ def _start_request(
     """
     deadline = time.monotonic() + REQUEST_OBSERVATION_BUDGET_SECONDS
     delay = 0.01
-    attempts = 0
     while True:
-        attempts += 1
         try:
             return _start_request_once(
                 self,
