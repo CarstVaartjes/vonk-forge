@@ -361,7 +361,7 @@ class Settings:
     @property
     def agent_service_hostnames(self) -> tuple[str, ...]:
         host = self._validated_control_hostname()
-        return (host, f"enroll.{host}", f"agents.{host}", f"registry.{host}")
+        return (host, f"enroll.{host}", f"agents.{host}")
 
     @property
     def agent_controller_origin(self) -> str:

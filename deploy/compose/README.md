@@ -48,8 +48,8 @@ hardware restriction.
 Lab mode asks only for the reserved LAN address and the two optional keys
 below. Secure remote also asks for:
 
-- the control hostname (`vonk-forge.<tailnet>.ts.net`); the enrollment, agent,
-  and registry names are derived from it;
+- the control hostname (`vonk-forge.<tailnet>.ts.net`); the enrollment and agent
+  names are derived from it;
 - the Tailscale OAuth client ID and secret;
 
 Both modes offer an optional LiteLLM upstream provider key and an optional
