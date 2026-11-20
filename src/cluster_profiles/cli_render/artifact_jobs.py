@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping, Sequence
+from collections.abc import Container, Mapping, Sequence
 from enum import StrEnum
 
 from ..cli_json_contract import Word
@@ -13,6 +13,7 @@ from ..control_client import ControlMalformedResponse
 from ..generated_control.models.artifact_job_contract_response import (
     ArtifactJobContractResponse,
 )
+from ..generated_control.models.artifact_job_response import ArtifactJobResponse
 from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
 from ..generated_control.models.boolean_parameter import BooleanParameter
 from ..generated_control.models.enum_parameter import EnumParameter
@@ -29,6 +30,17 @@ type Knob = (
     | BooleanParameter
     | EnumParameter
 )
+
+
+#: The job actions that print one job's record.
+RECORD_ACTIONS = frozenset(
+    {Word.DETAIL, Word.CREATE, Word.UPLOAD, Word.SUBMIT, Word.CANCEL, Word.RUN}
+)
+
+
+def prints_record(action: str, fields: Container[str]) -> bool:
+    """Whether this job action prints one job's record (not a download receipt)."""
+    return action in RECORD_ACTIONS and not (action == Word.RUN and "job_id" in fields)
 
 
 class ResultFiles(StrEnum):
@@ -49,67 +61,68 @@ def job_reconnects(state: object, operation_id: object) -> bool:
     return isinstance(operation_id, str) and state in ARTIFACT_JOB_IN_FLIGHT
 
 
-def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
-    _field("Artifact job", payload.get("id"))
-    _field("Command", action)
-    _field("Run", payload.get("run_id"))
-    _field("State", lifecycle_state(dict(payload)))
-    if payload.get("cancel_requested_at") is not None:
-        _field("Cancel requested", _time(payload.get("cancel_requested_at")))
-    _field("Interface", payload.get("interface"))
-    _field("Contract SHA-256", payload.get("contract_sha256"))
-    _field("Input manifest SHA-256", payload.get("input_manifest_sha256"))
-    _field("Input bytes", _bytes(payload.get("input_total_bytes")))
-    _field("Created", _time(payload.get("created_at")))
-    _field("Updated", _time(payload.get("updated_at")))
-    if payload.get("status_reason") is not None:
-        _field("Reason", payload.get("status_reason"))
-    evidence = payload.get("result_evidence")
-    if isinstance(evidence, Mapping) and type(evidence.get("exit_code")) is int:
-        _field("Exit code", evidence["exit_code"])
-
-    operation_id = payload.get("operation_id")
-    if operation_id is not None:
-        _field("Operation", operation_id)
-        _field("Submit request", payload.get("submit_request_id"))
-
-    input_declarations = _records(payload, "input_declarations")
-    input_files = _records(payload, "input_files")
-    uploaded_names = {item.get("name") for item in input_files}
-    _field("Inputs", f"{len(input_declarations)} declared, {len(input_files)} uploaded")
-    for item in input_declarations:
-        name = item.get("name")
-        _field("Input", name)
-        _field("Input slot", item.get("slot"))
-        _field("Input state", "uploaded" if name in uploaded_names else "not uploaded")
-        _field("Input media type", item.get("media_type"))
-        _field("Input size", _bytes(item.get("size_bytes")))
-        _field("Input SHA-256", item.get("sha256"))
-
-    state = payload.get("state")
-    output_files = _records(payload, "output_files")
-    files = result_files(state, output_files)
-    if files is not ResultFiles.UNAVAILABLE:
-        _field("Output manifest SHA-256", payload.get("output_manifest_sha256"))
-        if files is ResultFiles.EMPTY:
-            print("Result files: none (job succeeded with an empty result).")
-        else:
-            _field("Result files", len(output_files))
-            for item in output_files:
-                _field("Output file", item.get("name"))
-                _field("Output media type", item.get("media_type"))
-                _field("Output size", _bytes(item.get("size_bytes")))
-                _field("Output SHA-256", item.get("sha256"))
+def _artifact_job_record(job: ArtifactJobResponse) -> None:
+    """The short record: at most eight lines; hashes and per-file rows are --wide."""
+    document = job.to_dict()
+    _field("Artifact job", job.id)
+    _field("Run", job.run_id)
+    state_line = str(lifecycle_state(document))
+    if declared(job.cancel_requested_at) is not None:
+        state_line += (
+            f" (cancel requested {_time(document.get('cancel_requested_at'))})"
+        )
+    _field("State", state_line)
+    if declared(job.status_reason) is not None:
+        _field("Reason", job.status_reason)
+    declarations = job.input_declarations or []
+    _field("Inputs", f"{len(declarations)} declared, {len(job.input_files)} uploaded")
+    files = result_files(job.state, job.output_files)
+    if files is ResultFiles.EMPTY:
+        _field("Result files", "none (job succeeded with an empty result)")
+    elif files is ResultFiles.FILES:
+        _field("Result files", len(job.output_files))
     else:
-        _field(
-            "Result files", f"unavailable until job succeeds (state: {_text(state)})"
-        )
+        _field("Result files", f"unavailable until job succeeds ({_text(job.state)})")
+    _field(
+        "Created",
+        f"{_time(document.get('created_at'))} "
+        f"(updated {_time(document.get('updated_at'))})",
+    )
+    operation_id = declared(job.operation_id)
+    if job_reconnects(job.state, operation_id):
+        _field("Reconnect", f"vonkctl job detail {shlex.quote(job.id)} --follow")
 
-    if job_reconnects(state, operation_id):
+
+def artifact_job_details(job: ArtifactJobResponse) -> None:
+    """What `--wide` adds to the short record: hashes, ids and per-file rows."""
+    _field("Interface", job.interface)
+    _field("Contract SHA-256", job.contract_sha256)
+    _field("Input manifest SHA-256", job.input_manifest_sha256)
+    _field("Input bytes", _bytes(job.input_total_bytes))
+    evidence = declared(job.result_evidence)
+    if evidence is not None and declared(evidence.exit_code) is not None:
+        _field("Exit code", evidence.exit_code)
+    if declared(job.operation_id) is not None:
+        _field("Operation", job.operation_id)
+        _field("Submit request", declared(job.submit_request_id))
+    uploaded = {item.name for item in job.input_files}
+    for declaration in job.input_declarations or []:
+        _field("Input", declaration.name)
+        _field("Input slot", declaration.slot)
         _field(
-            "Reconnect",
-            f"vonkctl job detail {shlex.quote(str(payload.get('id')))} --follow",
+            "Input state",
+            "uploaded" if declaration.name in uploaded else "not uploaded",
         )
+        _field("Input media type", declaration.media_type)
+        _field("Input size", _bytes(declaration.size_bytes))
+        _field("Input SHA-256", declaration.sha256)
+    if job.output_files:
+        _field("Output manifest SHA-256", declared(job.output_manifest_sha256))
+        for output in job.output_files:
+            _field("Output file", output.name)
+            _field("Output media type", output.media_type)
+            _field("Output size", _bytes(output.size_bytes))
+            _field("Output SHA-256", output.sha256)
 
 
 def _artifact_job_list(payload: Mapping[str, object]) -> None:
@@ -265,14 +278,7 @@ def _artifact_job(payload: Mapping[str, object], action: str) -> None:
         _artifact_job_list(payload)
     elif action == Word.DOWNLOAD or (action == Word.RUN and "job_id" in payload):
         _artifact_job_download(payload)
-    elif action in {
-        Word.DETAIL,
-        Word.CREATE,
-        Word.UPLOAD,
-        Word.SUBMIT,
-        Word.CANCEL,
-        Word.RUN,
-    }:
-        _artifact_job_record(payload, action)
+    elif prints_record(action, payload.keys()):
+        _artifact_job_record(ArtifactJobResponse.from_dict(dict(payload)))
     else:
         _field("Observation", ENDPOINT_UNAVAILABLE)

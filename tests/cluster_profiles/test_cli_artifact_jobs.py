@@ -1793,6 +1793,44 @@ def test_download_creates_the_directory_and_local_errors_are_not_api_errors(
     assert "local filesystem" in error["error"]
 
 
+def test_each_local_cause_has_its_own_code_and_exit_status(tmp_path, vonkctl_json):
+    """One code per cause: no local cause reports the control API's code."""
+    client = ArtifactJobClient()
+    client.job = _job(state="running")
+    running_status, running = vonkctl_json(
+        "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
+    )
+    client.job = _job(state="failed")
+    failed_status, failed = vonkctl_json(
+        "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
+    )
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    client.job = _succeeded_job()
+    filesystem_status, filesystem = vonkctl_json(
+        "job",
+        "download",
+        JOB_ID,
+        "--output",
+        str(blocker / "sub"),
+        control_client=client,
+    )
+    invalid_status, invalid = vonkctl_json(
+        "job", "cancel", JOB_ID, control_client=client
+    )
+    documents = [running, failed, filesystem, invalid]
+    assert [d["code"] for d in documents] == [
+        "job.not_finished",
+        "job.ended_without_result",
+        "local.io_failed",
+        "cli.invalid_input",
+    ]
+    assert [running_status, failed_status, filesystem_status, invalid_status] == [2] * 4
+    assert {d["error_type"] for d in documents} == {"local"}
+    assert running["recovery_actions"] == [f"vonkctl job detail {JOB_ID} --follow"]
+    assert failed["recovery_actions"] == [f"vonkctl job detail {JOB_ID}"]
+
+
 def test_download_of_a_running_job_says_to_wait(tmp_path, vonkctl_json) -> None:
     client = ArtifactJobClient()
     client.job = _job(state="running")

@@ -35,6 +35,20 @@ class ClientCode(StrEnum):
     NOT_CONFIGURED = "client.not_configured"
     #: The environment asks for a transport this build cannot use (SOCKS proxy).
     TRANSPORT_UNSUPPORTED = "client.transport_unsupported"
+    #: The Controller API failed without a code of its own.
+    CONTROL_API_ERROR = "control.api_error"
+    #: This CLI client cannot move artifact bytes.
+    TRANSFER_UNAVAILABLE = "client.transfer_unavailable"
+    #: The operator interrupted the command.
+    INTERRUPTED = "client.interrupted"
+    #: A local file or directory could not be read or written.
+    LOCAL_IO_FAILED = "local.io_failed"
+    #: A command-line value or local input is not valid; nothing was sent.
+    INVALID_INPUT = "cli.invalid_input"
+    #: The job the command needs a result from has not finished yet.
+    JOB_NOT_FINISHED = "job.not_finished"
+    #: The job ended without producing result files.
+    JOB_ENDED_WITHOUT_RESULT = "job.ended_without_result"
 
 
 #: The grammar of a surfaced error code: matched whole, and published in schemas.
@@ -226,7 +240,7 @@ def local_io_context(
     return ErrorContext(
         operation=operation,
         endpoint=None,
-        code="local.io_failed",
+        code=ClientCode.LOCAL_IO_FAILED.value,
         source="local_io",
         decision="exit",
         errno=errno if isinstance(errno, int) else None,

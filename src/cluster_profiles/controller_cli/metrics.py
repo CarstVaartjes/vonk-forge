@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
 
-from ..control_client import ControlClientError
 from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
 from .common import ControllerClient
-from .selection import _resolve_spark_selectors
+from .selection import _resolve_spark_selectors, _spark_names
 
 
 def _metrics(args: argparse.Namespace, client: ControllerClient) -> dict:
@@ -24,20 +22,3 @@ def _metrics(args: argparse.Namespace, client: ControllerClient) -> dict:
     if not names and response.series:
         names = _spark_names(client)
     return {**document, "names": names}
-
-
-def _spark_names(client: ControllerClient) -> dict[str, str]:
-    """Friendly names from one roster read; ids stand in when it fails."""
-    try:
-        nodes = client.request("GET", "/api/fleet").get("nodes")
-    except ControlClientError:
-        return {}
-    if not isinstance(nodes, list):
-        return {}
-    return {
-        node["id"]: node["display_name"]
-        for node in nodes
-        if isinstance(node, Mapping)
-        and isinstance(node.get("id"), str)
-        and isinstance(node.get("display_name"), str)
-    }

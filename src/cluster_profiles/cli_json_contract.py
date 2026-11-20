@@ -74,6 +74,7 @@ class CliErrorType(StrEnum):
     ARGUMENTS = "arguments"
     CONTROL_API = "control_api"
     DECLINED = "declined"
+    LOCAL = "local"
     UPDATE = "update"
     ENROLLMENT_DELIVERY = "enrollment_delivery"
 

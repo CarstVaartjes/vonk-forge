@@ -15,7 +15,7 @@
       "lines": [
         "Controller build: 0123456789ab",
         "Library version: 1.4.0",
-        "Last sync: 2026-11-12 08:00:00+00:00 (current)"
+        "Last sync: 2026-11-12 08:00:00Z (current)"
       ]
     },
     {
@@ -32,7 +32,7 @@
       "lines": [
         "Controller build: 0123456789ab",
         "Library version: Not reported",
-        "Last sync: 2026-11-12 07:59:00+00:00 (failed)"
+        "Last sync: 2026-11-12 07:59:00Z (failed)"
       ]
     },
     {
@@ -61,7 +61,7 @@
       "lines": [
         "Controller build: Not reported",
         "Library version: 1.4.0",
-        "Last sync: 2026-11-12 08:00:00+00:00 (partial)"
+        "Last sync: 2026-11-12 08:00:00Z (partial)"
       ]
     }
   ]

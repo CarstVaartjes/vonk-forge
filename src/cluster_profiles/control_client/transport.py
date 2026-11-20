@@ -32,6 +32,8 @@ from .errors import (
     ControlResponseTooLarge,
     ControlSchemaRejected,
     ControlTransportError,
+    LocalFilesystemError,
+    LocalInputError,
     _OpenedResponse,
     _retry_after_seconds,
 )
@@ -52,7 +54,7 @@ def _read_token_file(token_file: Path) -> str:
     flags |= getattr(os, "O_NOINHERIT", 0)
     no_follow = getattr(os, "O_NOFOLLOW", None)
     if no_follow is None:
-        raise ControlClientError("control token file cannot be opened safely")
+        raise LocalFilesystemError("control token file cannot be opened safely")
     flags |= no_follow
 
     descriptor = -1
@@ -60,12 +62,14 @@ def _read_token_file(token_file: Path) -> str:
         descriptor = os.open(token_file, flags)
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
-            raise ControlClientError("control token must be a regular non-symlink file")
+            raise LocalFilesystemError(
+                "control token must be a regular non-symlink file"
+            )
         getuid = getattr(os, "getuid", None)
         if getuid is not None and metadata.st_uid != getuid():
-            raise ControlClientError("control token file owner is invalid")
+            raise LocalFilesystemError("control token file owner is invalid")
         if stat.S_IMODE(metadata.st_mode) & 0o077:
-            raise ControlClientError("control token file permissions are too broad")
+            raise LocalFilesystemError("control token file permissions are too broad")
 
         content = bytearray()
         while len(content) <= _MAX_TOKEN:
@@ -74,12 +78,12 @@ def _read_token_file(token_file: Path) -> str:
                 break
             content.extend(chunk)
         if len(content) > _MAX_TOKEN:
-            raise ControlClientError("control token file is invalid")
+            raise LocalFilesystemError("control token file is invalid")
         try:
             token = bytes(content).decode().strip()
         except UnicodeDecodeError:
-            raise ControlClientError("control token file is invalid") from None
-    except ControlClientError:
+            raise LocalFilesystemError("control token file is invalid") from None
+    except (ControlClientError, LocalInputError):
         raise
     except OSError as error:
         context = local_io_context(
@@ -98,7 +102,7 @@ def _read_token_file(token_file: Path) -> str:
         or len(token) > _MAX_TOKEN
         or any(character.isspace() for character in token)
     ):
-        raise ControlClientError("control token file is invalid")
+        raise LocalFilesystemError("control token file is invalid")
     return token
 
 

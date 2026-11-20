@@ -15,6 +15,7 @@ from ..control_client import (
     ControlHTTPError,
     ControlNotFound,
 )
+from ..control_client.errors import TransferUnavailable
 from ..generated_control.models.catalog_vocabulary import CatalogVocabulary
 from .cache_removal import _remove_model, _remove_recipe
 from .cache_submission import (
@@ -167,9 +168,7 @@ def _job(
     factory: Callable[[], str],
 ):
     if not isinstance(client, ArtifactJobClient):
-        raise ControlClientError(
-            "artifact byte transfer is unavailable in this CLI client"
-        )
+        raise TransferUnavailable
     return run_artifact_job(
         args,
         client,

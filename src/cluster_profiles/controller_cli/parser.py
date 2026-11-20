@@ -606,7 +606,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "key",
         help="Client keys for the inference gateway",
         description="Keys that let apps call the models the fleet serves.",
-        epilog="Without a command, lists the keys.",
+        epilog=(
+            "Without a command, lists the keys. A secret is shown once; "
+            "lost it? vonkctl key roll NAME"
+        ),
     )
     _add_output(key)
     key_actions = key.add_subparsers(dest="key_action", parser_class=type(key))

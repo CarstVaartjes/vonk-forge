@@ -36,6 +36,7 @@ from .errors import (
     ControlMalformedResponse,
     ControlResponseTooLarge,
     ControlTransportError,
+    LocalFilesystemError,
     _retry_after_seconds,
     _structured_http_error_fields,
 )
@@ -88,13 +89,13 @@ class ControlClient(HTTPControlClient):
         )
         no_follow = getattr(os, "O_NOFOLLOW", None)
         if no_follow is None:
-            raise ControlClientError("artifact input cannot be opened safely")
+            raise LocalFilesystemError("artifact input cannot be opened safely")
         descriptor = -1
         try:
             descriptor = os.open(source, flags | no_follow)
             metadata = os.fstat(descriptor)
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_size:
-                raise ControlClientError("artifact input changed before upload")
+                raise LocalFilesystemError("artifact input changed before upload")
             digest = hashlib.sha256()
             observed = 0
             while observed <= _MAX_ARTIFACT_INPUT:
@@ -107,7 +108,7 @@ class ControlClient(HTTPControlClient):
                 observed += len(chunk)
                 digest.update(chunk)
             if observed != expected_size or digest.hexdigest() != expected_sha256:
-                raise ControlClientError("artifact input changed before upload")
+                raise LocalFilesystemError("artifact input changed before upload")
             os.lseek(descriptor, 0, os.SEEK_SET)
             headers = {
                 "Authorization": f"Bearer {self._token}",
@@ -483,10 +484,6 @@ class ControlClient(HTTPControlClient):
             size_bytes=expected_size,
             sha256=expected_sha256,
         )
-
-
-class LocalFilesystemError(ValueError):
-    """A local file could not be created or written: the operator's to fix."""
 
 
 def local_filesystem_error(path: Path, error: OSError) -> LocalFilesystemError:

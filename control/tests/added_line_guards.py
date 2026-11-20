@@ -1860,6 +1860,25 @@ def check_source(
     if (
         "boundaries" in modes
         and python
+        and path.startswith("src/cluster_profiles/")
+        and not path.startswith("src/cluster_profiles/control_client/")
+    ):
+        hits.extend(
+            (
+                node.lineno,
+                (
+                    "vonkctl failure raised as a bare ControlClientError; "
+                    "use a typed error with its own code (control_client/errors.py)"
+                ),
+            )
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Raise)
+            and isinstance(node.exc, ast.Call)
+            and ast.unparse(node.exc.func) == "ControlClientError"
+        )
+    if (
+        "boundaries" in modes
+        and python
         and path.startswith("control/tests/")
         and path != AGENT_REQUESTS
     ):

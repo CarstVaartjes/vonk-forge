@@ -9,9 +9,9 @@ from .generated_control.models.platform_observation import PlatformObservation
 
 def render_platform(observation: PlatformObservation) -> None:
     # Import lazily: the shared terminal helpers live with the task renderer.
-    from .cli_render import _field, _reported, _table, _time
+    from .cli_render import _field, _reported, _table, _utc
 
-    _field("Observed", _time(observation.observed_at.isoformat()))
+    _field("Observed", _utc(observation.observed_at))
     # Wording shared with the dashboard's version line (tests/fixtures/version-line.json).
     build = observation.api.source_sha
     _reported("Controller build", build[:12] if isinstance(build, str) else None)
@@ -30,7 +30,7 @@ def render_platform(observation: PlatformObservation) -> None:
                     worker.source_sha,
                     worker.worker_contract_sha256,
                     worker.loop_sequence,
-                    _time(worker.completed_at.isoformat()),
+                    _utc(worker.completed_at),
                 )
                 for worker in observation.workers
             ],
@@ -41,7 +41,7 @@ def render_platform(observation: PlatformObservation) -> None:
         if isinstance(step, str) and isinstance(started, datetime):
             print(
                 f"Worker {worker.process_instance_id[:12]}: "
-                f"step {step} running since {_time(started.isoformat())}"
+                f"step {step} running since {_utc(started)}"
             )
     if observation.worker_issue is not None:
         _field("Worker observation", observation.worker_issue)
@@ -56,7 +56,7 @@ def render_platform(observation: PlatformObservation) -> None:
                     item.application_id,
                     item.state,
                     item.repeats,
-                    _time(item.first_seen_at.isoformat()),
+                    _utc(item.first_seen_at),
                     item.detail,
                 )
                 for item in stalled

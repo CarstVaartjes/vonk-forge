@@ -66,7 +66,7 @@ def _catalog_sync(payload: Mapping[str, object]) -> None:
     if expected is not None and expected != commit:
         _field("Expected commit", expected)
     _field(
-        "Recipes",
+        "Documents",
         f"{_text(payload.get('processed_count'))} of {_text(payload.get('total_count'))} processed; "
         f"{_text(payload.get('imported_count'))} imported, {_text(payload.get('updated_count'))} updated, "
         f"{_text(payload.get('unchanged_count'))} unchanged, {_text(payload.get('skipped_count'))} skipped, "

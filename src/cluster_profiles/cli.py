@@ -57,6 +57,7 @@ from .control_client import (
     ControlTransportUnsupported,
     ControlUnavailable,
 )
+from .control_client.errors import CommandInterrupted, LocalInputError
 from .controller_cli import (
     ActionDeclined,
     ControllerClient,
@@ -64,6 +65,7 @@ from .controller_cli import (
     run_controller,
 )
 from .controller_cli.common import NoLoadedProfile
+from .error_reporting import ClientCode
 from .runtime_identity import packaged_runtime_identity
 
 _MAX_TEXT_CHARS = 1_024
@@ -227,20 +229,46 @@ def _arguments_may_contain_secrets(argv: Sequence[str]) -> bool:
     )
 
 
+_LOCAL_FILE_ERRORS = (
+    FileNotFoundError,
+    PermissionError,
+    IsADirectoryError,
+    NotADirectoryError,
+)
+
+
 def _control_error(
     error: BaseException, args: argparse.Namespace | None = None
 ) -> dict[str, object]:
-    code = getattr(error, "code", None) or "control.api_error"
+    unreadable = isinstance(error, _LOCAL_FILE_ERRORS) or (
+        isinstance(error, OSError) and error.filename is not None
+    )
+    local = (
+        unreadable
+        or isinstance(error, LocalInputError)
+        or (
+            isinstance(error, (TypeError, ValueError))
+            and not isinstance(error, ControlClientError)
+        )
+    )
+    code = getattr(error, "code", None) or (
+        ClientCode.LOCAL_IO_FAILED.value
+        if unreadable
+        else ClientCode.INVALID_INPUT.value
+        if local
+        else ClientCode.CONTROL_API_ERROR.value
+    )
     detail = getattr(error, "detail", str(error))
     message = _plain_language_error(code, detail)
     message = (
         "control API unavailable"
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
+        and not unreadable
         else message
     )
     result = failure_document(
         message,
-        CliErrorType.CONTROL_API,
+        CliErrorType.LOCAL if local else CliErrorType.CONTROL_API,
         code=code,
         detail=_sanitize_text(detail),
         recovery_actions=list(getattr(error, "recovery", ()) or ()),
@@ -882,10 +910,7 @@ def _main(
             _emit(observation.document(), args, error=True)
             return 130
         _emit(
-            _control_error(
-                ControlClientError("command interrupted"),
-                args,
-            ),
+            _control_error(CommandInterrupted(), args),
             args,
             error=True,
         )

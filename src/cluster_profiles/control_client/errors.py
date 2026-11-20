@@ -154,6 +154,57 @@ class ControlNotConfigured(ControlClientError):
         )
 
 
+class LocalInputError(ValueError):
+    """A cause the CLI concludes itself, without a Controller answer."""
+
+    code = ClientCode.INVALID_INPUT.value
+    recovery: tuple[str, ...] = ()
+
+
+class LocalFilesystemError(LocalInputError):
+    """A local file could not be created, read or written: the operator's to fix."""
+
+    code = ClientCode.LOCAL_IO_FAILED.value
+
+
+class JobNotFinished(LocalInputError):
+    """The job has no result yet; the follow command is the way on."""
+
+    code = ClientCode.JOB_NOT_FINISHED.value
+
+    def __init__(self, message: str, *, follow: str) -> None:
+        super().__init__(message)
+        self.recovery = (follow,)
+
+
+class JobEndedWithoutResult(LocalInputError):
+    """The job ended in a state that leaves no result files."""
+
+    code = ClientCode.JOB_ENDED_WITHOUT_RESULT.value
+
+    def __init__(self, message: str, *, detail: str) -> None:
+        super().__init__(message)
+        self.recovery = (detail,)
+
+
+class TransferUnavailable(ControlClientError):
+    """This client cannot move artifact bytes; nothing was sent."""
+
+    code = ClientCode.TRANSFER_UNAVAILABLE.value
+
+    def __init__(self) -> None:
+        super().__init__("artifact byte transfer is unavailable in this client")
+
+
+class CommandInterrupted(ControlClientError):
+    """The operator interrupted the command (Ctrl-C)."""
+
+    code = ClientCode.INTERRUPTED.value
+
+    def __init__(self) -> None:
+        super().__init__("command interrupted")
+
+
 class ControlTransportUnsupported(ControlClientError):
     """The environment asks for a transport this build cannot use."""
 

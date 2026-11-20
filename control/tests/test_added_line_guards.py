@@ -4416,6 +4416,18 @@ def test_compiled_plan_validation_is_refused_outside_its_owners():
     )
 
 
+def test_vonkctl_failure_needs_its_own_typed_error():
+    source = 'def f():\n    raise ControlClientError("local file broke")\n'
+    cli_path = "src/cluster_profiles/cli_artifact_jobs.py"
+    assert check_source(cli_path, source, {2}, modes=("boundaries",))
+    assert not check_source(
+        "src/cluster_profiles/control_client/errors.py",
+        source,
+        {2},
+        modes=("boundaries",),
+    )
+
+
 @pytest.mark.parametrize(
     ("source", "rejected"),
     [
