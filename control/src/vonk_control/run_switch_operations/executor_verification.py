@@ -138,7 +138,11 @@ class ExecutorVerificationMixin:
                     ),
                     "model_artifact_set_bytes": (
                         sum(
-                            artifact.size_bytes for artifact in first_compiled.artifacts
+                            {
+                                artifact.sha256: artifact.size_bytes
+                                for plan in compiled.values()
+                                for artifact in plan.artifacts
+                            }.values()
                         )
                         if first_compiled is not None
                         else None

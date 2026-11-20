@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from vonk_agent_protocol import (
     InvalidRequestError,
+    InvalidRequestReason,
     SecurityRefusalError,
     UnknownOutcomeError,
 )
@@ -29,6 +30,14 @@ class InvalidType(InvalidRequestError, TypeError):
 
 class MissingRecord(InvalidRequestError, KeyError):
     """A named record the request refers to does not exist."""
+
+    def __init__(
+        self,
+        *args: object,
+        reason: InvalidRequestReason | None = InvalidRequestReason.NOT_FOUND,
+        field: str | None = None,
+    ) -> None:
+        super().__init__(*args, reason=reason, field=field)
 
 
 class UnsettledOutcome(UnknownOutcomeError, RuntimeError):

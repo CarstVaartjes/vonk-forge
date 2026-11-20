@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -749,17 +750,14 @@ def test_distributed_start_binds_native_fabric_instead_of_bridge_nat(rank: int) 
     assert wire.runtime.placement.local_address == f"192.168.100.{10 + rank}"
 
 
-def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
+def _compile_through_service(
+    recipe_document: dict[str, Any],
+    model_document: dict[str, Any],
+    files: list[tuple[str, str, str, int]],
+    roles: tuple[str, ...],
+) -> tuple[dict[str, Any], str]:
+    """Compile a recipe through the service; ``files`` are (id, path, sha256, bytes)."""
 
-    recipe_document = canonical_example("recipe-source-build.json")
-    topology = _mapping(recipe_document["topology"])
-    roles = _sequence(topology["roles"])
-    entrypoint = _mapping(roles[0])
-    resources = _mapping(entrypoint["resources"])
-    memory = _mapping(resources["memory"])
-    # The recipe reserve is informational; the compiled floor is the platform floor.
-    memory["reserve_bytes"] = 32_000_007
-    model_document = canonical_example("model-definition.json")
     model_digest = document_sha256(model_document)
     recipe_document["models"][0]["model"]["content_sha256"] = model_digest
     recipe = read_recipe(recipe_document)
@@ -769,15 +767,16 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
     class Manifest:
         digest = artifact_set_digest
         # Compilation describes the set in the resolved manifest's own terms.
-        artifacts = (
+        artifacts = tuple(
             SimpleNamespace(
-                artifact_id="weights",
-                path="model.safetensors",
-                sha256="c" * 64,
-                expected_bytes=1024,
+                artifact_id=file_id,
+                path=path,
+                sha256=sha256,
+                expected_bytes=size,
                 roles=("weights",),
                 model_content_sha256=model_digest,
-            ),
+            )
+            for file_id, path, sha256, size in files
         )
 
     class Cache:
@@ -788,13 +787,16 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         def adopt_covered_set(self, manifest: Manifest) -> None:
             assert manifest.digest == artifact_set_digest
 
-    node = ClusterMappingNode(
-        mapping_id="mapping-1",
-        node_id="spk_" + "1" * 32,
-        rank=0,
-        role="entrypoint",
-        endpoint_owner=True,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    nodes = tuple(
+        ClusterMappingNode(
+            mapping_id="mapping-1",
+            node_id="spk_" + str(rank + 1) * 32,
+            rank=rank,
+            role=role,
+            endpoint_owner=rank == 0,
+            created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        for rank, role in enumerate(roles)
     )
     revision = CatalogDocumentRevision(
         id="revision-1",
@@ -859,7 +861,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         Session(),
         revision=revision,
         build=build,
-        mapping_nodes=(node,),
+        mapping_nodes=nodes,
         parameters={},
         resolved_entities=ResolvedRecipe(
             recipe=recipe,
@@ -872,15 +874,76 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         ),
     )
 
-    payload = plans[node.node_id]
-    payload_wire = payload
-    assert payload_wire.identity.model_artifact_set_sha256 == artifact_set_digest
-    assert (
-        payload_wire.runtime.placement.memory_floor_bytes == PLATFORM_MEMORY_FLOOR_BYTES
+    return plans, artifact_set_digest
+
+
+def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
+    recipe_document = canonical_example("recipe-source-build.json")
+    memory = recipe_document["topology"]["roles"][0]["resources"]["memory"]
+    # The recipe reserve is informational; the compiled floor is the platform floor.
+    memory["reserve_bytes"] = 32_000_007
+    plans, artifact_set_digest = _compile_through_service(
+        recipe_document,
+        canonical_example("model-definition.json"),
+        [("weights", "model.safetensors", "c" * 64, 1024)],
+        ("entrypoint",),
     )
-    assert payload_wire.artifacts[0].path == "model.safetensors"
-    assert payload_wire.runtime_image.build_id == "build-1"
+    payload = next(iter(plans.values()))
+    assert payload.identity.model_artifact_set_sha256 == artifact_set_digest
+    assert payload.runtime.placement.memory_floor_bytes == PLATFORM_MEMORY_FLOOR_BYTES
+    assert payload.artifacts[0].path == "model.safetensors"
+    assert payload.runtime_image.build_id == "build-1"
     assert "repository" not in json.dumps(payload.model_dump(mode="json"))
+
+
+def test_each_role_of_a_dual_compiles_exactly_its_own_files() -> None:
+    recipe_document = canonical_example("recipe-dual.json")
+    model_document = canonical_example("model-definition.json")
+    files = [
+        (file_id, path, hashlib.sha256(path.encode()).hexdigest(), 100 + index)
+        for index, (file_id, path) in enumerate(
+            [
+                ("weights", "model.safetensors"),
+                ("rank0", "rank0.bin"),
+                ("rank1", "rank1.bin"),
+            ]
+        )
+    ]
+    model_document["files"] = [
+        {
+            "id": file_id,
+            "path": path,
+            "roles": ["weights"],
+            "sha256": sha256,
+            "size_bytes": size,
+        }
+        for file_id, path, sha256, size in files
+    ]
+    selected = {
+        "weights": ["entrypoint", "worker"],
+        "rank0": ["entrypoint"],
+        "rank1": ["worker"],
+    }
+    recipe_document["models"][0]["files"] = [
+        {
+            "file_id": file_id,
+            "id": file_id,
+            "mount": {"target": "/models"},
+            "roles": roles,
+        }
+        for file_id, roles in selected.items()
+    ]
+    plans, _ = _compile_through_service(
+        recipe_document, model_document, files, ("entrypoint", "worker")
+    )
+    held = {
+        node_id: {artifact.file_id for artifact in plan.artifacts}
+        for node_id, plan in plans.items()
+    }
+    assert sorted(map(sorted, held.values())) == [
+        ["rank0", "weights"],
+        ["rank1", "weights"],
+    ]
 
 
 def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary() -> (
