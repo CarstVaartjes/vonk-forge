@@ -194,6 +194,51 @@ def test_hostname_change_renews_leaf_without_rotating_authority(
     assert request_contract.files.intermediate_private_key not in replacement
 
 
+def _sha256_key_id(key: ed25519.Ed25519PublicKey) -> bytes:
+    der = key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return hashlib.sha256(der).digest()[:20]
+
+
+def _sha256_ski(
+    _cls: object, key: ed25519.Ed25519PublicKey
+) -> x509.SubjectKeyIdentifier:
+    return x509.SubjectKeyIdentifier(_sha256_key_id(key))
+
+
+def _sha256_aki(
+    _cls: object, key: ed25519.Ed25519PublicKey
+) -> x509.AuthorityKeyIdentifier:
+    return x509.AuthorityKeyIdentifier(_sha256_key_id(key), None, None)
+
+
+def test_renewal_under_retained_ca_with_other_key_id_method(
+    request_contract: NasStepCaControllerRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches deriving the leaf's authority key identifier from the issuer key:
+    # the earlier native producer recorded SHA-256 SPKI key identifiers.
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            x509.SubjectKeyIdentifier,
+            "from_public_key",
+            classmethod(_sha256_ski),
+        )
+        patch.setattr(
+            x509.AuthorityKeyIdentifier,
+            "from_issuer_public_key",
+            classmethod(_sha256_aki),
+        )
+        retained = generate_pki(request_contract, ENVIRONMENT, now=NOW)
+    environment = {"VONK_CONTROL_HOSTNAME": "renamed.example.test"}
+    replacement = renew_controller_leaf(
+        request_contract, environment, retained, now=NOW
+    )
+    validate_pki_material(
+        request_contract, environment, {**retained, **replacement}, now=NOW
+    )
+
+
 @pytest.mark.parametrize(
     "damaged", ["server_key", "intermediate_key", "password", "root", "chain", "jwk"]
 )
