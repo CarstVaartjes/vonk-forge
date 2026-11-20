@@ -240,7 +240,11 @@ from the record together, and a healer that trusted the record saw nothing
 wrong (the 2026-11-19 outage, the third after 11-03 and 11-05: Caddy running
 without `ingress`, `:8443` closed, no outbound DNS). Once per tick, against one
 inspect per network, a declared network that does not exist is broken whatever
-the record says; a recorded entry is broken when it names an older network ID,
+the record says, but only for a container that should run (running, a failed
+start, or a journalled start) and is still in the state it was inspected in:
+Compose removes the network of a container it stopped cleanly and reconnects it
+itself, so the janitor waits (`WAIT_NETWORK`) instead of recreating the network
+under it. A recorded entry is broken when it names an older network ID,
 or when the container runs and the network lists no endpoint for it. A declared
 network that exists but is missing from the record is left to Compose (a
 redeploy may be attaching it), unless a journalled repair owes it or the
