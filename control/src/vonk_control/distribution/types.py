@@ -103,13 +103,18 @@ def content_objects(
     return tuple(unique.values())
 
 
-def same_content(
-    left: tuple[DistributionObject, ...], right: tuple[DistributionObject, ...]
+def contained_content(
+    stored: tuple[DistributionObject, ...], objects: tuple[DistributionObject, ...]
 ) -> bool:
-    """Whether two object lists carry the same content (digest and length)."""
-    return {item.sha256: item.bytes for item in content_objects(left)} == {
-        item.sha256: item.bytes for item in content_objects(right)
-    }
+    """Whether every object is content the stored set holds (digest and length).
+
+    A node's plan names its role's files; the stored set holds every role's,
+    so the stored set is the superset and the plan is the exact selection.
+    """
+    held = {item.sha256: item.bytes for item in content_objects(stored)}
+    return bool(objects) and all(
+        held.get(item.sha256) == item.bytes for item in objects
+    )
 
 
 def plan_objects(plan: CompiledExecutionPlan) -> tuple[DistributionObject, ...]:

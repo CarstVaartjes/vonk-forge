@@ -21,7 +21,7 @@ from .types import (
     DistributionUnknown,
     ObjectSource,
     OpenedObject,
-    same_content,
+    contained_content,
 )
 
 if TYPE_CHECKING:
@@ -143,7 +143,7 @@ class MemoryObjectSource:
         # Fixtures receive the opaque digest from the cache manifest. The
         # production NAS adapter performs the same content comparison.
         declared = self.artifact_manifests.get(artifact_set_sha256)
-        return declared is not None and same_content(declared, objects)
+        return declared is not None and contained_content(declared, objects)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         payload = self.objects.get(digest)
