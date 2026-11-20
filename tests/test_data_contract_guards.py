@@ -128,6 +128,44 @@ def test_typescript_scan_finds_type_literals_and_interfaces_but_not_aliases(
     ]
 
 
+def test_typescript_shapes_match_formatter_line_breaks(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "control/web/src/api/y.ts",
+        """
+        type Msg =
+          | { id: string; kind: "a" }
+          | { id: string; kind: "b" };
+        export type Wrapped =
+          {
+            a: string;
+          };
+        export type Gen<
+          T,
+          U = string,
+        > =
+          | { t: T };
+        export interface Wide<
+          T,
+        > extends Base<T>,
+          Other {
+          call(): T;
+        }
+        export type Alias =
+          components["schemas"]["Alias"];
+        type Str =
+          | "a"
+          | "b";
+        """,
+    )
+    assert scans.typescript_shapes(tmp_path) == [
+        ("control/web/src/api/y.ts", "Gen"),
+        ("control/web/src/api/y.ts", "Msg"),
+        ("control/web/src/api/y.ts", "Wide"),
+        ("control/web/src/api/y.ts", "Wrapped"),
+    ]
+
+
 def test_python_registry_rejects_unregistered_and_duplicate_models(
     tmp_path: Path,
 ) -> None:

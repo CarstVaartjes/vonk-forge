@@ -12,6 +12,8 @@ that rule, each against a reviewed allowlist under ``tools/``:
     ``type X = {`` / ``interface X {`` outside generated files and tests declares
     a shape.  A shape that describes API data is an alias of the generated
     schema instead; ``tools/ts-shapes-allowlist.json`` names the UI-only ones.
+    Formatter line breaks (``type X =`` then ``| {``, multi-line generics or
+    ``extends`` lists) are matched the same as the one-line form.
 ``python_models``
     a Pydantic model class lives in a module of ``tools/python-model-registry.json``
     and no two registered models share a name or a field set.
@@ -80,7 +82,7 @@ TS_ALLOWLIST = TOOLS / "ts-shapes-allowlist.json"
 WEB_SRC = ROOT / "control/web/src"
 _TS_SHAPE = re.compile(
     r"^[ \t]*(?:export\s+)?(?:declare\s+)?"
-    r"(?:type\s+(\w+)(?:<[^=\n]*>)?\s*=\s*\{|interface\s+(\w+)(?:<[^{\n]*>)?[^{\n]*\{)",
+    r"(?:type\s+(\w+)(?:<[^;{]*?>)?\s*=\s*(?:\|\s*)?\{|interface\s+([A-Z]\w*)[^{;]*\{)",
     re.MULTILINE,
 )
 
