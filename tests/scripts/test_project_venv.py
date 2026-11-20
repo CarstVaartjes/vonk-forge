@@ -181,6 +181,8 @@ def test_test_local_checks_environment_before_uv_run(tmp_path: Path, kind: str):
         env={
             **os.environ,
             "PATH": f"{binaries}:{os.environ['PATH']}",
+            # No recipe library: placing its adapter sources would run uv too.
+            "VONK_RECIPE_LIBRARY_ROOT": str(tmp_path / "no-recipe-library"),
             "UV_CONTROL_PROJECT_ENVIRONMENT": "broken"
             if kind == "relative"
             else str(environment),

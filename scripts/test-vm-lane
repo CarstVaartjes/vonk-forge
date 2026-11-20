@@ -26,6 +26,14 @@ git clone --quiet --no-hardlinks "$root" "$work/repo"
 git -C "$work/repo" checkout --quiet --detach "$sha"
 
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
+# A recipes pull deletes the files its adapter-sources.json declares (the synthetic
+# canary package among them); place them on the host, from the recipes cache when
+# present, else from the mirror, before the VM reads the library.
+if [[ -d "$recipe_root/contracts" ]]; then
+    uv run --quiet --python 3.14 --no-project --with-editable "$recipe_root/contracts" \
+        python "$recipe_root/tools/fetch-adapter-sources" ||
+        echo "[WARN] recipe adapter sources were not placed in $recipe_root" >&2
+fi
 printf -v guest_repo '%q' "$work/repo"
 guest_args=""
 [[ $# -gt 0 ]] && printf -v guest_args '%q ' "$@"

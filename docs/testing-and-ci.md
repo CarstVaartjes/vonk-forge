@@ -117,6 +117,12 @@ scripts/test-local --changed          # changes since the merge base with origin
 scripts/test-local --changed HEAD~3   # or since an explicit base
 ```
 
+Both modes, and `scripts/test-vm-lane`, first place the recipe library's declared
+adapter sources (`tools/fetch-adapter-sources` in `VONK_RECIPE_LIBRARY_ROOT`, default
+`/opt/vonk-forge-recipes`): a recipes pull deletes files that moved to its mirror, the
+synthetic canary package among them. Placing reads the recipes cache and fetches only
+what is missing; a failure is a warning, and the tests that read those files fail.
+
 `scripts/select-changed-tests` maps each changed path (committed, staged,
 unstaged or untracked) to test files: a changed test file selects itself, a
 changed Python module selects the test files that import it directly, and any
