@@ -11,7 +11,8 @@ import type {
   RecipeDisplay,
   RecipeLibrary,
 } from "../api/types";
-import corpusSource from "./library-corpus.json?raw";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // Stable fixture identities must satisfy the same hex digest contract as HTTP.
 const digest = (seed: string): string => {
@@ -25,7 +26,9 @@ const revisionId = (index: number): string =>
 const recipeId = (index: number): string =>
   `00000001-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-const corpus = JSON.parse(corpusSource) as Record<string, unknown>;
+const corpus = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, "library-corpus.json"), "utf8"),
+) as Record<string, unknown>;
 
 // The Controller serves the library text as its own display, built from the
 // signed index; the fixtures register one display per document slug.
@@ -298,7 +301,7 @@ export const modelLibrary: ModelLibrary = {
   models: models.map((entry) => {
     if (entry.model_bytes === null) throw new Error("Fixture model size is required");
     return {
-      selector: entry.model.content_sha256,
+      selector: `${entry.model.publisher}/${entry.model.slug}`,
       identity: entry.model,
       model_display: entry.model_display,
       projected: {
@@ -315,7 +318,7 @@ export const modelLibrary: ModelLibrary = {
       quantization: entry.model_document.format.quantization ?? "none",
       usage: [...(entry.model_display?.capabilities ?? [])],
       resources: projectionResources,
-      local: projectionLocal,
+      local: entry.local,
       alignment: entry.alignment,
       updated_at: libraryViewSnapshot.generated_at,
     };
@@ -354,7 +357,9 @@ export const recipeLibrary: RecipeLibrary = {
       options: actualRecipeDocumentSeed.options ?? [],
       base_image_digest: actualRecipeDocumentSeed.execution.build.base_image.digest,
     },
-    model_selectors: entry.recipe_document.models.map((model) => model.model.content_sha256),
+    model_selectors: entry.recipe_document.models.map(
+      (model) => `${model.model.publisher}/${model.model.slug}`,
+    ),
     usage: entry.capabilities,
     resources: projectionResources,
     local: projectionLocal,
