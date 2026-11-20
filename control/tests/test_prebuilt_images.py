@@ -94,6 +94,9 @@ class _Reader:
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str):
         return next(item for item in self.snapshot.items if item.uri == uri)
 

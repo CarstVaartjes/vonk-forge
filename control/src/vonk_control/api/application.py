@@ -192,7 +192,6 @@ def create_app(
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
-    recipe_library: Any | None = None,
     managed_catalog_sync: Any | None = None,
     recipe_operations: RecipeOperationService | None = None,
     run_switch_operations: RunSwitchOperationService | None = None,

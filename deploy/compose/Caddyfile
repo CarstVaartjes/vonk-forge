@@ -221,53 +221,6 @@ http://127.0.0.1:8082 {
 	respond 404
 }
 
-# The control API has no general egress network. Relay only read-only GitHub API
-# calls for the one reviewed public recipe repository; never forward credentials.
-http://:8083 {
-	@recipe_library_api {
-		method GET
-		path /repos/CarstVaartjes/vonk-forge-recipes/*
-	}
-	handle @recipe_library_api {
-		reverse_proxy https://api.github.com {
-			header_up Host api.github.com
-			header_up -Authorization
-			header_up -Cookie
-		}
-	}
-	respond 404
-}
-
-# Relay only release asset downloads of the reviewed public recipe repository.
-# github.com redirects a download to the asset origin with a short-lived signed
-# query; that path is scoped to the repository's numeric ID. Integrity comes
-# from the Controller's signature and digest checks, not from this relay.
-http://:8085 {
-	@recipe_library_download {
-		method GET
-		path_regexp recipe_library_download ^/CarstVaartjes/vonk-forge-recipes/releases/download/v[0-9]+[.][0-9]+[.][0-9]+/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
-	}
-	@recipe_library_asset {
-		method GET
-		path_regexp recipe_library_asset ^/github-production-release-asset/1336002555/[0-9a-f-]{36}$
-	}
-	handle @recipe_library_download {
-		reverse_proxy https://github.com {
-			header_up Host github.com
-			header_up -Authorization
-			header_up -Cookie
-		}
-	}
-	handle @recipe_library_asset {
-		reverse_proxy https://release-assets.githubusercontent.com {
-			header_up Host release-assets.githubusercontent.com
-			header_up -Authorization
-			header_up -Cookie
-		}
-	}
-	respond 404
-}
-
 # Relay only the immutable documents needed to select the current signed agent
 # package. The package URL returned to Sparks remains the public HTTPS origin.
 http://:8084 {

@@ -47,7 +47,6 @@ from ..platform_observation import PlatformObserver
 from ..recipe_builds import RecipeBuildService
 from ..recipe_operation_worker import RecipeOperationWorker
 from ..recipe_operations import RecipeOperationService
-from ..recipe_packages import RecipePackageClient
 from ..resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from ..run_switch_operations import RunSwitchOperationService
 from ..settings import (
@@ -59,8 +58,6 @@ from ..settings import (
     MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
     MODEL_CACHE_PARALLEL_DOWNLOADS,
     RECIPE_IMAGE_PARALLEL_PREPARATIONS,
-    RECIPE_LIBRARY_API_URL,
-    RECIPE_LIBRARY_ASSET_URL,
     RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
     WORKER_MEMORY_REPORT_MAX_AGE_SECONDS,
     Settings,
@@ -563,16 +560,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             else max(0, int(time.time()) - restore_completed_at)
         )
 
-    recipe_library = capabilities.guard(
-        ControllerCapability.RECIPE_LIBRARY,
-        RecipePackageClient,
-        lambda: RecipePackageClient(
-            cache_root=settings.state_path / "recipe-library-packages",
-            api_url=RECIPE_LIBRARY_API_URL,
-            asset_url=RECIPE_LIBRARY_ASSET_URL,
-            release=settings.recipe_library_release,
-        ),
-    )
     catalog_service = CatalogService(
         sessions,
         clock=clock,
@@ -582,7 +569,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     managed_catalog_sync = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=catalog_service,
-        reader=recipe_library,
         clock=clock,
     )
     recipe_image_production = build_recipe_image_availability(
@@ -658,7 +644,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 _LOGGER.exception("Controller model cache cleanup deferred")
             for close in (
                 recipe_image_production.close,
-                recipe_library.close,
                 agent_upgrades.close,
             ):
                 try:
@@ -715,7 +700,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             model_cache,
         ),
         catalog=catalog_service,
-        recipe_library=recipe_library,
         managed_catalog_sync=managed_catalog_sync,
         browser_auth=browser_auth,
         recipe_operations=recipe_operations,
