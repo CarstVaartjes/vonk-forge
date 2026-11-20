@@ -41,6 +41,8 @@ def _cache_env(workflow: dict, job: dict) -> dict:
 def test_warm_jobs_match_a_ci_job_for_every_cache_key_input() -> None:
     problems = []
     for name, warm in WARM["jobs"].items():
+        if not _steps(warm, RUST_CACHE):
+            continue  # the recipe-library job warms no Rust cache
         (cache,) = _steps(warm, RUST_CACHE)
         warm_env = _cache_env(WARM, warm)
         twins = [

@@ -24,6 +24,9 @@ on:
       - agent_protocol/pyproject.toml
       - .github/actions/python-env/action.yml
       - .cargo/config.toml
+      - tests/acceptance/recipe-library-revision.txt
+      - scripts/build-recipe-library
+      - .github/actions/recipe-library/action.yml
       - .github/workflows/ci.yml
       - .github/workflows/ci-cache-warm.yml
   schedule:
@@ -38,6 +41,25 @@ permissions:
   contents: read
 
 jobs:
+  recipe-library:
+    # ci.yml runs on main rarely, so the built recipe library (cached by revision
+    # and build script) is saved here, once per key.
+    name: Warm the built recipe library
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
+      - name: Build and cache the recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
+
   rust-amd64:
     name: Warm linux-amd64 Rust and uv caches
     runs-on: ubuntu-24.04

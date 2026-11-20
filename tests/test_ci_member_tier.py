@@ -1,10 +1,11 @@
 """One selector output decides whether a run carries the full suites.
 
-A member pull request runs no CI jobs (the selector and a gate that cannot
-satisfy the required check); its integration pull request runs every suite and
+A member pull request runs only the quick tier (the selector, lint, the web
+check, Rust fmt/clippy when Rust changed, and a gate that cannot satisfy the
+required check); its integration pull request runs every suite and
 proof once. `full` from scripts/select-ci-areas owns that rule,
-so a new heavy job or proof workflow cannot run on every member again, and no
-workflow re-derives the rule from the branch name.
+so a new heavy job cannot run on every member again, no proof runs outside the
+CI gate, and no workflow re-derives the rule from the branch name.
 """
 
 from pathlib import Path
@@ -16,10 +17,15 @@ WORKFLOWS = ROOT / ".github/workflows"
 FULL = "needs.changes.outputs.full == 'true'"
 # The only jobs a member pull request runs. The lane proof reads `lane`,
 # which the selector already folds `full` into; the gate aggregates everything.
+# The quick tier (lint, web typecheck, rust-quality when Rust changed) is the
+# only other work a member pull request does; every other job is gated by `full`.
 MEMBER_JOBS = {
     "changes",
     "lane-proof",
     "ci-gate",
+    "lint",
+    "member-web",
+    "rust-quality",
 }
 
 
@@ -88,15 +94,19 @@ def test_conjuncts_are_parsed_not_matched() -> None:
     assert _conjuncts(f"(a) && ({FULL})") == ["(a)", f"({FULL})"]
 
 
-def test_pull_request_proof_workflows_read_the_same_selector() -> None:
+def test_only_ci_yml_runs_on_pull_requests() -> None:
+    """Every proof is a ci.yml job behind `full`; no workflow re-derives the rule."""
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        workflow = yaml.safe_load(path.read_text())
         assert "github.head_ref" not in path.read_text(), path.name
-        if path.name == "ci.yml" or "pull_request" not in workflow[True]:
-            continue
-        jobs = workflow["jobs"]
-        assert jobs["scope"]["uses"] == "./.github/workflows/ci-scope.yml"
-        for name, job in jobs.items():
-            if name != "scope":
-                assert job["needs"] == "scope", (path.name, name)
-                assert job["if"] == "needs.scope.outputs.full == 'true'"
+        triggers = yaml.safe_load(path.read_text())[True]
+        if path.name != "ci.yml":
+            assert not {"pull_request", "pull_request_target"} & set(triggers), (
+                path.name
+            )
+
+
+def test_the_quick_tier_uses_standard_runners() -> None:
+    """A member pull request must not consume the big or ARM runners."""
+    jobs = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())["jobs"]
+    for name in MEMBER_JOBS - {"lane-proof"}:
+        assert jobs[name]["runs-on"] in {"ubuntu-latest", "ubuntu-24.04"}, name

@@ -1,9 +1,14 @@
 name: Canonical recipe library
 description: >-
-  Provide the recipe library at the reviewed revision in .recipe-library.
-  Jobs build its catalog index and packages afterwards with
-  scripts/build-recipe-library. It is fetched once per revision and then restored
-  from the cache main saved.
+  Provide the recipe library at the reviewed revision in .recipe-library. With
+  `build: "true"` its catalog index and packages are built too (needs uv, so
+  run python-env first). The built tree is cached under the build's identity,
+  the reviewed revision plus scripts/build-recipe-library, so a job that finds
+  it skips the build and waits on no other job. Main saves the caches.
+inputs:
+  build:
+    description: Also build the catalog index and packages (cached by revision and build script)
+    default: "false"
 outputs:
   revision:
     description: The reviewed recipe library commit
@@ -20,14 +25,22 @@ runs:
         [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
         test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
         printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+    - name: Restore the built recipe library for this revision and build script
+      id: built
+      if: inputs.build == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .recipe-library
+        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/build-recipe-library') }}
     - name: Restore the recipe library for this revision
       id: cache
+      if: steps.built.outputs.cache-hit != 'true'
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .recipe-library
         key: recipe-library-v1-${{ steps.source.outputs.revision }}
     - name: Check out the reviewed recipe library
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.built.outputs.cache-hit != 'true' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: CarstVaartjes/vonk-forge-recipes
@@ -35,12 +48,13 @@ runs:
         path: .recipe-library
         persist-credentials: false
     - name: Save the recipe library for later runs
-      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      if: steps.built.outputs.cache-hit != 'true' && steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .recipe-library
         key: recipe-library-v1-${{ steps.source.outputs.revision }}
     - name: Record the recipe library source
+      if: steps.built.outputs.cache-hit != 'true'
       shell: bash
       env:
         EXPECTED_REVISION: ${{ steps.source.outputs.revision }}
@@ -50,3 +64,13 @@ runs:
         test "$resolved" = "$EXPECTED_REVISION"
         test -z "$(git -C .recipe-library status --porcelain)"
         printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
+    - name: Build the recipe library index and packages
+      if: inputs.build == 'true' && steps.built.outputs.cache-hit != 'true'
+      shell: bash
+      run: scripts/build-recipe-library .recipe-library
+    - name: Save the built recipe library for later runs
+      if: inputs.build == 'true' && steps.built.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .recipe-library
+        key: recipe-library-built-v1-${{ steps.source.outputs.revision }}-${{ hashFiles('scripts/build-recipe-library') }}

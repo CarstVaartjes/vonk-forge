@@ -302,19 +302,22 @@ protocol wheel the `control` project installs is built locally, not kept in git.
 
 Every change lands through an integration PR (same-repository `integration/*`
 head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
-owns that rule. A member PR runs no CI jobs: only the selector and a gate that
-reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
+owns that rule. A member PR runs only the quick tier (`Ruff` with the added-line guards, web
+typecheck/Biome, and Rust fmt/clippy when Rust changed; no full suite) and a
+gate that reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
 itself. Check member work locally (targeted tests, fast guards); the integration
 PR proves it. A member PR is done when its review has passed.
 A Dependabot PR runs nothing at all (every root job skips its author,
 `tests/test_dependabot_updates.py`); fold it into an integration PR.
 An integration PR runs the complete suites, every selected integration, its
-candidate acceptance with the upgrade carry, and the path-filtered proof
-workflows. Main's Release runs the complete CI unless it reuses the integration
-PR's run for the identical tree, and its own release acceptance; the proof
-workflows run on pull requests only. Adding the label re-runs `ci.yml` in full
-at once; the proof workflows do not trigger on labels and pick it up on the next
-push.
+candidate acceptance with the upgrade carry, and every proof (the proofs are
+`ci.yml` jobs behind `ci-gate`, selected by the same areas; no standalone proof
+workflow exists, `tests/test_workflow_assertions.py`). Main's Release runs the
+complete CI unless it reuses the integration PR's run for the identical tree,
+and its own release acceptance. Adding the label re-runs `ci.yml` in full at
+once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
+reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe
+library by revision and build-script hash.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.

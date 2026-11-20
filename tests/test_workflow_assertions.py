@@ -177,57 +177,6 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
     )
 
 
-_PROOF_PROVENANCE = re.compile(
-    r"\bhashlib\b|attest-build-provenance|provenance|git rev-parse HEAD:",
-    re.IGNORECASE,
-)
-
-
-def test_proof_lanes_have_named_external_prerequisites() -> None:
-    """Standalone lanes need an external prerequisite regular CI cannot supply."""
-    reasons = {
-        "installed-cli-proof.yml": "installed CLI signed update and release transition",
-        "model-cache-unknown-expiry-proof.yml": "process death with PostgreSQL and managed storage",
-        "profile-effect-consumer-proof.yml": "profile effects across PostgreSQL and runtime consumers",
-    }
-    workflows = {
-        path.name for path in (ROOT / ".github/workflows").glob("*-proof.y*ml")
-    }
-    assert workflows == reasons.keys(), "standalone lanes require a named prerequisite"
-    assert all(reasons.values())
-
-
-def test_proof_workflows_do_not_record_source_provenance() -> None:
-    """Splitting a source module cannot break an unrelated outcome check."""
-    for path in (ROOT / ".github/workflows").glob("*-proof.y*ml"):
-        assert not _PROOF_PROVENANCE.search(path.read_text()), path.name
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "hashlib.sha256(Path(path).read_bytes()).hexdigest()",
-        "uses: actions/attest-build-provenance@revision",
-        "git rev-parse HEAD:rust/crates/vonk-agent/src/client.rs",
-        "(output / 'source-provenance.json').write_text(report)",
-    ],
-)
-def test_guard_rejects_proof_provenance(source: str) -> None:
-    assert _PROOF_PROVENANCE.search(source)
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "assert expected <= {case.get('name') for case in cases}",
-        "uv pip install --require-hashes -r locked-requirements.txt",
-        "assert verified_wheel_sha256 == manifest_sha256",
-    ],
-)
-def test_guard_preserves_outcomes_and_ingress_integrity(source: str) -> None:
-    assert not _PROOF_PROVENANCE.search(source)
-
-
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
     """Retiring OCI proof jobs must not silently skip their real ingress tests."""
     from tools import pytest_prereqs
@@ -303,3 +252,44 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
         [run] = [step for step in steps if command in step.get("run", "")]
         assert "--test-budget-enforce" in run["run"]
         assert steps.index(listing) < steps.index(run)
+
+
+def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_restore_key() -> (
+    None
+):
+    """Catches a cache that survives a build-script change, is saved unbuilt, is
+    saved under a key nothing restores, or is saved on pull requests."""
+    action = yaml.safe_load(
+        (ROOT / ".github/actions/recipe-library/action.yml").read_text()
+    )
+    steps = action["runs"]["steps"]
+    [restore] = [s for s in steps if s.get("id") == "built"]
+    [save] = [
+        s
+        for s in steps
+        if s.get("uses", "").startswith("actions/cache/save")
+        and "recipe-library-built" in s["with"]["key"]
+    ]
+    key = restore["with"]["key"]
+    assert "hashFiles('scripts/build-recipe-library')" in key
+    assert "revision" in key
+    assert save["with"]["key"] == key
+    assert "refs/heads/main" in save["if"]
+    build = next(
+        i for i, s in enumerate(steps) if "build-recipe-library" in s.get("run", "")
+    )
+    assert steps.index(save) > build
+
+
+def test_main_warms_the_built_recipe_library() -> None:
+    """ci.yml rarely runs on main, so the warm workflow saves the built tree."""
+    warm = yaml.safe_load((ROOT / ".github/workflows/ci-cache-warm.yml").read_text())
+    paths = warm[True]["push"]["paths"]
+    for path in (
+        "tests/acceptance/recipe-library-revision.txt",
+        "scripts/build-recipe-library",
+        ".github/actions/recipe-library/action.yml",
+    ):
+        assert path in paths
+    uses = [s.get("uses") for s in warm["jobs"]["recipe-library"]["steps"]]
+    assert "./.github/actions/recipe-library" in uses
