@@ -2,8 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useToast } from "./toast";
 import type { CliTokenDownload } from "../api/types";
-
-const DOCS_URL = "https://vonkforge.ai";
+import { PUBLIC_SITE_ORIGIN } from "../lib/public-site";
 
 type AdminMenuProps = {
   onDownloadCliToken(): Promise<CliTokenDownload>;
@@ -155,7 +154,12 @@ export function AdminMenu({
           >
             API keys
           </a>
-          <a href={DOCS_URL} className="secondary-button" target="_blank" rel="noreferrer">
+          <a
+            href={PUBLIC_SITE_ORIGIN}
+            className="secondary-button"
+            target="_blank"
+            rel="noreferrer"
+          >
             Documentation<span className="sr-only"> (opens in a new tab)</span>
           </a>
           <button

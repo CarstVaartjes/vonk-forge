@@ -118,7 +118,14 @@ export function KeysPage({ api }: { api: ControlApi }) {
         title="API keys"
         description="Keys let apps call the models the fleet serves."
         actions={
-          <button type="button" className="button" onClick={() => setCreating((value) => !value)}>
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setCreateError(null);
+              setCreating((value) => !value);
+            }}
+          >
             Create key
           </button>
         }

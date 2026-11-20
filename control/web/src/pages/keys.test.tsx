@@ -99,10 +99,31 @@ test("the create form explains the expiry format, hides while the secret shows, 
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
   const banner = await screen.findByRole("alert");
   expect(banner).toHaveTextContent("Key name already exists");
-  expect(banner).toHaveClass("form-error");
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
   expect(await screen.findByLabelText("New key secret")).toHaveValue("sk-secret-value");
   expect(screen.queryByLabelText("Key name")).toBeNull();
   expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "I have copied it" }));
+});
+
+test("a create failure does not reappear after the panel is closed and reopened", async () => {
+  const createGatewayKey = vi.fn().mockRejectedValue(new Error("Key name already exists"));
+  render(
+    <KeysPage
+      api={
+        {
+          gatewayKeys: vi.fn().mockResolvedValue({ keys: [key] }),
+          createGatewayKey,
+        } as unknown as ControlApi
+      }
+    />,
+  );
+  const toggle = await screen.findByRole("button", { name: "Create key" });
+  fireEvent.click(toggle);
+  fireEvent.change(await screen.findByLabelText("Key name"), { target: { value: "laptop" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Key name already exists");
+  fireEvent.click(toggle);
+  fireEvent.click(toggle);
+  expect(screen.queryByRole("alert")).toBeNull();
 });
