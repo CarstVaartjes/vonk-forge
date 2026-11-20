@@ -266,7 +266,7 @@ class ProfileDocumentState(WireEnum):
     """Profile views and catalogue documents used by profile resolution."""
 
     ACTIVE = "active"
-    DRAFT = "draft"
+    SAVED = "saved"
     READY = "ready"
     LOADED = "loaded"
     NOT_CREATED = "not-created"

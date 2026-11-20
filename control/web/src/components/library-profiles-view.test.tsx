@@ -117,7 +117,7 @@ test("reads and loads a numbered profile without legacy status or application ro
   const api = apiFor();
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
   expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -148,7 +148,7 @@ test("a load names the reviewed effects, and a changed plan is refused with the 
       <LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />
     </ToastProvider>,
   );
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
 
   expect(loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -159,7 +159,7 @@ test("a load names the reviewed effects, and a changed plan is refused with the 
     await Promise.resolve();
   });
 
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(loadProfile).toHaveBeenLastCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     review: { effects_digest: "f".repeat(64) },
@@ -175,7 +175,7 @@ test("reconciles an ambiguous profile load with the same request key", async () 
   });
   const api = apiFor({ loadProfile, profileApplicationByRequest });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
 
   expect(await screen.findByRole("region", { name: "Profile load progress" })).toBeVisible();
   expect(profileApplicationByRequest).toHaveBeenCalledWith(
@@ -248,13 +248,57 @@ test("shows a refused profile load without resubmitting it", async () => {
       <LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />
     </ToastProvider>,
   );
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(
     await within(screen.getByRole("region", { name: "Notifications" })).findByText(
       /Profile admission refused/,
     ),
   ).toBeVisible();
   expect(loadProfile).toHaveBeenCalledTimes(1);
+});
+
+test("opens on the loaded profile, pins it first, and names what Load stops", async () => {
+  const other = {
+    ...profile,
+    number: 1,
+    id: "99999999-9999-4999-8999-999999999999",
+    status: "saved",
+  };
+  const loaded = { ...profile, status: "loaded", loaded_revision: 4 } as unknown as FleetProfile;
+  const stopping = {
+    ...preview,
+    effects: {
+      ...preview.effects,
+      runs: [{ alias: "glm", action: "stop" }],
+      adopted: [
+        {
+          application_id: "a",
+          node_ids: [nodeA],
+          stops: [{ effect: { alias: "qwen", action: "stop" } }],
+        },
+      ],
+    },
+  } as unknown as FleetProfilePreview;
+  const api = apiFor({
+    profiles: vi.fn(async () => ({
+      generated_at: "2026-09-10T00:00:00Z",
+      profiles: [other, loaded],
+    })),
+    previewProfile: vi.fn(async () => stopping),
+    profileEndpoints: vi.fn(async () => ({
+      assignments: [],
+    })) as unknown as ControlApi["profileEndpoints"],
+  });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  expect(
+    await screen.findByRole("region", { name: "Profile 2 saved profile" }),
+  ).toBeInTheDocument();
+  expect(await screen.findByText("Will stop: glm, qwen")).toBeInTheDocument();
+  expect(screen.getByText(/· saved$/)).toBeInTheDocument();
+  expect(screen.getByText(/loaded · revision/)).toBeInTheDocument();
+  const list = screen.getByLabelText("Saved profiles");
+  expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Profile 2");
+  expect(screen.queryByText(/draft/)).toBeNull();
 });
 
 test("a loaded profile names the inference gateway and alias as its client endpoint", async () => {
@@ -382,7 +426,7 @@ test("a load waiting for preparation is offered, and a waiting application says 
     </ToastProvider>,
   );
   expect(await screen.findByText(/The Controller prepares this first/)).toBeVisible();
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   const list = await screen.findByRole("list", { name: "Waiting for" });
   expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
   expect(within(list).getByText(/Next attempt/)).toBeVisible();
@@ -446,7 +490,7 @@ test("deleting a profile asks first, then removes it from the page without stopp
   expect(deleteProfile).toHaveBeenCalledWith(2, 4);
   expect(api.loadProfile).not.toHaveBeenCalled();
   expect(await screen.findByText(/Profile 2 deleted/)).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Apply profile" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Load profile" })).toBeNull();
 });
 
 test("a current profile shows no update notice", async () => {
@@ -504,7 +548,7 @@ test("a completed load refreshes the saved profile and shows the endpoint withou
     profileEndpoints,
   });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(
     await screen.findByRole("region", { name: "Qwen Code client endpoint" }, { timeout: 8_000 }),
   ).toBeVisible();
@@ -522,7 +566,7 @@ test("a running profile application does not lock navigation", async () => {
       onNavigate={vi.fn()}
     />,
   );
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(await screen.findByRole("region", { name: "Profile load progress" })).toBeVisible();
   expect(onBusyChange).toHaveBeenLastCalledWith(false);
 });
@@ -648,7 +692,7 @@ test("selects the maximum canonical URL profile and loads that identity", async 
     const buttons = within(list).getAllByRole("button");
     expect(buttons[0]).toHaveTextContent("Profile 2147483646 · Lower");
     expect(buttons[1]).toHaveAttribute("aria-pressed", "true");
-    await user.click(within(selected).getByRole("button", { name: "Apply profile" }));
+    await user.click(within(selected).getByRole("button", { name: "Load profile" }));
     expect(api.previewProfile).toHaveBeenCalledWith(upper, expect.any(AbortSignal));
     expect(api.loadProfile).toHaveBeenCalledWith(upper, {
       request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -726,7 +770,7 @@ test("preserves legitimate wide byte progress while presenting its ratio", async
     profileProgress: vi.fn(async () => wide),
   });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
-  await user.click(await screen.findByRole("button", { name: "Apply profile" }));
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
   expect(await screen.findByRole("progressbar", { name: "Profile load progress" })).toHaveAttribute(
     "aria-valuenow",
     "50",

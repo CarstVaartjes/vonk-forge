@@ -47,7 +47,7 @@ def cli_words() -> str:
     from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
     from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
-    from vonk_agent_protocol.state_machines import RunState
+    from vonk_agent_protocol.state_machines import RouteState, RunState
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
     from vonk_forge_contracts.qualification_status import (
@@ -111,6 +111,7 @@ def cli_words() -> str:
     ]
     for enum_type in (
         GpuClockMetric,
+        RouteState,
         JobContractState,
         QualificationStatus,
         QualificationOutcome,

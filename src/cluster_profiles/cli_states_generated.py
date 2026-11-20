@@ -18,6 +18,13 @@ class GpuClockMetric(StrEnum):
     THROTTLE = "throttle_reasons"
 
 
+class RouteState(StrEnum):
+    WITHDRAWN = "withdrawn"
+    PENDING = "pending"
+    PUBLISHED = "published"
+    FAILED = "failed"
+
+
 class JobContractState(StrEnum):
     AVAILABLE = "available"
     NOT_RUNNING = "not-running"

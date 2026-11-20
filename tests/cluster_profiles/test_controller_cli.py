@@ -5136,7 +5136,7 @@ def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
     assert _effects(client) == []
 
 
-def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) -> None:
+def test_declined_run_exits_nonzero_and_says_the_profile_was_saved(monkeypatch) -> None:
     client = FakeClient(_run_responses())
     prompt = _Prompt(monkeypatch, "no")
 
@@ -5149,7 +5149,7 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) ->
     assert status == 2
     # The recipe was saved to review its plan; nothing was loaded.
     assert _effects(client) == [("PUT", "/api/profile/1")]
-    assert "saved draft" in prompt.transcript
+    assert "saved profile" in prompt.transcript
     assert "control.api_error" not in prompt.transcript
 
 

@@ -7067,7 +7067,7 @@
           "type": "integer"
         },
         "status": {
-          "default": "draft",
+          "default": "saved",
           "title": "Status",
           "type": "string"
         },
@@ -7236,7 +7236,7 @@
           "type": "integer"
         },
         "status": {
-          "default": "draft",
+          "default": "saved",
           "title": "Status",
           "type": "string"
         },

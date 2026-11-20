@@ -17,12 +17,15 @@ import textwrap
 START_HERE = (
     ("vonkctl fleet", "What every Spark runs and what needs attention"),
     (
+        "vonkctl recipe library --fits-fleet --limit 5",
+        "Recipes that fit your Sparks, Working first",
+    ),
+    (
         "vonkctl run <recipe> --profile <n>",
         "Recipe in a profile, reviewed and started",
     ),
     ("vonkctl profile endpoint", "API base and model name for clients"),
     ("vonkctl key create <name>", "A key for an app to call the models"),
-    ("vonkctl recipe library", "Recipes you can run"),
     ("vonkctl job run <alias> --input slot=file", "Send files to a running recipe"),
 )
 

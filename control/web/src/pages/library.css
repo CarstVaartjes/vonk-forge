@@ -1040,3 +1040,8 @@
     padding-top: 0;
   }
 }
+
+.library-profile-stops {
+  align-self: center;
+  color: var(--muted, inherit);
+}

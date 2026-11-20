@@ -65,7 +65,7 @@ saved selection.
 
 Help is a map of the command tree and works offline. `vonkctl` (or
 `vonkctl --help`) lists where to start, every command group, and the global
-flags. `vonkctl GROUP --help` lists that group's commands as full invocations
+flags, in the order to try them. `vonkctl GROUP --help` lists that group's commands as full invocations
 with their arguments, for example `vonkctl fleet detail <spark>`, and no
 options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
 flags. A group run on its own shows its current state: `vonkctl fleet`,
@@ -130,6 +130,13 @@ Zsh requires its normal `compinit` setup. Generation never edits shell files or
 queries the Controller.
 
 ## Fleet
+
+`vonkctl fleet` groups installed-but-stopped rows with the same recipe title on the same
+Sparks into one line with a count (`(x2)`; they may be different revisions,
+`--wide` tells them apart), shows the first ten, and ends with
+`+K more; vonkctl fleet --wide lists every installation`. `--wide` lists every
+installation with its id. A run's route reads in plain words (`taking requests`,
+`not taking requests`); `--json` is unchanged.
 
 ```bash
 vonkctl fleet
@@ -367,11 +374,11 @@ A timeout or Ctrl-C ends observation without cancelling removal.
 ```bash
 vonkctl recipe
 vonkctl recipe sync-status
+vonkctl recipe library --fits-fleet --limit 5   # first success: with the default sort, Working recipes that fit come first
 vonkctl recipe library
 vonkctl recipe library --cached
 vonkctl recipe library --model "Qwen 3.8"
 vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2   # 2 Sparks or fewer
-vonkctl recipe library --fits-fleet
 vonkctl recipe library --ready
 vonkctl recipe detail qwen-code         # Usage and the status Meaning use the release's published words
 vonkctl recipe detail qwen-code --watch
@@ -444,7 +451,8 @@ fleet-fit state.
 
 Recipe reads distinguish current fleet fit, exact NAS assets, and readiness.
 `--fits-fleet` requires a complete placement that fits fresh current capacity;
-it does not assume that existing workloads will stop. `--ready` also requires
+with the default sort the Controller lists Working recipes first, then the
+newest; it does not assume that existing workloads will stop. `--ready` also requires
 an admissible run plan that downloads no model: the exact model files and
 companion dependencies are on the NAS or already on every Spark of that
 placement, and the authorized runtime image needs no preparation. Spark copies
@@ -757,13 +765,13 @@ vonkctl job download JOB_UUID --output artifact-results
 ## Profile
 
 Profiles cover the entire enrolled, non-revoked fleet. Editing autosaves a
-permissive draft; it does not stop or restart workloads. Every current Spark
+permissive saved profile; it does not stop or restart workloads. Every current Spark
 remains visible, and an unassigned Spark is explicitly idle. Review resolves
 the latest verified cached compatible recipe/model and checks complete
 topology. Load requires
 the digest of that reviewed decision and a client-generated request key.
 
-A save receipt confirms the complete committed draft and revision. Its cache
+A save receipt confirms the complete committed profile and revision. Its cache
 and live workload observations are unknown: saving does not walk managed model
 files, resolve runtime image presence, or assess running workloads. Read the
 profile or review a load for those observations. A lost save response may still
@@ -839,12 +847,12 @@ profile (`--profile N` is required, like every profile edit), previews the compl
 confirmation, follows the application, and prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
 Spark is included. `run` has two separate effects: the recipe is saved into
-the profile as a draft (the Controller can only review a saved profile, and
+the profile (the Controller can only review a saved profile, and
 saving does not change the running fleet), then the reviewed plan is loaded.
 Everything that can be refused is refused before the first effect: without
 `--yes`, a run that cannot ask (JSON, redirected input, `--no-input`) saves
 nothing. If you decline the confirmation, or the review is blocked, the saved
-draft remains, the fleet is unchanged, and the command exits non-zero.
+profile remains, the fleet is unchanged, and the command exits non-zero.
 Interactively, the load is bound to the effects you reviewed exactly as
 `profile load` is (see below) and asks again if they changed.
 
@@ -1240,7 +1248,7 @@ judges only the exact observed batch; protected prefixes never hide the tail.
 Each assignment can carry `gpu_clock: {min_mhz, max_mhz}`. Omission (or
 `null`) selects 300–2200 MHz, including Sparks with no assignment. Conflicting
 ranges on assignments sharing a Spark are refused. Save and export/import
-retain this setting; saving a draft does not change the active profile.
+retain this setting; saving a profile does not change the active profile.
 
 ```bash
 vonkctl --profile 2 profile configure --assignment coding --gpu-clock 300,1800

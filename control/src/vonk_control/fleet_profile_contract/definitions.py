@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     ProfileReasonCode,
 )
+from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_forge_contracts import EndpointAlias
 
@@ -318,7 +319,7 @@ class FleetProfileView(StrictModel):
     definition: FleetProfileDefinition
     assignments: list[FleetProfileAssignmentView]
     fleet: list[FleetNodeView] = Field(default_factory=list)
-    status: str = "draft"
+    status: str = ProfileDocumentState.SAVED.value
     loaded_revision: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=1)
     cache_summary: FleetCacheSummary = Field(default_factory=FleetCacheSummary)
     warnings: list[str] = Field(default_factory=list, max_length=MAX_PROFILE_WARNINGS)
