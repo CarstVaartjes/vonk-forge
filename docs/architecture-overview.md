@@ -741,7 +741,7 @@ lacks only the image still gets it: its grant names the objects of the accepted
 compiled plan, not the NAS set, and the agent skips the objects it holds.
 Serving a model object still checks it against the stored NAS set. Library readiness follows the same rule through the same predicate.
 
-Applying a ready, digest-bound profile fans exact model and recipe-image
+Loading a ready, digest-bound profile fans exact model and recipe-image
 preparation out to the target Sparks in parallel. Each target skips an asset it
 already has locally, then the Controller stops affected workloads safely before
 replacing them and records durable per-target progress. Routes are published

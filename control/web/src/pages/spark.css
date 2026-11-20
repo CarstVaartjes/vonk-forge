@@ -137,6 +137,9 @@
 .spark-power .sparkline {
   height: 2.5rem;
 }
+.spark-power-trace {
+  min-width: 0;
+}
 @media (max-width: 60rem) {
   .spark-panels {
     grid-template-columns: minmax(0, 1fr);
@@ -149,13 +152,14 @@
   .spark-power {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
-  .spark-power .sparkline {
+  .spark-power-trace {
     grid-column: 1 / -1;
     order: 3;
   }
 }
 .spark-cards {
   display: grid;
+  align-items: start;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   gap: 1rem;
   margin-bottom: 1rem;
@@ -180,14 +184,21 @@
 }
 .spark-models li {
   display: flex;
-  flex-wrap: wrap;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.25rem 1rem;
   padding: 0.5rem 0;
   border-top: 1px solid var(--line);
 }
-.spark-models li span:last-child {
+.spark-models li span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.spark-model-size {
+  flex: none;
   color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .health-list {
   display: grid;
@@ -231,4 +242,8 @@
 }
 .spark-strip {
   margin-bottom: 1rem;
+}
+.spark-panel-card a.button {
+  margin-top: 0.75rem;
+  color: var(--green-ink);
 }

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
+from typing import Any
 from urllib.parse import quote
 
 from ..cli_states_generated import QualificationOutcome, QualificationStatus
@@ -101,18 +102,18 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     resources = LibraryResourceProjection.from_dict(
         _object(item.get("resources"), "resources")
     )
-    name = identity.get("title") if noun == "recipe" else identity.get("slug")
+    name = identity.get("title") if noun == LibraryNoun.RECIPE else identity.get("slug")
     _table(
         (
             noun.upper(),
-            "IMAGE CACHE" if noun == "recipe" else "NAS CACHE",
+            "IMAGE CACHE" if noun == LibraryNoun.RECIPE else "CONTROLLER CACHE",
             "RUNNING ON",
         ),
         [(name, _cache_word(local.get("controller")), _words(local.get("running_on")))],
     )
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
-    _field("Usage", _capability_words(item.get("usage")))
+    _field("Capabilities", _capability_words(item.get("usage")))
     _field("Disk", _bytes(resources.disk_bytes))
     if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
@@ -129,7 +130,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             explained: set[str] = set()
             for key, label in (
                 ("fleet_fit", "Fleet fit"),
-                ("cache", "Exact NAS assets"),
+                ("cache", "Exact Controller assets"),
                 ("readiness", "Readiness"),
             ):
                 check = _object(assessment.get(key), key)
@@ -382,6 +383,29 @@ def _applied_filters(payload: Mapping[str, object]) -> list[str]:
     return applied
 
 
+def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
+    """Models and exact variants among model rows, as the web Library counts them.
+
+    A Model is the display lineage ``family/line/model``; quantizations and other
+    variants fold into it. A model with no lineage (a helper, drafter or encoder)
+    is not a Model and is left out of both counts. The shared vector
+    ``tests/fixtures/library-model-count.json`` pins the rule for web and vonkctl.
+    """
+    models: set[tuple[str, str, str]] = set()
+    variants: set[tuple[str, str, str]] = set()
+    for row in rows:
+        display = row["model_display"]
+        lineage = display["lineage"] if display is not None else None
+        if lineage is None:
+            continue
+        models.add((lineage["family"], lineage["line"], lineage["model"]))
+        identity = row["identity"]
+        variants.add(
+            (identity["publisher"], identity["slug"], identity["content_sha256"])
+        )
+    return len(models), len(variants)
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -424,7 +448,11 @@ def _library(
             f"Recipe library v{_text(library.get('version'))}, "
             f"updated {_time(library.get('updated_at'))}"
         )
-    print(f"{noun.title()}s: {len(rows)}{more}")
+    if noun == LibraryNoun.MODEL:
+        models, variants = _model_counts(rows)
+        print(f"Models: {models} ({variants} variants){more}")
+    else:
+        print(f"{noun.title()}s: {len(rows)}{more}")
     applied = _applied_filters(payload)
     if not rows:
         if applied:

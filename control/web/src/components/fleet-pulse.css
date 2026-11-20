@@ -25,6 +25,10 @@
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
+.pulse-fig.is-muted {
+  color: var(--faint);
+  font-weight: 400;
+}
 .pulse-fig small {
   margin-left: 0.25em;
   color: var(--muted);

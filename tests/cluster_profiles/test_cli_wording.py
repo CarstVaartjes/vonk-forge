@@ -29,8 +29,10 @@ from cluster_profiles.cli_render import (
     _library_item,
     render_payload,
 )
+from cluster_profiles.cli_render import library as library_render
 from cluster_profiles.cli_render.common import _utc
 from cluster_profiles.cli_render.host_checks import host_check_lines
+from cluster_profiles.cli_render.library import _model_counts
 from cluster_profiles.cli_render.metrics import metric_value_text
 from cluster_profiles.cli_render.profile import (
     _connection_examples,
@@ -235,6 +237,45 @@ _WORDING = _vector("library-vocabulary-wording.json")
 _RECIPE = _vector("library-list.json")["recipes"][0]
 
 
+_MODEL_COUNT = _vector("library-model-count.json")
+
+
+def _model_rows(case):
+    return [
+        {
+            "identity": {
+                "publisher": "p",
+                "slug": model["id"],
+                "content_sha256": "0" * 64,
+            },
+            "model_display": None
+            if model["lineage"] is None
+            else {"lineage": model["lineage"]},
+        }
+        for model in case["models"]
+    ]
+
+
+@pytest.mark.parametrize("case", _MODEL_COUNT["cases"], ids=lambda c: c["name"])
+def test_model_count_folds_variants_like_the_web(case):
+    assert _model_counts(_model_rows(case)) == (
+        case["models_count"],
+        case["variants_count"],
+    )
+
+
+def test_model_library_prints_models_and_variants(printed, monkeypatch):
+    case = _MODEL_COUNT["cases"][0]
+    monkeypatch.setattr(library_render, "_library_row", lambda item, noun: [])
+    monkeypatch.setattr(library_render, "_table", lambda labels, rows: None)
+    rows = [row | {"local": {}} for row in _model_rows(case)]
+    payload = {"models": rows, "next_cursor": None}
+    lines = printed(library_render._library, payload, "model", detail=False, wide=False)
+    assert (
+        f"Models: {case['models_count']} ({case['variants_count']} variants)" in lines
+    )
+
+
 @pytest.fixture
 def published_words():
     use_vocabulary(CatalogVocabulary.from_dict(_WORDING["vocabulary"]))
@@ -259,7 +300,7 @@ def test_status_meaning_line_is_the_vector_line(case, printed, published_words):
 
 def test_without_the_vocabulary_the_names_show_and_no_meaning(printed):
     lines = _recipe_lines(printed, usage=["chat"])
-    assert "Usage: chat" in lines
+    assert "Capabilities: chat" in lines
     assert not any(line.startswith("Meaning:") for line in lines)
 
 

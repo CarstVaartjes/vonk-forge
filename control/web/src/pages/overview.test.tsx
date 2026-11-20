@@ -250,3 +250,33 @@ test("the upgrade notice links to Activity instead of printing the operation id"
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/activity");
   nodes = [];
 });
+
+test("the status line is joined by a link to the unsuccessful operations the Activity rail read", async () => {
+  // Break caught: the banner claims all is well while the Activity rail lists an unsuccessful operation.
+  nodes = [spark("Alpha", 40, 250)];
+  const onNavigate = vi.fn();
+  const operations = async () => ({
+    total: 1,
+    next_cursor: null,
+    operations: [
+      {
+        id: "op-1",
+        kind: "recipe.start",
+        state: "failed",
+        summary: "Recipe start failed",
+        created_at: "2026-09-27T08:00:00Z",
+        node_ids: [],
+      },
+    ],
+  });
+  render(
+    <ToastProvider>
+      <OverviewPage api={{ ...api, operations } as unknown as ControlApi} onNavigate={onNavigate} />
+    </ToastProvider>,
+  );
+  const link = await screen.findByRole("link", { name: "1 unsuccessful" });
+  expect(link).toHaveAttribute("href", "/activity?status=unsuccessful");
+  fireEvent.click(link);
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/activity?status=unsuccessful");
+  nodes = [];
+});

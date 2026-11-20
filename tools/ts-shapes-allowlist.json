@@ -183,6 +183,11 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
+      "file": "control/web/src/components/library-setup.tsx",
+      "type": "Option",
+      "reason": "UI-only select option (value, label, disabled) built from generated library types; not an API document"
+    },
+    {
       "file": "control/web/src/components/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"

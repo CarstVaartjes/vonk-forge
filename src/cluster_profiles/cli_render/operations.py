@@ -171,7 +171,7 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         # A fleet removal that kept the NAS copy says so, with the
         # Controller's typed reason; "succeeded" alone read as removed.
         _field(
-            "NAS copy",
+            "Controller copy",
             f"kept ({_text(effects.get('nas_reason'))}): "
             f"{_text(effects.get('nas_detail'))}",
         )

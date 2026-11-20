@@ -280,7 +280,7 @@ def test_fleet_review_confirm_command_keeps_the_fleet_scope(
     ).model_dump(mode="json")
     text = _human(capsys, review)
 
-    assert "NAS removal: yes" in text
+    assert "Controller removal: yes" in text
     assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
 
 
@@ -326,7 +326,7 @@ def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
     )
     text = _human(capsys, review)
 
-    assert "NAS removal: no" in text
+    assert "Controller removal: no" in text
     assert "Keeps (retain-referenced): 3 files" in text
     assert "()" not in text
     assert "Removes" not in text
@@ -389,7 +389,7 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
     text = capsys.readouterr().out
 
     assert (
-        f"NAS copy: kept ({FleetRemovalReason.REFERENCED}): "
+        f"Controller copy: kept ({FleetRemovalReason.REFERENCED}): "
         "A live operation names this model." in text
     )
     removed = fleet["effects"] | {"nas_remove": True}
@@ -397,4 +397,4 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
         receipt | {"fleet": fleet | {"effects": removed}}, "model", action="remove"
     )
     text = capsys.readouterr().out
-    assert "State: succeeded" in text and "NAS copy" not in text
+    assert "State: succeeded" in text and "Controller copy" not in text

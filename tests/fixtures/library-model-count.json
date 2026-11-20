@@ -1,0 +1,66 @@
+{
+  "note": "Model counting rule shared by vonkctl and the web Library: Models fold by display lineage family/line/model; lineage-less models are excluded.",
+  "cases": [
+    {
+      "name": "quantization variants fold into one Model",
+      "models": [
+        {
+          "id": "qwen-bf16",
+          "lineage": {
+            "family": "qwen",
+            "line": "qwen3",
+            "model": "qwen3-27b"
+          }
+        },
+        {
+          "id": "qwen-nvfp4",
+          "lineage": {
+            "family": "qwen",
+            "line": "qwen3",
+            "model": "qwen3-27b"
+          }
+        },
+        {
+          "id": "glm",
+          "lineage": {
+            "family": "glm",
+            "line": "glm5",
+            "model": "glm-5-flash"
+          }
+        }
+      ],
+      "models_count": 2,
+      "variants_count": 3
+    },
+    {
+      "name": "a model without lineage is not a Model",
+      "models": [
+        {
+          "id": "drafter",
+          "lineage": null
+        },
+        {
+          "id": "qwen-bf16",
+          "lineage": {
+            "family": "qwen",
+            "line": "qwen3",
+            "model": "qwen3-27b"
+          }
+        }
+      ],
+      "models_count": 1,
+      "variants_count": 1
+    },
+    {
+      "name": "only lineage-less models count as none",
+      "models": [
+        {
+          "id": "encoder",
+          "lineage": null
+        }
+      ],
+      "models_count": 0,
+      "variants_count": 0
+    }
+  ]
+}

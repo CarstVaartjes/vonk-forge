@@ -44,7 +44,14 @@
 .activity-preview-what {
   display: grid;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+.activity-preview-what strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 .activity-preview-what small {
   color: var(--muted);

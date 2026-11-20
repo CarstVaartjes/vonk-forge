@@ -1,9 +1,14 @@
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** The one calendar-date format of the Controller: "20 Nov 2026" (day, short month, year), in local time. */
+export function formatDate(value: Date): string {
+  return `${value.getDate()} ${MONTHS[value.getMonth()]} ${value.getFullYear()}`;
+}
+
 export function exactTime(value: string): string | null {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "long" }).format(
-    parsed,
-  );
+  return `${formatDate(parsed)}, ${new Intl.DateTimeFormat("en-GB", { timeStyle: "long" }).format(parsed)}`;
 }
 
 export function relativeTime(value: string, now: Date): string | null {
