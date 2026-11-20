@@ -35,6 +35,7 @@ from ..operation_item_contract import (
     operation_item,
 )
 from ..operation_progress import project_progress_for_state
+from ..operation_summary import operation_summary
 from ..persisted_waits import read_wait
 from ..strict_json import (
     StrictModel,
@@ -104,6 +105,7 @@ def _job_operation_response(
         node_id=_required_text(item.node_id, "operation node id is invalid"),
         kind=item.kind,
         state=item.state,
+        summary=operation_summary(item.kind, item.state),
         attempt=item.attempt,
         progress=_progress_projection(item.progress, item.state, now=now),
         updated_at=item.updated_at,
@@ -163,6 +165,7 @@ def job_response(
         id=job.id,
         state=job.state,
         kind=job.kind,
+        summary=operation_summary(job.kind, job.state),
         authority_revision=job.authority_revision,
         targets=visible_targets,
         target_next_cursor=target_next_cursor,
@@ -347,6 +350,8 @@ def operation_detail_response(
         node_ids=item.node_ids,
         kind=item.kind,
         state=item.state,
+        summary=operation_summary(item.kind, item.state),
+        subject=item.subject,
         attempt=item.attempt,
         progress=_progress_projection(item.progress, item.state, now=now),
         created_at=item.created_at if _operation_boundary(item) is not None else None,
@@ -422,6 +427,8 @@ def bounded_operation_detail(
         node_ids=detail.node_ids,
         kind=detail.kind,
         state=detail.state,
+        summary=detail.summary,
+        subject=detail.subject,
         attempt=detail.attempt,
         created_at=detail.created_at,
         observation_unavailable=True,

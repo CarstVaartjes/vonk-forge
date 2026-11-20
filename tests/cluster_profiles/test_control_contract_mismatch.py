@@ -370,6 +370,7 @@ def test_a_refusal_with_an_unknown_reason_keeps_waiting_and_heals(
         current_attempt=1,
         id=job_id,
         kind="run",
+        summary="Run finished",
         operation_total=0,
         operations=[],
         progress=None,

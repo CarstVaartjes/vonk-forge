@@ -82,7 +82,6 @@ export function ActivityPreview({
               </time>
               <span className="activity-preview-what">
                 <strong>{row.label}</strong>
-                {row.targets && <small>{row.targets}</small>}
               </span>
               <StatusPill tone={row.tone}>{row.word}</StatusPill>
             </li>

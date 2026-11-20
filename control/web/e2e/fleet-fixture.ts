@@ -419,6 +419,7 @@ export async function serveOverviewFleet(page: Page) {
             id: "op-1",
             kind: "recipe.start",
             state: "succeeded",
+            summary: "Recipe start finished",
             attempt: 1,
             created_at: new Date(Date.now() - 300_000).toISOString(),
             node_ids: [SPARK_IDS[0], SPARK_IDS[1]],
