@@ -65,7 +65,7 @@ saved selection.
 
 Help is a map of the command tree and works offline. `vonkctl` (or
 `vonkctl --help`) lists where to start, every command group, and the global
-flags. `vonkctl GROUP --help` lists that group's commands as full invocations
+flags, in the order to try them. `vonkctl GROUP --help` lists that group's commands as full invocations
 with their arguments, for example `vonkctl fleet detail <spark>`, and no
 options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
 flags. A group run on its own shows its current state: `vonkctl fleet`,
@@ -374,11 +374,11 @@ A timeout or Ctrl-C ends observation without cancelling removal.
 ```bash
 vonkctl recipe
 vonkctl recipe sync-status
+vonkctl recipe library --fits-fleet --limit 5   # first success: with the default sort, Working recipes that fit come first
 vonkctl recipe library
 vonkctl recipe library --cached
 vonkctl recipe library --model "Qwen 3.8"
 vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2   # 2 Sparks or fewer
-vonkctl recipe library --fits-fleet
 vonkctl recipe library --ready
 vonkctl recipe detail qwen-code         # Usage and the status Meaning use the release's published words
 vonkctl recipe detail qwen-code --watch
@@ -451,7 +451,8 @@ fleet-fit state.
 
 Recipe reads distinguish current fleet fit, exact NAS assets, and readiness.
 `--fits-fleet` requires a complete placement that fits fresh current capacity;
-it does not assume that existing workloads will stop. `--ready` also requires
+with the default sort the Controller lists Working recipes first, then the
+newest; it does not assume that existing workloads will stop. `--ready` also requires
 an admissible run plan that downloads no model: the exact model files and
 companion dependencies are on the NAS or already on every Spark of that
 placement, and the authorized runtime image needs no preparation. Spark copies

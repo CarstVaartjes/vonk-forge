@@ -394,7 +394,7 @@ def recipe_library(
         )
         and (updated_since is None or item.updated_at >= _utc(updated_since))
     ]
-    key = self._recipe_sort_key(sort)
+    key = self._recipe_sort_key(sort, working_first=bool(fits_fleet))
     filtered.sort(key=key, reverse=sort == "updated")
     readiness_filters = {"readiness": ready, "fleet_fit": fits_fleet}
     filtering_assessment = any(

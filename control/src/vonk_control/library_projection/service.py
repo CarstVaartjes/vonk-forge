@@ -9,6 +9,7 @@ from typing import cast
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AssetAvailability
 from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.qualification_status import QualificationStatus
 
 from .. import model_cache_states
 from ..auth import CursorCodec
@@ -330,11 +331,20 @@ class LibraryProjection:
 
     @staticmethod
     def _recipe_sort_key(
-        sort: str,
+        sort: str, *, working_first: bool = False
     ) -> Callable[[LibraryRecipeProjection], tuple[str, ...]]:
+        """The recency order; ``working_first`` ranks Working recipes ahead of it
+        (the list is read newest first, so the flag leads the timestamp)."""
         if sort == "updated":
             return lambda item: (
-                item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
+                (
+                    "1"
+                    if working_first
+                    and item.qualification is not None
+                    and item.qualification.status == QualificationStatus.WORKING
+                    else "0"
+                )
+                + item.updated_at.strftime("%Y%m%dT%H%M%SZ"),
                 item.selector.casefold(),
                 item.identity.content_sha256,
             )

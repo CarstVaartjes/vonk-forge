@@ -7,6 +7,7 @@ import pytest
 from library_route_fixtures import _recipe_projection
 
 from cluster_profiles import cli, controller_cli
+from cluster_profiles.cli_help import subcommands
 from cluster_profiles.cli_select import SelectorError
 from cluster_profiles.control_client import ControlClientError
 from control.tests.consumer_outcomes import not_adopted
@@ -326,3 +327,15 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     )
     assert controller_cli._resolve_recipe_selector(client, "one/code") == "one/code"
     assert client.calls == []
+
+
+def test_recipe_library_help_shows_its_example_above_the_flags():
+    example = "vonkctl recipe library --fits-fleet --limit 5"
+    parser = cli._parser()
+    for name in ("recipe", "library"):
+        commands = subcommands(parser)
+        assert commands is not None
+        parser = commands.choices[name]
+    text = parser.format_help()
+    assert text.index(f"Example: {example}") < text.index("Flags")
+    assert "--search" in text
