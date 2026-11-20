@@ -136,11 +136,15 @@ def _utc(moment: datetime) -> str:
 
 
 def _freshness(observed_at: object, projected_at: object) -> str:
-    if not isinstance(observed_at, str) or not isinstance(projected_at, datetime):
+    if not isinstance(observed_at, str) or not isinstance(projected_at, str | datetime):
         return ENDPOINT_UNAVAILABLE
-    projected = projected_at
     try:
         observed = datetime.fromisoformat(observed_at)
+        projected = (
+            projected_at
+            if isinstance(projected_at, datetime)
+            else datetime.fromisoformat(projected_at)
+        )
     except ValueError:
         return ENDPOINT_UNAVAILABLE
     if observed.tzinfo is None or projected.tzinfo is None:
