@@ -10,6 +10,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
+    "runtime-init",
     "image-janitor",
     "caddy",
     "control-api",
@@ -71,6 +72,8 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         if isinstance(service, dict) and "profiles" not in service
     }
     assert set(defaults) == DEFAULT_SERVICES
+    # A one-shot's readiness is its exit status (service_completed_successfully).
+    assert "healthcheck" not in defaults.pop("runtime-init")
     assert services["tailscale-gateway"]["profiles"] == ["secure-remote"]
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
 
@@ -103,17 +106,16 @@ def _seconds(duration: str) -> float:
 def test_worker_health_grace_covers_its_startup_waits() -> None:
     """Catches a worker marked unhealthy while it still waits for the API.
 
-    The worker waits for the API-staged secret and then for the API-owned
-    schema, each within the startup budget; one probe may overrun it by a lock
-    wait. `compose up --wait` must not see that wait as a failure.
+    The worker waits for the API-owned schema within the startup budget; one
+    probe may overrun it by a lock wait. `compose up --wait` must not see that
+    wait as a failure.
     """
     from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
     from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
     healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
     waits = (
-        2 * _DATABASE_STARTUP_TIMEOUT_SECONDS
-        + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
+        _DATABASE_STARTUP_TIMEOUT_SECONDS + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
     )
     assert _seconds(healthcheck["start_period"]) > waits
 
@@ -224,6 +226,6 @@ def test_default_graph_is_warning_free_and_does_not_couple_configurator_to_profi
     configurator = secure_remote["tailscale-configurator"]
     assert set(configurator["depends_on"]) == {
         "caddy",
-        "control-api",
+        "runtime-init",
         "tailscale-gateway",
     }

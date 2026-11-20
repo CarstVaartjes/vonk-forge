@@ -33,10 +33,10 @@ def test_fresh_postgres_initializes_the_litellm_database() -> None:
 
     assert "litellm-database-password" in postgres["secrets"]
     # The Controller image ships the entrypoint; PostgreSQL runs the staged copy.
-    assert postgres["entrypoint"][:2] == ["/bin/sh", "-c"]
-    assert (
-        "/run/vonk-runtime-assets/postgres/entrypoint.sh" in postgres["entrypoint"][2]
-    )
+    assert postgres["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-runtime-assets/postgres/entrypoint.sh",
+    ]
     assert postgres["command"] == ["postgres"]
     assert "runtime-assets:/run/vonk-runtime-assets:ro" in postgres["volumes"]
     api_root = _final_stage("api-root")

@@ -29,6 +29,7 @@ from tests.acceptance.runtime import (
     assert_compose_compatibility,
     assert_compose_services_healthy,
     bootstrap_command,
+    compose_service_settled,
     group_readable_secrets,
     https_over_command,
     reclaim_gateway_journal,
@@ -42,6 +43,7 @@ DEPENDENCY_FETCH = (
 DEPENDENCY_FETCH_TIMEOUT_SECONDS = 16 * 60
 
 DEFAULT_SERVICES = {
+    "runtime-init",
     "image-janitor",
     "caddy",
     "control-api",
@@ -499,7 +501,7 @@ def compose_startup_diagnostics(bundle: Path) -> str:
         health = str(row.get("Health", "none")) or "none"
         exit_code = str(row.get("ExitCode", "unknown"))
         states.append(f"{service}={state}/{health}/exit-{exit_code}")
-        if state != "running" or health != "healthy":
+        if not compose_service_settled(service, row):
             broken.append(service)
     details = f"states: {', '.join(states) or 'none'}"
     if not broken:

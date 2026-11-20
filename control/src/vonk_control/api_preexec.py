@@ -17,28 +17,25 @@ from .db import (
     run_with_database_startup_retry,
     session_factory,
 )
-from .runtime_init import (
-    prepare_shared_volumes,
-    read_runtime_secret,
-    stage_compose_secrets,
-    stage_runtime_assets,
-)
+from .runtime_init import read_runtime_secret
 
 _LOGGER = logging.getLogger(__name__)
 
 _API_UID = 10001
 _API_GID = 10001
 _SOURCE_SECRETS = Path("/run/secrets")
-_NORMALIZED_SECRETS = Path("/normalized")
+_NORMALIZED_SECRETS = Path("/run/vonk-normalized-secrets")
 
 
 def prepare_owned_state() -> None:
-    """Initialize all state formerly owned by the bootstrap helper."""
+    """Initialize the database and the administrator before the API starts.
+
+    The ``runtime-init`` one-shot has already staged the secrets, the runtime
+    kit and the shared-volume ownership; root is left only for the
+    administrator password, which the image keeps in a root-only directory.
+    """
     if os.geteuid() != 0:
         raise RuntimeError("control API pre-exec must start as root")
-    stage_compose_secrets(_SOURCE_SECRETS, _NORMALIZED_SECRETS)
-    stage_runtime_assets()
-    prepare_shared_volumes()
     database_url = (
         (_NORMALIZED_SECRETS / "database-url").read_text(encoding="utf-8").strip()
     )

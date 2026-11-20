@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -59,7 +58,6 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
         }
     ]
     assert caddy["environment"] == {
-        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",
         "VONK_CONTROL_HOSTNAME": "control.test.example",
     }
 
@@ -139,14 +137,10 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
 def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
     litellm = _rendered()["services"]["litellm"]
 
-    # Wait for the staged entrypoint, then run it through the shell.
-    assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
-    command = litellm["entrypoint"][2]
-    assert "runtime-asset-timeout" in command
-    assert "exit 1" in command
-    assert command.endswith(
-        "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
-    )
+    assert litellm["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
+    ]
 
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
@@ -159,8 +153,8 @@ def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
     assert "normalized-private-keys" in {
         item["source"] for item in services["control-api"]["volumes"]
     }
-    assert "admin-password" in {
-        item["source"] for item in services["control-api"]["secrets"]
+    assert {item["source"] for item in services["control-api"]["secrets"]} == {
+        "admin-password"
     }
     assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/litellm-master-key"
@@ -212,36 +206,33 @@ def test_control_api_has_only_the_capabilities_required_by_its_preexec() -> None
 
     assert api["user"] == "0:0"
     assert api["cap_drop"] == ["ALL"]
-    assert set(api["cap_add"]) == {
-        "CHOWN",
-        "FOWNER",
-        "DAC_OVERRIDE",
-        "SETUID",
-        "SETGID",
-    }
+    # Read the administrator password, then drop to 10001; runtime-init owns
+    # every chown.
+    assert set(api["cap_add"]) == {"DAC_OVERRIDE", "SETUID", "SETGID"}
     assert api["security_opt"] == ["no-new-privileges:true"]
     assert "SYS_ADMIN" not in api["cap_add"]
     assert api["command"] == ["python", "-m", "vonk_control.api"]
 
 
-def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> None:
+def test_file_backed_private_keys_are_normalized_by_runtime_init() -> None:
     services = _rendered()["services"]
     api = services["control-api"]
+    init = services["runtime-init"]
 
-    assert "control-secret-init" not in services
-    assert "control-bootstrap" not in services
-    # PostgreSQL waits for the entrypoint the API stages, so the API starts
-    # without waiting for it and retries the database instead.
-    assert "depends_on" not in api
-    api_secrets = {secret["source"] for secret in api["secrets"]}
+    # The API retries the database instead of depending on PostgreSQL.
+    assert set(api["depends_on"]) == {"runtime-init"}
+    staged = {secret["source"] for secret in init["secrets"]}
     assert {
         "host-runtime-grant-private-key",
         "database-url",
         "hf-token",
-    } <= api_secrets
-    normalized = {volume["target"]: volume for volume in api["volumes"]}
-    assert normalized["/normalized"].get("read_only") is not True
-    assert normalized["/run/vonk-normalized-secrets"]["read_only"] is True
+    } <= staged
+    assert "admin-password" not in staged
+    init_volumes = {volume["target"]: volume for volume in init["volumes"]}
+    assert init_volumes["/normalized"].get("read_only") is not True
+    api_volumes = {volume["target"]: volume for volume in api["volumes"]}
+    assert "/normalized" not in api_volumes
+    assert api_volumes["/run/vonk-normalized-secrets"]["read_only"] is True
 
 
 def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
@@ -259,13 +250,10 @@ def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
         assert retired not in serialized
 
 
-def test_former_bootstrap_dependants_only_order_after_the_controller() -> None:
-    services = _rendered()["services"]
-
-    for name in ("control-worker",):
-        dependency = services[name]["depends_on"]["control-api"]
-        assert dependency["condition"] == "service_started"
-        assert dependency["required"] is True
+def test_worker_only_orders_after_the_controller() -> None:
+    dependency = _rendered()["services"]["control-worker"]["depends_on"]["control-api"]
+    assert dependency["condition"] == "service_started"
+    assert dependency["required"] is True
 
 
 def test_caddy_has_readiness_checks() -> None:
@@ -370,19 +358,3 @@ def test_caddy_disables_admin_and_sets_edge_guards() -> None:
     assert "source-bundles" not in text
     assert "Strict-Transport-Security" in text
     assert "X-Frame-Options" in text
-
-
-def test_control_api_waits_out_startup_and_asset_waits_have_one_owner() -> None:
-    services = _rendered()["services"]
-
-    assert services["control-api"]["healthcheck"]["start_period"] == "2m0s"
-    waiting = ["postgres", "litellm", "prometheus", "caddy"]
-    for name in waiting:
-        service = services[name]
-        text = str(service.get("entrypoint", "")) + str(service.get("command", ""))
-        assert "-ge 120" not in text
-        assert service["environment"]["VONK_RUNTIME_ASSET_WAIT_SECONDS"] == "120"
-    # The included file cannot share the anchor; its literal must match it.
-    configurator = services["tailscale-configurator"]["entrypoint"][2]
-    wait = re.search(r"-ge (\d+) \]", configurator)
-    assert wait is not None and wait.group(1) == "120"

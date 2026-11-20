@@ -389,25 +389,25 @@ def test_development_image_compose_enables_local_ca_agent_settings(
         "litellm-metrics",
     }
     assert services["litellm"].get("ports") in (None, [])
-    # Caddy waits for its staged Caddyfile, never for a healthy Controller.
-    assert caddy["depends_on"]["control-api"] == {
-        "condition": "service_started",
-        "required": False,
-        "restart": True,
-    }
+    # Caddy starts after its Caddyfile is staged, never waits for the Controller.
+    assert set(caddy["depends_on"]) == {"runtime-init"}
 
 
 def test_agent_bootstrap_uses_the_normalized_public_ca() -> None:
     rendered = _rendered()
     api = rendered["services"]["control-api"]
-    api_secrets = {secret["source"] for secret in api.get("secrets", [])}
+    staged = {
+        secret["source"]
+        for secret in rendered["services"]["runtime-init"].get("secrets", [])
+    }
 
-    assert "controller-ca" in api_secrets
+    assert "controller-ca" in staged
     assert any(
-        volume["target"] == "/run/vonk-normalized-secrets" for volume in api["volumes"]
+        volume["target"] == "/run/vonk-normalized-secrets" and volume["read_only"]
+        for volume in api["volumes"]
     )
-    assert "controller-server-key" not in api_secrets
-    assert "agent-intermediate-key" not in api_secrets
+    assert "controller-server-key" not in staged
+    assert "agent-intermediate-key" not in staged
 
 
 def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
@@ -830,7 +830,6 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     caddy_environment = rendered_caddy["environment"]
     # The entrypoint derives the other SNI names from this one hostname.
     assert caddy_environment == {
-        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",
         "VONK_CONTROL_HOSTNAME": environment["VONK_CONTROL_HOSTNAME"],
     }
     adapted = _adapted_caddy(

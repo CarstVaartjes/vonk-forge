@@ -108,8 +108,8 @@ volumes declared by the generated project. Caddy binds to the configured LAN
 address and serves the browser UI with the generated local CA certificate;
 Secure remote additionally enables the Tailscale gateway. PostgreSQL is the
 control authority and Step CA is the agent identity authority. There is no
-runtime Git checkout, host updater, migration helper, one-shot initializer, or
-A/B agent supervisor.
+runtime Git checkout, host updater, migration helper, or A/B agent supervisor.
+The one setup container is `runtime-init` (below); it exits after each run.
 
 ## Upgrade
 
@@ -131,15 +131,11 @@ redeploy. Keep named volumes during normal upgrades.
 
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
 Prometheus and LiteLLM supervisor files) ships inside the
-Controller API image. On every start the API stages it into the
-`runtime-assets` volume that the other services read, and those services
-restart with it. A pull and redeploy therefore rolls out configuration too; the
-installer only needs to run again when `.env`, secrets or the Compose graph
-itself change.
-Each of those services waits for its staged files for
-`VONK_RUNTIME_ASSET_WAIT_SECONDS` (one value in `compose.yaml`, 120) and then
-exits so the restart policy retries; the Controller API healthcheck
-`start_period` (2m) covers the same wait.
+Controller API image. The `runtime-init` one-shot, which runs that image, stages
+it into the `runtime-assets` volume that the other services read (see
+[Runtime staging](#runtime-staging-runtime-init)). A pull and redeploy therefore
+rolls out configuration too; the installer only needs to run again when `.env`,
+secrets or the Compose graph itself change.
 The LiteLLM supervisor script comes from the API image, but the route
 activation contract it imports is baked into the LiteLLM image. Each may run
 with the other's previous release. Transitions follow deploy order, with no
@@ -152,8 +148,8 @@ acknowledgement to the `litellm-supervisor-state` volume once the old child has
 exited, and a `ready` acknowledgement once the new child is healthy. A Controller
 withdrawal (for example a Stop) waits only for `drained`; a publication waits for
 `ready`. All routes stay unavailable until the new child is ready.
-The Caddy startup wrapper forwards an explicit Compose `command` after the
-runtime-asset wait and native secret checks. With no command, its native
+The Caddy startup wrapper forwards an explicit Compose `command` after its
+native secret checks. With no command, its native
 entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile` and watches it,
 so a restaged Caddyfile applies without a Caddy restart.
 
@@ -182,22 +178,41 @@ PostgreSQL stop may lose the Controller's other commits of the last moments:
 about 0.6 s, longer while the disk is stalled. Data is never corrupted; the
 platform self-heals.
 
-### Runtime asset startup observation
+## Runtime staging (`runtime-init`)
 
-The Controller pre-exec stages public runtime assets before opening PostgreSQL.
-Consumers poll once per second for up to 120 checks (119 nominal sleeps), then
-log the exact missing asset and exit. This two-minute observation window matches
-the Controller database startup window and bounds one startup attempt, not the
-time required to recover an outage. Scheduling and file I/O can add elapsed time.
-The existing `unless-stopped` restart policy retries automatically when staging
-becomes available. PostgreSQL must not depend on a healthy Controller: staging
-precedes the Controller's database initialization and avoids a dependency cycle.
+`runtime-init` is a one-shot on the Controller API image (`restart: "no"`, root
+with only `CHOWN`, `FOWNER` and `DAC_OVERRIDE`, no network, no database). Each
+`compose up` runs it once, before the services that read what it stages:
 
-Each shipped file is a bounded regular file (at most 64 KiB) published with fsync
-and atomic replacement. The startup window is an observation policy, not a
-measured guarantee of storage throughput. Local shell tests prove timeout and
-execution after staging; hosted Compose tests separately prove Docker restart
-and actual PostgreSQL readiness.
+- each consumer's private copy of the installer's Compose secrets in
+  `normalized-private-keys` (owner and mode per consumer), and the gateway
+  master key under `secrets/gateway/authority`;
+- this release's runtime kit in `runtime-assets`, with files a release no
+  longer ships removed;
+- the ownership of the shared volume roots (`/state`, the object stores,
+  `/routes`, `/supervisor`, `secrets/gateway`).
+
+Every file is a bounded regular file (at most 64 KiB) published with fsync and
+atomic replacement, so a reader sees the old or the new copy, never a partial
+one. A staging run retries three times and then exits 1.
+
+Its readers declare `runtime-init: {condition: service_completed_successfully,
+required: false}`. Compose starts them only after it has exited, so nothing
+polls for a staged file. The edge orders startup and never gates it: after a
+failed run they still start on the previous staging kept in the volumes, and
+the next `compose up` runs `runtime-init` again. A restart policy on the one-shot
+would hold `compose up` and every recreated dependant while staging keeps
+failing, so it has none. Caddy, LiteLLM, Prometheus and the Tailscale
+configurator also declare `restart: true`: when a new image recreates
+`runtime-init`, Compose restarts them after the new kit is staged. PostgreSQL
+does not restart with a release. The API keeps only the database half of
+startup (schema and administrator) in its pre-exec, because PostgreSQL itself
+starts from the staged entrypoint.
+
+After a NAS reboot Docker restarts the long-running services by their restart
+policy, without Compose, so `runtime-init` does not run. The services start
+from the retained volumes. `compose ps` shows `runtime-init` as `exited (0)`
+after a successful run.
 
 ## NAS daemon platform-image retention and network repair
 

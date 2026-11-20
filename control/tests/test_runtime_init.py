@@ -565,3 +565,45 @@ def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_se
         source, destination, gateway_master_key=tmp_path / "gateway" / "master-key"
     )
     assert not projected.exists()
+
+
+def test_runtime_init_retries_unavailable_staging_then_ends_for_the_next_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a one-shot that loops forever or reports success unstaged."""
+    attempts: list[str] = []
+
+    def unavailable() -> None:
+        attempts.append("stage")
+        raise OSError("volume observation unavailable")
+
+    monkeypatch.setattr(runtime_init, "stage_runtime", unavailable)
+    with pytest.raises(SystemExit) as ended:
+        runtime_init.main()
+    assert ended.value.code == 1
+    assert attempts == ["stage"] * 3
+
+    monkeypatch.setattr(runtime_init, "stage_runtime", lambda: attempts.append("ok"))
+    runtime_init.main()
+    assert attempts[-1] == "ok"
+
+
+def test_runtime_init_stages_secrets_kit_and_volumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(runtime_init.os, "geteuid", lambda: 0)
+    for name in (
+        "stage_compose_secrets",
+        "stage_runtime_assets",
+        "prepare_shared_volumes",
+    ):
+        monkeypatch.setattr(runtime_init, name, lambda name=name: events.append(name))
+
+    runtime_init.stage_runtime()
+
+    assert events == [
+        "stage_compose_secrets",
+        "stage_runtime_assets",
+        "prepare_shared_volumes",
+    ]

@@ -7,10 +7,6 @@ x-bounded-logging: &bounded-logging
     max-size: 10m
     max-file: "5"
 
-# Seconds each service waits for its staged runtime assets; the control-api
-# healthcheck start_period (2m) covers the same wait.
-x-runtime-asset-wait-seconds: &runtime-asset-wait-seconds "120"
-
 # The Controller's whole site configuration. Everything else (secret paths,
 # internal relays, tuning) is fixed in code. Only the NAS address and the
 # control hostname are required; the rest heals to a sensible default.
@@ -50,20 +46,47 @@ services:
       retries: 1
       start_period: 1m
 
+  # One-shot, root, no network: stages each consumer's private secrets, this
+  # release's runtime kit (configs and entrypoints from the Controller image)
+  # and the ownership of the shared volume roots, then exits. Dependants start
+  # after it ends (required: false orders, never gates: a failed run leaves the
+  # previous staging in the volumes and the next `compose up` runs it again).
+  runtime-init:
+    # The Controller API image: it ships the kit and the staging code.
+    image: &control-api-image ${CONTROL_API_IMAGE:?set a version-pinned control-api image}
+    entrypoint: [python, -m, vonk_control.runtime_init]
+    restart: "no"
+    logging: *bounded-logging
+    read_only: true
+    user: "0:0"
+    # Reads installer-owned secrets and chowns/chmods each staged file and
+    # volume root to its consumer. It never changes identity.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    secrets: [host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    volumes:
+      - control-state:/state
+      - agent-artifacts:/state/agent-artifacts
+      - model-cache:/state/model-cache
+      - route-publications:/routes
+      - litellm-supervisor-state:/supervisor
+      - normalized-private-keys:/normalized
+      - runtime-assets:/runtime-assets
+      - type: bind
+        source: ./secrets/gateway
+        target: /gateway-secrets
+        bind: {create_host_path: true}
+
   postgres:
     # PostgreSQL 17+ is required: the Controller sets the transaction_timeout
     # connection GUC (added in 17) on every connection. The pinned image
     # satisfies that.
     image: postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
-    # The Controller image ships this entrypoint and stages it on start (see
-    # control-api), so a pulled release updates it. PostgreSQL must start
-    # before the Controller, so wait for the staged copy instead of depending
-    # on the Controller.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/postgres/init-databases.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge "$$VONK_RUNTIME_ASSET_WAIT_SECONDS" ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/postgres/init-databases.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/postgres/entrypoint.sh "$$@"'
-      - vonk-postgres-entrypoint
+    # The Controller image ships this entrypoint; runtime-init stages it, so a
+    # pulled release updates it.
+    entrypoint: [/bin/sh, /run/vonk-runtime-assets/postgres/entrypoint.sh]
     command: [postgres]
     stop_grace_period: 60s
     restart: unless-stopped
@@ -77,7 +100,6 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID, KILL]
     security_opt: [no-new-privileges:true]
     environment:
-      VONK_RUNTIME_ASSET_WAIT_SECONDS: *runtime-asset-wait-seconds
       VONK_BACKUP_OFFHOST_PATH: ${VONK_BACKUP_OFFHOST_PATH:-}
       POSTGRES_DB: control
       POSTGRES_USER: control
@@ -96,6 +118,10 @@ services:
         target: /offhost
       - runtime-assets:/run/vonk-runtime-assets:ro
     networks: [data, litellm-data]
+    # No restart edge: the database must not bounce with every release; a new
+    # entrypoint applies from its next start.
+    depends_on:
+      runtime-init: {condition: service_completed_successfully, required: false}
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control && psql -U control -d control -tAc 'SELECT 1' | grep -qx 1"]
       interval: 10s
@@ -103,28 +129,26 @@ services:
       retries: 10
 
   control-api:
-    image: ${CONTROL_API_IMAGE:?set a version-pinned control-api image}
+    image: *control-api-image
     restart: unless-stopped
     logging: *bounded-logging
     command: [python, -m, vonk_control.api]
     read_only: true
+    # The pre-exec reads the installer-owned administrator password as root,
+    # then drops to 10001 for good before the API starts.
     user: "0:0"
     cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
+    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment: *control-environment
-    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    secrets: [admin-password]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
       - model-cache:/state/model-cache
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
-      - normalized-private-keys:/normalized
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      # Non-secret runtime configuration ships in this image; the pre-exec
-      # stages it here for every consumer on each start.
-      - runtime-assets:/runtime-assets
       # The Controller keeps the default gateway client key here (mode 600).
       - type: bind
         source: ./secrets/gateway
@@ -136,8 +160,10 @@ services:
     # builds. PostgreSQL remains the authority for their lifecycle.
     tmpfs: [/tmp]
     networks: [application, data, agent-proxy]
-    # No dependency on PostgreSQL: it waits for the entrypoint this service
-    # stages, and startup retries the database connection until it is ready.
+    # No dependency on PostgreSQL: startup retries the database connection
+    # until it is ready.
+    depends_on:
+      runtime-init: {condition: service_completed_successfully, required: false}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -158,7 +184,7 @@ services:
     secrets: []
     volumes:
       - route-publications:/routes
-      # API pre-exec stages the same encrypted intermediate/password as private
+      # runtime-init stages the same encrypted intermediate/password as private
       # UID 10001 files; enrollment and worker recovery share this authority.
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
@@ -171,9 +197,9 @@ services:
     # publish worker ports; the API and database retain internal networks.
     networks: [data, artifact-egress]
     # Start order only: a down dependency must never leave this service Created.
-    # The worker itself waits for the API-staged database URL and for the
-    # API-owned schema (wait_for_staged_secret, wait_for_database).
+    # The worker itself waits for the API-owned schema (wait_for_database).
     depends_on:
+      runtime-init: {condition: service_completed_successfully, required: false}
       postgres: {condition: service_started}
       control-api: {condition: service_started}
     healthcheck:
@@ -181,24 +207,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      # Covers both startup waits (secret, then schema: 120s each, one owner in
-      # vonk_control.db.constants) plus one probe's lock wait and a first loop.
+      # Covers the schema wait (120s, one owner in vonk_control.db.constants)
+      # plus one probe's lock wait and a first loop.
       start_period: 5m
 
   litellm:
     image: ${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}
     restart: unless-stopped
     logging: *bounded-logging
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/litellm/entrypoint.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge "$$VONK_RUNTIME_ASSET_WAIT_SECONDS" ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/litellm/entrypoint.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh'
+    entrypoint: [/bin/sh, /run/vonk-runtime-assets/litellm/entrypoint.sh]
     read_only: true
     user: "10002:10001"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      VONK_RUNTIME_ASSET_WAIT_SECONDS: *runtime-asset-wait-seconds
       HOME: /root
       XDG_CACHE_HOME: /root/.cache
       PRISMA_QUERY_ENGINE_BINARY: /opt/vonk-litellm/prisma/query-engine
@@ -220,8 +242,8 @@ services:
       - /root:exec,mode=0700,uid=10002,gid=10001
     networks: [litellm-data, cluster-egress, litellm-edge, litellm-metrics]
     depends_on:
+      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
       postgres: {condition: service_started}
-      control-api: {condition: service_started, required: false, restart: true}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
       interval: 15s
@@ -232,18 +254,9 @@ services:
     image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     restart: unless-stopped
     logging: *bounded-logging
-    environment:
-      VONK_RUNTIME_ASSET_WAIT_SECONDS: *runtime-asset-wait-seconds
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/prometheus/prometheus.yml ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge "$$VONK_RUNTIME_ASSET_WAIT_SECONDS" ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/prometheus/prometheus.yml; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/prometheus "$$@"'
-      - prometheus
     command:
       - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
-      # Compose restarts Prometheus as soon as control-api starts, before its
-      # pre-exec has staged the new release's rules, so a start alone loads
-      # the previous release. Reloading on change applies the restage.
+      # Reloading on change applies a restage without a restart.
       - --config.auto-reload
       - --config.auto-reload-interval=10s
       - --storage.tsdb.path=/prometheus
@@ -265,17 +278,15 @@ services:
     tmpfs: [/tmp]
     networks: [application, litellm-metrics]
     depends_on:
-      control-api: {condition: service_started, required: false, restart: true}
+      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
     healthcheck:
       test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:9090/-/ready"]
       interval: 10s
       timeout: 5s
       retries: 12
 
-  # Services that read the Controller-staged runtime assets depend on the
-  # Controller only to restart with it. That restart precedes the restage, so
-  # one that does not reload keeps the previous release's files until its next
-  # restart. They wait for their staged files, never for a healthy Controller:
+  # Services that read the staged runtime assets restart once runtime-init has
+  # staged a new release (restart: true). They never wait for the Controller:
   # the volume keeps the last release, so the gateway keeps serving while the
   # Controller is down.
   caddy:
@@ -303,18 +314,13 @@ services:
       - agent-artifacts:/srv/state/agent-artifacts:ro
       - model-cache:/srv/state/model-cache:ro
     tmpfs: [/tmp]
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge "$$VONK_RUNTIME_ASSET_WAIT_SECONDS" ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/caddy/entrypoint.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh "$$@"'
-      - vonk-caddy-entrypoint
+    entrypoint: [/bin/sh, /run/vonk-runtime-assets/caddy/entrypoint.sh]
     environment:
-      VONK_RUNTIME_ASSET_WAIT_SECONDS: *runtime-asset-wait-seconds
       VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
     secrets: [agent-client-ca, agent-proxy-auth, controller-server-certificate, controller-server-key]
     networks: [ingress, agent-proxy, tailnet-web-edge, litellm-edge]
     depends_on:
-      control-api: {condition: service_started, required: false, restart: true}
+      runtime-init: {condition: service_completed_successfully, required: false, restart: true}
     healthcheck:
       # The loopback listener is independent of every network; the default
       # route exists only while `ingress` (the one non-internal network) is

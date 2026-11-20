@@ -11,7 +11,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
 from .categorized_errors import UnsettledOutcome
 from .runtime_asset_contract import RuntimeAssetInventory
@@ -638,3 +638,33 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def stage_runtime() -> None:
+    """Stage everything other services read before they start.
+
+    The ``runtime-init`` Compose one-shot runs this as root, without network or
+    database, before its dependants start: private secrets for each consumer,
+    this release's runtime kit, and the ownership of the shared volume roots.
+    """
+    if os.geteuid() != 0:
+        raise RuntimeError("runtime-init must start as root")
+    stage_compose_secrets()
+    stage_runtime_assets()
+    prepare_shared_volumes()
+
+
+def main() -> None:
+    for _attempt in range(3):
+        try:
+            stage_runtime()
+            return
+        except (OSError, UnknownOutcomeError):
+            _LOGGER.warning("runtime staging observation is unavailable")
+    # Every file is replaced atomically, so the previous staging stays intact
+    # for the dependants, which start anyway; the next `compose up` reruns this.
+    raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

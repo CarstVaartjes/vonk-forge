@@ -43,6 +43,7 @@ SERVICES = {
     "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
+    "runtime-init",
     "postgres",
     "control-api",
     "control-worker",
@@ -157,7 +158,7 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 "target": "/offhost",
             }:
                 continue
-            if name == "control-api" and volume == {
+            if name in {"runtime-init", "control-api"} and volume == {
                 "type": "bind",
                 "source": "./secrets/gateway",
                 "target": "/gateway-secrets",

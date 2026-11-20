@@ -131,19 +131,6 @@ def test_owned_state_initializes_database_then_the_single_administrator(
     monkeypatch.setattr(api_preexec, "_NORMALIZED_SECRETS", normalized)
     monkeypatch.setattr(
         api_preexec,
-        "stage_compose_secrets",
-        lambda source_root, destination_root: events.append(
-            ("stage", source_root, destination_root)
-        ),
-    )
-    monkeypatch.setattr(
-        api_preexec, "stage_runtime_assets", lambda: events.append("assets")
-    )
-    monkeypatch.setattr(
-        api_preexec, "prepare_shared_volumes", lambda: events.append("volumes")
-    )
-    monkeypatch.setattr(
-        api_preexec,
         "initialize_database",
         lambda database_url: events.append(("database", database_url)),
     )
@@ -159,9 +146,6 @@ def test_owned_state_initializes_database_then_the_single_administrator(
     api_preexec.prepare_owned_state()
 
     assert events == [
-        ("stage", source, normalized),
-        "assets",
-        "volumes",
         ("database", "postgresql://control/database"),
         ("administrator", "postgresql://control/database", source / "admin-password"),
     ]

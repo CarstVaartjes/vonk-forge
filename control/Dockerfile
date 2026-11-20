@@ -262,8 +262,9 @@ RUN python -c 'import pathlib, runpy; print(runpy.run_path("/compose/render-dev-
 FROM runtime-root AS api-root
 RUN install -d -o 0 -g 0 -m 0700 /run/secrets
 # Non-secret runtime configuration for the whole Compose application ships
-# with the Controller release. The API pre-exec stages it into a shared volume
-# on every start, so pulling a new image is enough to roll out a change.
+# with the Controller release. The runtime-init one-shot (this image) stages it
+# into a shared volume on every `compose up`, so pulling a new image is enough
+# to roll out a change.
 COPY deploy/compose/Caddyfile deploy/compose/caddy/entrypoint.sh /usr/local/share/vonk-forge/runtime-assets/caddy/
 COPY deploy/compose/postgres/ /usr/local/share/vonk-forge/runtime-assets/postgres/
 COPY deploy/compose/litellm/bootstrap-config.json deploy/compose/litellm/entrypoint.sh deploy/compose/litellm/config_supervisor.py /usr/local/share/vonk-forge/runtime-assets/litellm/

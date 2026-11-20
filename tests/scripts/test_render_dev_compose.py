@@ -169,7 +169,7 @@ def test_rendered_postgres_starts_with_an_inert_initializer(
     backups = tmp_path / "backups"
     backups.mkdir()
     # tmpfs data: initdb's fsyncs dominate the test on a Docker volume. The
-    # Controller normally stages the PostgreSQL assets; bind the sources here.
+    # runtime-init normally stages the PostgreSQL assets; bind the sources here.
     postgres["volumes"] = [
         {"type": "tmpfs", "target": "/var/lib/postgresql"},
         {"type": "bind", "source": str(backups), "target": "/backups"},
@@ -181,6 +181,7 @@ def test_rendered_postgres_starts_with_an_inert_initializer(
         },
     ]
     postgres.pop("networks")
+    postgres.pop("depends_on")
     postgres["healthcheck"] = {
         "test": [
             "CMD-SHELL",
@@ -252,8 +253,8 @@ def test_render_uses_canonical_template_and_stages_the_local_signer(
 
     assert result.returncode == 0, result.stderr
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
-    api_secrets = document["services"]["control-api"]["secrets"]
-    assert "step-ca-password" in api_secrets
+    staged_secrets = document["services"]["runtime-init"]["secrets"]
+    assert "step-ca-password" in staged_secrets
 
 
 def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> None:

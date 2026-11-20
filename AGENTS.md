@@ -476,6 +476,12 @@ its host transport; do not request another approval merely for that transport
 when the operation is already authorized. This exception does not permit SSH
 Spark rollouts or bypass a Controller authorization decision.
 
+Compose dependency edges order startup and never gate it (`required: false` on
+any condition other than `service_started`). The only setup container is the
+`runtime-init` one-shot, which stages secrets, the runtime kit and volume
+ownership as root. Its readers start after it exits and never poll for a staged
+file; see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
+
 Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
 derived from what the installers create. A change that makes an installer, the
 Compose bundle or the agent package create a new file, volume, unit, host entry

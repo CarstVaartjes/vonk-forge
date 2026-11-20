@@ -680,19 +680,13 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     api = services["control-api"]
     assert api["user"] == "0:0"
     assert api["cap_drop"] == ["ALL"]
-    assert set(api["cap_add"]) == {
-        "CHOWN",
-        "FOWNER",
-        "DAC_OVERRIDE",
-        "SETUID",
-        "SETGID",
-    }
+    assert set(api["cap_add"]) == {"DAC_OVERRIDE", "SETUID", "SETGID"}
     assert services["control-worker"]["depends_on"]["control-api"] == {
         "condition": "service_started",
         "required": True,
     }
-    assert services["litellm"]["depends_on"]["control-api"] == {
-        "condition": "service_started",
+    assert services["litellm"]["depends_on"]["runtime-init"] == {
+        "condition": "service_completed_successfully",
         "required": False,
         "restart": True,
     }
@@ -737,10 +731,10 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     worker = services["control-worker"]
     volumes = {volume["target"]: volume for volume in litellm["volumes"]}
 
-    assert litellm["entrypoint"][:2] == ["/bin/sh", "-c"]
-    assert litellm["entrypoint"][2].endswith(
-        "exec /bin/sh /run/vonk-runtime-assets/litellm/entrypoint.sh"
-    )
+    assert litellm["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-runtime-assets/litellm/entrypoint.sh",
+    ]
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False
     assert volumes["/run/vonk-normalized-secrets"]["read_only"] is True
