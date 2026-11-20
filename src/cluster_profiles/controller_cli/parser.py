@@ -533,7 +533,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _profile_edit_flags(profile_delete)
     profile_load = profile_actions.add_parser(
-        "load", help="Load the entire profile onto the fleet"
+        Word.LOAD, help="Load the entire profile onto the fleet"
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument(
