@@ -79,11 +79,21 @@ function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+/** An operation kind as plain words: no schema version, sentence case, never empty. The one place kinds become text. */
+function kindPhrase(kind: string): string {
+  const words = kind
+    .replace(/[._-]v\d+$/i, "")
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .toLowerCase();
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : "Operation";
+}
+
 export function activityActionLabel(action: string): string {
   if (action.startsWith("operation.")) {
     const parts = action.split(".").slice(1);
     const state = parts.pop() ?? "unknown";
-    const kind = titleCase(parts.join(" ")) || "Operation";
+    const kind = kindPhrase(parts.join("."));
     const stateLabels: Record<string, string> = {
       cancelled: "Cancelled",
       compensated: "Recovered",
@@ -351,6 +361,15 @@ function targetSummaryNames(event: ActivityRecord): string[] {
   if (historicalTargets > 0)
     names.push(`${historicalTargets} historical ${historicalTargets === 1 ? "target" : "targets"}`);
   return names;
+}
+
+/** The entry's headline: the Sparks it concerns first, then what happened. */
+export function activityTitle(event: ActivityRecord): string {
+  const names = targetSummaryNames(event);
+  const subject =
+    names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
+  const label = activityActionLabel(event.action);
+  return subject ? `${subject} · ${label}` : label;
 }
 
 function TargetSummary({ compact = false, event }: { compact?: boolean; event: ActivityRecord }) {
@@ -854,7 +873,7 @@ function ActivityTimeline({
               <header>
                 <div>
                   <span className="activity-category">{activityCategory(event)}</span>
-                  <h2>{activityActionLabel(event.action)}</h2>
+                  <h2>{activityTitle(event)}</h2>
                 </div>
                 <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
               </header>
@@ -925,7 +944,7 @@ function ActivityTable({
             return (
               <tr key={`${event.source}:${event.request_id}:${index}`}>
                 <td data-label="Event">
-                  <strong>{activityActionLabel(event.action)}</strong>
+                  <strong>{activityTitle(event)}</strong>
                   <small>{activityCategory(event)}</small>
                   <TargetSummary compact event={event} />
                 </td>
@@ -1211,7 +1230,6 @@ export function activityPreviewRows(
   id: string;
   occurredAt: string | null;
   label: string;
-  targets: string;
   tone: ReturnType<typeof statusTone>;
   word: string;
 }[] {
@@ -1224,8 +1242,7 @@ export function activityPreviewRows(
       return {
         id: record.request_id,
         occurredAt: record.occurred_at ?? null,
-        label: activityActionLabel(record.action),
-        targets: targetSummaryNames(record).join(" · "),
+        label: activityTitle(record),
         tone: statusTone(status),
         word: statusLabel(status),
       };

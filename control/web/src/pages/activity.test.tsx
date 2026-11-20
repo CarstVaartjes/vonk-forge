@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
-import { ActivityPage, activityStateLabel, activityStatus } from "./activity";
+import { ActivityPage, activityActionLabel, activityStateLabel, activityStatus } from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -183,10 +183,10 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   render(<ActivityPage api={api()} now={NOW} />);
 
-  expect(await screen.findByRole("heading", { name: "Recipe Start · Completed" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "Recipe Install · Running" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Recipe start · Completed$/ })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe install · Running$/ })).toBeVisible();
   expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
-  expect(screen.getByText("Agent Enrollment · Needs review")).toBeVisible();
+  expect(screen.getByText(/Agent enrollment · Needs review$/)).toBeVisible();
   expect(screen.getAllByText("Unsuccessful").length).toBeGreaterThan(0);
   const timestamp = screen.getByText(/1 minute ago/i).closest("time");
   expect(timestamp).toHaveAttribute("datetime", "2026-08-15T11:59:00Z");
@@ -200,7 +200,7 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   expect(hiddenId).not.toBeVisible();
   expect(screen.getByText(TECHNICAL_TARGET_ID)).not.toBeVisible();
   const firstEvent = screen
-    .getByRole("heading", { name: "Recipe Start · Completed" })
+    .getByRole("heading", { name: /Recipe start · Completed$/ })
     .closest("article")!;
   await user.click(within(firstEvent).getByText("Technical details"));
   expect(hiddenId).toBeVisible();
@@ -216,7 +216,7 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
 test("keeps summaries in sync with filters and offers a recoverable empty state", async () => {
   const user = userEvent.setup();
   render(<ActivityPage api={api()} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Start · Completed" });
+  await screen.findByRole("heading", { name: /Recipe start · Completed$/ });
 
   const loadedSummary = screen.getByRole("region", { name: "Loaded activity summary" });
   expect(loadedSummary).toHaveTextContent("Summary of 4 loaded events");
@@ -226,9 +226,9 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
 
   await user.selectOptions(screen.getByLabelText("Status"), "unsuccessful");
   expect(
-    screen.queryByRole("heading", { name: "Recipe Start · Completed" }),
+    screen.queryByRole("heading", { name: /Recipe start · Completed$/ }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Agent Enrollment · Failed" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Agent enrollment · Failed$/ })).toBeVisible();
   const statusSummary = screen.getByRole("region", { name: "Matching activity summary" });
   expect(statusSummary).toHaveTextContent("Summary of 1 matching event from 4 loaded");
   expect(within(statusSummary).getByRole("img")).toHaveAccessibleName(
@@ -236,9 +236,9 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "attention");
-  expect(screen.getByRole("heading", { name: "Agent Enrollment · Needs review" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Agent enrollment · Needs review$/ })).toBeVisible();
   expect(
-    screen.queryByRole("heading", { name: "Agent Enrollment · Failed" }),
+    screen.queryByRole("heading", { name: /Agent enrollment · Failed$/ }),
   ).not.toBeInTheDocument();
 
   await user.type(screen.getByRole("searchbox", { name: "Search activity" }), "no such activity");
@@ -248,12 +248,12 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
     within(screen.getByRole("region", { name: "Matching activity summary" })).getByRole("img"),
   ).toHaveAccessibleName("0 recorded, 0 in progress, 0 need review, 0 unsuccessful, 0 unknown");
   await user.click(within(emptyState).getByRole("button", { name: "Clear filters" }));
-  expect(screen.getByRole("heading", { name: "Recipe Start · Completed" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe start · Completed$/ })).toBeVisible();
 
   await user.type(screen.getByRole("searchbox", { name: "Search activity" }), "Mia Lab Spark");
-  expect(screen.getByRole("heading", { name: "Recipe Start · Completed" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe start · Completed$/ })).toBeVisible();
   expect(
-    screen.queryByRole("heading", { name: "Agent Enrollment · Failed" }),
+    screen.queryByRole("heading", { name: /Agent enrollment · Failed$/ }),
   ).not.toBeInTheDocument();
 });
 
@@ -272,9 +272,9 @@ test("keeps the timeline chronological unless attention-first sorting is selecte
       .getAllByRole("heading")
       .slice(0, 2)
       .map((heading) => heading.textContent),
-  ).toEqual(["Recipe Install · Completed", "Recipe Install · Future State"]);
+  ).toEqual(["Recipe install · Completed", "Recipe install · Future State"]);
   const unknownEvent = screen
-    .getByRole("heading", { name: "Recipe Install · Future State" })
+    .getByRole("heading", { name: /Recipe install · Future State$/ })
     .closest("article")!;
   expect(within(unknownEvent).getByText("Unknown state")).toHaveClass("status-pill-neutral");
 
@@ -284,13 +284,13 @@ test("keeps the timeline chronological unless attention-first sorting is selecte
       .getAllByRole("heading")
       .slice(0, 2)
       .map((heading) => heading.textContent),
-  ).toEqual(["Agent Enrollment · Needs review", "Agent Enrollment · Failed"]);
+  ).toEqual(["Agent enrollment · Needs review", "1 historical target · Agent enrollment · Failed"]);
 });
 
 test("switches to the responsive table view and persists that preference", async () => {
   const user = userEvent.setup();
   const first = render(<ActivityPage api={api()} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Start · Completed" });
+  await screen.findByRole("heading", { name: /Recipe start · Completed$/ });
 
   await user.click(screen.getByRole("button", { name: "Table" }));
   expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
@@ -343,7 +343,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, resumeJob)} now={NOW} />);
 
-  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await screen.findByRole("heading", { name: /Recipe install · Running$/ });
   await user.click(screen.getByText("View operation progress"));
 
   expect(await screen.findByText("inspect worker logs")).toBeVisible();
@@ -360,7 +360,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   await user.click(screen.getByRole("button", { name: "Resume operation" }));
   await waitFor(() => expect(resumeJob).toHaveBeenCalledWith("operation-1"));
   expect(await screen.findByText("Operation resumed and current details reloaded.")).toBeVisible();
-  expect(screen.getByRole("heading", { name: "Recipe Install · Queued" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe install · Queued$/ })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Resume operation" })).not.toBeInTheDocument();
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
@@ -425,7 +425,7 @@ test("explains an upgrade failure without guessing its missing failure stage", a
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);
 
-  await screen.findByRole("heading", { name: "Agent Upgrade · Waiting for operator" });
+  await screen.findByRole("heading", { name: /Agent upgrade · Waiting for operator$/ });
   await user.click(screen.getByText("View operation progress"));
 
   const diagnosis = await screen.findByRole("region", { name: "Agent upgrade diagnosis" });
@@ -518,7 +518,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);
 
-  await screen.findByRole("heading", { name: "Agent Upgrade · Waiting for operator" });
+  await screen.findByRole("heading", { name: /Agent upgrade · Waiting for operator$/ });
   await user.click(screen.getByText("View operation progress"));
   expect(await screen.findByText("Retry queued behind safety delay")).toBeVisible();
   expect(screen.getByText(nextAction)).toBeVisible();
@@ -573,7 +573,7 @@ test("refreshes an automatic wait at its bounded observation interval", async ()
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);
 
   expect(
-    await screen.findByRole("heading", { name: "Recipe Run Switch · Waiting to recheck" }),
+    await screen.findByRole("heading", { name: /Recipe run switch · Waiting to recheck$/ }),
   ).toBeVisible();
   await user.click(screen.getByText("View operation progress"));
   expect(
@@ -617,7 +617,7 @@ test("shows a retryable operation-detail failure without offering resume", async
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob)} now={NOW} />);
 
-  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await screen.findByRole("heading", { name: /Recipe install · Running$/ });
   await user.click(screen.getByText("View operation progress"));
   expect(await screen.findByRole("alert")).toHaveTextContent("operation projection unavailable");
   expect(screen.queryByRole("button", { name: "Resume operation" })).not.toBeInTheDocument();
@@ -658,7 +658,7 @@ test("clears dynamic filters that are no longer available after refresh", async 
     .mockResolvedValueOnce({ operations: [], next_cursor: null, total: 0 });
   const user = userEvent.setup();
   render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await screen.findByRole("heading", { name: /Recipe install · Running$/ });
 
   await user.selectOptions(screen.getByLabelText("Operator"), "Vonk Forge");
   expect(screen.getByLabelText("Operator")).toHaveValue("Vonk Forge");
@@ -683,7 +683,7 @@ test("resets pagination busy state when a new activity load supersedes load-more
   const secondApi = api(undefined, undefined, noOperations());
   const user = userEvent.setup();
   const view = render(<ActivityPage api={firstApi} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await screen.findByRole("heading", { name: /Recipe install · Running$/ });
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
   expect(screen.getByRole("button", { name: "Loading older operations…" })).toBeDisabled();
 
@@ -738,7 +738,7 @@ test("discloses bounded API windows and loads older operations when a cursor is 
   expect(coverage).toHaveTextContent("Loaded 1 of 2 operations");
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
 
-  expect(await screen.findByRole("heading", { name: "Recipe Stop · Completed" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Recipe stop · Completed$/ })).toBeVisible();
   expect(screen.getByRole("region", { name: "Activity history coverage" })).toHaveTextContent(
     "Loaded 2 of 2 operations",
   );
@@ -864,7 +864,7 @@ test("canonical operations poll current detail while active", async () => {
   });
   vi.useRealTimers();
   expect(client.operation).toHaveBeenCalledWith(first.id);
-  expect(await screen.findByRole("heading", { name: "Profile Load · Completed" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Profile load · Completed$/ })).toBeVisible();
 });
 
 test("paginates operations after a partial page error", async () => {
@@ -883,7 +883,7 @@ test("paginates operations after a partial page error", async () => {
   );
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
   expect(
-    (await screen.findAllByRole("heading", { name: "Profile Load · Failed" }))[0],
+    (await screen.findAllByRole("heading", { name: /Profile load · Failed$/ }))[0],
   ).toBeVisible();
   expect(client.operations).toHaveBeenNthCalledWith(
     3,
@@ -901,7 +901,7 @@ test("server-side filters are sent to the operations API and kept in the URL", a
   const user = userEvent.setup();
   const client = api();
   render(<ActivityPage api={client} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Start · Completed" });
+  await screen.findByRole("heading", { name: /Recipe start · Completed$/ });
   await user.selectOptions(screen.getByLabelText("Operation state"), "failed");
   await user.selectOptions(screen.getByLabelText("Spark"), TARGET_ID);
   await waitFor(() =>
@@ -1032,10 +1032,18 @@ test("reloads the first page when Load more is refused for an invalid cursor", a
     });
   const user = userEvent.setup();
   render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW} />);
-  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await screen.findByRole("heading", { name: /Recipe install · Running$/ });
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
 
   await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(3));
   expect(loadOperations.mock.calls[2][0]).toBeUndefined();
   expect(await screen.findByRole("button", { name: "Load older operations" })).toBeEnabled();
+});
+
+test("names unknown kinds readably, without a schema version or an empty label", () => {
+  expect(activityActionLabel("operation.recipe.job.run.v1.running")).toBe(
+    "Recipe job run · Running",
+  );
+  expect(activityActionLabel("operation.widget.rebuild.v7.failed")).toBe("Widget rebuild · Failed");
+  expect(activityActionLabel("operation..running")).toBe("Operation · Running");
 });

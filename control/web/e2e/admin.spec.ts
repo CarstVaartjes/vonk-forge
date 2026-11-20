@@ -286,9 +286,9 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recipe Start · Completed" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Recipe start · Completed$/ })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Agent Upgrade · Waiting for operator" }),
+    page.getByRole("heading", { name: /Agent upgrade · Waiting for operator$/ }),
   ).toBeVisible();
   await page.getByText("View operation progress").click();
   await expect(page.getByText("Retry queued behind safety delay")).toBeVisible();
