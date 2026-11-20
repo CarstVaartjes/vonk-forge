@@ -28,8 +28,6 @@ control/web/playwright-report
 install/*
 !schemas/
 schemas/*
-!schemas/global/
-schemas/global/*
 !schemas/install-release-manifest.schema.json
 !tools/
 tools/*
