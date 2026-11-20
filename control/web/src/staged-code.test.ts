@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   copyFileSync,
   readFileSync,
   mkdirSync,
@@ -30,6 +31,18 @@ test("generated-only commit checks skip formatting and still reject invalid type
     ]) {
       copyFileSync(join(workspace, "scripts", script), join(root, "scripts", script));
     }
+    // This fixture tests check dispatch: the added-line guards are a stub and the
+    // control environment is not prepared.
+    mkdirSync(join(root, "control/tests"), { recursive: true });
+    writeFileSync(join(root, "control/tests/__init__.py"), "");
+    writeFileSync(
+      join(root, "control/tests/added_line_guards.py"),
+      "import sys\nsys.stdin.read()\nraise SystemExit(0)\n",
+    );
+    appendFileSync(
+      join(root, "scripts/check_environment.py"),
+      "\n\ndef ensure_control(root, environment):\n    return None\n",
+    );
     copyFileSync(join(process.cwd(), "biome.json"), join(web, "biome.json"));
     symlinkSync(join(process.cwd(), "node_modules"), join(web, "node_modules"), "dir");
     writeFileSync(
@@ -52,6 +65,10 @@ test("generated-only commit checks skip formatting and still reject invalid type
     const check = () =>
       spawnSync("python3", ["scripts/check-staged-code"], {
         cwd: root,
+        env: {
+          ...process.env,
+          UV_PROJECT_ENVIRONMENT: join(workspace, "control/.venv"),
+        },
         encoding: "utf8",
         timeout: 30_000,
       });
