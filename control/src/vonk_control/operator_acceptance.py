@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
 
 from .api_availability import AVAILABILITY_ERRORS
 from .auth import Actor
+from .categorized_errors import MissingRecord
 from .operator_receipt_contract import (
     AcceptanceReceipt,
     ReceiptCode,
@@ -238,7 +239,7 @@ class OperatorReceiptResolver:
             assert isinstance(result, Response)
             try:
                 return resolve_agent_receipt(self, policy, result, arguments)
-            except (UnknownOutcomeError, *AVAILABILITY_ERRORS):
+            except (UnknownOutcomeError, MissingRecord, *AVAILABILITY_ERRORS):
                 raise _refused(
                     "The agent receipt owner is unavailable; retry the same request",
                     unavailable=True,
@@ -522,19 +523,23 @@ class OperatorReceiptResolver:
                     request_id=request_key,
                     content_digest=result.plan_digest,
                 )
+        except (MissingRecord, UnknownOutcomeError):
+            # No owner row yet is an unknown outcome: same request, retry.
+            raise _refused(
+                "The owner cannot yet observe its acceptance receipt", unavailable=True
+            ) from None
         except InvalidRequestError as error:
             raise HTTPException(
                 status_code=409,
-                detail=str(error)[:256],
+                detail=(
+                    "The owner refused the acceptance receipt: "
+                    f"{type(error).__name__}: {str(error)[:200]}"
+                ),
                 headers={
                     "x-vonk-error-code": str(
                         getattr(error, "code", ReceiptCode.MISMATCH)
                     )
                 },
-            ) from None
-        except UnknownOutcomeError:
-            raise _refused(
-                "The owner cannot yet observe its acceptance receipt", unavailable=True
             ) from None
         except (KeyError, *AVAILABILITY_ERRORS):
             raise _refused(
