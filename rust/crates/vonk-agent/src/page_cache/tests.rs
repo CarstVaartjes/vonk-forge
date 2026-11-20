@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use vonk_agent_protocol::generated::PageCacheDropPurpose;
 
 const INTERVAL: Duration = Duration::from_secs(5);
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -21,7 +22,7 @@ fn report(problem: Option<PageCacheDropProblem>) -> PageCacheDropReport {
 fn counting(problem: Option<PageCacheDropProblem>) -> (Arc<LoadPhases>, Arc<AtomicUsize>) {
     let drops = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&drops);
-    let dropper: Dropper = Arc::new(move || {
+    let dropper: Dropper = Arc::new(move |_| {
         counted.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move { report(problem) })
     });
@@ -35,7 +36,7 @@ fn ticking(phases: &LoadPhases) -> bool {
 #[tokio::test(start_paused = true)]
 async fn a_loading_run_is_dropped_every_interval_and_never_after_it_is_ready() {
     let (phases, drops) = counting(None);
-    let load = phases.begin(Uuid::new_v4());
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
     load.drop_now().await;
     tokio::time::sleep(INTERVAL * 3 + INTERVAL / 2).await;
     assert_eq!(drops.load(Ordering::SeqCst), 4);
@@ -54,7 +55,7 @@ async fn a_launched_rank_keeps_its_drops_until_its_deadline_and_the_cadence_then
     // A worker rank has no readiness wait on its node: its start deadline
     // bounds its drops.
     let (phases, drops) = counting(None);
-    let load = phases.begin(Uuid::new_v4());
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
     load.drop_now().await;
     let snapshot = load
         .release_until(Instant::now() + INTERVAL * 2 + INTERVAL / 2)
@@ -69,14 +70,14 @@ async fn a_launched_rank_keeps_its_drops_until_its_deadline_and_the_cadence_then
 async fn the_masters_readiness_phase_adopts_its_launched_ranks_drops_and_ends_them_at_ready() {
     let (phases, drops) = counting(None);
     let run = Uuid::new_v4();
-    let launched = phases.begin(run);
+    let launched = phases.begin(run, PageCacheDropPurpose::Load);
     launched.drop_now().await;
     let first = launched
         .release_until(Instant::now() + INTERVAL * 100)
         .and_then(|evidence| evidence.first)
         .unwrap();
     tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
-    let readiness = phases.begin(run);
+    let readiness = phases.begin(run, PageCacheDropPurpose::Load);
     tokio::time::sleep(INTERVAL).await;
     let evidence = readiness.finish().unwrap();
     assert_eq!(evidence.first, Some(first));
@@ -88,7 +89,7 @@ async fn the_masters_readiness_phase_adopts_its_launched_ranks_drops_and_ends_th
 #[tokio::test(start_paused = true)]
 async fn an_abandoned_start_ends_its_drops() {
     let (phases, drops) = counting(None);
-    drop(phases.begin(Uuid::new_v4()));
+    drop(phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load));
     tokio::time::sleep(INTERVAL * 10).await;
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     assert!(!ticking(&phases));
@@ -97,7 +98,7 @@ async fn an_abandoned_start_ends_its_drops() {
 #[tokio::test(start_paused = true)]
 async fn a_drop_the_helper_cannot_make_is_noted_and_the_cadence_continues() {
     let (phases, drops) = counting(Some(PageCacheDropProblem::NotPermitted));
-    let load = phases.begin(Uuid::new_v4());
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
     load.drop_now().await;
     tokio::time::sleep(INTERVAL * 2 + INTERVAL / 2).await;
     let evidence = load.finish().unwrap();
@@ -113,8 +114,8 @@ async fn a_drop_the_helper_cannot_make_is_noted_and_the_cadence_continues() {
 #[tokio::test(start_paused = true)]
 async fn concurrent_loads_share_one_cadence() {
     let (phases, drops) = counting(None);
-    let first = phases.begin(Uuid::new_v4());
-    let second = phases.begin(Uuid::new_v4());
+    let first = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
+    let second = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
     tokio::time::sleep(INTERVAL * 2 + INTERVAL / 2).await;
     assert_eq!(drops.load(Ordering::SeqCst), 2);
     assert_eq!(first.finish().unwrap().drops, 2);
@@ -127,7 +128,7 @@ fn an_ask_is_answered_only_by_the_helpers_report_for_it() {
     let root = tempfile::tempdir().unwrap();
     let socket = root.path().join("helper.sock");
     assert_eq!(
-        ask(&socket).problem,
+        ask(&socket, PageCacheDropPurpose::Load).problem,
         Some(PageCacheDropProblem::HelperUnavailable)
     );
     let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
@@ -150,11 +151,11 @@ fn an_ask_is_answered_only_by_the_helpers_report_for_it() {
             stream.write_all(&body).unwrap();
         }
     });
-    let answered = ask(&socket);
+    let answered = ask(&socket, PageCacheDropPurpose::Load);
     assert_eq!(answered.problem, None);
     assert_eq!(answered.cached_after_bytes, Some(GIB));
     assert_eq!(
-        ask(&socket).problem,
+        ask(&socket, PageCacheDropPurpose::Load).problem,
         Some(PageCacheDropProblem::HelperUnavailable)
     );
     helper.join().unwrap();
@@ -165,7 +166,7 @@ async fn a_stop_ends_a_launched_ranks_drops_before_its_deadline() {
     let (phases, drops) = counting(None);
     let run = Uuid::new_v4();
     phases
-        .begin(run)
+        .begin(run, PageCacheDropPurpose::Load)
         .release_until(Instant::now() + INTERVAL * 100);
     tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
     phases.end(run);
@@ -177,11 +178,33 @@ async fn a_stop_ends_a_launched_ranks_drops_before_its_deadline() {
 #[tokio::test(start_paused = true)]
 async fn a_load_after_the_cadence_ended_starts_it_again() {
     let (phases, drops) = counting(None);
-    phases.begin(Uuid::new_v4()).finish();
+    phases
+        .begin(Uuid::new_v4(), PageCacheDropPurpose::Load)
+        .finish();
     tokio::time::sleep(INTERVAL * 3).await;
     assert!(!ticking(&phases));
-    let load = phases.begin(Uuid::new_v4());
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
     tokio::time::sleep(INTERVAL * 2 + INTERVAL / 2).await;
     assert_eq!(load.finish().unwrap().drops, 2);
     assert_eq!(drops.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_tick_asks_load_while_any_phase_loads_and_hygiene_after() {
+    let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = Arc::clone(&asked);
+    let dropper: Dropper = Arc::new(move |purpose| {
+        log.lock().unwrap().push(purpose);
+        Box::pin(async move { report(None) })
+    });
+    let phases = LoadPhases::new(dropper, INTERVAL);
+    let _job = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Hygiene);
+    let load = phases.begin(Uuid::new_v4(), PageCacheDropPurpose::Load);
+    tokio::time::sleep(INTERVAL + INTERVAL / 2).await;
+    load.finish();
+    tokio::time::sleep(INTERVAL).await;
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [PageCacheDropPurpose::Load, PageCacheDropPurpose::Hygiene]
+    );
 }

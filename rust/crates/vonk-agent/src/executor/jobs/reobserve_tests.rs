@@ -33,7 +33,7 @@ pub(super) struct Peers {
     log: Log,
     done: Arc<AtomicBool>,
     pub(super) socket: PathBuf,
-    controller: String,
+    pub(super) controller: String,
     pub(super) runtime_root: tempfile::TempDir,
 }
 

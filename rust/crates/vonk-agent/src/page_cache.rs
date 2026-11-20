@@ -4,6 +4,8 @@
 //! A start holds its run's load phase from just before its container starts
 //! until it is ready or the start ends; a rank launch, whose readiness another
 //! phase waits for, leaves its run loading until its accepted start deadline.
+//! A job holds its own hygiene phase, keyed by its job id, from just before its
+//! container starts until it exits: drops only, never a load for the guard.
 //! Nothing here can fail or delay a start beyond one bounded ask.
 use std::{
     collections::BTreeMap,
@@ -18,8 +20,8 @@ use tokio::time::Instant;
 use uuid::Uuid;
 use vonk_agent_protocol::canonical_generated_json;
 use vonk_agent_protocol::generated::{
-    PageCacheDropEvidence, PageCacheDropKind, PageCacheDropProblem, PageCacheDropReport,
-    PageCacheDropRequest,
+    PageCacheDropEvidence, PageCacheDropKind, PageCacheDropProblem, PageCacheDropPurpose,
+    PageCacheDropReport, PageCacheDropRequest,
 };
 use vonk_agent_protocol::host_memory_guard_policy::{
     PAGE_CACHE_DROP_INTERVAL, PAGE_CACHE_DROP_REPLY_TIMEOUT,
@@ -27,10 +29,11 @@ use vonk_agent_protocol::host_memory_guard_policy::{
 
 /// Ask the helper for one drop. An ask it does not answer is the report's
 /// problem, never an error.
-pub(crate) fn ask(socket: &Path) -> PageCacheDropReport {
+pub(crate) fn ask(socket: &Path, purpose: PageCacheDropPurpose) -> PageCacheDropReport {
     let request_id = Uuid::new_v4();
     let request = PageCacheDropRequest {
         kind: PageCacheDropKind::PageCacheDrop,
+        purpose,
         request_id,
     };
     let reply = crate::stall_window::Inactivity::new(PAGE_CACHE_DROP_REPLY_TIMEOUT);
@@ -73,7 +76,8 @@ fn unanswered(request_id: Uuid) -> PageCacheDropReport {
 }
 
 /// One drop, however it is made.
-pub type Dropper = Arc<dyn Fn() -> BoxFuture<'static, PageCacheDropReport> + Send + Sync>;
+pub type Dropper =
+    Arc<dyn Fn(PageCacheDropPurpose) -> BoxFuture<'static, PageCacheDropReport> + Send + Sync>;
 
 /// Fold one report into a run's bounded evidence.
 pub fn record(evidence: &mut PageCacheDropEvidence, report: &PageCacheDropReport) {
@@ -98,6 +102,7 @@ pub fn record(evidence: &mut PageCacheDropEvidence, report: &PageCacheDropReport
 }
 
 struct Run {
+    purpose: PageCacheDropPurpose,
     evidence: PageCacheDropEvidence,
     /// `None` while a start holds it; else when its drops end.
     deadline: Option<Instant>,
@@ -134,10 +139,10 @@ impl LoadPhases {
             return existing;
         }
         let owned = socket.to_owned();
-        let dropper: Dropper = Arc::new(move || {
+        let dropper: Dropper = Arc::new(move |purpose| {
             let socket = owned.clone();
             Box::pin(async move {
-                tokio::task::spawn_blocking(move || ask(&socket))
+                tokio::task::spawn_blocking(move || ask(&socket, purpose))
                     .await
                     .unwrap_or_else(|_| unanswered(Uuid::new_v4()))
             })
@@ -151,24 +156,24 @@ impl LoadPhases {
         self.state.lock().unwrap_or_else(|error| error.into_inner())
     }
 
-    /// `run` loads from now until its phase is finished, released or dropped.
-    pub fn begin(self: &Arc<Self>, run: Uuid) -> LoadPhase {
+    /// `run` holds a phase of `purpose` from now until it is finished,
+    /// released or dropped.
+    pub fn begin(self: &Arc<Self>, run: Uuid, purpose: PageCacheDropPurpose) -> LoadPhase {
         let mut state = self.lock();
-        state
-            .runs
-            .entry(run)
-            .or_insert_with(|| Run {
-                evidence: PageCacheDropEvidence {
-                    drops: 0,
-                    problems: 0,
-                    reclaimed_bytes: 0,
-                    first: None,
-                    last: None,
-                    last_problem: None,
-                },
-                deadline: None,
-            })
-            .deadline = None;
+        let held = state.runs.entry(run).or_insert_with(|| Run {
+            purpose,
+            evidence: PageCacheDropEvidence {
+                drops: 0,
+                problems: 0,
+                reclaimed_bytes: 0,
+                first: None,
+                last: None,
+                last_problem: None,
+            },
+            deadline: None,
+        });
+        held.deadline = None;
+        held.purpose = purpose;
         if !state.ticking {
             state.ticking = true;
             let phases = Arc::clone(self);
@@ -181,8 +186,19 @@ impl LoadPhases {
         }
     }
 
+    /// One drop for every phase held: a load if any phase loads, else hygiene.
     async fn drop_once(&self) {
-        let report = (self.dropper)().await;
+        let purpose = if self
+            .lock()
+            .runs
+            .values()
+            .any(|run| run.purpose == PageCacheDropPurpose::Load)
+        {
+            PageCacheDropPurpose::Load
+        } else {
+            PageCacheDropPurpose::Hygiene
+        };
+        let report = (self.dropper)(purpose).await;
         let mut state = self.lock();
         if report.problem != state.last_problem {
             if let Some(problem) = report.problem {
