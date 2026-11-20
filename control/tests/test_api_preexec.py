@@ -128,7 +128,7 @@ def test_owned_state_initializes_database_then_the_single_administrator(
     events: list[object] = []
     monkeypatch.setattr(api_preexec.os, "geteuid", lambda: 0)
     monkeypatch.setattr(api_preexec, "_SOURCE_SECRETS", source)
-    monkeypatch.setattr(api_preexec, "_NORMALIZED_SECRETS", normalized)
+    monkeypatch.setattr(api_preexec, "SECRETS_ROOT", normalized)
     monkeypatch.setattr(
         api_preexec,
         "initialize_database",

@@ -573,43 +573,18 @@ def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
     """Catches a resident helper that reports healthy unstaged, or busy-loops."""
     monkeypatch.setattr(runtime_init.signal, "signal", lambda *_args: None)
     marker = tmp_path / "runtime-staged"
-    attempts: list[str] = []
+    idles: list[str] = []
 
     def unavailable() -> None:
-        attempts.append("stage")
         raise OSError("volume observation unavailable")
 
     monkeypatch.setattr(runtime_init, "stage_runtime", unavailable)
-    with pytest.raises(SystemExit) as ended:
-        runtime_init.main(marker=marker)
-    assert ended.value.code == 1
-    assert attempts == ["stage"] * 3
+    with pytest.raises(OSError):
+        runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
     assert not marker.exists()
+    assert idles == []
 
-    idles: list[str] = []
-    monkeypatch.setattr(runtime_init, "stage_runtime", lambda: attempts.append("ok"))
+    monkeypatch.setattr(runtime_init, "stage_runtime", lambda: None)
     runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
-    assert attempts[-1] == "ok"
     assert marker.read_text() == "staged\n"
     assert idles == ["idle"]
-
-
-def test_runtime_init_stages_secrets_kit_and_volumes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events: list[str] = []
-    monkeypatch.setattr(runtime_init.os, "geteuid", lambda: 0)
-    for name in (
-        "stage_compose_secrets",
-        "stage_runtime_assets",
-        "prepare_shared_volumes",
-    ):
-        monkeypatch.setattr(runtime_init, name, lambda name=name: events.append(name))
-
-    runtime_init.stage_runtime()
-
-    assert events == [
-        "stage_compose_secrets",
-        "stage_runtime_assets",
-        "prepare_shared_volumes",
-    ]

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+from vonk_agent_protocol import WaitReason
 
 from .categorized_errors import UnsettledOutcome
 from .runtime_asset_contract import RuntimeAssetInventory
@@ -33,7 +33,7 @@ GATEWAY_MASTER_KEY_PATH = Path("/gateway-secrets/authority/master-key")
 
 @dataclass(frozen=True)
 class SharedRuntimePaths:
-    """Shared named-volume roots initialized by the control API pre-exec."""
+    """Shared named-volume roots initialized by runtime-init."""
 
     agent_artifacts: Path = Path("/state/agent-artifacts")
     model_cache: Path = Path("/state/model-cache")
@@ -645,7 +645,7 @@ def _identity(value: os.stat_result) -> tuple[int, ...]:
 def stage_runtime() -> None:
     """Stage everything other services read before they start.
 
-    The ``runtime-init`` Compose one-shot runs this as root, without network or
+    The ``runtime-init`` Compose helper runs this as root, without network or
     database, before its dependants start: private secrets for each consumer,
     this release's runtime kit, and the ownership of the shared volume roots.
     """
@@ -671,20 +671,14 @@ def main(
     """Stage once, mark this run healthy, then stay resident without work.
 
     Some NAS Docker UIs show a project with an exited container as failed, so
-    the staging container stays up. A failed run exits for the restart policy;
-    every file is replaced atomically, so the previous staging stays intact
-    for the dependants, which start anyway.
+    the staging container stays up. A failed run exits with its traceback and
+    Docker's restart backoff runs it again; every file is replaced atomically,
+    so the previous staging stays intact for the dependants, which start
+    anyway.
     """
     # As PID 1 the default SIGTERM action is ignored; stop promptly instead.
     signal.signal(signal.SIGTERM, _stop)
-    for _attempt in range(3):
-        try:
-            stage_runtime()
-            break
-        except (OSError, UnknownOutcomeError):
-            _LOGGER.warning("runtime staging observation is unavailable")
-    else:
-        raise SystemExit(1)
+    stage_runtime()
     marker.write_text("staged\n", encoding="utf-8")
     # Blocks until a signal is handled; SIGTERM exits. Any other wake ends the
     # process and the restart policy stages again.

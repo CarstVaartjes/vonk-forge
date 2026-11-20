@@ -29,10 +29,14 @@ def _services() -> dict[str, dict]:
 
 
 def _volume_mounts(service: dict) -> list[tuple[str, bool]]:
-    """(volume, read_only) for each named-volume mount."""
+    """(source, read_only) for each mount, in short or long syntax."""
     mounts = []
     for entry in service.get("volumes", []):
-        if isinstance(entry, str):
+        if isinstance(entry, dict):
+            mounts.append(
+                (str(entry.get("source", "")), entry.get("read_only") is True)
+            )
+        else:
             fields = entry.split(":")
             mounts.append((fields[0], fields[-1] == "ro" and len(fields) == 3))
     return mounts
