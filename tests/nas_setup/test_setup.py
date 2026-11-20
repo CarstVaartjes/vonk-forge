@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from vonk_agent_protocol.installer_setup import (
     NasGroupReadableSecrets,
     NasInstallTemplate,
+    NasInternalValue,
     NasRequiredValuePrompt,
     NasSecretPrompt,
 )
@@ -186,13 +187,14 @@ def test_projection_repair_reuses_verified_authority(
         )
 
 
-def test_absent_custody_does_not_block_compose_and_fresh_request_recovers(
+def test_absent_custody_keeps_previous_compose_and_fresh_request_recovers(
     installed: Path, template: NasInstallTemplate
 ) -> None:
-    """Catch treating missing signer as permission to mint authority or poisoned state."""
+    """Catch treating missing signer as permission to mint authority or a half bundle."""
     signer = installed / "secrets/signing-key"
     retained = installed / ".vonk-verified-secrets/signing-key"
     original = signer.read_bytes()
+    compose = (installed / "docker-compose.yaml").read_bytes()
     signer.unlink()
     retained.unlink()
     template = template.model_copy(
@@ -200,11 +202,67 @@ def test_absent_custody_does_not_block_compose_and_fresh_request_recovers(
     )
     with pytest.raises(ObservationUnavailable):
         prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
-    assert (installed / "docker-compose.yaml").read_text() == ("services:\n  new: {}\n")
+    assert (installed / "docker-compose.yaml").read_bytes() == compose
     assert not signer.exists()
     retained.write_bytes(original)
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
     assert signer.read_bytes() == original
+    assert (installed / "docker-compose.yaml").read_text() == ("services:\n  new: {}\n")
+
+
+def test_retried_upgrade_asks_a_new_required_value_once(
+    installed: Path, template: NasInstallTemplate
+) -> None:
+    """Catch a retry re-prompting, so file input ends before the real blocker."""
+    (installed / "secrets/signing-key").unlink()
+    (installed / ".vonk-verified-secrets/signing-key").unlink()
+    template = template.model_copy(
+        update={
+            "required_values": [
+                *template.required_values,
+                NasRequiredValuePrompt(
+                    env="VONK_NEW_IP", prompt="New IP", validation="ipv4"
+                ),
+            ]
+        }
+    )
+    output = io.StringIO()
+    with pytest.raises(ObservationUnavailable):
+        prepare(
+            template,
+            installed.parent,
+            PromptIo(io.StringIO("10.0.0.9\n"), output),
+            upgrade=True,
+        )
+    assert output.getvalue().count("New IP") == 1
+
+
+def test_compose_refusal_leaves_secrets_and_env_unchanged(
+    installed: Path, template: NasInstallTemplate
+) -> None:
+    """Catch publishing secrets and .env before the Compose file is known good."""
+    before = (
+        credentials(installed),
+        (installed / ".env").read_bytes(),
+        (installed / "docker-compose.yaml").read_bytes(),
+    )
+    template = template.model_copy(
+        update={
+            "docker_compose_yaml": (
+                "services: {a: {profiles: [unselected]}, b: {depends_on: [a]}}\n"
+            ),
+            "internal_values": [
+                NasInternalValue(env="VONK_CONTROLLER_IMAGE", value="controller:newer")
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="unselected"):
+        prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
+    assert (
+        credentials(installed),
+        (installed / ".env").read_bytes(),
+        (installed / "docker-compose.yaml").read_bytes(),
+    ) == before
 
 
 def test_consumed_symlinks_and_hardlinks_never_touch_outside_alias(
