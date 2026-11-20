@@ -64,7 +64,7 @@ def verify(
                 f"{job} result is {results.get(job)!r}, expected {expected!r}"
             )
 
-    for job in ("lint", "supply-chain", "repository-guards"):
+    for job in ("lint", "supply-chain", "repository-guards", "consumer-probe"):
         expect(job, full)
 
     def chosen(area: str) -> bool:
