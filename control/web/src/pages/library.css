@@ -1118,6 +1118,7 @@
 .library-toolbar .segmented button small {
   color: var(--gold-text);
   font-size: 0.6875rem;
+  font-weight: 400;
 }
 .library-toolbar .segmented button small.segment-count {
   color: var(--muted);
