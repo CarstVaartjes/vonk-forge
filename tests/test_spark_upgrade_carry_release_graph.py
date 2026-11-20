@@ -229,10 +229,24 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     assert ("step-ca" in lane._expected_controller_services()) is historical
     # A service only the baseline declares (the retired standing registry) runs
     # with it, so it is expected there and gone once the candidate is current.
+    # The installed file carries no `profiles:` key; the Tailscale pair is
+    # declared there yet never started under the disabled lane credential.
+    tailscale_pair = {"tailscale-gateway", "tailscale-configurator"}
+    tailscale = {name: {"image": "tailscale/tailscale:dev"} for name in tailscale_pair}
     (tmp_path / "docker-compose.yaml").write_text(
-        yaml.safe_dump({"services": {**installed, "registry": {"image": "registry:3"}}})
+        yaml.safe_dump(
+            {
+                "services": {
+                    **installed,
+                    **tailscale,
+                    "registry": {"image": "registry:3"},
+                }
+            }
+        )
     )
     assert "registry" in lane._expected_controller_services()
+    assert not tailscale_pair & lane._expected_controller_services()
+    assert not tailscale_pair & set(lane._local_controller_up_command())
     (tmp_path / "docker-compose.yaml").write_text(
         yaml.safe_dump({"services": base_services})
     )

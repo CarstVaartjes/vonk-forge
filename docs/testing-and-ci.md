@@ -74,7 +74,10 @@ for a change to what the upgrade is made of: the agent, its packaging and
 installers, the deployment, the Controller-to-agent protocol, and the scripts,
 actions and workflows that assemble and accept a candidate (`CARRY_INPUTS` in
 `scripts/select-ci-areas`). The `release-acceptance` label makes any PR a full
-run with both.
+run with both. The baseline starts every service its installed Compose file
+declares except the Tailscale pair (the lane has no tailnet, and the installed
+file carries no `profiles:` key to tell them apart); after the upgrade the
+candidate's roster is expected.
 
 The carry waits on behaviour, never on a fixed timer. After the baseline
 serves, after the Controller recreate and after the agent upgrade, each phase
