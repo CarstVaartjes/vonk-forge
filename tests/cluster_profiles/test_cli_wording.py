@@ -29,6 +29,7 @@ from cluster_profiles.cli_render import (
     _library_item,
     render_payload,
 )
+from cluster_profiles.cli_render import library as library_render
 from cluster_profiles.cli_render.common import _utc
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.library import _model_counts
@@ -239,9 +240,8 @@ _RECIPE = _vector("library-list.json")["recipes"][0]
 _MODEL_COUNT = _vector("library-model-count.json")
 
 
-@pytest.mark.parametrize("case", _MODEL_COUNT["cases"], ids=lambda c: c["name"])
-def test_model_count_folds_variants_like_the_web(case):
-    rows = [
+def _model_rows(case):
+    return [
         {
             "identity": {
                 "publisher": "p",
@@ -254,7 +254,26 @@ def test_model_count_folds_variants_like_the_web(case):
         }
         for model in case["models"]
     ]
-    assert _model_counts(rows) == (case["models_count"], case["variants_count"])
+
+
+@pytest.mark.parametrize("case", _MODEL_COUNT["cases"], ids=lambda c: c["name"])
+def test_model_count_folds_variants_like_the_web(case):
+    assert _model_counts(_model_rows(case)) == (
+        case["models_count"],
+        case["variants_count"],
+    )
+
+
+def test_model_library_prints_models_and_variants(printed, monkeypatch):
+    case = _MODEL_COUNT["cases"][0]
+    monkeypatch.setattr(library_render, "_library_row", lambda item, noun: [])
+    monkeypatch.setattr(library_render, "_table", lambda labels, rows: None)
+    rows = [row | {"local": {}} for row in _model_rows(case)]
+    payload = {"models": rows, "next_cursor": None}
+    lines = printed(library_render._library, payload, "model", detail=False, wide=False)
+    assert (
+        f"Models: {case['models_count']} ({case['variants_count']} variants)" in lines
+    )
 
 
 @pytest.fixture

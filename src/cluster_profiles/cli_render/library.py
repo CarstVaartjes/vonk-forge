@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
+from typing import Any
 from urllib.parse import quote
 
 from ..cli_states_generated import QualificationOutcome, QualificationStatus
@@ -382,7 +383,7 @@ def _applied_filters(payload: Mapping[str, object]) -> list[str]:
     return applied
 
 
-def _model_counts(rows: Sequence[object]) -> tuple[int, int]:
+def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     """Models and exact variants among model rows, as the web Library counts them.
 
     A Model is the display lineage ``family/line/model``; quantizations and other
@@ -391,27 +392,16 @@ def _model_counts(rows: Sequence[object]) -> tuple[int, int]:
     ``tests/fixtures/library-model-count.json`` pins the rule for web and vonkctl.
     """
     models: set[tuple[str, str, str]] = set()
-    variants: set[str] = set()
+    variants: set[tuple[str, str, str]] = set()
     for row in rows:
-        if not isinstance(row, Mapping):
+        display = row["model_display"]
+        lineage = display["lineage"] if display is not None else None
+        if lineage is None:
             continue
-        display = row.get("model_display")
-        lineage = display.get("lineage") if isinstance(display, Mapping) else None
-        if not isinstance(lineage, Mapping):
-            continue
-        models.add(
-            (
-                str(lineage.get("family")),
-                str(lineage.get("line")),
-                str(lineage.get("model")),
-            )
-        )
-        identity = row.get("identity")
+        models.add((lineage["family"], lineage["line"], lineage["model"]))
+        identity = row["identity"]
         variants.add(
-            "/".join(
-                str(identity.get(field)) if isinstance(identity, Mapping) else ""
-                for field in ("publisher", "slug", "content_sha256")
-            )
+            (identity["publisher"], identity["slug"], identity["content_sha256"])
         )
     return len(models), len(variants)
 
