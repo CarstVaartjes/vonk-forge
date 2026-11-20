@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
-from vonk_control import artifact_blob_store, recipe_packages, route_runtime
+from vonk_control import artifact_blob_store, route_runtime
 from vonk_control.api import production as api
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.capabilities import CapabilityRegistry, RecoveringService
@@ -38,7 +38,6 @@ def _platform(client, headers) -> PlatformObservation:
         (FilesystemRuntimeImageStorage, ControllerCapability.RUNTIME_IMAGE_STORAGE),
         (api.ModelCacheService, ControllerCapability.MODEL_CACHE),
         (artifact_blob_store.ArtifactBlobStore, ControllerCapability.ARTIFACT_STORAGE),
-        (recipe_packages.RecipePackageClient, ControllerCapability.RECIPE_LIBRARY),
         (api.GatewayKeyService, ControllerCapability.GATEWAY_KEYS),
         (
             route_runtime.AtomicRouteBundlePublisher,

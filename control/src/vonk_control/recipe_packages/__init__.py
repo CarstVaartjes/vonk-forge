@@ -208,7 +208,7 @@ class RecipePackageClient:
         parsed = urlsplit(origin)
         if not parsed.hostname or (
             parsed.scheme != "https"
-            and parsed.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}
+            and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
         ):
             raise RecipePackageError(
                 RecipePackageCode.URL_INSECURE, "recipe package URL must use HTTPS"
@@ -229,7 +229,7 @@ class RecipePackageClient:
             not api.hostname
             or (
                 api.scheme != "https"
-                and api.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}
+                and api.hostname not in {"localhost", "127.0.0.1", "::1"}
             )
             or api.username
             or api.password

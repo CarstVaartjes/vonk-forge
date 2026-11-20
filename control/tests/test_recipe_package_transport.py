@@ -476,8 +476,8 @@ def test_production_reader_downloads_one_signed_bundle(
     index, row, package = _canonical_package_fixture()
     release = _release_for(index, package)
     client = RecipePackageClient(
-        api_url="http://127.0.0.1:8083",
-        asset_url="http://127.0.0.1:8085",
+        api_url="http://127.0.0.1:9001",
+        asset_url="http://127.0.0.1:9002",
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(release.handler),
     )
@@ -488,13 +488,13 @@ def test_production_reader_downloads_one_signed_bundle(
     assert signed_releases == [release.members["SHA256SUMS"]]
     # One listing call and one bundle download; nothing per package.
     assert release.requests == [
-        f"http://127.0.0.1:8083{RELEASES}?per_page=100",
+        f"http://127.0.0.1:9001{RELEASES}?per_page=100",
         (
-            "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/"
+            "http://127.0.0.1:9002/CarstVaartjes/vonk-forge-recipes/releases/download/"
             f"v{MAJOR}.1.0/recipe-library.tar"
         ),
         (
-            "http://127.0.0.1:8085/github-production-release-asset/1336002555/"
+            "http://127.0.0.1:9002/github-production-release-asset/1336002555/"
             "recipe-library.tar?sig=opaque%3D"
         ),
     ]

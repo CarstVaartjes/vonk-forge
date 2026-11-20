@@ -38,9 +38,7 @@ STATE_ROOT = Path("/state")
 AGENT_ARTIFACT_ROOT = Path("/state/agent-artifacts")
 MODEL_CACHE_ROOT = Path("/state/model-cache")
 
-# Fixed in-project relays and the private certificate authority.
-RECIPE_LIBRARY_API_URL = "http://caddy:8083"
-RECIPE_LIBRARY_ASSET_URL = "http://caddy:8085"
+# The fixed in-project relay and the private certificate authority.
 AGENT_RELEASE_API_URL = "http://caddy:8084"
 AGENT_CA_PROVISIONER_NAME = "vonk-forge-agent"
 
