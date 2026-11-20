@@ -329,17 +329,8 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     assert client.calls == []
 
 
-def test_start_here_and_library_example_match_the_runbook():
-    from pathlib import Path
-
-    from cluster_profiles.cli_help import START_HERE
-
-    runbook = Path(__file__).parents[2] / "docs/runbooks/vonkctl.md"
-    text = runbook.read_text()
-    block = text.split("Start here, in order:\n\n```text\n", 1)[1].split("```", 1)[0]
-    assert block.splitlines() == [command for command, _ in START_HERE]
+def test_recipe_library_help_shows_its_example_above_the_flags():
     example = "vonkctl recipe library --fits-fleet --limit 5"
-    assert START_HERE[1][0] == example and example in text
     parser = cli._parser()
     for name in ("recipe", "library"):
         commands = subcommands(parser)

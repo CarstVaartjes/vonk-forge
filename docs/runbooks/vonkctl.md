@@ -65,18 +65,7 @@ saved selection.
 
 Help is a map of the command tree and works offline. `vonkctl` (or
 `vonkctl --help`) lists where to start, every command group, and the global
-flags. Start here, in order:
-
-```text
-vonkctl fleet
-vonkctl recipe library --fits-fleet --limit 5
-vonkctl run <recipe> --profile <n>
-vonkctl profile endpoint
-vonkctl key create <name>
-vonkctl job run <alias> --input slot=file
-```
-
- `vonkctl GROUP --help` lists that group's commands as full invocations
+flags, in the order to try them. `vonkctl GROUP --help` lists that group's commands as full invocations
 with their arguments, for example `vonkctl fleet detail <spark>`, and no
 options. `vonkctl GROUP COMMAND --help` shows that command's arguments and
 flags. A group run on its own shows its current state: `vonkctl fleet`,
