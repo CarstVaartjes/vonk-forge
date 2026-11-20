@@ -101,7 +101,6 @@ class Fixture:
         return {
             "slot": slot,
             "name": self.name,
-            "media_type": self.media_type,
             "size_bytes": self.size_bytes,
             "sha256": self.sha256,
         }

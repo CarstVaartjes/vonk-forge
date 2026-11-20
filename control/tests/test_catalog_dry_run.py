@@ -18,6 +18,8 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
+from vonk_control.artifact_jobs.contracts import slot_input_media_type
+from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.litellm import LiteLlmPolicy, RouteState, render_config
 from vonk_control.prebuilt_images import (
     _bundle_relative,
@@ -129,6 +131,24 @@ def _upstream_model(slug: str) -> str | None:
 @pytest.fixture(scope="module")
 def dry_run(tmp_path_factory: pytest.TempPathFactory) -> Iterator[CatalogDryRun]:
     yield from import_catalog(ROOT, tmp_path_factory.mktemp("catalog-dry-run"))
+
+
+@pytest.mark.parametrize("slug", _params())
+def test_every_declared_input_extension_resolves_to_a_slot_media_type(
+    slug: str,
+) -> None:
+    """The Controller derives a job input's type from its file name: every
+    extension a recipe's input slot declares must map to one of its types."""
+
+    recipe = read_recipe(_document(slug))
+    for interface in (i.adapter for i in recipe.interfaces if i.adapter != "openai"):
+        contract = compile_artifact_contract(recipe, interface)
+        for input_slot in contract.input.slots:
+            for extension in input_slot.extensions:
+                assert slot_input_media_type(input_slot, f"file{extension}"), (
+                    f"slot {input_slot.id} extension {extension} maps to none of "
+                    f"{input_slot.media_types}"
+                )
 
 
 @pytest.mark.parametrize("slug", _params())

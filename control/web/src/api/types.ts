@@ -176,6 +176,7 @@ export type LibraryViewPlacementGroup = {
 export type ArtifactJobInterface = components["schemas"]["ArtifactJobResponse"]["interface"];
 export type ArtifactJobFile = components["schemas"]["ArtifactOutputFile"];
 export type ArtifactJobInputFile = components["schemas"]["ArtifactFileDeclaration"];
+export type ArtifactJobInputRequest = components["schemas"]["RecipeJobInputRequest"];
 export type ArtifactJobOutputLimits = components["schemas"]["OutputLimits"];
 export type ArtifactJobCreateInput = components["schemas"]["ArtifactJobCreate"];
 export type ArtifactJob = components["schemas"]["ArtifactJobResponse"];
