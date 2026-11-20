@@ -83,17 +83,17 @@ pub(crate) async fn accept_async(
 }
 
 async fn is_probe_async(stream: &tokio::net::TcpStream) -> bool {
-    let deadline = std::time::Instant::now() + PROBE_WAIT;
+    let deadline = tokio::time::Instant::now() + PROBE_WAIT;
     let mut buffer = [0_u8; PEEK_BYTES];
     loop {
-        match stream.peek(&mut buffer).await {
-            Ok(size) if size == 0 || complete(&buffer[..size]) || size == PEEK_BYTES => {
+        match tokio::time::timeout_at(deadline, stream.peek(&mut buffer)).await {
+            Ok(Ok(size)) if size == 0 || complete(&buffer[..size]) || size == PEEK_BYTES => {
                 return is_probe(&buffer[..size]);
             }
-            Ok(_) => {}
-            Err(_) => return false,
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) | Err(_) => return false,
         }
-        if std::time::Instant::now() >= deadline {
+        if tokio::time::Instant::now() >= deadline {
             return false;
         }
         tokio::time::sleep(Duration::from_millis(2)).await;
