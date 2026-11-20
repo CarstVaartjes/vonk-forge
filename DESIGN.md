@@ -305,6 +305,19 @@ The administrator menu is four uniform left-aligned rows (download CLI token, AP
 
 **The State Before Control Rule.** Show health, current workload, capacity, and live-versus-desired evidence before presenting the action that changes them.
 
+## Glossary
+
+One word per thing, in the Controller, `vonkctl`, the site and the docs (owner decision, 20 Nov 2026).
+
+- **Load**: the profile verb. A profile is loaded onto the fleet (`profile load`).
+- **Controller**: the host that runs the control plane and serves the web interface.
+- **Overview / Workloads**: the two views of where things run. Overview leads with the workload per Spark; Workloads is one line per workload.
+- **Capabilities**: what a model or recipe can do.
+- **Family**: the model lineage a model belongs to (Family, Line, Model, Variant).
+- **Quantization**: the weight precision of a variant.
+- **Creator**: who published the model or recipe.
+- **Dates**: written "20 Nov 2026" (day, abbreviated month, year).
+
 ## Do's and Don'ts
 
 ### Do:
