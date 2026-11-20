@@ -511,8 +511,10 @@ def decide(
       not running, should run         -> START
       created, never started          -> WAIT_CREATED, then START
       otherwise                       -> NONE
-    A declared network that does not exist counts as broken, never unknown;
-    its REATTACH, journalled and backed off, first recreates the network
+    A declared network that does not exist counts as broken, never unknown,
+    but only for a container the janitor owes a run (running, failed start,
+    journalled start, or abandoned `created`): Compose reconciles the rest.
+    Its REATTACH, journalled and backed off, first recreates the network
     (`Reconciler.recreate`) from the bundle's definition.
     """
     if container.state in DOCKER_OWNED:
@@ -698,11 +700,13 @@ class Reconciler:
 
         A network the bundle declares for the container's service that does not
         exist is broken whatever the record says (the daemon can lose a network
-        and drop it from the record together), but only for a container that
-        should run and is still as inspected: Compose removes the network of a
-        container it stopped cleanly, and reconnects it itself. One that exists but is missing
-        from the record is Compose's to attach (a redeploy may be mid-way),
-        unless a pending repair owes it or this janitor recreated the network. A recorded entry is broken when it
+        and drop it from the record together), but only for an active container
+        (should run, or abandoned in `created`) still as inspected: Compose
+        removes the network of a container it stopped cleanly and reconnects it
+        itself. One that exists but is missing from the record is Compose's to
+        attach (a redeploy may be mid-way), unless a pending repair owes it or
+        this janitor recreated the network for an active container. A recorded
+        entry, when active, is broken when it
         names an older network ID (the network was recreated) or, while
         running, when the network lists no endpoint for it. A pending repair
         also owes the networks it disconnected and has not yet seen attached.
@@ -711,6 +715,7 @@ class Reconciler:
         declared = self.topology.declared(self.project, container.service)
         names = dict.fromkeys([*container.networks, *owed, *declared])
         broken = []
+        active = should_run(container, pending) or abandoned(container)
         for name in names:
             network = self.network(name, networks)
             if network is None:
@@ -720,17 +725,17 @@ class Reconciler:
                 # reconcile: it is removing the network and will reconnect it.
                 # Condemn only one that should run and still is in the state
                 # it was inspected in.
-                if not (should_run(container, pending) and self.observed(container)):
+                if not (active and self.observed(container)):
                     return None
                 broken.append(name)
                 continue
             if name not in container.networks:
                 # Compose's to attach, unless a repair owes it: journalled, or
                 # a network this janitor recreated for the declared service.
-                if name in owed or (network.recreated and name in declared):
+                if name in owed or (active and network.recreated and name in declared):
                     broken.append(name)
                 continue
-            if self.detached(container, name, network):
+            if active and self.detached(container, name, network):
                 # The snapshot is shared by the tick and may predate this
                 # container joining; condemn only on a fresh read, and only if
                 # the container is still in the state it was observed in.

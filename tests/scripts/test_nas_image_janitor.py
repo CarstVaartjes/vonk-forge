@@ -380,15 +380,34 @@ def test_recreated_network_reattaches_the_same_stopped_container_and_runs_it(
 def test_compose_network_swap_is_never_fought_at_any_step(tmp_path: Path) -> None:
     """Catches recreating a network under Compose, which then never reconnects Caddy."""
     daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    # The precondition: a previous heal left the janitor's own mark.
+    daemon.networks["vonk-forge_ingress"]["Labels"][janitor.HASH_LABEL] = (
+        "janitor-recreated"
+    )
     ticks(reconciler, clock, 1)
     daemon.exits_cleanly(caddy)  # Compose stops Caddy cleanly.
     ticks(reconciler, clock, 1)
+    # Disconnect before remove: the network still exists, the record is empty.
+    daemon.networks["vonk-forge_ingress"]["Containers"].pop(caddy, None)
     del daemon.containers[caddy]["NetworkSettings"]["Networks"]["vonk-forge_ingress"]
     ticks(reconciler, clock, 1)
     del daemon.networks["vonk-forge_ingress"]  # The network is removed.
     ticks(reconciler, clock, 2)
     assert daemon.created == []
     assert daemon.mutations == []
+
+
+def test_abandoned_created_container_with_a_lost_network_is_healed_and_run(
+    tmp_path: Path,
+) -> None:
+    """Catches waiting forever on a never-started container whose network vanished."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.exits_cleanly(caddy)
+    daemon.containers[caddy]["State"]["Status"] = "created"
+    del daemon.networks["vonk-forge_ingress"]
+    ticks(reconciler, clock, 2)
+    assert [c["Name"] for c in daemon.created] == ["vonk-forge_ingress"]
+    assert daemon.running(caddy)
 
 
 def test_container_that_stops_mid_tick_does_not_condemn_a_vanished_network(
