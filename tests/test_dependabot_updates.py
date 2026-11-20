@@ -32,17 +32,12 @@ WORKFLOWS = ROOT / ".github/workflows"
 def test_a_dependabot_pull_request_schedules_no_runner() -> None:
     # Its update lands through an integration pull request, which runs CI once.
     # Every job that could start on its own on a pull request (no `needs`, or
-    # `always()` and not push-only) skips it; the proof workflows' only root job
-    # is ci-scope.yml's `scope`.
-    scope = yaml.safe_load((WORKFLOWS / "ci-scope.yml").read_text())["jobs"]["scope"]
-    assert DEPENDABOT_SKIP in scope["if"]
+    # `always()` and not push-only) skips it; every proof is a ci.yml job.
     for path in sorted(WORKFLOWS.glob("*.yml")):
         workflow = yaml.safe_load(path.read_text())
         if not {"pull_request", "pull_request_target"} & set(workflow[True]):
             continue
         for name, job in workflow["jobs"].items():
-            if job.get("uses") == "./.github/workflows/ci-scope.yml":
-                continue
             condition = str(job.get("if", ""))
             if "github.event_name == 'push'" in condition and "||" not in condition:
                 continue

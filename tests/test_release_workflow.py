@@ -270,10 +270,13 @@ def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
 
 def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
-    for name in ("generated-clients", "repository-guards", "lint"):
+    for name in ("generated-clients", "repository-guards"):
         # No path predicate: the only one is the selector's full-suites choice.
         assert jobs[name]["if"] == FULL_ONLY, name
         assert jobs[name]["needs"] == "changes", name
+    # The member tier's Python check runs on every pull request, member or full.
+    assert "if" not in jobs["lint"]
+    assert jobs["lint"]["needs"] == "changes"
     assert "lane-proof" in jobs["ci-gate"]["needs"]
     # Integration PRs prove their own complete candidate with no release secrets.
     assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"

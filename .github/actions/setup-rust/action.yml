@@ -1,0 +1,26 @@
+name: Set up Rust
+description: >-
+  Install the toolchain pinned in rust-toolchain.toml (channel and components
+  come from that file only) and restore the shared Rust dependency cache
+  read-only. Only the main-branch warm job saves caches (ci-cache-warm.yml).
+inputs:
+  shared-key:
+    description: rust-cache key shared with the warm job (linux-amd64 or linux-arm64)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        read -r channel components < <(python3 -c 'import tomllib; t = tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]; print(t["channel"], ",".join(t.get("components", [])))')
+        rustup set profile minimal
+        scripts/retry-dependency-fetch rustup toolchain install "$channel" ${components:+--component "$components"}
+        rustup default "$channel"
+    - name: Restore read-only Rust dependency cache
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        shared-key: ${{ inputs.shared-key }}
+        add-job-id-key: "false"
+        save-if: "false"

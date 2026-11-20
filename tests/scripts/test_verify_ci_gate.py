@@ -32,6 +32,7 @@ def _valid(**overrides: str):
         "agent-package": "true",
         "lane": "false",
         "full": "true",
+        "rust-changed": "false",
     }
     results = {
         "lint": "success",
@@ -51,6 +52,14 @@ def _valid(**overrides: str):
         "lane-proof": "skipped",
         "supply-chain": "success",
         "consumer-probe": "success",
+        "member-web": "skipped",
+        "agent-repair-recovery": "success",
+        "client-compatibility-report": "success",
+        "installed-cli-proof": "success",
+        "model-cache-unknown-expiry": "success",
+        "oci-link-fallback": "success",
+        "privileged-helper-oci-process": "success",
+        "profile-effect-consumer": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
     results.update({key: value for key, value in overrides.items() if key in results})
@@ -81,6 +90,13 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "nas-install",
         "agent-package",
         "lane-proof",
+        "agent-repair-recovery",
+        "client-compatibility-report",
+        "installed-cli-proof",
+        "model-cache-unknown-expiry",
+        "oci-link-fallback",
+        "privileged-helper-oci-process",
+        "profile-effect-consumer",
     ):
         results[job] = "skipped"
     assert _module().verify("success", selected, results) == []
@@ -188,16 +204,38 @@ def test_repository_guards_are_required_when_heavy_repository_is_skipped(
     )
 
 
-def test_member_pull_request_runs_no_jobs() -> None:
+def test_member_pull_request_runs_only_the_quick_tier() -> None:
     selected, results = _valid(full="false")
     for job in results:
         results[job] = "skipped"
+    results.update(lint="success", **{"member-web": "success"})
     assert _module().verify("success", selected, results) == []
-    # Any job that ran anyway is refused.
-    refused = dict(results, lint="success")
+    # Any full-suite job that ran anyway is refused.
+    refused = dict(results, **{"rust-tests": "success"})
     assert _module().verify("success", selected, refused) == [
-        "lint result is 'success', expected 'skipped'"
+        "rust-tests result is 'success', expected 'skipped'"
     ]
+    # The quick tier is not optional.
+    missing = dict(results, **{"member-web": "skipped"})
+    assert _module().verify("success", selected, missing) == [
+        "member-web result is 'skipped', expected 'success'"
+    ]
+
+
+@pytest.mark.parametrize("rust_changed", ["true", "false"])
+def test_member_rust_quality_runs_only_when_rust_changed(rust_changed) -> None:
+    selected, results = _valid(full="false")
+    selected["rust-changed"] = rust_changed
+    for job in results:
+        results[job] = "skipped"
+    results.update(lint="success", **{"member-web": "success"})
+    ran = rust_changed == "true"
+    results["rust-quality"] = "success" if ran else "skipped"
+    assert _module().verify("success", selected, results) == []
+    results["rust-quality"] = "skipped" if ran else "success"
+    assert any(
+        "rust-quality" in e for e in _module().verify("success", selected, results)
+    )
 
 
 def test_missing_scope_selection_is_refused() -> None:
@@ -213,3 +251,11 @@ def test_consumer_probe_verification_is_required() -> None:
     results["consumer-probe"] = "failure"
     errors = _module().verify("success", selected, results)
     assert errors == ["consumer-probe result is 'failure', expected 'success'"]
+
+
+def test_folded_proofs_follow_their_area() -> None:
+    selected, results = _valid()
+    results["oci-link-fallback"] = "skipped"
+    assert _module().verify("success", selected, results) == [
+        "oci-link-fallback result is 'skipped', expected 'success'"
+    ]

@@ -18,14 +18,20 @@ AREAS = (
     "lane",
 )
 AREA_JOBS = {
-    "rust": ("rust-platform",),
+    "rust": ("rust-platform", "oci-link-fallback", "privileged-helper-oci-process"),
     "repository": ("repository",),
-    "control": ("control",),
+    "control": (
+        "control",
+        "client-compatibility-report",
+        "installed-cli-proof",
+        "model-cache-unknown-expiry",
+        "profile-effect-consumer",
+    ),
     "web": ("web",),
     "generated": ("generated",),
     "compose": ("compose",),
     "nas-install": ("nas-install",),
-    "agent-package": ("agent-package",),
+    "agent-package": ("agent-package", "agent-repair-recovery"),
     # A change to the upgrade-carry lane's own code is merged only with a
     # green lane run on that head.
     "lane": ("lane-proof",),
@@ -64,8 +70,23 @@ def verify(
                 f"{job} result is {results.get(job)!r}, expected {expected!r}"
             )
 
-    for job in ("lint", "supply-chain", "repository-guards", "consumer-probe"):
+    for job in (
+        "supply-chain",
+        "repository-guards",
+        "consumer-probe",
+    ):
         expect(job, full)
+
+    # The member tier: the Python check (lint) runs on every pull request, the
+    # web check on a member pull request, and rust-quality on a member pull
+    # request that changes Rust (or any other full run).
+    rust_changed = selected.get("rust-changed")
+    if rust_changed not in {"true", "false"}:
+        errors.append(
+            f"rust-changed selection is {rust_changed!r}, expected 'true' or 'false'"
+        )
+    expect("lint", True)
+    expect("member-web", not full)
 
     def chosen(area: str) -> bool:
         return selected.get(area) == "true" and full
@@ -79,7 +100,7 @@ def verify(
         else:
             for job in AREA_JOBS[area]:
                 expect(job, chosen(area))
-    expect("rust-quality", chosen("rust"))
+    expect("rust-quality", chosen("rust") or (not full and rust_changed == "true"))
     expect("rust-tests", chosen("rust"))
     expect("control-image-build", chosen("control") and chosen("nas-install"))
     expect("controller-spark-wire", chosen("rust") or chosen("control"))
