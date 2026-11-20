@@ -696,6 +696,16 @@ local command `scripts/test guards` runs them. The runner
 `python3 scripts/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
 
+### Cross-repo nightly
+
+Every other lane pins `vonk-forge-recipes` to a reviewed revision.
+`.github/workflows/cross-repo-nightly.yml` runs nightly (and on demand) with
+`main` of vonk-forge and `main` of vonk-forge-recipes and runs the recipe
+validator that `validate-recipe-library.yml` runs. It only reads, and a failed
+job is the alarm; the fix is a pin move or a contract fix in the repository that
+drifted, never a gate on unrelated pull requests. The recipes repository owns
+its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
+
 ### Release acceptance before merge
 
 Every integration PR, including acceptance-harness changes, builds an immutable
