@@ -1008,9 +1008,7 @@ export function LibraryProfilesView({
                   Profile {formatWire(profile.number)} · {profile.name}
                 </span>
                 <small>
-                  {profile.assignments.length} assignment
-                  {profile.assignments.length === 1 ? "" : "s"} ·{" "}
-                  {profileStateLabel(profile.status)}
+                  {`${profile.assignments.length} assignment${profile.assignments.length === 1 ? "" : "s"} · ${profileStateLabel(profile.status)}`}
                 </small>
               </button>
             ),
@@ -1347,7 +1345,7 @@ export function LibraryProfilesView({
               ))}
               {selectedProfile.assignments.length === 0 && (
                 <li>
-                  <strong>Idle fleet</strong>
+                  <strong>Idle fleet</strong> <span aria-hidden="true">·</span>{" "}
                   <span>No assignments; every Spark becomes idle on load.</span>
                 </li>
               )}
