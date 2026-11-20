@@ -764,6 +764,14 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 "installed baseline Compose document",
             )
             declared = require_object(document.get("services"), "baseline services")
+            # A service only the baseline declares (the standing registry that
+            # Caddy depended on) starts with it and is expected until the
+            # upgrade's --remove-orphans removes it.
+            services |= {
+                name
+                for name, definition in declared.items()
+                if "profiles" not in require_object(definition, "baseline service")
+            }
             services.intersection_update(declared)
         return services
 
