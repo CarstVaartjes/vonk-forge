@@ -209,16 +209,14 @@ def upgrade_credentials(
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
         raise ObservationUnavailable()
+    # The Compose file follows the same selection as .env: no profile flags.
+    # It is resolved before the commit point so that a refusal changes nothing.
+    compose = resolve_compose(payload.docker_compose_yaml, environment)
     # Publication is the commit point: it writes secrets and .env. Nothing in the
     # bundle changes before it, so a failed run leaves the previous deployable
-    # bundle. The Compose file follows the same selection as .env (no profile
-    # flags) and is rewritten on every run, so a rerun repairs an interruption.
+    # bundle. Every run rewrites Compose, so a rerun repairs an interruption.
     publication.publish(payload, bundle, members, environment)
-    atomic_replace(
-        bundle / "docker-compose.yaml",
-        resolve_compose(payload.docker_compose_yaml, environment),
-        0o644,
-    )
+    atomic_replace(bundle / "docker-compose.yaml", compose, 0o644)
     permission_note(payload, root, prompt)
     retired = root / "runtime-configs"
     if metadata(retired):
