@@ -238,6 +238,9 @@ export function LibrarySetupStrip({
                 >
                   {tile.value}
                   {tile.yours && <small aria-hidden="true">yours</small>}
+                  <small className="segment-count" aria-hidden="true">
+                    {tile.count}
+                  </small>
                 </button>
               );
             })}
@@ -248,6 +251,9 @@ export function LibrarySetupStrip({
               onClick={() => set({ sparks: "" })}
             >
               Any
+              <small className="segment-count" aria-hidden="true">
+                {anyCount}
+              </small>
             </button>
           </div>
         </div>

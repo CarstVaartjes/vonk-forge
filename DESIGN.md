@@ -262,7 +262,7 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 - **Shape:** Compact machined control corners with a 44px minimum interactive height.
 - **Primary:** NVIDIA green with dark green ink and compact horizontal padding; one clear affirmative action per local decision area.
-- **Hover / Focus:** Secondary controls lift tonally on hover; all variants use a high-contrast three-pixel focus outline with a three-pixel offset.
+- **Hover / Focus:** Secondary controls lift tonally on hover; all variants use the one focus ring, `outline: 3px solid var(--focus)` at a three-pixel offset (`--focus` is `--gold-text`; the public site uses the same ring and values). Ghost (`.button.quiet`) is the style for secondary row actions: muted text, no border, a tonal fill on hover; the site's `.button.quiet` matches.
 - **Secondary:** Transparent graphite control with a strong structural border; use for inspection, cancellation, and alternate paths.
 
 ### Chips
@@ -290,6 +290,8 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 - **Error / Disabled:** Error copy and border use proven-failure red; disabled controls remain readable and visibly muted, never merely hidden.
 
 ### Library Toolbar
+
+**The shared Spark-count bar** (Library and the site's Recipes and Models are one pattern, aligned by values because the repos cannot share code): one `segmented` group of 50px height (a 1px `--line-strong` border, 2px padding on `--recess`, 44px segments at `--r-ctl`); each segment is its label (0.875rem) with the recipe or model count inline after it in `--muted` (0.6875rem), never a numeral twice; the selected segment is `--raised` with `--ink` text and a 1px `--line-control` inset ring; the operator's fleet size carries a gold "yours". The site's `SparkPicker` (compact) uses the same values, with a screen-reader-only noun after the count.
 
 The Library (Models and Recipes) has one toolbar, never two filter zones: a wide search with a fully visible placeholder, one segmented Spark-count control (the shared `segmented` class, the operator's fleet size marked "yours"), two 44px pill toggles ("Fits fleet", "Cached only") with ordinary-size checkboxes, and one Filters disclosure holding Family, Engine, Creator, Quantization, Capabilities, Version, Publisher, Alignment, Exact model, Updated and Sort. No filter appears twice; the URL stays the single owner of filter state. Release, sync state and storage-polling cadence are one quiet status line in the page header ("Recipe library v5.2.0 current, synced 2 hours ago") with commit, counters and storage cadence in a Details disclosure that opens by itself when the sync is not current. Long lists show one page and a "Show more" button. Model counts count Models: quantization variants fold into their Model by the display lineage (`family/line/model`); a model without lineage (helper, drafter, encoder) is not a Model and is left out of every count.
 

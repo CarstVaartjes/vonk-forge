@@ -1107,6 +1107,7 @@
 .library-toolbar .segmented button {
   align-items: baseline;
   display: inline-flex;
+  font-size: 0.875rem;
   gap: 0.3rem;
   min-height: 2.75rem;
   min-width: 2.75rem;
@@ -1114,7 +1115,10 @@
 }
 .library-toolbar .segmented button small {
   color: var(--gold-text);
-  font-size: 0.62rem;
+  font-size: 0.6875rem;
+}
+.library-toolbar .segmented button small.segment-count {
+  color: var(--muted);
 }
 .library-toolbar .segmented button:disabled {
   cursor: not-allowed;
