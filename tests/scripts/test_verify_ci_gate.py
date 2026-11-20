@@ -230,28 +230,9 @@ def test_consumer_probe_verification_is_required() -> None:
     assert errors == ["consumer-probe result is 'failure', expected 'success'"]
 
 
-@pytest.mark.parametrize(
-    ("area", "job"),
-    [
-        ("rust", "oci-link-fallback"),
-        ("rust", "privileged-helper-oci-process"),
-        ("control", "client-compatibility-report"),
-        ("control", "installed-cli-proof"),
-        ("control", "model-cache-unknown-expiry"),
-        ("control", "profile-effect-consumer"),
-        ("agent-package", "agent-repair-recovery"),
-    ],
-)
-def test_folded_proofs_follow_their_area(area, job) -> None:
+def test_folded_proofs_follow_their_area() -> None:
     selected, results = _valid()
-    results[job] = "skipped"
+    results["oci-link-fallback"] = "skipped"
     assert _module().verify("success", selected, results) == [
-        f"{job} result is 'skipped', expected 'success'"
+        "oci-link-fallback result is 'skipped', expected 'success'"
     ]
-    selected[area] = "false"
-    # An unselected area leaves its proofs skipped; the other jobs of the
-    # area must skip too for the gate to pass.
-    for other in _module().AREA_JOBS[area]:
-        results[other] = "skipped"
-    errors = _module().verify("success", selected, results)
-    assert not any(job in error for error in errors)

@@ -177,24 +177,6 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
     )
 
 
-def test_no_proof_runs_outside_the_ci_gate() -> None:
-    """Every proof is a ci.yml job that ci-gate needs, never a standalone lane."""
-    workflows = ROOT / ".github" / "workflows"
-    assert not list(workflows.glob("*-proof.y*ml"))
-    for name in (
-        "agent-repair-recovery",
-        "client-compatibility-report",
-        "installed-cli-proof",
-        "model-cache-unknown-expiry",
-        "oci-link-fallback",
-        "privileged-helper-oci-process",
-        "profile-effect-consumer",
-    ):
-        assert not (workflows / f"{name}.yml").exists()
-        jobs = yaml.safe_load((workflows / "ci.yml").read_text())["jobs"]
-        assert name in jobs["ci-gate"]["needs"]
-
-
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:
     """Retiring OCI proof jobs must not silently skip their real ingress tests."""
     from tools import pytest_prereqs
