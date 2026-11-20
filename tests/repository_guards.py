@@ -62,6 +62,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "control/tests/test_missing_acceptance_retryable.py",
+        "A mutation that returns without writing its owner row answers the retryable 503, then resolves once the row exists.",
+    ),
+    (
         "control/tests/test_schema_contention.py",
         "Startup schema repair re-raises lock timeouts and deadlocks so startup retries; other errors stay logged skips.",
     ),
