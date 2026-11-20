@@ -135,8 +135,9 @@ start `docker-compose.yaml`. Keep `.env` and `secrets/` beside it.
 
 ### 3. Add a Spark
 
-Open the controller's private Web address, go to **Fleet**, and create a one-use
-enrollment grant with **Enroll Spark**. Enter a display name, then run the
+Open the controller's private Web address, go to the **Overview** page, and create a one-use
+enrollment grant with **Enroll Spark** (or run
+`vonkctl fleet enroll NAME --output grant.json`). Enter a display name, then run the
 generated command on the Spark before the displayed expiry. The installer asks
 for the one-use pairing token shown with the command. It has this shape:
 
