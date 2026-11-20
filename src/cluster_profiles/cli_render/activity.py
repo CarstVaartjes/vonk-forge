@@ -104,10 +104,7 @@ def activity_continuation(
 
 
 def _activity(
-    payload: Mapping[str, object],
-    filters: Mapping[str, object] | None,
-    *,
-    wide: bool = False,
+    payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
     issue = unknown_membership(
         payload.get("operations"), payload.get("total"), payload.get("projection_issue")
@@ -127,7 +124,7 @@ def _activity(
         # One operation shows one id: the owner's, which `Reconnect` follows.
         # The row's own id is shown only with --wide (and in JSON).
         _field("Operation", owner.get("id", operation.get("id")))
-        if owner and wide:
+        if owner and (filters or {}).get("wide"):
             _field("Row", operation.get("id"))
         _field("Kind", operation.get("kind"))
         _field("State", operation.get("state"))
