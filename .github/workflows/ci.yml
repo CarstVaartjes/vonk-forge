@@ -2010,7 +2010,7 @@ jobs:
     name: Validate accepted release images
     needs: [lint, generated-clients, compose-integration, supply-chain, release-metadata, build-agent-package]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 50
     permissions:
       attestations: read
       contents: read

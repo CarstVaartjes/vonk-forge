@@ -309,7 +309,6 @@ def test_every_action_is_pinned_at_one_sha() -> None:
 def test_every_job_has_a_timeout_and_a_pinned_runner_label() -> None:
     """No job may hang on the 6 h default or float on `ubuntu-latest`."""
     allowed = {"ubuntu-24.04", "ubuntu-24.04-arm"}
-    matrix_runner = re.compile(r"^\s+runner:\s*(\S+)\s*$", re.MULTILINE)
     bad: list[str] = []
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         text = path.read_text()
@@ -320,7 +319,10 @@ def test_every_job_has_a_timeout_and_a_pinned_runner_label() -> None:
                 bad.append(f"{path.name}:{name} has no timeout-minutes")
             runner = job.get("runs-on")
             if runner == "${{ matrix.runner }}":
-                labels = set(matrix_runner.findall(text))
+                matrix = job.get("strategy", {}).get("matrix", {})
+                labels = {
+                    e["runner"] for e in matrix.get("include", []) if "runner" in e
+                }
                 if not labels or not labels <= allowed:
                     bad.append(f"{path.name}:{name} matrix runners {sorted(labels)}")
             elif runner not in allowed:
