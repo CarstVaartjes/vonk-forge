@@ -71,6 +71,7 @@ test("keeps the exact model filter addressable", async () => {
   history.replaceState(null, "", "/library?view=models");
   render(<App api={libraryApi as unknown as ControlApi} />);
   expect(await screen.findByRole("heading", { name: "Models" })).toBeVisible();
+  fireEvent.click(screen.getByText("Filters"));
   expect(screen.getByRole("combobox", { name: "Filter exact model" })).toBeVisible();
 });
 test("merges paged Library responses beyond the first 100 Models", async () => {
@@ -289,4 +290,77 @@ test("a modified click on an in-app link is left to the browser; a plain click n
   expect(location.search).toBe("");
   expect(fireEvent.click(link)).toBe(false);
   await waitFor(() => expect(location.search).toContain("view=models"));
+});
+
+test("one quiet sync line; commit, counters and storage cadence sit in its details", async () => {
+  history.replaceState(null, "", "/library");
+  const status = {
+    state: "current",
+    created_at: "2026-01-01T00:00:00Z",
+    completed_at: "2026-01-01T00:01:00Z",
+    commit: "abcdef123456".repeat(3),
+    expected_commit: null,
+    imported_count: 1,
+    updated_count: 0,
+    unchanged_count: 2,
+    skipped_count: 0,
+    withdrawn_count: 0,
+    total_count: 3,
+    problems: [],
+    stale_recipes: [],
+    last_error: null,
+  };
+  const library = { version: "5.2.0", updated_at: "2026-01-01T00:00:00Z" };
+  const api = {
+    ...libraryApi,
+    modelLibrary: async () => ({ ...modelLibrary, library }),
+    recipeLibrary: async () => ({ ...recipeLibrary, library }),
+    catalogSyncStatus: async () => status,
+  } as unknown as ControlApi;
+  render(<App api={api} />);
+  const line = await screen.findByText(/Recipe library v/);
+  expect(line).toHaveTextContent(/synced/);
+  expect(screen.getAllByText(/Recipe library v/)).toHaveLength(1);
+  expect(screen.getByText("abcdef123456")).not.toBeVisible();
+  expect(screen.queryByText(/imported/)).not.toBeVisible();
+  fireEvent.click(screen.getByText("Details"));
+  expect(screen.getByText("abcdef123456")).toBeVisible();
+});
+
+test("degraded storage observation opens the sync details by itself", async () => {
+  history.replaceState(null, "", "/library");
+  const { ModelStorageObservationReason } = await import("../api/vocabulary.generated");
+  const api = {
+    ...libraryApi,
+    modelLibrary: async () => ({
+      ...modelLibrary,
+      storage_reason: ModelStorageObservationReason.FAILED,
+      storage_error_type: "OSError",
+    }),
+  } as unknown as ControlApi;
+  render(<App api={api} />);
+  expect(await screen.findByText(/FAILED|failed/i, { selector: "p" })).toBeVisible();
+});
+
+test("Fits fleet can be turned on from a fresh load and asks for fits_fleet", async () => {
+  history.replaceState(null, "", "/library");
+  const fits: Array<boolean | undefined> = [];
+  const api = {
+    ...libraryApi,
+    recipeLibrary: async (
+      _cursor?: string,
+      _sort?: string,
+      _updated?: string,
+      _signal?: AbortSignal,
+      fitsFleet?: boolean,
+    ) => {
+      fits.push(fitsFleet);
+      return recipeLibrary;
+    },
+  } as unknown as ControlApi;
+  render(<App api={api} />);
+  const toggle = await screen.findByRole("checkbox", { name: "Fits fleet" });
+  expect(toggle).toBeEnabled();
+  fireEvent.click(toggle);
+  await waitFor(() => expect(fits).toContain(true));
 });

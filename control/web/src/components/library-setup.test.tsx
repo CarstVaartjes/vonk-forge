@@ -110,6 +110,7 @@ test("Spark tiles count the library, mark the operator's fleet, and set the same
       query=""
       noun="recipes"
       onFiltersChange={onFiltersChange}
+      onQueryChange={() => undefined}
     />,
   );
   expect(screen.getByText(/of \d+ Sparks? online/)).toHaveTextContent(
@@ -138,7 +139,7 @@ test("Spark tiles count the library, mark the operator's fleet, and set the same
   });
 });
 
-test("family and engine chips carry counts that respect the other filters and toggle the URL facets", () => {
+test("one toolbar: Family, Engine and Creator live once, in the Filters disclosure", () => {
   const onFiltersChange = vi.fn();
   const withRecipe = records.find((record) => record.recipe)!;
   const engine = recipeEngine(withRecipe.recipe!);
@@ -150,20 +151,22 @@ test("family and engine chips carry counts that respect the other filters and to
       query=""
       noun="recipes"
       onFiltersChange={onFiltersChange}
+      onQueryChange={() => undefined}
     />,
   );
   expect(screen.getByText(/Fleet state is not available yet/)).toBeVisible();
-  const engines = within(screen.getByRole("group", { name: "Engine" }));
-  const pressed = engines.getByRole("button", { pressed: true });
-  expect(pressed).toHaveAccessibleName(new RegExp(`^${engine}: \\d+$`));
-  fireEvent.click(pressed);
+  // No second zone: the old chip rows are gone, each filter is one select.
+  for (const name of ["Family", "Engine", "Creator"])
+    expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("combobox", { name: "Filter engine" })).toHaveLength(1);
+  expect(screen.getByText("Filters · 1 active")).toBeVisible();
+  const select = screen.getByRole("combobox", { name: "Filter engine" });
+  expect(select).toHaveValue(engine.toLocaleLowerCase());
+  fireEvent.change(select, { target: { value: "" } });
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine: "" });
-  const families = within(screen.getByRole("group", { name: "Family" }));
-  const familyCount = uniqueRecipes(
-    filterLibraryRecipeRecords(records, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine, family }, ""),
-  ).size;
-  const title = withRecipe.modelDisplay!.family_title;
-  fireEvent.click(families.getByRole("button", { name: `${title}: ${familyCount}` }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Filter family" }), {
+    target: { value: family },
+  });
   expect(onFiltersChange).toHaveBeenLastCalledWith({
     ...EMPTY_LIBRARY_WORKCELL_FILTERS,
     engine,
@@ -171,34 +174,46 @@ test("family and engine chips carry counts that respect the other filters and to
   });
 });
 
-test("a facet with nothing to offer stays out of the way", () => {
-  render(
-    <LibrarySetupStrip
-      records={records.filter((record) => !record.recipe || !record.recipe.creator)}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      query=""
-      noun="recipes"
-      onFiltersChange={() => undefined}
-    />,
-  );
-  expect(screen.queryByRole("group", { name: "Creator" })).not.toBeInTheDocument();
-  expect(screen.getByRole("group", { name: "Engine" })).toBeVisible();
-});
-
-test("counts models instead of recipes on the Models tab", () => {
+test("search, Sparks, two toggles and one Filters disclosure make the whole toolbar", () => {
+  const onQueryChange = vi.fn();
   render(
     <LibrarySetupStrip
       records={records}
       filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
       query=""
-      noun="models"
+      noun="recipes"
       onFiltersChange={() => undefined}
+      onQueryChange={onQueryChange}
     />,
   );
-  const models = new Set(records.map((record) => record.modelKey)).size;
+  const search = screen.getByRole("searchbox", { name: "Search Library" });
+  fireEvent.change(search, { target: { value: "ltx" } });
+  expect(onQueryChange).toHaveBeenCalledWith("ltx");
+  expect(screen.getByRole("group", { name: "Sparks per recipe" })).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Fits fleet" })).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Cached only" })).toBeVisible();
+  expect(screen.getAllByText(/^Filters/)).toHaveLength(1);
+  expect(screen.queryByRole("heading", { name: "Start from your fleet" })).not.toBeInTheDocument();
+});
+
+test("counts Models, not quantization variants, and leaves lineage-less models out", () => {
+  const first = records.find((record) => record.recipe && record.modelDisplay?.lineage)!;
+  const variant = { ...first, key: `${first.key}:q4`, modelKey: `${first.modelKey}:q4` };
+  const helper = { ...first, key: `${first.key}:helper`, modelKey: "helper", modelDisplay: null };
+  render(
+    <LibrarySetupStrip
+      records={[...records, variant, helper]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="models"
+      onFiltersChange={() => undefined}
+      onQueryChange={() => undefined}
+    />,
+  );
+  // The fixture holds 92 Models; one more variant and one helper change nothing.
   expect(
     within(screen.getByRole("group", { name: "Sparks per recipe" })).getByRole("button", {
-      name: `Any Spark count: ${models} models`,
+      name: "Any Spark count: 92 models",
     }),
   ).toBeVisible();
 });
@@ -218,13 +233,16 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
       query=""
       noun="recipes"
       onFiltersChange={onFiltersChange}
+      onQueryChange={() => undefined}
     />,
   );
-  expect(screen.getByText(/assessed recipes fit it now/)).toHaveTextContent(
-    `${counts.fits} of ${counts.fits + counts.nonFit} assessed recipes fit it now. ${counts.unknown} awaiting assessment.`,
-  );
-  const toggle = screen.getByRole("button", { name: `Fits my fleet now: ${counts.fits} recipes` });
-  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
+  expect(toggle).not.toBeChecked();
+  expect(
+    screen.getByText("22 of 44 assessed recipes fit now, 41 awaiting assessment", {
+      exact: false,
+    }),
+  ).toBeVisible();
   fireEvent.click(toggle);
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
   // --fits-fleet excludes only proven non-fits; unknown evidence stays visible.
@@ -264,51 +282,23 @@ test("a model fits when one of its recipes does, matching what the filter keeps"
   expect(kept.size).toBe(expected.fits + expected.unknown);
 });
 
-test("without any verdict the toggle is disabled and the strip says so", () => {
+test("Fits fleet can be turned on before any verdict exists, so the page can ask for them", () => {
+  const onFiltersChange = vi.fn();
   render(
     <LibrarySetupStrip
       records={records}
       filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
       query=""
       noun="models"
-      onFiltersChange={() => undefined}
+      onFiltersChange={onFiltersChange}
+      onQueryChange={() => undefined}
     />,
   );
-  expect(screen.getByText(/has not assessed placement/)).toBeVisible();
-  const button = screen.getByRole("button", { name: /^Fits my fleet now/ });
-  expect(button).toBeDisabled();
-  expect(button).toHaveTextContent("Fit not assessed");
-});
-
-test("an assessed empty result keeps 0, not Fit not assessed", () => {
-  render(
-    <LibrarySetupStrip
-      records={assessed(["blocked"])}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      query=""
-      noun="recipes"
-      onFiltersChange={() => undefined}
-    />,
-  );
-  expect(screen.getByRole("button", { name: "Fits my fleet now: 0 recipes" })).toHaveTextContent(
-    "0",
-  );
-});
-
-test("header and button agree when every verdict is unavailable", () => {
-  render(
-    <LibrarySetupStrip
-      records={assessed(["unavailable"])}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      query=""
-      noun="recipes"
-      onFiltersChange={() => undefined}
-    />,
-  );
-  expect(screen.getByText(/has not assessed placement/)).toBeVisible();
-  expect(screen.getByRole("button", { name: /^Fits my fleet now/ })).toHaveTextContent(
-    "Fit not assessed",
-  );
+  expect(screen.getByText(/Placement not assessed yet/)).toBeVisible();
+  const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
+  expect(toggle).toBeEnabled();
+  fireEvent.click(toggle);
+  expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
 });
 
 test("a recipe used by several models is counted once", () => {
@@ -322,6 +312,7 @@ test("a recipe used by several models is counted once", () => {
         query=""
         noun="recipes"
         onFiltersChange={() => undefined}
+        onQueryChange={() => undefined}
       />,
     );
     const label = within(screen.getByRole("group", { name: "Sparks per recipe" }))
@@ -333,7 +324,7 @@ test("a recipe used by several models is counted once", () => {
   expect(anyTile(doubled)).toBe(anyTile(records));
 });
 
-test("the header gives the online Sparks' total and free memory with the fleet bar, and says what it covers", () => {
+test("the toolbar gives the online Sparks and their free memory in one quiet line", () => {
   const GIB = 1024 ** 3;
   const node = (id: string, online: boolean) => ({
     id,
@@ -353,13 +344,34 @@ test("the header gives the online Sparks' total and free memory with the fleet b
       query=""
       noun="recipes"
       onFiltersChange={vi.fn()}
+      onQueryChange={() => undefined}
     />,
   );
   expect(
-    screen.getByText(
-      /2 of 3 Sparks online · 200\.0 GiB unified memory · 40\.0 GiB unified memory free/,
-    ),
+    screen.getByText(/2 of 3 Sparks online · 40\.0 GiB unified memory free/),
   ).toBeInTheDocument();
-  expect(screen.getByRole("meter", { name: "Fleet unified memory" })).toBeInTheDocument();
-  expect(screen.getByText("2 Sparks")).toBeInTheDocument();
+});
+
+test("Exact model on the Recipes tab leaves out models that are not Models", () => {
+  const first = records.find((record) => record.recipe && record.modelDisplay?.lineage)!;
+  const helper = {
+    ...first,
+    key: `${first.key}:helper`,
+    modelKey: "helper",
+    modelTitle: "Helper draft",
+    modelDisplay: null,
+  };
+  render(
+    <LibrarySetupStrip
+      records={[...records, helper]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={() => undefined}
+      onQueryChange={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByText("Filters"));
+  const select = screen.getByRole("combobox", { name: "Filter exact model" });
+  expect(within(select).queryByText(/Helper draft/)).toBeNull();
 });
