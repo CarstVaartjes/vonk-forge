@@ -55,6 +55,9 @@ directory cannot be read or written), `cli.invalid_input` (a value or local
 input is not valid), `job.not_finished` (the job has no result yet; the
 follow command is in `recovery_actions`) and `job.ended_without_result`.
 
+A list that has more pages carries a non-null `next_cursor`; a null one means
+the page is the last.
+
 ## Compatibility rules
 
 - Adding a field, or a value to an open string, keeps the version. Clients

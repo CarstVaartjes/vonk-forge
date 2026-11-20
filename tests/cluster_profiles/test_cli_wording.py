@@ -563,8 +563,27 @@ def test_job_record_is_short_and_hashes_need_wide(printed):
 
 
 def test_unfinished_job_record_stays_short(printed):
-    running = _job_record(state="running", output_files=[], status_reason="queued")
+    running = _job_record(
+        state="running",
+        output_files=[],
+        status_reason="queued",
+        cancel_requested_at="2026-10-02T14:24:00Z",
+    )
     assert len(printed(_artifact_job, running, "detail")) <= 8
+
+
+def test_job_run_wide_adds_details_without_an_observation_line(printed):
+    record = _job_record()
+    wide = printed(
+        render_payload,
+        record,
+        "job",
+        action="run",
+        artifact_job_action="run",
+        wide=True,
+    )
+    assert not [line for line in wide if line.startswith("Observation")]
+    assert [line for line in wide if "SHA-256" in line]
 
 
 def test_library_page_hint_hides_the_cursor_until_wide(printed):
@@ -619,5 +638,5 @@ def test_sync_status_counts_documents_not_recipes(printed):
         "withdrawn_recipes": [],
     }
     lines = printed(_catalog_sync, payload)
-    assert [line for line in lines if "725 of 725 processed" in line]
+    assert [line for line in lines if line.startswith("Documents: 725 of 725")]
     assert not [line for line in lines if line.startswith("Recipes")]

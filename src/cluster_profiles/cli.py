@@ -57,7 +57,7 @@ from .control_client import (
     ControlTransportUnsupported,
     ControlUnavailable,
 )
-from .control_client.errors import LocalInputError
+from .control_client.errors import CommandInterrupted, LocalInputError
 from .controller_cli import (
     ActionDeclined,
     ControllerClient,
@@ -240,7 +240,9 @@ _LOCAL_FILE_ERRORS = (
 def _control_error(
     error: BaseException, args: argparse.Namespace | None = None
 ) -> dict[str, object]:
-    unreadable = isinstance(error, _LOCAL_FILE_ERRORS)
+    unreadable = isinstance(error, _LOCAL_FILE_ERRORS) or (
+        isinstance(error, OSError) and error.filename is not None
+    )
     local = (
         unreadable
         or isinstance(error, LocalInputError)
@@ -908,10 +910,7 @@ def _main(
             _emit(observation.document(), args, error=True)
             return 130
         _emit(
-            _control_error(
-                ControlClientError("command interrupted"),
-                args,
-            ),
+            _control_error(CommandInterrupted(), args),
             args,
             error=True,
         )

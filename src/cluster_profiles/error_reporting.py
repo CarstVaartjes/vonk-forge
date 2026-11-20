@@ -37,6 +37,10 @@ class ClientCode(StrEnum):
     TRANSPORT_UNSUPPORTED = "client.transport_unsupported"
     #: The Controller API failed without a code of its own.
     CONTROL_API_ERROR = "control.api_error"
+    #: This CLI client cannot move artifact bytes.
+    TRANSFER_UNAVAILABLE = "client.transfer_unavailable"
+    #: The operator interrupted the command.
+    INTERRUPTED = "client.interrupted"
     #: A local file or directory could not be read or written.
     LOCAL_IO_FAILED = "local.io_failed"
     #: A command-line value or local input is not valid; nothing was sent.

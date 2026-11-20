@@ -5574,3 +5574,27 @@ def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:
 
     assert "/api/profile/1/definition" not in client.completed
     assert "/api/recipe/library" in client.completed
+
+
+def test_profile_read_fetches_spark_names_for_people_but_not_for_json(capsys):
+    """Catches ids in human output, and names leaking into the JSON document."""
+    profile = {
+        "number": 1,
+        "name": "p",
+        "definition": {
+            "assignments": [{"recipe_selector": "r", "spark_ids": ["spk_1"]}]
+        },
+        "assignments": [],
+    }
+    roster = {"nodes": [{"id": "spk_1", "display_name": "spark-a"}]}
+    responses = {("GET", "/api/profile/1"): profile, ("GET", "/api/fleet"): roster}
+
+    client = FakeClient(dict(responses))
+    status, document = run(("profile", "--json"), client)
+    assert status == 0 and "spark_names" not in document
+    assert ("GET", "/api/fleet") not in [call[:2] for call in client.calls]
+
+    client = FakeClient(dict(responses))
+    assert cli.main(("profile",), control_client=client) == 0
+    capsys.readouterr()
+    assert ("GET", "/api/fleet") in [call[:2] for call in client.calls]

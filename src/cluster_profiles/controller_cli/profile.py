@@ -29,7 +29,7 @@ from .observation import (
 )
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
-from .selection import _spark_names
+from .selection import _read_concurrently, _spark_names
 from .submission import _submit_idempotent_request
 
 
@@ -115,24 +115,28 @@ def _profile(
             terminal=lambda _: True,
         )
     if action is None:
-        shown = _poll_path(
-            client,
-            f"/api/profile/{number}",
-            {},
-            args,
-            fetch_initial=True,
-            terminal=lambda _: True,
-        )
-        if (
-            isinstance(shown, dict)
-            and "assignments" in shown
-            and not (
-                getattr(args, "global_json", False) or getattr(args, "json", False)
+
+        def read_profile() -> object:
+            return _poll_path(
+                client,
+                f"/api/profile/{number}",
+                {},
+                args,
+                fetch_initial=True,
+                terminal=lambda _: True,
             )
-        ):
-            # Human output names the Sparks; the JSON keeps the ids alone.
-            return {**shown, "spark_names": _spark_names(client)}
-        return shown
+
+        if getattr(args, "global_json", False) or getattr(args, "json", False):
+            return read_profile()  # type: ignore[return-value]
+        # Human output names the Sparks (read beside the profile); JSON keeps ids.
+        profile_read, names_read = _read_concurrently(
+            read_profile, lambda: _spark_names(client)
+        )
+        shown = profile_read.get()
+        names = names_read.get()
+        if isinstance(shown, dict) and "assignments" in shown:
+            return {**shown, "spark_names": names}
+        return shown  # type: ignore[return-value]
     if action == "endpoint":
 
         def endpoint_view(observed: object) -> None:

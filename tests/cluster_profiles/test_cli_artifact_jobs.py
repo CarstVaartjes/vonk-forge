@@ -1763,17 +1763,17 @@ def test_each_local_cause_has_its_own_code_and_exit_status(tmp_path, vonkctl_jso
     """One code per cause: no local cause reports the control API's code."""
     client = ArtifactJobClient()
     client.job = _job(state="running")
-    status, running = vonkctl_json(
+    running_status, running = vonkctl_json(
         "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
     )
     client.job = _job(state="failed")
-    _, failed = vonkctl_json(
+    failed_status, failed = vonkctl_json(
         "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
     )
     blocker = tmp_path / "file"
     blocker.write_text("x")
     client.job = _succeeded_job()
-    _, filesystem = vonkctl_json(
+    filesystem_status, filesystem = vonkctl_json(
         "job",
         "download",
         JOB_ID,
@@ -1781,7 +1781,9 @@ def test_each_local_cause_has_its_own_code_and_exit_status(tmp_path, vonkctl_jso
         str(blocker / "sub"),
         control_client=client,
     )
-    _, invalid = vonkctl_json("job", "cancel", JOB_ID, control_client=client)
+    invalid_status, invalid = vonkctl_json(
+        "job", "cancel", JOB_ID, control_client=client
+    )
     documents = [running, failed, filesystem, invalid]
     assert [d["code"] for d in documents] == [
         "job.not_finished",
@@ -1789,7 +1791,7 @@ def test_each_local_cause_has_its_own_code_and_exit_status(tmp_path, vonkctl_jso
         "local.io_failed",
         "cli.invalid_input",
     ]
-    assert status == 2
+    assert [running_status, failed_status, filesystem_status, invalid_status] == [2] * 4
     assert {d["error_type"] for d in documents} == {"local"}
     assert running["recovery_actions"] == [f"vonkctl job detail {JOB_ID} --follow"]
     assert failed["recovery_actions"] == [f"vonkctl job detail {JOB_ID}"]

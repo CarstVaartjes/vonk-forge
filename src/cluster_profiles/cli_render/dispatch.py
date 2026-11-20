@@ -16,7 +16,7 @@ from ..generated_control.models.metrics_series_response import MetricsSeriesResp
 from ..generated_control.models.platform_observation import PlatformObservation
 from .activity import _activity, _locks
 from .administration import _catalog_sync, _enrollment, _error
-from .artifact_jobs import RECORD_ACTIONS, _artifact_job, artifact_job_details
+from .artifact_jobs import _artifact_job, artifact_job_details, prints_record
 from .common import _field, _object, _records, _table, _text, _time, _words
 from .fleet import _fleet_overview, _node
 from .library import _library
@@ -144,7 +144,7 @@ def render_payload(
                 _field("Observation", ENDPOINT_UNAVAILABLE)
         elif noun == Word.JOB and artifact_job_action is not None:
             _artifact_job(payload, artifact_job_action)
-            if wide and artifact_job_action in RECORD_ACTIONS:
+            if wide and prints_record(artifact_job_action, payload.keys()):
                 artifact_job_details(ArtifactJobResponse.from_dict(dict(payload)))
         elif noun == "recipe" and action == "sync-status":
             _catalog_sync(payload)

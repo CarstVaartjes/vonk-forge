@@ -161,6 +161,12 @@ class LocalInputError(ValueError):
     recovery: tuple[str, ...] = ()
 
 
+class LocalFilesystemError(LocalInputError):
+    """A local file could not be created, read or written: the operator's to fix."""
+
+    code = ClientCode.LOCAL_IO_FAILED.value
+
+
 class JobNotFinished(LocalInputError):
     """The job has no result yet; the follow command is the way on."""
 
@@ -179,6 +185,24 @@ class JobEndedWithoutResult(LocalInputError):
     def __init__(self, message: str, *, detail: str) -> None:
         super().__init__(message)
         self.recovery = (detail,)
+
+
+class TransferUnavailable(ControlClientError):
+    """This client cannot move artifact bytes; nothing was sent."""
+
+    code = ClientCode.TRANSFER_UNAVAILABLE.value
+
+    def __init__(self) -> None:
+        super().__init__("artifact byte transfer is unavailable in this client")
+
+
+class CommandInterrupted(ControlClientError):
+    """The operator interrupted the command (Ctrl-C)."""
+
+    code = ClientCode.INTERRUPTED.value
+
+    def __init__(self) -> None:
+        super().__init__("command interrupted")
 
 
 class ControlTransportUnsupported(ControlClientError):

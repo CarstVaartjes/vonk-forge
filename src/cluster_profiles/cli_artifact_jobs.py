@@ -42,9 +42,13 @@ from .control_client import (
     ControlTransportError,
     validate_control_document,
 )
-from .control_client.errors import JobEndedWithoutResult, JobNotFinished
-from .control_client.transfers import (
+from .control_client.errors import (
+    JobEndedWithoutResult,
+    JobNotFinished,
     LocalFilesystemError,
+    TransferUnavailable,
+)
+from .control_client.transfers import (
     TransferReceipt,
     local_filesystem_error,
 )
@@ -1325,7 +1329,7 @@ def _digest_regular_file(path: Path, maximum: int, name: str) -> tuple[int, str]
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
     no_follow = getattr(os, "O_NOFOLLOW", None)
     if no_follow is None:
-        raise ControlClientError(
+        raise LocalFilesystemError(
             "artifact inputs cannot be opened safely on this platform"
         )
     descriptor = -1
@@ -1514,7 +1518,7 @@ def _output_directory(path: Path, *, create: bool = False) -> Path:
     except OSError as error:
         raise local_filesystem_error(path, error) from error
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise ControlClientError(
+        raise LocalFilesystemError(
             "artifact output path must be an existing non-symlink directory"
         )
     try:
@@ -1527,7 +1531,7 @@ def _transfer_client(client: ArtifactJobClient) -> ArtifactJobClient:
     if not callable(getattr(client, "upload_file", None)) or not callable(
         getattr(client, "download_file", None)
     ):
-        raise ControlClientError("artifact byte transfer is unavailable in this client")
+        raise TransferUnavailable
     return client
 
 
