@@ -45,7 +45,7 @@ impl ObservationServer {
     }
 
     fn spawn(statuses: Vec<Option<u16>>, disposition: Option<&'static str>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
         let stop = Arc::new(AtomicBool::new(false));

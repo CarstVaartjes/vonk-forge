@@ -28,7 +28,7 @@ struct Served {
 /// seconds, which a test then sees in `peak`); request number `refuse` (from
 /// 1) is answered with another object's ETag.
 fn range_server(hold: usize, refuse: Option<usize>) -> (String, Arc<(Mutex<Served>, Condvar)>) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = std::net::TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let served = Arc::new((Mutex::new(Served::default()), Condvar::new()));
     let shared = served.clone();

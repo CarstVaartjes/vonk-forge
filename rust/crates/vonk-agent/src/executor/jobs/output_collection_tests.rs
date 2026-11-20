@@ -194,7 +194,9 @@ async fn an_unconfirmed_step_after_the_exit_carries_the_receipt() {
 async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let job = exited_job(60, 30);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+        .await
+        .unwrap();
     let endpoint = format!("http://{}/", listener.local_addr().unwrap());
     let uploads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = uploads.clone();

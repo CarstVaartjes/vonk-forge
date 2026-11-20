@@ -118,7 +118,8 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
     let socket = runtime_root.path().join("helper.sock");
     let helper = std::os::unix::net::UnixListener::bind(&socket).unwrap();
     helper.set_nonblocking(true).unwrap();
-    let controller = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let controller =
+        std::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
     controller.set_nonblocking(true).unwrap();
     let address = controller.local_addr().unwrap();
     let (helper_log, helper_done) = (log.clone(), done.clone());

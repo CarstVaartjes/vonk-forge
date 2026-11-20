@@ -267,6 +267,16 @@ either is missing. The VM uses task-specific uv and Cargo directories under
 `VONK_RECIPE_LIBRARY_ROOT` when the sibling
 checkout is outside `/opt/vonk-forge-recipes`.
 
+On the `vonk-ci` OrbStack VM the port forwarder (`machines.forward_ports`, source
+`orbstack-agent`) probes every new `127.0.0.1` listener once with `GET /` from
+`Go-http-client`; a fixture that accepts first would count it as the client under
+test. `127.0.0.2` reaches the same loopback interface and is not probed, so every
+Rust TCP test fixture binds there (`FIXTURE_BIND` / `FIXTURE_HOST` /
+`FIXTURE_IP` in vonk-agent `client/test_support.rs`; a constant in
+`vonk-build-egress/src/tests.rs`). The `loopback-bind` added-line guard rejects a
+new `127.0.0.1` bind in Rust test code; Unix sockets bind a path and are not
+affected. GitHub runners have no probe.
+
 ### Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only
@@ -405,6 +415,16 @@ themselves: without the exported path they skip locally and fail in CI. On
 macOS `cargo build` fails on platform-gated code such as
 `rustix::fs::openat2`, so run those suites in the Linux/OrbStack or designated
 CI lane instead of reading the failure as a regression.
+
+The Rust workspace tests run in parallel (`cargo test --workspace --locked`
+with Cargo's default test threads; CI sets no `RUST_TEST_THREADS`). A Rust test
+must own its state (a unique `tempfile` directory, an ephemeral port) or
+serialise explicitly with a narrow lock. Explicit exceptions: the containerd
+fixture's runner-wide `flock` (`vonk-agent/tests/recipe_builder/main.rs`), the
+build-egress tests that reach the retained-resolver list (one
+static mutex), and `listener_recovery.rs`'s fixed port (alone in its binary).
+Held file locks release explicitly on drop (`held_lock.rs`), so a child forked
+by another test thread cannot keep one busy.
 
 PostgreSQL tests share one disposable server per pytest session, including
 across xdist workers. It starts when collection finishes (only if a selected

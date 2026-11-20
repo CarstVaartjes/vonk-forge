@@ -196,7 +196,7 @@ use response::*;
 use storage::*;
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 use buffering::*;
 pub(crate) use errors::endpoint_name;

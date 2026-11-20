@@ -155,7 +155,7 @@ mod tests {
 
     #[tokio::test]
     async fn readiness_honors_a_controller_renewed_deadline() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -180,7 +180,7 @@ mod tests {
         );
 
         wait_ready(
-            "127.0.0.1".parse().unwrap(),
+            crate::client::test_support::FIXTURE_HOST.parse().unwrap(),
             port,
             "/health",
             deadline_receiver,
@@ -201,7 +201,7 @@ mod tests {
         let started = tokio::time::Instant::now();
         assert!(
             wait_ready_until(
-                "127.0.0.1".parse().unwrap(),
+                crate::client::test_support::FIXTURE_HOST.parse().unwrap(),
                 65534,
                 "/health",
                 receiver,
@@ -212,7 +212,9 @@ mod tests {
         );
         assert!(started.elapsed() < Duration::from_secs(1));
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+            .await
+            .unwrap();
         let port = listener.local_addr().unwrap().port();
         let peer = tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
@@ -238,7 +240,7 @@ mod tests {
         let fresh = (Utc::now() + ChronoDuration::seconds(3)).fixed_offset();
         let (_sender, receiver) = tokio::sync::watch::channel(fresh);
         wait_ready_until(
-            "127.0.0.1".parse().unwrap(),
+            crate::client::test_support::FIXTURE_HOST.parse().unwrap(),
             port,
             "/health",
             receiver,
@@ -258,7 +260,7 @@ mod tests {
         // start_deadline=<an hour away>` for a `recipe.start` that then failed
         // with "workload did not become ready before its deadline", which no
         // model needing minutes to load can ever pass.
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind(crate::client::test_support::FIXTURE_BIND).unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -282,7 +284,7 @@ mod tests {
         let (_sender, receiver) = tokio::sync::watch::channel(lapsed);
 
         wait_ready_until(
-            "127.0.0.1".parse().unwrap(),
+            crate::client::test_support::FIXTURE_HOST.parse().unwrap(),
             port,
             "/health",
             receiver,

@@ -5,6 +5,15 @@ pub(super) const TEST_PLAN_DIGEST: &str =
 
 pub(super) const TEST_NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
+/// Every TCP test fixture binds here, never on `127.0.0.1`. OrbStack's port
+/// forwarder in the `vonk-ci` VM probes each new `127.0.0.1` listener with a
+/// `GET /` that a fixture would count as the client under test; the rest of
+/// `127.0.0.0/8` reaches the same loopback interface and is not probed.
+pub(crate) const FIXTURE_HOST: &str = "127.0.0.2";
+pub(crate) const FIXTURE_BIND: &str = "127.0.0.2:0";
+pub(crate) const FIXTURE_IP: std::net::IpAddr =
+    std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 2));
+
 use super::*;
 
 pub(super) use crate::{
@@ -125,7 +134,7 @@ pub(super) async fn request_capture_client(
     budget: Duration,
 ) -> (AgentHttpClient, CapturePeer) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
     let address = listener.local_addr().unwrap();
     let deadline = tokio::time::Instant::now() + budget;
     let (stage_observer, stages) = tokio::sync::mpsc::channel(2);
@@ -296,7 +305,7 @@ pub(super) fn distribution_fixture_server(
     expected_requests: usize,
     mode: DistributionFixtureMode,
 ) -> (AgentHttpClient, ThreadPeer<Vec<Vec<u8>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let manifest = canonical_json(&assignment).unwrap();
     // TLS/client initialization is not peer inactivity. Construct it before
@@ -460,7 +469,7 @@ pub(super) fn job_input_client(
     declared_bytes: usize,
     body: Vec<u8>,
 ) -> (AgentHttpClient, ThreadPeer<Vec<u8>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let server = spawn_peer(move || {
         let deadline = std::time::Instant::now() + PEER_BUDGET;
@@ -537,7 +546,7 @@ pub(super) async fn host_runtime_grant_client() -> (AgentHttpClient, CapturePeer
 pub(super) fn delayed_upload_client(
     response_delay: Duration,
 ) -> (AgentHttpClient, ThreadPeer<Vec<u8>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let base_client = authenticated_test_client(&format!("http://{address}"), "spk_test");
     let server = spawn_peer(move || {

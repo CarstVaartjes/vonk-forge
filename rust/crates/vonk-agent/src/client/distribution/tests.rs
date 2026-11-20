@@ -30,7 +30,7 @@ async fn distribution_consumer_fetches_manifest_and_all_objects_with_ranges() {
     };
     assignment.validate().unwrap();
     let manifest = canonical_json(&assignment).unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let server = spawn_peer(move || {
         let deadline = std::time::Instant::now() + PEER_BUDGET;
@@ -164,7 +164,7 @@ async fn distribution_downloads_overlap_without_reordering_evidence_or_progress(
         .collect::<Vec<_>>();
     let completed = Arc::new(tokio::sync::Semaphore::new(0));
     let observed = completed.clone();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = spawn_async_peer(async move {
         let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())

@@ -374,7 +374,9 @@ mod tests {
         expected_body: Vec<u8>,
         stalled_body: bool,
     ) -> (Url, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+            .await
+            .unwrap();
         let endpoint = Url::parse(&format!(
             "http://{}/agent/enroll",
             listener.local_addr().unwrap()
@@ -588,7 +590,9 @@ mod tests {
         headers: &str,
         body: Vec<u8>,
     ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+            .await
+            .unwrap();
         let address = listener.local_addr().unwrap();
         let headers = headers.to_owned();
         let peer = tokio::spawn(async move {
@@ -668,7 +672,9 @@ mod tests {
 
     #[tokio::test]
     async fn pairing_reader_cancellation_releases_incomplete_response() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(crate::client::test_support::FIXTURE_BIND)
+            .await
+            .unwrap();
         let address = listener.local_addr().unwrap();
         let (closed, observed_close) = tokio::sync::oneshot::channel();
         let peer = tokio::spawn(async move {
