@@ -468,7 +468,7 @@ and `recipe detail` show both. `recipe detail` also lists the other recipes for
 the same model with their engine, Spark count, creator, version, cache and
 fleet-fit state.
 
-Recipe reads distinguish current fleet fit, exact NAS assets, and readiness.
+Recipe reads distinguish current fleet fit, exact Controller assets, and readiness.
 `--fits-fleet` requires a complete placement that fits fresh current capacity;
 with the default sort the Controller lists Working recipes first, then the
 newest; it does not assume that existing workloads will stop. `--ready` also requires
@@ -1254,7 +1254,7 @@ Change them only together with the tests that pin them.
   given there.
 
 Fleet model cleanup uses `vonkctl model remove <model> --fleet --review` to show
-exact NAS and per-Spark effects, then `vonkctl model remove <model> --fleet --yes`
+exact Controller and per-Spark effects, then `vonkctl model remove <model> --fleet --yes`
 to request removal. Saved/loaded profiles, running work, live operations, pins
 and shared content retain their bytes. The returned model-operation receipt is
 durable; the [cache runbook](model-cache.md#remove-a-model-from-the-fleet) explains
@@ -1262,7 +1262,7 @@ confirmation, recovery and its deadline.
 
 `vonkctl model remove --unused --review` shows every cached model that no saved
 or loaded profile, live operation or running workload keeps, with the bytes
-freed on the NAS and each Spark; `--unused --yes` removes them on the NAS and
+freed on the Controller and each Spark; `--unused --yes` removes them on the Controller and
 every Spark. A model whose removal would free nothing, because every file is
 shared with another cached model, is listed as kept and never submitted. It covers the models the library lists as cached; Spark-only
 leftovers are cleared by the 24 h Spark retention. A refused removal is listed

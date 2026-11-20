@@ -101,11 +101,11 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     resources = LibraryResourceProjection.from_dict(
         _object(item.get("resources"), "resources")
     )
-    name = identity.get("title") if noun == "recipe" else identity.get("slug")
+    name = identity.get("title") if noun == LibraryNoun.RECIPE else identity.get("slug")
     _table(
         (
             noun.upper(),
-            "IMAGE CACHE" if noun == "recipe" else "NAS CACHE",
+            "IMAGE CACHE" if noun == LibraryNoun.RECIPE else "CONTROLLER CACHE",
             "RUNNING ON",
         ),
         [(name, _cache_word(local.get("controller")), _words(local.get("running_on")))],

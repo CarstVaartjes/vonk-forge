@@ -63,6 +63,6 @@ running on each Spark if the operation is partial. Retry resumes the durable
 operation and reuses verified cache and Spark-local copies.
 
 To roll back, select an earlier profile or exact accepted recipe revision whose
-required assets are cached, then apply it through the same cache, distribution,
+required assets are cached, then load it through the same cache, distribution,
 replacement, and readiness path. If its cache is unavailable, prepare the cache
 first; do not recover from a Spark-local copy.
