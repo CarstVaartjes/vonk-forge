@@ -174,14 +174,14 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         payload.get("assignments"),
     )
     if listing is EndpointListing.NOT_LOADED:
-        print(f"Profile {payload.get('number')} has no loaded application.")
+        print(f"Profile {payload.get('number')} is not loaded.")
         print("Saved profile edits do not publish routes until the profile is loaded.")
         return
-    _field("Loaded application", payload.get("application_id"))
-    _field("Application state", payload.get("application_state"))
+    _field("Load", payload.get("application_id"))
+    _field("Load state", payload.get("application_state"))
     if listing is EndpointListing.HISTORY_INVALID:
         print(
-            "Endpoint assignments are unavailable because stored application history is invalid."
+            "Endpoint assignments are unavailable because stored load history is invalid."
         )
         _field(
             "Stored evidence",
@@ -191,8 +191,10 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         )
         return
     if listing is EndpointListing.EMPTY:
-        print("The loaded application has no endpoint assignments.")
-        print("Job recipes have no endpoint; see vonkctl recipe job --help")
+        print("The loaded profile has no endpoint assignments.")
+        print(
+            "Job recipes have no endpoint; run one with vonkctl job run ALIAS (see vonkctl job --help)"
+        )
         return
     assignments = _records(payload, "assignments")
     _serving_now(

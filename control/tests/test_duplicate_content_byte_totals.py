@@ -94,3 +94,57 @@ def test_assignment_carries_each_digest_once() -> None:
             oci_image_digest=image.image_digest,
             oci_image_config_digest=image.config_digest,
         )
+
+
+def test_every_node_is_delivered_the_union_of_its_roles_files(monkeypatch) -> None:
+    """Role-split plans each name their own files; the model is the unit, so
+    every node gets all of them and the bytes equal the prepared set's."""
+    from contextlib import nullcontext
+
+    from vonk_control.distribution_executor import identity as identity_module
+
+    def plan(*files: tuple[str, int]) -> SimpleNamespace:
+        return SimpleNamespace(
+            artifacts=[
+                SimpleNamespace(
+                    path=name,
+                    sha256=hashlib.sha256(name.encode()).hexdigest(),
+                    size_bytes=size,
+                )
+                for name, size in files
+            ]
+        )
+
+    stored = SimpleNamespace(
+        model_artifact_set_sha256="a" * 64,
+        compiled_execution_plans={
+            "entrypoint-node": plan(("shared", 10), ("rank0", 3)),
+            "worker-node": plan(("shared", 10), ("rank1", 5)),
+        },
+    )
+    monkeypatch.setattr(
+        identity_module, "parse_stored_installation_plan", lambda _plan: stored
+    )
+    session = SimpleNamespace(
+        get=lambda *_args: SimpleNamespace(plan={}),
+    )
+    identity = DistributionIdentity(
+        lambda: nullcontext(session),  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        clock=lambda: datetime(2026, 10, 12, tzinfo=UTC),
+    )
+    plan_row = SimpleNamespace(
+        installation_id="installation-1",
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(artifact_set_sha256="a" * 64, artifact_set_bytes=18)
+        ),
+    )
+
+    objects, digest, size = identity._model_objects(
+        plan_row,  # type: ignore[arg-type]
+        SimpleNamespace(phase_results=[]),  # type: ignore[arg-type]
+    )
+
+    assert sorted(item.name for item in objects) == ["rank0", "rank1", "shared"]
+    assert (digest, size) == ("a" * 64, 18)

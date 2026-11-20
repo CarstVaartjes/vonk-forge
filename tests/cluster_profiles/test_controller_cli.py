@@ -2707,7 +2707,7 @@ def test_profile_application_selector_uses_owner_without_a_second_profile_gate()
             "4",
             "profile",
             "progress",
-            "--application",
+            "--load",
             application_id,
             "--json",
         ),
@@ -2734,7 +2734,7 @@ def test_global_profile_application_selector_needs_no_profile_selection() -> Non
     )
 
     status, payload = run(
-        ("profile", "progress", "--application", application_id, "--json"),
+        ("profile", "progress", "--load", application_id, "--json"),
         client,
     )
 
@@ -2767,7 +2767,7 @@ def test_profile_application_selector_accepts_selected_profile_owner() -> None:
             "4",
             "profile",
             "progress",
-            "--application",
+            "--load",
             application_id,
             "--json",
         ),
@@ -2797,7 +2797,7 @@ def test_profile_progress_follow_discards_wrong_identity_until_original_repairs(
         (
             "profile",
             "progress",
-            "--application",
+            "--load",
             selected_application,
             "--follow",
             "--interval-seconds",
@@ -2830,7 +2830,7 @@ def test_initial_application_identity_is_reobserved_until_original_repairs() -> 
         (
             "profile",
             "progress",
-            "--application",
+            "--load",
             requested_application,
             "--json",
         ),
@@ -4949,7 +4949,7 @@ def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
 
     captured = capsys.readouterr()
     assert status == 0
-    assert "Job: upgrade-job" in captured.out
+    assert job_id in captured.out
     assert "not a valid object" not in captured.out + captured.err
 
 

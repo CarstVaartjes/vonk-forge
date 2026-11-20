@@ -106,8 +106,8 @@ pub const RECENT_FIELDS: [&str; 4] = [
     "recent_swap_free_mib",
     "recent_full_avg10",
 ];
-// A Spark is loading while the agent's page-cache drop cadence was heard
-// within this window. The agent waits PAGE_CACHE_DROP_INTERVAL after each
+// A Spark is loading while the agent's load-purpose page-cache drop cadence
+// was heard within this window (hygiene drops of a job never count). The agent waits PAGE_CACHE_DROP_INTERVAL after each
 // answer and an answer takes up to PAGE_CACHE_DROP_REPLY_TIMEOUT, so the
 // longest healthy gap between asks is their sum; one more interval is margin.
 pub const LOADING_PHASE_WINDOW: Duration = Duration::from_secs(
@@ -124,7 +124,9 @@ pub const RECEIPT_COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
 // allocations fail at ~6-7 GB MemAvailable with 7-14 GB cached (NVIDIA's DGX
 // Spark vLLM troubleshooting; vLLM #35313). The agent asks once before the
 // container starts and every interval until the workload is ready or its
-// start ends; the helper syncs within the bound, then drops.
+// start ends; the helper syncs within the bound, then drops. A load-purpose
+// ask also marks the host as loading (R4 is lenient only then); a job's drops
+// are hygiene-purpose and never do.
 pub const PAGE_CACHE_DROP_INTERVAL: Duration = Duration::from_secs(5);
 // A slow disk never stalls a start: the drop proceeds after this bound and
 // reclaims only clean pages.

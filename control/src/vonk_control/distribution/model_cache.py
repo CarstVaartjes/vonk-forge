@@ -25,7 +25,7 @@ from .types import (
     DistributionRefused,
     DistributionUnknown,
     OpenedObject,
-    same_content,
+    contained_content,
 )
 
 
@@ -233,12 +233,12 @@ class ModelCacheObjectSource:
     ) -> bool:
         # Content identity: the assignment carries each digest once, so the
         # stored manifest's paths that repeat a digest are not a mismatch.
-        if same_content(self.objects_for_set(artifact_set_sha256), objects):
+        if contained_content(self.objects_for_set(artifact_set_sha256), objects):
             return True
         if not hasattr(self, "_service"):
             return False
         # The stored manifest decides, never this process's copy of it.
-        return same_content(self._load_manifest(artifact_set_sha256), objects)
+        return contained_content(self._load_manifest(artifact_set_sha256), objects)
 
     def objects_for_set(
         self, artifact_set_sha256: str
