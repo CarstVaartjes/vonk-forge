@@ -33,7 +33,7 @@ provenance remains a separate observation.
 | Worker prebuilt importer, telemetry/history collectors, storage demands/collector, maintenance cadence, heartbeat and memory monitor | Fixed budgets and retained paths | Reviewed wiring; existing per-source worker containment handles tick/sample failures |
 | `Settings.from_env_and_secrets`, engine/session creation | Missing/invalid database URL or inaccessible database authority | Required core dependency; database identity is never substituted |
 | `runtime_init.stage_runtime` (`runtime-init` helper) | Privilege, secret normalization, runtime kit staging, shared-volume ownership | Root, no network, no database; three attempts, then exit 1 and the restart policy runs it again. Dependants start anyway on the previous staging (`required: false`); healthy only after its own completed run |
-| `api_preexec.prepare_owned_state` and `db.initialize_database` | Privilege, migration/schema conflict, administrator bootstrap | Existing privileged/core startup boundary; bookkeeping adoption already uses its own savepoint and logs/degrades without undoing schema reconciliation |
+| `api_preexec.prepare_owned_state` and `db.initialize_database` | Migration/schema conflict, administrator bootstrap | Unprivileged (10001) core startup boundary; three attempts, then exit 1 and the restart policy runs it again. Bookkeeping adoption uses its own savepoint and logs/degrades without undoing schema reconciliation. An unstaged administrator password (older Compose file) skips the bootstrap; root from an older Compose file steps down to 10001 first |
 
 Construction attempts use a nonblocking per-capability owner. Failure produces
 one canonical `CapabilityReason`, availability and next-attempt timestamp.
@@ -53,7 +53,7 @@ unless it is deferred to a factory or reviewed as core/pure wiring. It also
 contains a deliberate new-constructor rejection test. The registry is compared
 against working-tree sources without Git access.
 
-The privileged pre-exec and required database configuration boundaries still
+The API pre-exec and required database configuration boundaries still
 can prevent process startup. This change does not claim that an unavailable
 PostgreSQL authority can serve authenticated fleet data, or that all pre-exec
 failures have been converted to runtime capability observations.

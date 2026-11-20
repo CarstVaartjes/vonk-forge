@@ -1,4 +1,4 @@
-"""Exercise installer ownership against the real root pre-exec in Linux."""
+"""Exercise installer ownership against the real root runtime-init in Linux."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ def test_gateway_authority_survives_installer_backup_and_cleanup(
             "docker",
             "run",
             "--rm",
+            # As runtime-init runs in Compose; the image default is 10001.
+            "--user",
+            "0:0",
             "--entrypoint",
             "python",
             controller_image,
@@ -44,6 +47,7 @@ def test_gateway_authority_survives_installer_backup_and_cleanup(
                         'token-signing-key', 'metrics-token', 'agent-client-ca',
                         'agent-intermediate-certificate', 'controller-ca',
                         'agent-proxy-auth', 'litellm-master-key', 'litellm-database-url',
+                        'admin-password',
                     ):
                         (source / name).write_bytes(b'preserved-secret')
                     key = gateway / 'authority/master-key'
@@ -57,7 +61,7 @@ def test_gateway_authority_survives_installer_backup_and_cleanup(
                         assert not stale.exists()
                         assert key.parent.stat().st_uid == gateway.stat().st_uid == 12000
                         subprocess.run(
-                            [sys.executable, '-c', "from pathlib import Path; import sys; assert Path(sys.argv[1]).read_bytes() == b'preserved-secret'", str(key)],
+                            [sys.executable, '-c', "from pathlib import Path; import sys; assert all(Path(path).read_bytes() == b'preserved-secret' for path in sys.argv[1:])", str(key), str(shared / 'admin-password')],
                             user=10001, group=10001, extra_groups=[], check=True,
                         )
                     # Backup and the acceptance/uninstall directory walk run

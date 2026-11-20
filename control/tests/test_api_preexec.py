@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -14,121 +13,48 @@ from vonk_control.browser_auth import (
 from vonk_control.models import Base, User
 
 
-class _ExecCalled(RuntimeError):
-    pass
-
-
-def test_privilege_drop_clears_groups_and_saved_root_ids_before_exec(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("euid", [0, 10001])
+def test_startup_never_runs_the_api_as_root(
+    monkeypatch: pytest.MonkeyPatch, euid: int
 ) -> None:
+    # Catches an older Compose file (user 0:0) leaving the API root, which
+    # would write root-owned files into volumes the 10001 worker shares.
     from vonk_control import api_preexec
 
     events: list[object] = []
-    identity = {
-        "groups": [0, 10001],
-        "gid": (0, 0, 0),
-        "uid": (0, 0, 0),
-    }
-
-    def setgroups(groups: list[int]) -> None:
-        identity["groups"] = list(groups)
-        events.append(("groups", tuple(groups)))
-
-    def setresgid(real: int, effective: int, saved: int) -> None:
-        identity["gid"] = (real, effective, saved)
-        events.append(("gid", real, effective, saved))
-
-    def setresuid(real: int, effective: int, saved: int) -> None:
-        identity["uid"] = (real, effective, saved)
-        events.append(("uid", real, effective, saved))
-
-    def open_source_secrets(path: Path) -> None:
-        events.append(("probe", path))
-        if identity["uid"] != (10001, 10001, 10001):
-            raise AssertionError("source secrets were probed before the UID drop")
-        raise PermissionError
-
-    def exec_process(command: tuple[str, ...]) -> None:
-        assert ("probe", Path("/run/secrets")) in events
-        assert identity["groups"] == []
-        assert identity["gid"] == (10001, 10001, 10001)
-        assert identity["uid"] == (10001, 10001, 10001)
-        events.append(("exec", command))
-        raise _ExecCalled
-
-    # Linux exposes these calls on the real ``os`` module; retain that patch
-    # path there. macOS does not expose setresgid/setresuid, so inject the
-    # smallest equivalent boundary instead of skipping the security test.
-    if hasattr(api_preexec.os, "setresgid") and hasattr(api_preexec.os, "setresuid"):
-        privilege_os = api_preexec.os
-        monkeypatch.setattr(privilege_os, "setgroups", setgroups)
-        monkeypatch.setattr(privilege_os, "setresgid", setresgid)
-        monkeypatch.setattr(privilege_os, "setresuid", setresuid)
-        monkeypatch.setattr(privilege_os, "getgroups", lambda: identity["groups"])
-        monkeypatch.setattr(privilege_os, "getresgid", lambda: identity["gid"])
-        monkeypatch.setattr(privilege_os, "getresuid", lambda: identity["uid"])
-    else:
-        privilege_os = SimpleNamespace(
-            setgroups=setgroups,
-            setresgid=setresgid,
-            setresuid=setresuid,
-            getgroups=lambda: identity["groups"],
-            getresgid=lambda: identity["gid"],
-            getresuid=lambda: identity["uid"],
-        )
-        monkeypatch.setattr(api_preexec, "os", privilege_os)
-
-    with pytest.raises(_ExecCalled):
-        api_preexec.drop_privileges_and_exec(
-            ("python", "-m", "vonk_control.api"),
-            source_secrets=Path("/run/secrets"),
-            source_probe=open_source_secrets,
-            execute=exec_process,
-        )
-
-    assert identity["groups"] == []
-    assert identity["gid"] == (10001, 10001, 10001)
-    assert identity["uid"] == (10001, 10001, 10001)
-    assert events[-1] == ("exec", ("python", "-m", "vonk_control.api"))
-
-
-def test_preexec_initializes_owned_state_before_dropping_privileges(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from vonk_control import api_preexec
-
-    events: list[str] = []
+    monkeypatch.setattr(api_preexec.os, "geteuid", lambda: euid)
     monkeypatch.setattr(
-        api_preexec,
-        "prepare_owned_state",
-        lambda: events.append("prepare"),
+        api_preexec.os, "setgroups", lambda groups: events.append(("groups", groups))
     )
     monkeypatch.setattr(
-        api_preexec,
-        "drop_privileges_and_exec",
-        lambda command: events.append("exec:" + " ".join(command)),
+        api_preexec.os, "setgid", lambda gid: events.append(("gid", gid))
+    )
+    monkeypatch.setattr(
+        api_preexec.os, "setuid", lambda uid: events.append(("uid", uid))
+    )
+    monkeypatch.setattr(
+        api_preexec, "prepare_owned_state", lambda: events.append("prepare")
     )
 
-    api_preexec.main(("python", "-m", "vonk_control.api"))
+    api_preexec.main(("python", "-m", "vonk_control.api"), execute=events.append)
 
-    assert events == ["prepare", "exec:python -m vonk_control.api"]
+    step_down = [("groups", []), ("gid", 10001), ("uid", 10001)] if euid == 0 else []
+    assert events == [*step_down, "prepare", ("python", "-m", "vonk_control.api")]
 
 
+@pytest.mark.parametrize("staged", [True, False])
 def test_owned_state_initializes_database_then_the_single_administrator(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, staged: bool
 ) -> None:
+    # Catches the API refusing to start when an older Compose file staged no
+    # administrator password (the administrator already exists then).
     from vonk_control import api_preexec
 
-    source = tmp_path / "source"
-    normalized = tmp_path / "normalized"
-    source.mkdir()
-    normalized.mkdir()
-    (source / "admin-password").write_text("private admin password\n")
-    (normalized / "database-url").write_text("postgresql://control/database\n")
+    (tmp_path / "database-url").write_text("postgresql://control/database\n")
+    if staged:
+        (tmp_path / "admin-password").write_text("private admin password\n")
     events: list[object] = []
-    monkeypatch.setattr(api_preexec.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(api_preexec, "_SOURCE_SECRETS", source)
-    monkeypatch.setattr(api_preexec, "SECRETS_ROOT", normalized)
+    monkeypatch.setattr(api_preexec, "SECRETS_ROOT", tmp_path)
     monkeypatch.setattr(
         api_preexec,
         "initialize_database",
@@ -140,14 +66,18 @@ def test_owned_state_initializes_database_then_the_single_administrator(
         lambda database_url, password_path: events.append(
             ("administrator", database_url, password_path)
         ),
-        raising=False,
     )
 
     api_preexec.prepare_owned_state()
 
+    administrator = (
+        "administrator",
+        "postgresql://control/database",
+        tmp_path / "admin-password",
+    )
     assert events == [
         ("database", "postgresql://control/database"),
-        ("administrator", "postgresql://control/database", source / "admin-password"),
+        *([administrator] if staged else []),
     ]
 
 
@@ -219,16 +149,16 @@ def test_startup_storage_unknown_ends_and_fresh_startup_executes(monkeypatch, fa
             )
 
     monkeypatch.setattr(api_preexec, "prepare_owned_state", observe)
-    monkeypatch.setattr(api_preexec, "drop_privileges_and_exec", launches.append)
+    monkeypatch.setattr(api_preexec, "step_down_from_root", lambda: None)
     ended = False
     try:
-        api_preexec.main(("python",))
+        api_preexec.main(("python",), execute=launches.append)
     except BaseException:  # noqa: BLE001 -- observe ending, not error taxonomy
         ended = True
     assert ended
     assert len(observations) == 3
     assert launches == []
     unavailable[0] = False
-    api_preexec.main(("python",))
+    api_preexec.main(("python",), execute=launches.append)
     assert len(observations) == 4
     assert launches == [("python",)]

@@ -482,6 +482,8 @@ Docker UIs show an exited container as a failed project. The `runtime-init`
 helper stages secrets, the runtime kit and volume ownership as root, then idles
 healthy. Its readers start once it is healthy and never poll for a staged file;
 see [Runtime staging](deploy/compose/README.md#runtime-staging-runtime-init).
+`control-api` runs as 10001 without capabilities or Compose secrets and reads
+staged copies only; under an older Compose file its pre-exec steps down from root.
 
 Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
 derived from what the installers create. A change that makes an installer, the
