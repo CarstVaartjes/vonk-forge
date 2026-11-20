@@ -1,6 +1,7 @@
 import { formatWire } from "../api/contract-numeric";
 import { useEffect, useState } from "react";
-import type { CatalogSyncStatus, LibraryApi } from "../api/types";
+import type { ReactNode } from "react";
+import type { CatalogSyncStatus, LibraryApi, LibraryViewSnapshot } from "../api/types";
 import { lastSyncAt } from "../lib/catalog-sync";
 import { Time } from "./time";
 import { StatusPill } from "./status-pill";
@@ -13,8 +14,20 @@ const TONE: Record<CatalogSyncStatus["state"], StatusTone> = {
   failed: "bad",
 };
 
-/** Read-only: the Controller syncs the recipe library itself; this only reports the last sync. */
-export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogSyncStatus"> }) {
+/** Read-only: the Controller syncs the recipe library itself; this only reports the last sync.
+ *
+ * One quiet line ("Recipe library v5.2.0 · current · synced 2 hours ago"); the
+ * commit, counters, problems and any `children` (storage observation) sit in a
+ * disclosure that opens by itself when the sync is not current. */
+export function CatalogSyncStatusLine({
+  api,
+  release,
+  children,
+}: {
+  api: Pick<LibraryApi, "catalogSyncStatus">;
+  release?: LibraryViewSnapshot["library"];
+  children?: ReactNode;
+}) {
   const [status, setStatus] = useState<CatalogSyncStatus | null | undefined>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -33,18 +46,40 @@ export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogS
       });
     return () => controller.abort();
   }, [api]);
+  const name = <>Recipe library{release ? ` v${release.version}` : ""}</>;
+  const details = (open: boolean, body: ReactNode) => (
+    <details open={open}>
+      <summary>Details</summary>
+      {release && (
+        <p>
+          Library release v{release.version}, updated{" "}
+          {new Date(release.updated_at).toLocaleDateString()}.
+        </p>
+      )}
+      {body}
+      {children}
+    </details>
+  );
   if (error)
     return (
-      <p className="library-sync" role="status">
-        Recipe library sync status unavailable: {error}
-      </p>
+      <div className="library-sync" role="status">
+        <p>{name} · sync status unavailable</p>
+        {details(true, <p>{error}</p>)}
+      </div>
     );
-  if (status === undefined) return null;
+  if (status === undefined)
+    return release || children ? (
+      <div className="library-sync" role="status">
+        <p>{name}</p>
+        {details(false, null)}
+      </div>
+    ) : null;
   if (status === null)
     return (
-      <p className="library-sync" role="status">
-        Recipe library sync has not run yet. The Controller syncs automatically.
-      </p>
+      <div className="library-sync" role="status">
+        <p>{name} · sync has not run yet. The Controller syncs automatically.</p>
+        {details(false, null)}
+      </div>
     );
   const at = lastSyncAt(status);
   const problems = [
@@ -54,43 +89,46 @@ export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogS
   return (
     <div className="library-sync" role="status">
       <p>
-        <span>Recipe library sync </span>
-        <StatusPill tone={TONE[status.state]}>{status.state}</StatusPill>
+        {name} <StatusPill tone={TONE[status.state]}>{status.state}</StatusPill> · synced{" "}
+        <Time value={at} />
+      </p>
+      {details(
+        status.state !== "current",
         <>
-          {" "}
-          · Last sync <Time value={at} />
-        </>
-        {status.commit && (
-          <>
-            {" "}
-            · commit <code>{status.commit.slice(0, 12)}</code>
-          </>
-        )}
-        {status.expected_commit && status.expected_commit !== status.commit && (
-          <>
-            {" "}
-            · expected commit <code>{status.expected_commit.slice(0, 12)}</code>
-          </>
-        )}
-      </p>
-      <p>
-        {formatWire(status.imported_count)} imported · {formatWire(status.updated_count)} updated ·{" "}
-        {formatWire(status.unchanged_count)} unchanged · {formatWire(status.skipped_count)} skipped
-        · {formatWire(status.withdrawn_count)} withdrawn of {formatWire(status.total_count)}
-      </p>
-      {(problems.length > 0 || status.stale_recipes.length > 0) && (
-        <details open={status.state !== "current"}>
-          <summary>
-            {problems.length} problem{problems.length === 1 ? "" : "s"}
-            {status.stale_recipes.length > 0 &&
-              ` · ${status.stale_recipes.length} recipe${status.stale_recipes.length === 1 ? "" : "s"} with stale installations or runs`}
-          </summary>
-          <ul>
-            {problems.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </details>
+          <p>
+            {status.commit && (
+              <>
+                Commit <code>{status.commit.slice(0, 12)}</code>
+              </>
+            )}
+            {status.expected_commit && status.expected_commit !== status.commit && (
+              <>
+                {" "}
+                · expected commit <code>{status.expected_commit.slice(0, 12)}</code>
+              </>
+            )}
+          </p>
+          <p>
+            {formatWire(status.imported_count)} imported · {formatWire(status.updated_count)}{" "}
+            updated · {formatWire(status.unchanged_count)} unchanged ·{" "}
+            {formatWire(status.skipped_count)} skipped · {formatWire(status.withdrawn_count)}{" "}
+            withdrawn of {formatWire(status.total_count)}
+          </p>
+          {(problems.length > 0 || status.stale_recipes.length > 0) && (
+            <>
+              <p>
+                {problems.length} problem{problems.length === 1 ? "" : "s"}
+                {status.stale_recipes.length > 0 &&
+                  ` · ${status.stale_recipes.length} recipe${status.stale_recipes.length === 1 ? "" : "s"} with stale installations or runs`}
+              </p>
+              <ul>
+                {problems.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>,
       )}
     </div>
   );

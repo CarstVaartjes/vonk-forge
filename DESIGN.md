@@ -284,6 +284,10 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 - **Focus:** High-contrast three-pixel focus outline with offset; selection and caret use green without removing the visible structural border.
 - **Error / Disabled:** Error copy and border use proven-failure red; disabled controls remain readable and visibly muted, never merely hidden.
 
+### Library Toolbar
+
+The Library (Models and Recipes) has one toolbar, never two filter zones: a wide search with a fully visible placeholder, one segmented Spark-count control (the shared `segmented` class, the operator's fleet size marked "yours"), two 44px pill toggles ("Fits fleet", "Cached only") with ordinary-size checkboxes, and one Filters disclosure holding Family, Engine, Creator, Quantization, Usage, Version, Publisher, Alignment, Exact model, Updated and Sort. No filter appears twice; the URL stays the single owner of filter state. Release, sync state and storage-polling cadence are one quiet status line in the page header ("Recipe library v5.2.0 current, synced 2 hours ago") with commit, counters and storage cadence in a Details disclosure that opens by itself when the sync is not current. Long lists show one page and a "Show more" button. Model counts count Models: quantization variants fold into their Model by the display lineage (`family/line/model`); a Model without lineage counts as itself.
+
 ### Navigation
 
 The header holds the brand mark (a link to Overview), Fleet, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.

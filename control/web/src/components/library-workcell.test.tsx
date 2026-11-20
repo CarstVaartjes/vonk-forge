@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import type { ControlApi } from "../api/types";
 import {
@@ -11,6 +11,7 @@ import {
   LibraryWorkcell,
   recipeEngine,
   recipeFleetFit,
+  recordModelKey,
 } from "./library-workcell";
 import { cacheRemovalReview } from "../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../test-fixtures/library";
@@ -195,6 +196,7 @@ test("offers the same recipe filters as vonkctl recipe library", () => {
       snapshot={libraryViewSnapshot}
     />,
   );
+  fireEvent.click(screen.getByText("Filters"));
   for (const name of [
     "Filter usage",
     "Filter family",
@@ -202,7 +204,6 @@ test("offers the same recipe filters as vonkctl recipe library", () => {
     "Filter quantization",
     "Filter creator",
     "Filter alignment",
-    "Filter Sparks",
     "Sort Library",
     "Filter updated",
   ]) {
@@ -358,6 +359,7 @@ test("a recipe row shows engine, creator and Spark count badges", () => {
   expect(pane.querySelector('[data-badge="engine"]')).toBeTruthy();
   expect(pane.querySelector('[data-badge="creator"]')).toHaveTextContent("MiaAI-Lab");
   expect(pane.querySelector('[data-badge="sparks"]')).toHaveTextContent(/^\d+ Sparks?$/);
+  fireEvent.click(screen.getByText("Filters"));
   expect(screen.getByRole("combobox", { name: "Filter engine" })).toBeVisible();
 });
 
@@ -515,5 +517,87 @@ test("record titles and the alignment filter follow the published display", () =
   );
   expect(new Set(aligned.map((record) => record.recipe?.recipe_id))).toEqual(
     new Set([recipe.recipe_id]),
+  );
+});
+
+test("folds quantization variants into one Model row and counts Models", () => {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const base = snapshot.models[0]!;
+  snapshot.models.push({
+    ...structuredClone(base),
+    model: { ...base.model, slug: `${base.model.slug}-q8`, content_sha256: "b".repeat(64) },
+    quantization: "q8",
+    recipes: [],
+  });
+  const total = new Set(buildLibraryRecipeRecords(snapshot).map(recordModelKey)).size;
+  expect(total).toBe(snapshot.models.length - 1);
+  render(
+    <LibraryWorkcell
+      api={{} as never}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      query=""
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
+      snapshot={snapshot}
+    />,
+  );
+  expect(screen.getByText(`Models · ${total} of ${total}`)).toBeVisible();
+  expect(screen.getByText(/2 variants/)).toBeVisible();
+});
+
+test("the Models list starts with one page and Show more reveals the rest", () => {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const base = snapshot.models[0]!;
+  snapshot.models = Array.from({ length: 45 }, (_, index) => ({
+    ...structuredClone(base),
+    model: { ...base.model, slug: `bulk-${index}`, content_sha256: `${index}`.padStart(64, "0") },
+    model_display: {
+      ...base.model_display!,
+      lineage: { ...base.model_display!.lineage!, model: `bulk-${index}` },
+    },
+    recipes: [],
+  }));
+  render(
+    <LibraryWorkcell
+      api={{} as never}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      query=""
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(snapshot.models[0]!.model) }}
+      snapshot={snapshot}
+    />,
+  );
+  const list = within(screen.getByLabelText("Models"));
+  expect(list.getAllByRole("listitem")).toHaveLength(40);
+  fireEvent.click(list.getByRole("button", { name: "Show more (5 more)" }));
+  expect(list.getAllByRole("listitem")).toHaveLength(45);
+});
+
+test("the Models list obeys the toolbar filters, not only the search", () => {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const cached = snapshot.models[0]!;
+  cached.local = { ...cached.local, controller: "cached" };
+  render(
+    <LibraryWorkcell
+      api={{} as never}
+      filters={{ ...EMPTY_LIBRARY_WORKCELL_FILTERS, cached: true }}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      query=""
+      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(cached.model) }}
+      snapshot={snapshot}
+    />,
+  );
+  expect(within(screen.getByLabelText("Models")).getAllByRole("listitem").length).toBe(
+    new Set(
+      buildLibraryRecipeRecords(snapshot)
+        .filter((record) => record.modelCached)
+        .map(recordModelKey),
+    ).size,
   );
 });
