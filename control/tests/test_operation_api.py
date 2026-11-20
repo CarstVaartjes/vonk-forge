@@ -2296,3 +2296,15 @@ def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> Non
     body = response.json()
     assert body["targets"] == []
     assert body["progress"] == {"completed": 0, "failed": 0, "running": 0, "total": 0}
+
+
+def test_failure_summary_ends_at_a_whole_word() -> None:
+    from vonk_control.summary_cut import summary_cut as _summary_cut
+
+    assert _summary_cut("short reason") == "short reason"
+    text = "word " * 100
+    cut = _summary_cut(text, 256)
+    assert len(cut) <= 256 and cut.endswith("word") and text.startswith(cut)
+    # A word that straddles the limit is dropped whole, never split.
+    straddling = "a" * 250 + " straddling words"
+    assert _summary_cut(straddling) == "a" * 250

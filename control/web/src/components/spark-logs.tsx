@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ControlApi, FleetLogResponse } from "../api/types";
 import { ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { errorText } from "../lib/error-display";
+import { CommandBlock } from "./command-block";
 import { SkeletonBlock } from "./skeleton";
 import { StatusPill } from "./status-pill";
 import { Time } from "./time";
@@ -48,9 +49,8 @@ export function SparkLogs({ api, id }: { api: ControlApi; id: string }) {
           </ol>
         ))}
       {error && <p role="alert">{error}</p>}
-      <p>
-        CLI: <code>vonkctl fleet loginfo {id}</code>
-      </p>
+      <p className="spark-panel-note">Read the same lines, with more history, from a terminal:</p>
+      <CommandBlock command={`vonkctl fleet loginfo ${id}`} />
     </div>
   );
 }

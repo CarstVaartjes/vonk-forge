@@ -971,10 +971,10 @@ progress {
 }
 .activity-controls {
   display: grid;
-  grid-template-columns: minmax(16rem, 1.3fr) minmax(24rem, 2fr);
-  gap: 0.8rem 1rem;
-  margin-bottom: 1.2rem;
-  padding: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-card);
   background: var(--panel);
@@ -998,14 +998,31 @@ progress {
   min-height: 2.75rem;
   background: var(--recess);
 }
+.activity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+.activity-bar .activity-search {
+  flex: 1 1 16rem;
+}
+.activity-bar label:not(.activity-search) {
+  flex: 0 1 11rem;
+}
+.activity-bar .button {
+  min-height: 2.75rem;
+}
+.activity-filters[hidden] {
+  display: none;
+}
 .activity-filters {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 0.7rem;
 }
 .activity-control-footer {
   display: flex;
-  grid-column: 1 / -1;
   align-items: center;
   gap: 0.7rem;
   padding-top: 0.2rem;
@@ -2407,7 +2424,7 @@ progress {
 .spark-host-checks p {
   margin: 0;
 }
-.spark-host-checks pre {
+.command-block pre {
   flex: 1;
   min-width: 0;
   margin: 0;
@@ -2417,7 +2434,7 @@ progress {
   background: var(--recess);
   border-radius: var(--r-in);
 }
-.host-check-command {
+.command-block {
   display: flex;
   align-items: center;
   gap: 0.5rem;

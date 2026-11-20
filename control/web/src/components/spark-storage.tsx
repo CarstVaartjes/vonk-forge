@@ -32,7 +32,7 @@ export function SparkStorage({ node }: { node: VisualFleetNode }) {
         {node.installed.map((item) => (
           <li key={item.installation_id}>
             <span>{item.title ?? item.installation_id}</span>
-            <span>
+            <span className="spark-model-size">
               {item.installed_bytes == null ? NOT_REPORTED_TEXT : formatBytes(item.installed_bytes)}
               {inUse.has(item.installation_id) ? " · in use" : ""}
             </span>

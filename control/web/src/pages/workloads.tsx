@@ -1,17 +1,18 @@
+import "./workloads.css";
 import { useEffect, useState } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
+import { CertificateNotice, expiringCertificates } from "../components/certificate-notice";
 import { EmptyState } from "../components/empty-state";
 import { EnginePanel } from "../components/engine-panel";
 import { ClusterUnit } from "../components/workload-units";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { MetricsChart } from "../components/metrics-chart";
 import { PageHeader } from "../components/page-header";
-import { RangeSwitch } from "../components/range-switch";
 import { SparksTable } from "../components/sparks-table";
 import { WorkloadRow } from "../components/workload-row";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { useFleetStream } from "../hooks/use-fleet-stream";
-import { useMetricSeries } from "../hooks/use-metric-series";
+import { useMetricRead, useMetricSeries } from "../hooks/use-metric-series";
 import { useWorkloadReads } from "../hooks/use-workload-reads";
 import { groupByWorkload, nodeDisplayName } from "../lib/fleet";
 
@@ -39,8 +40,10 @@ export function WorkloadsPage({
   const [range, setRange] = useState<MetricRange>("6h");
   const [openRun, setOpenRun] = useState<string | null>(null);
   const nodes = fleet.snapshot?.nodes ?? [];
+  const certificates = useMetricRead(api, "certificate_expiry", range);
   const { clusters } = groupByWorkload(nodes);
   const order = new Map(nodes.map((node, index) => [node.id, index]));
+  const names = Object.fromEntries(nodes.map((node) => [node.id, nodeDisplayName(node)]));
   return (
     <div className="fleet-page">
       <PageHeader
@@ -48,6 +51,7 @@ export function WorkloadsPage({
         description="What is serving, and every Spark that carries it."
       />
       <FleetFeedback fleet={fleet} />
+      <CertificateNotice lines={expiringCertificates(certificates, names)} />
       {fleet.snapshot && (
         <section className="workloads-section" aria-labelledby="workloads-heading">
           <h2 id="workloads-heading">By workload</h2>
@@ -93,12 +97,7 @@ export function WorkloadsPage({
           <SparksTable nodes={nodes} now={fleet.now} onSelect={onOpenSpark} />
         </section>
       )}
-      <RangeSwitch range={range} onChange={setRange} />
-      <MetricsChart
-        api={api}
-        range={range}
-        names={Object.fromEntries(nodes.map((node) => [node.id, nodeDisplayName(node)]))}
-      />
+      <MetricsChart api={api} range={range} onRangeChange={setRange} names={names} />
     </div>
   );
 }
