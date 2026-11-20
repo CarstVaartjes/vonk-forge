@@ -547,7 +547,7 @@ Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
 wait lacks an action and no admission is stuck. It is run by hand after
 lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
 
-TypeScript uses pinned Biome for formatting and focused correctness lint rules.
+TypeScript uses pinned Biome for formatting and focused correctness lint rules; every control/web CSS file (`src/**/*.css`) is formatted by Biome too.
 The commit hook and pull-request CI check changed authored TypeScript files.
 `npm run typecheck --prefix control/web` checks both the application and browser
 tests/configuration; `npm run build` also checks application types. Generated
