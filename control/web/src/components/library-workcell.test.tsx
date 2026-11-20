@@ -17,7 +17,7 @@ import {
 } from "./library-workcell";
 import { cacheRemovalReview } from "../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../test-fixtures/library";
-import { LibraryPath, recipeLibraryPath, modelKey } from "../lib/library-route";
+import { LibraryPath, modelLibraryPath, recipeLibraryPath, modelKey } from "../lib/library-route";
 import { formatBytes } from "../lib/fleet";
 
 test("renders every selected model's own recipe identities", () => {
@@ -635,4 +635,38 @@ test.each(countVector.cases)("counts Models like vonkctl: $name", (vector) => {
   }));
   expect(countModels(models)).toBe(vector.models_count);
   expect(countVariants(models)).toBe(vector.variants_count);
+});
+
+function twoVariants() {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const base = snapshot.models.find((entry) => entry.recipes.length > 0)!;
+  const lineage = { ...base.model_display!.lineage!, variant_kind: "quantization" as const };
+  base.model_display = { ...base.model_display!, model_title: "Long variant title", lineage };
+  const short = {
+    ...structuredClone(base),
+    model: { ...base.model, slug: `${base.model.slug}-q8`, content_sha256: "c".repeat(64) },
+    model_display: { ...base.model_display!, model_title: "Short" },
+  };
+  snapshot.models.push(short);
+  return { snapshot, base, short };
+}
+
+test("a recipe that serves two variants of one Model is listed once", () => {
+  const { snapshot, base } = twoVariants();
+  render(renderBulk(snapshot, snapshot.models.indexOf(base)));
+  expect(screen.getByText(`Recipes for selected Model · ${base.recipes.length}`)).toBeVisible();
+});
+
+test("the Model row keeps its title and link when the filters change", () => {
+  const { snapshot, base, short } = twoVariants();
+  const { rerender } = render(renderBulk(snapshot, snapshot.models.indexOf(base)));
+  const row = () => within(screen.getByLabelText("Models")).getByText("Short").closest("a");
+  expect(row()).toHaveAttribute("href", modelLibraryPath(modelKey(short.model)));
+  rerender(
+    renderBulk(snapshot, snapshot.models.indexOf(base), {
+      ...EMPTY_LIBRARY_WORKCELL_FILTERS,
+      sort: "name",
+    }),
+  );
+  expect(row()).toHaveAttribute("href", modelLibraryPath(modelKey(short.model)));
 });

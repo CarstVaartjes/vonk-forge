@@ -845,7 +845,6 @@
   white-space: nowrap;
 }
 .library-toggle input { height: 1.1rem; margin: 0; width: 1.1rem; accent-color: var(--green); }
-.library-toggle:has(input:disabled) { cursor: not-allowed; opacity: 0.55; }
 .library-toggle:has(input:checked) { background: color-mix(in srgb, var(--green) 8%, var(--panel)); border-color: color-mix(in srgb, var(--green-text) 40%, transparent); color: var(--green-text); }
 .library-filters > summary { cursor: pointer; display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--muted); font-size: 0.78rem; font-weight: 700; }
 .library-filters-grid { display: grid; gap: 0.6rem 0.75rem; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); padding-bottom: 0.4rem; }

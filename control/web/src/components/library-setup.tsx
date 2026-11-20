@@ -359,10 +359,12 @@ export function LibrarySetupStrip({
             value={filters.model}
             options={[
               ...new Map(
-                records.map((r) => [
-                  r.modelKey,
-                  `${r.modelTitle} · ${r.modelDocument?.identity.version ?? ""} · ${r.model?.content_sha256.slice(0, 8) ?? ""}`,
-                ]),
+                records
+                  .filter((r) => noun === "models" || recordModelKey(r) !== null)
+                  .map((r) => [
+                    r.modelKey,
+                    `${r.modelTitle} · ${r.modelDocument?.identity.version ?? ""} · ${r.model?.content_sha256.slice(0, 8) ?? ""}`,
+                  ]),
               ).entries(),
             ].map(([value, label]) => ({ value, label }))}
             onChange={(model) => set({ model })}

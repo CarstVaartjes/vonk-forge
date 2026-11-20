@@ -237,13 +237,12 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
     />,
   );
   const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
-  expect(
-    screen.getByText(
-      `${counts.fits} of ${counts.fits + counts.nonFit} assessed recipes fit now, ${counts.unknown} awaiting assessment`,
-      { exact: false },
-    ),
-  ).toBeVisible();
   expect(toggle).not.toBeChecked();
+  expect(
+    screen.getByText("22 of 44 assessed recipes fit now, 41 awaiting assessment", {
+      exact: false,
+    }),
+  ).toBeVisible();
   fireEvent.click(toggle);
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
   // --fits-fleet excludes only proven non-fits; unknown evidence stays visible.
@@ -351,4 +350,28 @@ test("the toolbar gives the online Sparks and their free memory in one quiet lin
   expect(
     screen.getByText(/2 of 3 Sparks online · 40\.0 GiB unified memory free/),
   ).toBeInTheDocument();
+});
+
+test("Exact model on the Recipes tab leaves out models that are not Models", () => {
+  const first = records.find((record) => record.recipe && record.modelDisplay?.lineage)!;
+  const helper = {
+    ...first,
+    key: `${first.key}:helper`,
+    modelKey: "helper",
+    modelTitle: "Helper draft",
+    modelDisplay: null,
+  };
+  render(
+    <LibrarySetupStrip
+      records={[...records, helper]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={() => undefined}
+      onQueryChange={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByText("Filters"));
+  const select = screen.getByRole("combobox", { name: "Filter exact model" });
+  expect(within(select).queryByText(/Helper draft/)).toBeNull();
 });

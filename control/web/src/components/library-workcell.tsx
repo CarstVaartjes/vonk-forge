@@ -207,6 +207,16 @@ export function modelFoldKey(display: ModelDisplay | null | undefined): string |
   const lineage = display?.lineage;
   return lineage ? `${lineage.family}/${lineage.line}/${lineage.model}` : null;
 }
+/** Which variant stands for its Model: base first, then the shortest title, then the key. */
+function representativeOrder(a: LibraryRecipeRecord, b: LibraryRecipeRecord): number {
+  const base = (record: LibraryRecipeRecord) =>
+    record.modelDisplay?.lineage?.variant_kind === "base" ? 0 : 1;
+  return (
+    base(a) - base(b) ||
+    a.modelTitle.length - b.modelTitle.length ||
+    (a.modelKey < b.modelKey ? -1 : a.modelKey > b.modelKey ? 1 : 0)
+  );
+}
 export function recordModelKey(record: LibraryRecipeRecord): string | null {
   return modelFoldKey(record.modelDisplay);
 }
@@ -521,12 +531,7 @@ export function LibraryWorkcell({
     if (key === null) continue;
     variantKeys.set(key, (variantKeys.get(key) ?? new Set()).add(record.modelKey));
     const rep = reps.get(key);
-    if (
-      !rep ||
-      (record.modelDisplay?.lineage?.variant_kind === "base" &&
-        rep.modelDisplay?.lineage?.variant_kind !== "base")
-    )
-      reps.set(key, record);
+    if (!rep || representativeOrder(record, rep) < 0) reps.set(key, record);
   }
   const shown = new Set(matching.flatMap((record) => recordModelKey(record) ?? []));
   const models = [...reps].filter(([key]) => shown.has(key)).map(([, record]) => record);
@@ -537,9 +542,14 @@ export function LibraryWorkcell({
     models.find((record) => recordModelKey(record) === requestedFold) ??
     (requested ? undefined : models[0]);
   const selectedFold = selectedModel ? recordModelKey(selectedModel) : undefined;
-  const selectedRecipes = matching.filter(
-    (record) => recordModelKey(record) === selectedFold && record.recipe,
-  );
+  // A recipe is listed once, however many variants of the Model it serves.
+  const selectedRecipes = [
+    ...new Map(
+      matching
+        .filter((record) => recordModelKey(record) === selectedFold && record.recipe)
+        .map((record) => [record.recipe!.recipe_id, record]),
+    ).values(),
+  ];
   const selectedIndex = models.findIndex((record) => recordModelKey(record) === selectedFold);
   const selectedVariants = selectedFold ? (variantKeys.get(selectedFold)?.size ?? 0) : 0;
   const { limit, more } = useShowMore(

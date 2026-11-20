@@ -16,6 +16,7 @@ import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-work
 import {
   countModels,
   countVariants,
+  modelFoldKey,
   EMPTY_LIBRARY_WORKCELL_FILTERS,
   EmptyLibrary,
   filterLibraryRecipeRecords,
@@ -81,6 +82,7 @@ export function LibraryModelsView({
         filteredRecipes.some((record) => record.modelKey === modelKey(model.model)) ||
         modelTitle(model).toLowerCase().includes(normalizedQuery),
     );
+  const others = visible.filter((model) => modelFoldKey(model.model_display) === null).length;
   const groups = groupModels(visible);
   const { limit, more } = useShowMore(JSON.stringify([filters, query]), groups.size, 0, "rows");
   const refresh = () => void onRefresh(new AbortController().signal);
@@ -108,6 +110,7 @@ export function LibraryModelsView({
         </div>
         <span>
           {countModels(visible)} of {countModels(models)} models · {countVariants(visible)} variants
+          {others > 0 && ` · ${others} other models`}
         </span>
       </header>
       <LibrarySetupStrip
@@ -195,15 +198,25 @@ function ModelRevisionsRow({
   return (
     <article className="library-model-row">
       <div>
-        <a
-          href={modelLibraryPath(key)}
-          onClick={(event) => onNavigate(event, modelLibraryPath(key))}
-        >
-          <h3>{modelTitle(model)}</h3>
-          <p>
-            {model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}
-          </p>
-        </a>
+        {modelFoldKey(model.model_display) === null ? (
+          // Not a Model (helper, drafter, encoder): no Model page to open; its recipes keep their links.
+          <div>
+            <h3>{modelTitle(model)}</h3>
+            <p>
+              {model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}
+            </p>
+          </div>
+        ) : (
+          <a
+            href={modelLibraryPath(key)}
+            onClick={(event) => onNavigate(event, modelLibraryPath(key))}
+          >
+            <h3>{modelTitle(model)}</h3>
+            <p>
+              {model.model.publisher}/{model.model.slug} · {model.model_document.identity.variant}
+            </p>
+          </a>
+        )}
         <div className="library-model-badges">
           {capabilities.length ? (
             capabilities.map((capability) => (

@@ -326,3 +326,37 @@ test("counts Models, not quantization variants, and bounds the list with Show mo
   fireEvent.click(screen.getByRole("button", { name: "Show more (7 more rows)" }));
   expect(within(list).getAllByRole("article")).toHaveLength(47);
 });
+
+test("a model with no lineage is not a Model: no Model link, named in the header", () => {
+  const base = libraryViewSnapshot.models[0]!;
+  const helper = {
+    ...base,
+    model: { ...base.model, slug: "helper-draft" },
+    model_document: {
+      ...base.model_document,
+      identity: {
+        ...base.model_document.identity,
+        model: { ...base.model_document.identity.model, slug: "helper-draft" },
+      },
+    },
+    model_display: null,
+    recipes: [],
+  };
+  render(
+    <LibraryModelsView
+      api={cacheApi()}
+      entries={[]}
+      modelInventory={[base, helper]}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      onFiltersChange={() => undefined}
+      onNavigate={() => undefined}
+      onQueryChange={() => undefined}
+      onRefresh={async () => undefined}
+      path="/library?view=models"
+      query=""
+    />,
+  );
+  expect(screen.getByText("1 of 1 models · 1 variants · 1 other models")).toBeVisible();
+  const heading = screen.getByRole("heading", { name: /helper-draft/ });
+  expect(heading.closest("a")).toBeNull();
+});
