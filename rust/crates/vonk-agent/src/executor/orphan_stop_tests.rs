@@ -107,6 +107,12 @@ impl World {
 
 /// One complete observation cycle; a failed report is the next cycle's work.
 async fn cycle(executor: &RecipeExecutor<'_, NoProcess>) {
+    cycle_within(executor, ObservationWindows::default()).await;
+}
+
+/// The same cycle with the page's waits scaled down, so a slow Controller or
+/// stop is a short real wait with the same ordering against each window.
+async fn cycle_within(executor: &RecipeExecutor<'_, NoProcess>, windows: ObservationWindows) {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut checkpoint = None;
     loop {
@@ -115,7 +121,7 @@ async fn cycle(executor: &RecipeExecutor<'_, NoProcess>) {
             "observation cycle budget expired"
         );
         let Ok(page) = executor
-            .report_recipe_run_observation_page(checkpoint.as_ref())
+            .report_recipe_run_observation_page_within(checkpoint.as_ref(), windows)
             .await
         else {
             return;
@@ -124,6 +130,15 @@ async fn cycle(executor: &RecipeExecutor<'_, NoProcess>) {
         if checkpoint.is_none() {
             return;
         }
+    }
+}
+
+/// A page inspection budget a fifth of production's, for the tests whose
+/// Controller or stop is slower than the budget.
+fn short_inspection() -> ObservationWindows {
+    ObservationWindows {
+        inspection: Duration::from_secs(2),
+        ..ObservationWindows::default()
     }
 }
 
@@ -349,17 +364,17 @@ async fn a_stop_slower_than_the_page_budget_completes_in_its_own_cycle() {
     let (run, installation) = world.prepared_run(2);
     world.host.run(run, Some(labels_of(run, installation, 2)));
     world.controller.say(run, FakeDisposition::Unowned);
-    world.host.slow_next_stop(Duration::from_secs(11));
+    world.host.slow_next_stop(Duration::from_millis(2200));
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
-    cycle(&executor).await;
+    cycle_within(&executor, short_inspection()).await;
 
     assert!(!world.host.is_running(run));
     assert!(!world.lifecycle(run).exists());
     assert_eq!(stops(&world.host).len(), 1);
     assert_eq!(world.controller.grants().len(), 1);
-    cycle(&executor).await;
+    cycle_within(&executor, short_inspection()).await;
     assert_eq!(stops(&world.host).len(), 1, "no double effect");
 }
 
@@ -374,14 +389,21 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     let (run, installation) = world.prepared_run(2);
     world.host.run(run, Some(labels_of(run, installation, 2)));
     world.controller.say(run, FakeDisposition::Unowned);
-    world.host.slow_next_stop(Duration::from_secs(22));
+    // The stop outlasts the (scaled) stop window. The pass also spends the
+    // endpoint probe's own 2 s connect timeout on the unreachable address, so
+    // a pass that waited for the stop would take 5 s, not 2.3 s.
+    let windows = ObservationWindows {
+        orphan_stop: Duration::from_millis(300),
+        ..ObservationWindows::default()
+    };
+    world.host.slow_next_stop(Duration::from_secs(3));
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
     let started = Instant::now();
-    cycle(&executor).await;
+    cycle_within(&executor, windows).await;
     assert!(
-        started.elapsed() < Duration::from_secs(19),
+        started.elapsed() < Duration::from_secs(4),
         "the pass waited for the stop: {:?}",
         started.elapsed()
     );
@@ -392,7 +414,7 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
 
     // While the stop is still running a second cycle sees the container
     // running and asks again; the helper turns that stop away at once.
-    cycle(&executor).await;
+    cycle_within(&executor, windows).await;
     let deadline = Instant::now() + Duration::from_secs(30);
     while world.host.is_running(run) {
         assert!(Instant::now() < deadline, "the stop never landed");

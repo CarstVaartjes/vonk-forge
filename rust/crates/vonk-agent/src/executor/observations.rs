@@ -160,16 +160,33 @@ impl<R> RecipeExecutor<'_, R> {
     }
 }
 
-/// How long a page waits for the orphan stops it started. A stop that outlasts
-/// it lands anyway (the helper works on its own thread, from the request file
-/// it already read) and is retired next cycle, so a container whose stop never
-/// finishes cannot hold up a claim.
-const ORPHAN_STOP_WINDOW: Duration = Duration::from_secs(15);
+/// The waits of one observation page. `Default` is production; tests pass
+/// short ones to the `_within` entry point.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ObservationWindows {
+    /// How long the page inspects its runs before the rest stay unknown.
+    pub(super) inspection: Duration,
+    /// How long a page waits for the Controller's dispositions of its running
+    /// runs. They are asked only after the page is reported, so a slow
+    /// Controller delays nothing already observed; an unanswered ask is
+    /// repeated next cycle.
+    pub(super) running_disposition: Duration,
+    /// How long a page waits for the orphan stops it started. A stop that
+    /// outlasts it lands anyway (the helper works on its own thread, from the
+    /// request file it already read) and is retired next cycle, so a container
+    /// whose stop never finishes cannot hold up a claim.
+    pub(super) orphan_stop: Duration,
+}
 
-/// How long a page waits for the Controller's dispositions of its running
-/// runs. They are asked only after the page is reported, so a slow Controller
-/// delays nothing already observed; an unanswered ask is repeated next cycle.
-const RUNNING_DISPOSITION_WINDOW: Duration = Duration::from_secs(15);
+impl Default for ObservationWindows {
+    fn default() -> Self {
+        Self {
+            inspection: Duration::from_secs(10),
+            running_disposition: Duration::from_secs(15),
+            orphan_stop: Duration::from_secs(15),
+        }
+    }
+}
 
 impl<R> RecipeExecutor<'_, R> {
     /// Stop the running containers of runs the Controller does not want here,
@@ -184,6 +201,7 @@ impl<R> RecipeExecutor<'_, R> {
         &self,
         confirmed: Vec<(String, Option<HostHelperContainerLabels>)>,
         running: Vec<(String, Option<HostHelperContainerLabels>)>,
+        windows: ObservationWindows,
     ) where
         R: ProcessRunner,
     {
@@ -194,7 +212,7 @@ impl<R> RecipeExecutor<'_, R> {
                 (run_id, labels, disposition)
             })
             .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
-            .take_until(tokio::time::sleep(RUNNING_DISPOSITION_WINDOW))
+            .take_until(tokio::time::sleep(windows.running_disposition))
             .collect::<Vec<_>>()
             .await;
         unowned.extend(
@@ -209,7 +227,7 @@ impl<R> RecipeExecutor<'_, R> {
                 self.stop_unowned_container(&run_id, labels).await
             })
             .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
-            .take_until(tokio::time::sleep(ORPHAN_STOP_WINDOW))
+            .take_until(tokio::time::sleep(windows.orphan_stop))
             .collect::<Vec<_>>()
             .await;
     }
@@ -450,6 +468,18 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
+        self.report_recipe_run_observation_page_within(checkpoint, ObservationWindows::default())
+            .await
+    }
+
+    pub(super) async fn report_recipe_run_observation_page_within(
+        &self,
+        checkpoint: Option<&RecipeRunObservationCheckpoint>,
+        windows: ObservationWindows,
+    ) -> Result<RecipeObservationSweep, RecipeObservationError>
+    where
+        R: ProcessRunner,
+    {
         let mut outbox = StateStore::open(
             &self.runtime.data_root.join("state.sqlite"),
             self.client.node_id(),
@@ -593,12 +623,13 @@ impl<R> RecipeExecutor<'_, R> {
                 })
             })
             .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
-            .take_until(tokio::time::sleep(Duration::from_secs(10)))
+            .take_until(tokio::time::sleep(windows.inspection))
             .collect::<Vec<_>>()
             .await;
         if results.len() != expected {
             eprintln!(
-                "vonk-agent: run observation page reached its 10s inspection budget; {} of {} inspections completed; omitted runs remain unknown and retry next cycle",
+                "vonk-agent: run observation page reached its {:?} inspection budget; {} of {} inspections completed; omitted runs remain unknown and retry next cycle",
+                windows.inspection,
                 results.len(),
                 expected
             );
@@ -640,7 +671,8 @@ impl<R> RecipeExecutor<'_, R> {
         let running = running
             .into_inner()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.settle_running_unowned(confirmed, running).await;
+        self.settle_running_unowned(confirmed, running, windows)
+            .await;
         let reported = reported?;
         Ok(RecipeObservationSweep {
             reported,
