@@ -678,9 +678,9 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     )
     services = json.loads(rendered.stdout)["services"]
     api = services["control-api"]
-    assert api["user"] == "0:0"
+    assert api["user"] == "10001:10001"
     assert api["cap_drop"] == ["ALL"]
-    assert set(api["cap_add"]) == {"DAC_OVERRIDE", "SETUID", "SETGID"}
+    assert not api.get("cap_add")
     assert services["control-worker"]["depends_on"]["control-api"] == {
         "condition": "service_started",
         "required": True,

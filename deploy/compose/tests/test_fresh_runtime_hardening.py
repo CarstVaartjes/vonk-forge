@@ -116,14 +116,14 @@ def test_control_images_do_not_install_git_or_ssh() -> None:
         assert " git" not in stage
 
 
-def test_api_image_bounds_root_to_preexec_and_seals_source_secret_directory() -> None:
+def test_api_image_runs_non_root_and_seals_source_secret_directory() -> None:
     worker = _final_stage("worker")
     api = _final_stage("api")
 
     assert "USER 10001:10001" in worker
     assert "api_preexec" not in worker
     assert "CMD" not in worker
-    assert "USER 0:0" in api
+    assert "USER 10001:10001" in api
     assert 'ENTRYPOINT ["python", "-m", "vonk_control.api_preexec"]' in api
     assert 'CMD ["python", "-m", "vonk_control.api"]' in api
     assert "install -d -o 0 -g 0 -m 0700 /run/secrets" in _final_stage("api-root")

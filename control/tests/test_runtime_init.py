@@ -354,6 +354,38 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 
 
+@pytest.mark.parametrize("supplied", [True, False])
+def test_admin_password_is_staged_for_the_api_when_compose_supplies_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, supplied: bool
+) -> None:
+    # Catches the non-root API losing its administrator password, or an older
+    # Compose file (no such secret for runtime-init) failing the whole run.
+    source, shared, gateway = tmp_path / "source", tmp_path / "shared", tmp_path / "gw"
+    for directory in (source, shared, gateway):
+        directory.mkdir()
+    if supplied:
+        (source / "admin-password").write_text("administrator password\n")
+    staged: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        runtime_init,
+        "stage_private_key",
+        lambda _source, destination, **kwargs: staged.append(
+            (destination.name, kwargs["owner_uid"], kwargs["mode"])
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_init, "_stage_optional_private_key", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(runtime_init, "_directory", lambda *_args: None)
+
+    stage_compose_secrets(
+        source, shared, gateway_master_key=gateway / "authority" / "master-key"
+    )
+
+    assert (("admin-password", 10001, 0o400) in staged) is supplied
+    assert ("database-url", 10001, 0o400) in staged
+
+
 def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

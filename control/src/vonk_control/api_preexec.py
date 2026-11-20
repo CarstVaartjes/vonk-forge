@@ -1,4 +1,4 @@
-"""Bounded privileged initialization before the control API becomes PID 1."""
+"""Unprivileged database initialization before the control API becomes PID 1."""
 
 from __future__ import annotations
 
@@ -22,23 +22,43 @@ from .settings import SECRETS_ROOT
 
 _LOGGER = logging.getLogger(__name__)
 
-_API_UID = 10001
-_API_GID = 10001
-_SOURCE_SECRETS = Path("/run/secrets")
+_API_ID = 10001
+
+
+def step_down_from_root() -> None:
+    """Never run the API as root, even when an older Compose file starts it so.
+
+    A Compose file from before the API ran as 10001 still says ``user: "0:0"``
+    (with SETUID/SETGID) until the NAS installer reruns; NasComposeBundleStale
+    reports that. Files the API writes into volumes it shares with the 10001
+    worker must stay 10001's, so the API steps down and keeps serving. Under
+    the current Compose file it starts as 10001 and this does nothing.
+    """
+    if os.geteuid() != 0:
+        return
+    _LOGGER.warning(
+        "control API started as root by an older Compose file; rerun the NAS installer"
+    )
+    os.setgroups([])
+    os.setgid(_API_ID)
+    os.setuid(_API_ID)
 
 
 def prepare_owned_state() -> None:
     """Initialize the database and the administrator before the API starts.
 
-    The ``runtime-init`` helper has already staged the secrets, the runtime
-    kit and the shared-volume ownership; root is left only for the
-    administrator password, which the image keeps in a root-only directory.
+    ``runtime-init`` has already staged the secrets (the administrator
+    password among them), the runtime kit and the shared-volume ownership.
     """
-    if os.geteuid() != 0:
-        raise RuntimeError("control API pre-exec must start as root")
     database_url = (SECRETS_ROOT / "database-url").read_text(encoding="utf-8").strip()
     initialize_database(database_url)
-    initialize_administrator(database_url, _SOURCE_SECRETS / "admin-password")
+    password_path = SECRETS_ROOT / "admin-password"
+    if not password_path.exists():
+        # Only an older Compose file stages no password. An existing
+        # administrator is unaffected; a start after the rerun bootstraps.
+        _LOGGER.warning("administrator password is not staged; bootstrap skipped")
+        return
+    initialize_administrator(database_url, password_path)
 
 
 def initialize_administrator(database_url: str, password_path: Path) -> None:
@@ -60,64 +80,17 @@ def initialize_administrator(database_url: str, password_path: Path) -> None:
     run_with_database_startup_retry(bootstrap_once, label="PostgreSQL")
 
 
-def _probe_source_secrets(path: Path) -> None:
-    descriptor = os.open(
-        path,
-        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-    )
-    os.close(descriptor)
-
-
 def _exec(command: tuple[str, ...]) -> None:
     os.execvp(command[0], command)
 
 
-def drop_runtime_privileges(
+def main(
+    command: Sequence[str] | None = None,
     *,
-    source_secrets: Path = _SOURCE_SECRETS,
-    source_probe: Callable[[Path], None] = _probe_source_secrets,
-) -> None:
-    """Irreversibly become the API identity and verify secret isolation."""
-    os.setgroups([])
-    # ``setres*``/``getres*`` are Linux-only: this pre-exec path runs in the
-    # API container, and typeshed omits the calls on Darwin. Read the live
-    # module namespace (which tests replace) instead of hiding the platform
-    # boundary behind an ignore.
-    os.__dict__["setresgid"](_API_GID, _API_GID, _API_GID)
-    os.__dict__["setresuid"](_API_UID, _API_UID, _API_UID)
-    if os.getgroups() or os.__dict__["getresgid"]() != (_API_GID,) * 3:
-        raise RuntimeError("control API group privileges were not dropped")
-    if os.__dict__["getresuid"]() != (_API_UID,) * 3:
-        raise RuntimeError("control API user privileges were not dropped")
-    try:
-        source_probe(Path(source_secrets))
-    except PermissionError:
-        pass
-    else:
-        raise RuntimeError("control API can still traverse source secrets")
-
-
-def drop_privileges_and_exec(
-    command: Sequence[str],
-    *,
-    source_secrets: Path = _SOURCE_SECRETS,
-    source_probe: Callable[[Path], None] = _probe_source_secrets,
     execute: Callable[[tuple[str, ...]], None] = _exec,
 ) -> None:
-    """Irreversibly become the API identity, verify isolation, and exec."""
-    argv = tuple(command)
-    if not argv or not all(isinstance(argument, str) and argument for argument in argv):
-        raise RuntimeError("control API command is invalid")
-    drop_runtime_privileges(
-        source_secrets=source_secrets,
-        source_probe=source_probe,
-    )
-    execute(argv)
-    raise RuntimeError("control API exec returned unexpectedly")
-
-
-def main(command: Sequence[str] | None = None) -> None:
     argv = tuple(sys.argv[1:] if command is None else command)
+    step_down_from_root()
     for _attempt in range(3):
         try:
             prepare_owned_state()
@@ -131,7 +104,7 @@ def main(command: Sequence[str] | None = None) -> None:
         # This startup owns no persisted lease. Ending leaves all prior files
         # intact; Compose starts a new independently bounded startup request.
         raise SystemExit(1)
-    drop_privileges_and_exec(argv)
+    execute(argv)
 
 
 if __name__ == "__main__":
