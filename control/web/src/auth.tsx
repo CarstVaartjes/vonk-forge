@@ -1,9 +1,9 @@
-import {createContext, useContext, useEffect, useState} from "react";
-import type {ReactNode} from "react";
-import type {AuthSession} from "./api/types";
-import {LoginPage} from "./pages/login";
+import { createContext, useContext, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import type { AuthSession } from "./api/types";
+import { LoginPage } from "./pages/login";
 
-export type {AuthSession} from "./api/types";
+export type { AuthSession } from "./api/types";
 
 export class AuthenticationRequired extends Error {
   readonly status = 401;
@@ -40,7 +40,7 @@ export function useOptionalAuth(): AuthContextValue | undefined {
   return useContext(AuthContext);
 }
 
-export function AuthProvider({api, children}: {api: BrowserAuthApi; children: ReactNode}) {
+export function AuthProvider({ api, children }: { api: BrowserAuthApi; children: ReactNode }) {
   const [session, setSession] = useState<AuthSession>();
   const [checking, setChecking] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -50,13 +50,17 @@ export function AuthProvider({api, children}: {api: BrowserAuthApi; children: Re
     const unsubscribe = api.onAuthenticationRequired(() => {
       if (active) setSession(undefined);
     });
-    api.session().then(value => {
-      if (active) setSession(value);
-    }).catch(() => {
-      if (active) setSession(undefined);
-    }).finally(() => {
-      if (active) setChecking(false);
-    });
+    api
+      .session()
+      .then((value) => {
+        if (active) setSession(value);
+      })
+      .catch(() => {
+        if (active) setSession(undefined);
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
     return () => {
       active = false;
       unsubscribe();
@@ -82,7 +86,16 @@ export function AuthProvider({api, children}: {api: BrowserAuthApi; children: Re
     }
   }
 
-  if (checking) return <main className="auth-loading"><p role="status">Checking administrator session…</p></main>;
-  if (!session) return <LoginPage onLogin={login}/>;
-  return <AuthContext.Provider value={{session, logout, loggingOut, logoutError}}>{children}</AuthContext.Provider>;
+  if (checking)
+    return (
+      <main className="auth-loading">
+        <p role="status">Checking administrator session…</p>
+      </main>
+    );
+  if (!session) return <LoginPage onLogin={login} />;
+  return (
+    <AuthContext.Provider value={{ session, logout, loggingOut, logoutError }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }

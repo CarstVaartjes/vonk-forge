@@ -1,6 +1,5 @@
 const INITIAL = new Uint32Array([
-  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-  0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
 ]);
 
 const K = new Uint32Array([
@@ -52,8 +51,9 @@ export class IncrementalSha256 {
     const view = new DataView(final.buffer);
     view.setUint32(finalLength - 8, high);
     view.setUint32(finalLength - 4, low);
-    for (let offset = 0; offset < finalLength; offset += 64) this.#compress(final.subarray(offset, offset + 64));
-    return Array.from(this.#state, word => word.toString(16).padStart(8, "0")).join("");
+    for (let offset = 0; offset < finalLength; offset += 64)
+      this.#compress(final.subarray(offset, offset + 64));
+    return Array.from(this.#state, (word) => word.toString(16).padStart(8, "0")).join("");
   }
 
   #compress(block: Uint8Array): void {
@@ -75,7 +75,14 @@ export class IncrementalSha256 {
       const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
       const majority = (a & b) ^ (a & c) ^ (b & c);
       const t2 = (sum0 + majority) >>> 0;
-      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + t1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) >>> 0;
     }
     this.#state[0] = (this.#state[0] + a) >>> 0;
     this.#state[1] = (this.#state[1] + b) >>> 0;

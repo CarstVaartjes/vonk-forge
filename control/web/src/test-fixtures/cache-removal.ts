@@ -1,6 +1,8 @@
-import type {CacheRemovalReview} from "../api/types";
+import type { CacheRemovalReview } from "../api/types";
 
-export function cacheRemovalReview(overrides: Partial<CacheRemovalReview> = {}): CacheRemovalReview {
+export function cacheRemovalReview(
+  overrides: Partial<CacheRemovalReview> = {},
+): CacheRemovalReview {
   return {
     schema_version: 2,
     action: "remove",
@@ -8,7 +10,16 @@ export function cacheRemovalReview(overrides: Partial<CacheRemovalReview> = {}):
     selector: "vonk-forge/test-recipe",
     target_identity: "reviewed-recipe-revision",
     with_model: false,
-    assets: [{kind: "runtime-image", sha256: "a".repeat(64), expected_bytes: 42, availability: "verified", available_bytes: 42, disposition: "remove"}],
+    assets: [
+      {
+        kind: "runtime-image",
+        sha256: "a".repeat(64),
+        expected_bytes: 42,
+        availability: "verified",
+        available_bytes: 42,
+        disposition: "remove",
+      },
+    ],
     references: [],
     active_work: [],
     blockers: [],

@@ -1,36 +1,229 @@
-.chart{position:relative;min-width:0}
-.chart-plot{position:relative}
-.chart svg,.sparkline{display:block;width:100%;height:auto;overflow:visible}
-.chart svg:focus-visible{outline:2px solid var(--gold-text);outline-offset:3px;border-radius:var(--r-ctl)}
-.chart-grid{stroke:var(--grid);stroke-width:1}
-.chart-tick{fill:var(--axis);font-size:11px;font-variant-numeric:tabular-nums}
-.chart-tick-y,.chart-tick-x2{text-anchor:end}.chart-tick-x1{text-anchor:middle}.chart-tick-x0{text-anchor:start}
-.chart-threshold{stroke:var(--warn);stroke-width:1;opacity:.7}
-.chart-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
-.sparkline .chart-line{stroke-width:1.75}
-.chart-dot{stroke:var(--panel);stroke-width:2}
-.chart-halo{display:none}
-@media(prefers-reduced-motion:no-preference){.chart-halo{display:block;opacity:.2;transform-box:fill-box;transform-origin:center;animation:chart-pulse 2.4s ease-in-out infinite}}
+.chart {
+  position: relative;
+  min-width: 0;
+}
+.chart-plot {
+  position: relative;
+}
+.chart svg,
+.sparkline {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.chart svg:focus-visible {
+  outline: 2px solid var(--gold-text);
+  outline-offset: 3px;
+  border-radius: var(--r-ctl);
+}
+.chart-grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.chart-tick {
+  fill: var(--axis);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-tick-y,
+.chart-tick-x2 {
+  text-anchor: end;
+}
+.chart-tick-x1 {
+  text-anchor: middle;
+}
+.chart-tick-x0 {
+  text-anchor: start;
+}
+.chart-threshold {
+  stroke: var(--warn);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.sparkline .chart-line {
+  stroke-width: 1.75;
+}
+.chart-dot {
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.chart-halo {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chart-halo {
+    display: block;
+    opacity: 0.2;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: chart-pulse 2.4s ease-in-out infinite;
+  }
+}
 /* Glows are dark-theme data ink only. */
-:root[data-theme="light"] .chart-halo{display:none!important}
-@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .chart-halo{display:none!important}}
-@keyframes chart-pulse{0%,100%{transform:scale(.55);opacity:.28}50%{transform:scale(1);opacity:.06}}
-.chart-crosshair line{stroke:var(--axis);stroke-width:1;stroke-dasharray:3 3}
-.chart-tooltip{position:absolute;top:0;z-index:5;display:grid;gap:.15rem;padding:.4rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-ctl);background:var(--raised);color:var(--ink);font-size:.75rem;white-space:nowrap;pointer-events:none;transform:translateX(.75rem)}
-.chart-tooltip[data-flipped="true"]{transform:translateX(calc(-100% - .75rem))}
-.chart-tooltip strong{color:var(--muted);font-weight:650}
-.chart-table-toggle{min-height:2rem;margin-top:.25rem;padding:.2rem .6rem;font-size:.75rem}
-.chart-table{margin-top:.5rem;font-size:.75rem}
-.chart-table th,.chart-table td{padding:.3rem .5rem}
-@media(forced-colors:active){.chart-halo{display:none!important}.chart-line{stroke:CanvasText!important}.chart-dot{fill:CanvasText!important;stroke:Canvas}.column{fill:CanvasText}}
-.arc-gauge{display:grid;justify-items:center;min-width:0;text-align:center}
-.arc-gauge-dial{position:relative;width:100%;max-width:11rem}
-.arc-gauge svg{display:block;width:100%;height:auto}
-.arc-track,.arc-value{fill:none;stroke-width:8;stroke-linecap:round}.arc-track{stroke:var(--track)}
-.arc-tick{stroke-width:2.5}.arc-tick-warn{stroke:var(--warn)}.arc-tick-bad{stroke:var(--bad)}.arc-tick-limit{stroke:var(--ink)}
-.arc-gauge-text{display:grid;gap:.1rem;justify-items:center}.arc-gauge-dial svg+.arc-gauge-text{position:absolute;inset:0;align-content:center;padding-bottom:1.4rem}
-.arc-gauge-text strong{font-size:1.5rem;letter-spacing:-.02em;font-weight:600}.arc-gauge-text span{color:var(--muted);font-size:.8125rem}
-.arc-gauge-caption{margin:.25rem 0 0;color:var(--muted);font-size:.8125rem}
-.stacked-area{display:block;width:100%;height:auto;overflow:visible}
-.stack-layer{stroke:var(--panel);stroke-width:2;stroke-linejoin:round}
-@media(forced-colors:active){.arc-value{stroke:Highlight!important}.arc-tick{stroke:CanvasText}.stack-layer{fill:CanvasText!important}}
+:root[data-theme="light"] .chart-halo {
+  display: none !important;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .chart-halo {
+    display: none !important;
+  }
+}
+@keyframes chart-pulse {
+  0%,
+  100% {
+    transform: scale(0.55);
+    opacity: 0.28;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.06;
+  }
+}
+.chart-crosshair line {
+  stroke: var(--axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-ctl);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(0.75rem);
+}
+.chart-tooltip[data-flipped="true"] {
+  transform: translateX(calc(-100% - 0.75rem));
+}
+.chart-tooltip strong {
+  color: var(--muted);
+  font-weight: 650;
+}
+.chart-table-toggle {
+  min-height: 2rem;
+  margin-top: 0.25rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+}
+.chart-table {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+.chart-table th,
+.chart-table td {
+  padding: 0.3rem 0.5rem;
+}
+@media (forced-colors: active) {
+  .chart-halo {
+    display: none !important;
+  }
+  .chart-line {
+    stroke: CanvasText !important;
+  }
+  .chart-dot {
+    fill: CanvasText !important;
+    stroke: Canvas;
+  }
+  .column {
+    fill: CanvasText;
+  }
+}
+.arc-gauge {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  text-align: center;
+}
+.arc-gauge-dial {
+  position: relative;
+  width: 100%;
+  max-width: 11rem;
+}
+.arc-gauge svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.arc-track,
+.arc-value {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+.arc-track {
+  stroke: var(--track);
+}
+.arc-tick {
+  stroke-width: 2.5;
+}
+.arc-tick-warn {
+  stroke: var(--warn);
+}
+.arc-tick-bad {
+  stroke: var(--bad);
+}
+.arc-tick-limit {
+  stroke: var(--ink);
+}
+.arc-gauge-text {
+  display: grid;
+  gap: 0.1rem;
+  justify-items: center;
+}
+.arc-gauge-dial svg + .arc-gauge-text {
+  position: absolute;
+  inset: 0;
+  align-content: center;
+  padding-bottom: 1.4rem;
+}
+.arc-gauge-text strong {
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+.arc-gauge-text span {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.arc-gauge-caption {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.stacked-area {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.stack-layer {
+  stroke: var(--panel);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+@media (forced-colors: active) {
+  .arc-value {
+    stroke: Highlight !important;
+  }
+  .arc-tick {
+    stroke: CanvasText;
+  }
+  .stack-layer {
+    fill: CanvasText !important;
+  }
+}
