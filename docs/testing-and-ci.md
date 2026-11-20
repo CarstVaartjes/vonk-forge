@@ -77,7 +77,14 @@ actions and workflows that assemble and accept a candidate (`CARRY_INPUTS` in
 run with both. The baseline starts every service its installed Compose file
 declares except the Tailscale pair (the lane has no tailnet, and the installed
 file carries no `profiles:` key to tell them apart); after the upgrade the
-candidate's roster is expected.
+candidate's roster is expected. The harness is newer than the baseline it
+installs, so before the upgrade it requires only what any release provides
+(the services its own file declares, the service names a Spark needs, the
+Caddy wrapper it ships); the candidate stays exact after the upgrade.
+`test_carry_baseline_phase_accepts_an_older_release_shape` runs those
+baseline-phase checks against an older release's shape (a standing registry,
+four service names, no runtime-init, a root API), so a candidate-only
+expectation fails there in seconds instead of in Release.
 
 The carry waits on behaviour, never on a fixed timer. After the baseline
 serves, after the Controller recreate and after the agent upgrade, each phase
