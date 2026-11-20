@@ -366,27 +366,46 @@ def test_admin_password_is_staged_for_the_api_when_compose_supplies_it(
     source, shared, gateway = tmp_path / "source", tmp_path / "shared", tmp_path / "gw"
     for directory in (source, shared, gateway):
         directory.mkdir()
+    for name in (
+        "host-runtime-grant-private-key",
+        "database-url",
+        "token-signing-key",
+        "metrics-token",
+        "agent-client-ca",
+        "agent-intermediate-certificate",
+        "controller-ca",
+        "agent-proxy-auth",
+        "litellm-master-key",
+        "litellm-database-url",
+    ):
+        (source / name).write_bytes(b"secret\n")
     if supplied:
-        (source / "admin-password").write_text("administrator password\n")
-    staged: list[tuple[str, int, int]] = []
-    monkeypatch.setattr(
-        runtime_init,
-        "stage_private_key",
-        lambda _source, destination, **kwargs: staged.append(
-            (destination.name, kwargs["owner_uid"], kwargs["mode"])
-        ),
-    )
-    monkeypatch.setattr(
-        runtime_init, "_stage_optional_private_key", lambda *_a, **_k: None
-    )
-    monkeypatch.setattr(runtime_init, "_directory", lambda *_args: None)
+        (source / "admin-password").write_bytes(b"administrator password\n")
+    # This host test cannot assign the consumers' owners; the built-image
+    # test exercises the real uid/gid boundary.
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    order: list[str] = []
+    stage = runtime_init.stage_private_key
+
+    def observe(source_path, destination, **kwargs):
+        order.append(destination.name)
+        return stage(source_path, destination, **kwargs)
+
+    monkeypatch.setattr(runtime_init, "stage_private_key", observe)
 
     stage_compose_secrets(
         source, shared, gateway_master_key=gateway / "authority" / "master-key"
     )
 
-    assert (("admin-password", 10001, 0o400) in staged) is supplied
-    assert ("database-url", 10001, 0o400) in staged
+    staged = shared / "admin-password"
+    if supplied:
+        assert staged.read_bytes() == b"administrator password\n"
+        assert stat.S_IMODE(staged.stat().st_mode) == 0o400
+        # First: a failure leaves a fresh install without its database URL too.
+        assert order.index("admin-password") < order.index("database-url")
+    else:
+        assert not staged.exists()
+    assert (shared / "database-url").read_bytes() == b"secret\n"
 
 
 def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
