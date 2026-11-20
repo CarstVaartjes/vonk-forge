@@ -373,3 +373,34 @@ def test_a_supplied_knob_reaches_the_adapter_argument(tmp_path) -> None:
         recipe = read_recipe(revision.document)
     arguments = _compiled_arguments(recipe, {"num-frames": 141})
     assert ("num-frames", 141) in [(item.name, item.value) for item in arguments]
+
+
+def _slot(media_types: list[str], extensions: list[str]) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id="in", media_types=media_types, extensions=extensions, max_files=1
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "media_types", "extensions", "expected"),
+    [
+        ("Song.FLAC", ["audio/flac", "audio/wav"], [".flac", ".wav"], "audio/flac"),
+        (
+            "clip.mkv",
+            ["video/mp4", "video/x-matroska"],
+            [".mkv", ".mp4"],
+            "video/x-matroska",
+        ),
+        ("a.obj", ["model/obj", "model/ply"], [".obj", ".ply"], "model/obj"),
+        ("a.ply", ["model/obj", "model/ply"], [".obj", ".ply"], "model/ply"),
+        ("a.aiff", ["audio/flac"], [".flac"], None),
+    ],
+)
+def test_an_input_media_type_comes_from_its_name_and_the_slot(
+    name, media_types, extensions, expected
+) -> None:
+    from vonk_control.artifact_jobs.contracts import slot_input_media_type
+
+    assert slot_input_media_type(_slot(media_types, extensions), name) == expected

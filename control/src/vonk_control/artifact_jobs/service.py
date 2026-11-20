@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestReason,
-    RecipeJobInputFile,
+    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RunState,
@@ -85,6 +85,7 @@ from .contracts import (
     _artifact_submission_in_session,
     _canonical_declared_parameters,
     _compile_contract,
+    _derive_inputs,
     _effective_output_limits,
     _effective_parameters,
     _output_mappings,
@@ -200,7 +201,7 @@ class ArtifactJobService(OutputService):
         *,
         interface: str,
         parameters: Mapping[str, ParameterScalar],
-        inputs: Sequence[RecipeJobInputFile],
+        inputs: Sequence[RecipeJobInputRequest],
         output_limits: RecipeJobOutputLimits,
         timeout_seconds: int,
         actor: str,
@@ -232,7 +233,7 @@ class ArtifactJobService(OutputService):
         *,
         interface: str,
         parameters: Mapping[str, ParameterScalar],
-        inputs: Sequence[RecipeJobInputFile],
+        inputs: Sequence[RecipeJobInputRequest],
         output_limits: RecipeJobOutputLimits,
         timeout_seconds: int,
         actor: str,
@@ -258,10 +259,6 @@ class ArtifactJobService(OutputService):
                 reason=InvalidRequestReason.LIMIT_EXCEEDED,
             )
         supplied_parameters = dict(parameters)
-        manifest = RecipeJobInputManifest(
-            schema_version=1, total_bytes=total, files=list(parsed_inputs)
-        )
-        manifest_digest = recipe_job_manifest_sha256(parsed_inputs)
         now = self._clock()
         try:
             with admitting(), self._sessions.begin() as session:
@@ -270,13 +267,11 @@ class ArtifactJobService(OutputService):
                     run_id=run_id,
                     interface=interface,
                     supplied_parameters=supplied_parameters,
-                    parsed_inputs=parsed_inputs,
+                    requested_inputs=parsed_inputs,
                     output_limits=output_limits,
                     timeout_seconds=timeout_seconds,
                     actor=actor,
                     request_id=request_id,
-                    manifest=manifest,
-                    manifest_digest=manifest_digest,
                     total=total,
                     now=now,
                 )
@@ -295,13 +290,11 @@ class ArtifactJobService(OutputService):
                     run_id=run_id,
                     interface=interface,
                     supplied_parameters=supplied_parameters,
-                    parsed_inputs=parsed_inputs,
+                    requested_inputs=parsed_inputs,
                     output_limits=output_limits,
                     timeout_seconds=timeout_seconds,
                     actor=actor,
                     request_id=request_id,
-                    manifest=manifest,
-                    manifest_digest=manifest_digest,
                     total=total,
                     now=now,
                     existing=existing,
@@ -314,13 +307,11 @@ class ArtifactJobService(OutputService):
         run_id: str,
         interface: str,
         supplied_parameters: Mapping[str, ParameterScalar],
-        parsed_inputs: tuple[RecipeJobInputFile, ...],
+        requested_inputs: tuple[RecipeJobInputRequest, ...],
         output_limits: RecipeJobOutputLimits,
         timeout_seconds: int,
         actor: str,
         request_id: str,
-        manifest: RecipeJobInputManifest,
-        manifest_digest: str,
         total: int,
         now: datetime,
         existing: ArtifactJob | None = None,
@@ -328,33 +319,6 @@ class ArtifactJobService(OutputService):
         existing = existing or session.scalar(
             select(ArtifactJob).where(ArtifactJob.request_id == request_id)
         )
-        if existing is not None:
-            # The replay supplies the same declaration, never replacement bytes.
-            # Either the retained digest or the canonical declaration proves its
-            # binding before repairing the other damaged projections.
-            if existing.operation_id is None and (
-                existing.input_manifest_sha256 == manifest_digest
-                or existing.input_manifest == manifest.model_dump(mode="json")
-            ):
-                existing.input_manifest = manifest.model_dump(mode="json")
-                existing.input_manifest_sha256 = manifest_digest
-                existing.input_total_bytes = total
-            recovered = self._stored_input_manifest(session, existing, repair=True)
-            if isinstance(recovered, Residue):
-                return self._end_preparation(session, existing)
-        if existing is not None and (
-            existing.run_id != run_id
-            or existing.interface != interface
-            or existing.input_manifest != manifest.model_dump(mode="json")
-            or existing.input_manifest_sha256 != manifest_digest
-            or existing.input_total_bytes != total
-            or existing.timeout_seconds != timeout_seconds
-            or existing.actor != actor
-        ):
-            raise ArtifactJobInvalid(
-                "request key was already used differently",
-                reason=InvalidRequestReason.CONFLICT,
-            )
         run = session.get(RecipeRun, run_id)
         if run is None or existing is None and run.state != RunState.RUNNING:
             raise ArtifactJobUnavailableError(
@@ -400,6 +364,7 @@ class ArtifactJobService(OutputService):
                 contract.parameters, supplied_parameters
             )
             limits = _effective_output_limits(contract, output_limits)
+            parsed_inputs = _derive_inputs(contract, requested_inputs)
             _validate_inputs_against_contract(contract, parsed_inputs)
         except ArtifactJobUnavailableError:
             raise
@@ -410,6 +375,37 @@ class ArtifactJobService(OutputService):
                     reason=InvalidRequestReason.CONFLICT,
                 ) from None
             raise
+        manifest = RecipeJobInputManifest(
+            schema_version=1, total_bytes=total, files=list(parsed_inputs)
+        )
+        manifest_digest = recipe_job_manifest_sha256(parsed_inputs)
+        if existing is not None:
+            # The replay supplies the same declaration, never replacement bytes.
+            # Either the retained digest or the canonical declaration proves its
+            # binding before repairing the other damaged projections.
+            if existing.operation_id is None and (
+                existing.input_manifest_sha256 == manifest_digest
+                or existing.input_manifest == manifest.model_dump(mode="json")
+            ):
+                existing.input_manifest = manifest.model_dump(mode="json")
+                existing.input_manifest_sha256 = manifest_digest
+                existing.input_total_bytes = total
+            recovered = self._stored_input_manifest(session, existing, repair=True)
+            if isinstance(recovered, Residue):
+                return self._end_preparation(session, existing)
+        if existing is not None and (
+            existing.run_id != run_id
+            or existing.interface != interface
+            or existing.input_manifest != manifest.model_dump(mode="json")
+            or existing.input_manifest_sha256 != manifest_digest
+            or existing.input_total_bytes != total
+            or existing.timeout_seconds != timeout_seconds
+            or existing.actor != actor
+        ):
+            raise ArtifactJobInvalid(
+                "request key was already used differently",
+                reason=InvalidRequestReason.CONFLICT,
+            )
         effective_limits = limits.to_mapping()
         contract_mapping = contract.to_mapping()
         if existing is not None:
