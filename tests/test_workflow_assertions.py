@@ -293,3 +293,14 @@ def test_main_warms_the_built_recipe_library() -> None:
         assert path in paths
     uses = [s.get("uses") for s in warm["jobs"]["recipe-library"]["steps"]]
     assert "./.github/actions/recipe-library" in uses
+
+
+def test_every_action_is_pinned_at_one_sha() -> None:
+    """The same action is never pinned at two commits across workflows/actions."""
+    pin = re.compile(r"uses:\s*([\w.-]+/[\w./-]+)@([0-9a-f]{40})")
+    pins: dict[str, set[str]] = {}
+    for path in (ROOT / ".github").rglob("*.yml"):
+        for action, sha in pin.findall(path.read_text()):
+            pins.setdefault(action, set()).add(sha)
+    assert pins
+    assert {a: sorted(s) for a, s in pins.items() if len(s) > 1} == {}
