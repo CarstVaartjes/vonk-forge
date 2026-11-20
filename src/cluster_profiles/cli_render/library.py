@@ -33,6 +33,7 @@ from .common import (
     _table,
     _text,
     _time,
+    _utc,
     _waiting,
     _words,
 )
@@ -75,7 +76,7 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
         reason = view.reason
         return ("Not verified because", reason) if isinstance(reason, str) else None
     record = max(records, key=lambda evidence: evidence.tested_at)
-    tested = record.tested_at.isoformat(sep=" ")
+    tested = _utc(record.tested_at)
     if record.outcome == QualificationOutcome.PASSED:
         count = record.platform.spark_count
         sparks = (

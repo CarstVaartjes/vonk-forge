@@ -6,7 +6,7 @@ import shutil
 import sys
 import unicodedata
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from ..cli_telemetry_render import size as _size
@@ -127,7 +127,12 @@ def _time(value: object) -> str:
         return _text(value)
     if parsed.tzinfo is None:
         return _text(value) + " (timezone unavailable)"
-    return parsed.isoformat(sep=" ")
+    return _utc(parsed)
+
+
+def _utc(moment: datetime) -> str:
+    """The one human time format: UTC, to the second, e.g. ``2026-10-02 14:22:58Z``."""
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
 def _freshness(observed_at: object, projected_at: object) -> str:

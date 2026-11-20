@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from .. import cli_states
@@ -213,15 +214,8 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
             _field("Client model identifier", alias)
             api_base = endpoint.get("api_base")
             _field("API base (inference gateway)", api_base)
-            _field("Route generation", endpoint.get("generation"))
-            _field("Route observed at", _time(endpoint.get("observed_at")))
-            _field(
-                "Freshness",
-                _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
-            )
             if isinstance(api_base, str) and isinstance(alias, str):
                 _connection_examples(api_base, alias)
-            _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             continue
         if alias is not None:
             _field("Client model identifier", alias)
@@ -237,11 +231,29 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         )
 
 
+def _route_details(payload: object) -> None:
+    """``--wide``: the route facts behind each published alias."""
+    document = _object(payload, "endpoints")
+    for assignment in _records(document, "assignments"):
+        endpoint = _optional(assignment.get("endpoint"), "endpoint")
+        if assignment.get("state") != cli_states.PUBLISHED:
+            continue
+        print()
+        _field("Route detail", assignment.get("alias"))
+        _field("Route generation", endpoint.get("generation"))
+        _field("Route observed at", _time(endpoint.get("observed_at")))
+        _field(
+            "Freshness",
+            _freshness(endpoint.get("observed_at"), document.get("observed_at")),
+        )
+        _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
+
+
 def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
     if action in ("create", "roll"):
         _field("Key", payload.get("name"))
         _field("Models", _words(payload.get("models") or ["all"]))
-        _field("Expires", payload.get("expires_at") or "never")
+        _field("Expires", _key_expiry(payload.get("expires_at")))
         if payload.get("output") is not None:
             _field("Written to", payload.get("output"))
         else:
@@ -261,12 +273,23 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
                     row.get("name"),
                     _words(row.get("models") or ["all"]),
                     _time(row.get("created_at")),
-                    _time(row.get("expires_at")) if row.get("expires_at") else "never",
+                    _key_expiry(row.get("expires_at")),
                     _time(row.get("last_used_at")),
                 )
                 for row in rows
             ],
         )
+
+
+def _key_expiry(value: object) -> str:
+    if not value:
+        return "never"
+    shown = _time(value)
+    try:
+        expired = datetime.fromisoformat(str(value)) <= datetime.now(UTC)
+    except (ValueError, TypeError):
+        return shown
+    return f"expired {shown}" if expired else shown
 
 
 class EndpointListing(StrEnum):

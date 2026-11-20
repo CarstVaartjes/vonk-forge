@@ -24,7 +24,11 @@ from cluster_profiles.cli import _parser
 from cluster_profiles.cli_render import _library_item, render_payload
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
-from cluster_profiles.cli_render.profile import _connection_examples, _profile_endpoints
+from cluster_profiles.cli_render.profile import (
+    _connection_examples,
+    _profile_endpoints,
+    _route_details,
+)
 from cluster_profiles.cli_render.throttle import throttle_words
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
 from cluster_profiles.generated_control.models.catalog_vocabulary import (
@@ -503,3 +507,73 @@ def test_rendered_profile_text_uses_load_words(printed):
         texts += printed(_profile_endpoints, payload)
     assert [t for t in texts if _APPLICATION.search(t)] == []
     assert any("vonkctl job run" in t for t in texts)
+
+
+# Times, endpoint detail and expired keys.
+
+_PUBLISHED_ALIAS = {
+    "alias": "coder",
+    "recipe_title": "Qwen Code",
+    "state": "published",
+    "endpoint": {
+        "api_base": "https://vonk-forge.example.ts.net/v1",
+        "backend_api_base": "http://10.0.0.10:8000/v1",
+        "generation": 8,
+        "observed_at": "2026-09-23T12:59:30.611000+02:00",
+    },
+}
+
+
+def _endpoint_payload():
+    return {
+        "number": 3,
+        "application_id": "load-1",
+        "application_state": "succeeded",
+        "observed_at": "2026-09-23T12:59:31Z",
+        "assignments": [_PUBLISHED_ALIAS],
+    }
+
+
+def test_profile_endpoint_is_short_until_wide(printed):
+    short = printed(_profile_endpoints, _endpoint_payload())
+    wide = printed(_route_details, _endpoint_payload())
+    detail = ("Route generation", "Route observed at", "Freshness", "Spark backend")
+    assert [t for t in short if t.startswith(detail)] == []
+    assert "API base (inference gateway): https://vonk-forge.example.ts.net/v1" in short
+    assert wide[:2] == ["", "Route detail: coder"]
+    assert "Route observed at: 2026-09-23 10:59:30Z" in wide
+    assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in wide
+
+
+def test_key_list_marks_expired_keys_and_times_are_utc_seconds(printed):
+    rows = [
+        {
+            "name": name,
+            "models": [],
+            "created_at": "2026-10-01T14:22:58.611000+00:00",
+            "expires_at": expires,
+            "last_used_at": None,
+        }
+        for name, expires in (
+            ("old", "2026-10-02T14:22:58.611000+00:00"),
+            ("new", None),
+        )
+    ]
+    lines = printed(render_payload, {"keys": rows}, "key", action="list")
+    old = next(t for t in lines if t.startswith("old"))
+    new = next(t for t in lines if t.startswith("new"))
+    assert re.split(r"\s{2,}", old)[2:4] == [
+        "2026-10-01 14:22:58Z",
+        "expired 2026-10-02 14:22:58Z",
+    ]
+    assert re.split(r"\s{2,}", new)[3] == "never"
+
+
+def test_one_time_formatter_owns_isoformat():
+    render = Path(__file__).parents[2] / "src/cluster_profiles/cli_render"
+    users = [
+        path.name
+        for path in render.glob("*.py")
+        if ".isoformat(" in path.read_text() and path.name != "common.py"
+    ]
+    assert users == []
