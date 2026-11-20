@@ -21,6 +21,7 @@ from typing import TypedDict
 
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..error_reporting import (
+    ClientCode,
     local_io_context,
     protocol_context,
     safe_request_id,
@@ -36,6 +37,7 @@ from .errors import (
     ControlMalformedResponse,
     ControlResponseTooLarge,
     ControlTransportError,
+    LocalInputError,
     _retry_after_seconds,
     _structured_http_error_fields,
 )
@@ -485,8 +487,10 @@ class ControlClient(HTTPControlClient):
         )
 
 
-class LocalFilesystemError(ValueError):
+class LocalFilesystemError(LocalInputError):
     """A local file could not be created or written: the operator's to fix."""
+
+    code = ClientCode.LOCAL_IO_FAILED.value
 
 
 def local_filesystem_error(path: Path, error: OSError) -> LocalFilesystemError:

@@ -21,10 +21,20 @@ from library_route_fixtures import _library_detail, _recipe_projection
 from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli import _parser
-from cluster_profiles.cli_render import _library_item, render_payload
+from cluster_profiles.cli_render import (
+    _activity,
+    _artifact_job,
+    _catalog_sync,
+    _library_item,
+    render_payload,
+)
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
-from cluster_profiles.cli_render.profile import _connection_examples, _profile_endpoints
+from cluster_profiles.cli_render.profile import (
+    _connection_examples,
+    _profile,
+    _profile_endpoints,
+)
 from cluster_profiles.cli_render.throttle import throttle_words
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
 from cluster_profiles.generated_control.models.catalog_vocabulary import (
@@ -503,3 +513,111 @@ def test_rendered_profile_text_uses_load_words(printed):
         texts += printed(_profile_endpoints, payload)
     assert [t for t in texts if _APPLICATION.search(t)] == []
     assert any("vonkctl job run" in t for t in texts)
+
+
+def _job_record(**changes: object) -> dict[str, object]:
+    sha = "a" * 64
+    declaration = {
+        "name": "p.txt",
+        "slot": "prompt",
+        "media_type": "text/plain",
+        "size_bytes": 3,
+        "sha256": sha,
+    }
+    return {
+        "id": "job-1",
+        "run_id": "run-1",
+        "state": "succeeded",
+        "interface": "image-job",
+        "compiled_contract": None,
+        "output_limits": None,
+        "timeout_seconds": 60,
+        "contract_sha256": sha,
+        "input_manifest_sha256": sha,
+        "output_manifest_sha256": sha,
+        "input_total_bytes": 3,
+        "created_at": "2026-10-02T14:22:58Z",
+        "updated_at": "2026-10-02T14:23:58Z",
+        "input_declarations": [declaration],
+        "input_files": [declaration],
+        "output_files": [
+            {"name": "o.png", "media_type": "image/png", "size_bytes": 1, "sha256": sha}
+        ],
+        "operation_id": "op-1",
+        "submit_request_id": "req-1",
+    } | changes
+
+
+def test_job_record_is_short_and_hashes_need_wide(printed):
+    short = printed(_artifact_job, _job_record(), "detail")
+    wide = printed(
+        render_payload,
+        _job_record(),
+        "job",
+        artifact_job_action="detail",
+        wide=True,
+    )
+    assert len(short) <= 8
+    assert not [line for line in short if "SHA-256" in line]
+    assert len([line for line in wide if "SHA-256" in line]) == 5
+
+
+def test_unfinished_job_record_stays_short(printed):
+    running = _job_record(state="running", output_files=[], status_reason="queued")
+    assert len(printed(_artifact_job, running, "detail")) <= 8
+
+
+def test_library_page_hint_hides_the_cursor_until_wide(printed):
+    payload = {"recipes": [], "next_cursor": "c" * 400}
+    short = printed(render_payload, payload, "recipe", action="library")
+    wide = printed(render_payload, payload, "recipe", action="library", wide=True)
+    assert [line for line in short if line.startswith("Next page: add --cursor")]
+    assert not [line for line in short if "c" * 400 in line]
+    assert [line for line in wide if "c" * 400 in line]
+
+
+def test_activity_blocker_prints_in_order_on_stdout(capsys):
+    operation = {
+        "id": "op-1",
+        "kind": "profile-load",
+        "state": "failed",
+        "created_at": "2026-10-02T14:22:58Z",
+        "node_ids": [],
+        "failure": {"code": "x.failed", "detail": "no room"},
+        "recovery": {"actions": []},
+    }
+    capsys.readouterr()
+    _activity({"operations": [operation], "total": 1, "next_cursor": None}, None)
+    out, err = capsys.readouterr()
+    assert err == ""
+    lines = out.splitlines()
+    blocker = lines.index("Blocker: x.failed: no room")
+    assert lines[0].startswith("Activity") and blocker > 0
+
+
+def test_profile_names_its_sparks(printed):
+    payload = {
+        "number": 1,
+        "name": "p",
+        "definition": {
+            "assignments": [{"recipe_selector": "r", "spark_ids": ["spk_1", "spk_2"]}]
+        },
+        "assignments": [],
+        "spark_names": {"spk_1": "spark-a"},
+    }
+    lines = printed(_profile, payload)
+    assert "Sparks: spark-a, spk_2" in " ".join(lines).replace("  ", " ")
+
+
+def test_sync_status_counts_documents_not_recipes(printed):
+    payload = {
+        "state": "succeeded",
+        "processed_count": 725,
+        "total_count": 725,
+        "problems": [],
+        "stale_recipes": [],
+        "withdrawn_recipes": [],
+    }
+    lines = printed(_catalog_sync, payload)
+    assert [line for line in lines if "725 of 725 processed" in line]
+    assert not [line for line in lines if line.startswith("Recipes")]

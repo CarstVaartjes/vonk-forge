@@ -194,14 +194,14 @@ def _activity(
                     )
         failure = _optional(operation.get("failure"), "operation failure")
         if failure:
-            _warn(
-                "Blocker: "
-                + _text(failure.get("code", failure.get("error_code")))
+            _field(
+                "Blocker",
+                _text(failure.get("code", failure.get("error_code")))
                 + ": "
-                + _text(failure.get("detail", failure.get("summary")))
+                + _text(failure.get("detail", failure.get("summary"))),
             )
         if operation.get("status_reason") is not None:
-            _warn(f"Reason: {_text(operation['status_reason'])}")
+            _field("Reason", operation["status_reason"])
         _waiting(operation)
         recovery = _optional(operation.get("recovery"), "operation recovery")
         _actions(recovery.get("actions"))

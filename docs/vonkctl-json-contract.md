@@ -45,9 +45,15 @@ that fails prints the same `result_kind` / `result` / `observation` inside the
 unpublished.
 
 `error` documents type `error_type` (`arguments`, `control_api`, `declined`,
-`update`), `code` (the Controller code grammar), `detail` and
+`local`, `update`), `code` (the Controller code grammar), `detail` and
 `recovery_actions`, the error context, and an unconfirmed `submission` with its
 `reconcile` command. Enrollment-delivery receipts are not part of the contract.
+
+One cause, one code. A failure the CLI concludes itself carries `error_type`
+`local` and never `control.api_error`: `local.io_failed` (a local file or
+directory cannot be read or written), `cli.invalid_input` (a value or local
+input is not valid), `job.not_finished` (the job has no result yet; the
+follow command is in `recovery_actions`) and `job.ended_without_result`.
 
 ## Compatibility rules
 

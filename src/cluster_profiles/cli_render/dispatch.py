@@ -10,12 +10,13 @@ from ..cli_json_contract import Word
 from ..cli_platform_render import render_platform
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
+from ..generated_control.models.artifact_job_response import ArtifactJobResponse
 from ..generated_control.models.metric_spec import MetricSpec
 from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
 from ..generated_control.models.platform_observation import PlatformObservation
 from .activity import _activity, _locks
 from .administration import _catalog_sync, _enrollment, _error
-from .artifact_jobs import _artifact_job
+from .artifact_jobs import RECORD_ACTIONS, _artifact_job, artifact_job_details
 from .common import _field, _object, _records, _table, _text, _time, _words
 from .fleet import _fleet_overview, _node
 from .library import _library
@@ -143,6 +144,8 @@ def render_payload(
                 _field("Observation", ENDPOINT_UNAVAILABLE)
         elif noun == Word.JOB and artifact_job_action is not None:
             _artifact_job(payload, artifact_job_action)
+            if wide and artifact_job_action in RECORD_ACTIONS:
+                artifact_job_details(ArtifactJobResponse.from_dict(dict(payload)))
         elif noun == "recipe" and action == "sync-status":
             _catalog_sync(payload)
         elif noun in {"model", "recipe"}:

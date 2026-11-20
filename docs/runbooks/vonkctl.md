@@ -643,7 +643,9 @@ request: it says `previous job ID failed: REASON; starting a new one` and
 creates a new job. A job that fails or needs an operator shows its reason and
 the command exits non-zero. `--no-wait` stops after submit and prints the job
 id (with `--json`, the job document); `job download` on a job that is still
-running says to wait with `job detail ID --follow`.
+running says to wait with `job detail ID --follow` (`--json` code
+`job.not_finished`). The human job record is at most eight lines; hashes,
+operation ids and per-file rows need `--wide`.
 
 Step commands: use the run UUID to list jobs and the job UUID
 to inspect, resume, submit, cancel, or retrieve one job:

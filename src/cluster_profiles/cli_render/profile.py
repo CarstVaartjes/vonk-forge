@@ -64,7 +64,7 @@ def _profile(payload: Mapping[str, object]) -> None:
             None,
         )
         _field("Recipe", selector)
-        _field("Sparks", _words(nodes))
+        _field("Sparks", _words(_spark_labels(nodes, payload.get("spark_names"))))
         _field("Desired", assignment.get("desired_state"))
         _option_choices(assignment.get("option_choices"))
         _field("Observed", match.get("observed_state") if match is not None else None)
@@ -235,6 +235,13 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
         print(
             messages.get(str(assignment.get("state")), "Endpoint state is unavailable.")
         )
+
+
+def _spark_labels(nodes: object, names: object) -> object:
+    """Spark names for ids the Controller named; an id stands in for the rest."""
+    if not isinstance(nodes, list) or not isinstance(names, Mapping):
+        return nodes
+    return [names.get(node, node) for node in nodes]
 
 
 def _gateway_keys(payload: Mapping[str, object], action: object) -> None:

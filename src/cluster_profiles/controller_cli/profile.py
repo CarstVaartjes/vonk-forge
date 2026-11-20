@@ -29,6 +29,7 @@ from .observation import (
 )
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
+from .selection import _spark_names
 from .submission import _submit_idempotent_request
 
 
@@ -114,7 +115,7 @@ def _profile(
             terminal=lambda _: True,
         )
     if action is None:
-        return _poll_path(
+        shown = _poll_path(
             client,
             f"/api/profile/{number}",
             {},
@@ -122,6 +123,16 @@ def _profile(
             fetch_initial=True,
             terminal=lambda _: True,
         )
+        if (
+            isinstance(shown, dict)
+            and "assignments" in shown
+            and not (
+                getattr(args, "global_json", False) or getattr(args, "json", False)
+            )
+        ):
+            # Human output names the Sparks; the JSON keeps the ids alone.
+            return {**shown, "spark_names": _spark_names(client)}
+        return shown
     if action == "endpoint":
 
         def endpoint_view(observed: object) -> None:

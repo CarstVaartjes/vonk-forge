@@ -466,7 +466,8 @@ def _library(
                 )
     print()
     if isinstance(cursor, str):
-        print(f"Next page: add --cursor {shlex.quote(cursor)} with the same filters.")
+        shown = shlex.quote(cursor) if wide else "<cursor> (--wide prints it)"
+        print(f"Next page: add --cursor {shown} with the same filters.")
     if not rows and applied:
         print(f"Next: vonkctl {noun} library  (no filters)")
     elif not rows:

@@ -42,7 +42,12 @@ from .control_client import (
     ControlTransportError,
     validate_control_document,
 )
-from .control_client.transfers import TransferReceipt, local_filesystem_error
+from .control_client.errors import JobEndedWithoutResult, JobNotFinished
+from .control_client.transfers import (
+    LocalFilesystemError,
+    TransferReceipt,
+    local_filesystem_error,
+)
 from .control_client.transfers import download_destination as _download_destination
 from .control_client.transfers import verified_output as _existing_verified_file
 from .generated_control.media_types import canonical_media_types
@@ -1052,13 +1057,15 @@ def _download(
     if result["state"] != SUCCEEDED:
         state = result["state"]
         if state in ENDED_WITHOUT_RESULT:
-            raise ValueError(
+            raise JobEndedWithoutResult(
                 f"job {args.job_id} ended {state} and has no result files: "
-                f"{result.get('status_reason') or 'no reason recorded'}"
+                f"{result.get('status_reason') or 'no reason recorded'}",
+                detail=f"vonkctl {Word.JOB} {Word.DETAIL} {args.job_id}",
             )
-        raise ValueError(
-            f"job {args.job_id} is {state} and has no result yet; wait with "
-            f"vonkctl {Word.JOB} {Word.DETAIL} {args.job_id} --follow"
+        follow = f"vonkctl {Word.JOB} {Word.DETAIL} {args.job_id} --follow"
+        raise JobNotFinished(
+            f"job {args.job_id} is {state} and has no result yet; wait with {follow}",
+            follow=follow,
         )
     digest = result.get("output_manifest_sha256")
     outputs = result.get("output_files")
@@ -1362,7 +1369,7 @@ def _digest_regular_file(path: Path, maximum: int, name: str) -> tuple[int, str]
             )
         return observed, digest.hexdigest()
     except OSError as error:
-        raise ControlClientError(
+        raise LocalFilesystemError(
             f"artifact input {name} must be a readable regular non-symlink file"
         ) from error
     finally:
