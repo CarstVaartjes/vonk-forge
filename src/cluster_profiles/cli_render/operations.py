@@ -21,7 +21,7 @@ from .common import (
     _warn,
     _words,
 )
-from .profile import _profile_endpoints
+from .profile import _endpoints_view, _profile_endpoints
 from .progress import _measured_progress, progress_line
 
 
@@ -52,7 +52,7 @@ def _run_result(payload: Mapping[str, object]) -> None:
     _application(application)
     endpoints = payload.get("endpoints")
     if isinstance(endpoints, Mapping):
-        _profile_endpoints(endpoints)
+        _profile_endpoints(_endpoints_view(endpoints))
 
 
 def _application(payload: Mapping[str, object]) -> None:

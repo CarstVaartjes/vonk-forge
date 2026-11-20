@@ -29,7 +29,6 @@ from cluster_profiles.cli_render.metrics import metric_value_text
 from cluster_profiles.cli_render.profile import (
     _connection_examples,
     _key_expired,
-    _profile_endpoints,
 )
 from cluster_profiles.cli_render.throttle import throttle_words
 from cluster_profiles.cli_render.vocabulary import use_vocabulary
@@ -340,7 +339,7 @@ def test_profile_endpoint_serving_lines_are_the_vector_lines(case, printed):
         for index, item in enumerate(case["assignments"])
     ]
     lines = printed(
-        _profile_endpoints,
+        render_payload,
         {
             "number": 3,
             "profile_id": "11111111-1111-4111-8111-111111111111",
@@ -349,6 +348,8 @@ def test_profile_endpoint_serving_lines_are_the_vector_lines(case, printed):
             "observed_at": "2026-09-23T12:59:31Z",
             "assignments": assignments,
         },
+        "profile",
+        action="endpoint",
     )
     start = lines.index(_SERVING_NOW["heading"])
     assert lines[start + 1 : start + 1 + len(case["lines"])] == case["lines"]
@@ -506,9 +507,10 @@ def test_rendered_profile_text_uses_load_words(printed):
             "number": 1,
             "application_id": application_id,
             "application_state": "succeeded",
+            "observed_at": "2026-09-23T12:59:31Z",
             "assignments": [],
         }
-        texts += printed(_profile_endpoints, payload)
+        texts += printed(render_payload, payload, "profile", action="endpoint")
     assert [t for t in texts if _APPLICATION.search(t)] == []
     assert any("vonkctl job run" in t for t in texts)
 
@@ -518,7 +520,10 @@ def test_rendered_profile_text_uses_load_words(printed):
 _ENDPOINT = {
     "api_base": "https://vonk-forge.example.ts.net/v1",
     "backend_api_base": "http://10.0.0.10:8000/v1",
+    "alias": "coder",
     "generation": 8,
+    "node_id": "spk_" + "a" * 32,
+    "plan_digest": "a" * 64,
     "observed_at": "2026-09-23T12:59:30.611000+02:00",
 }
 
@@ -531,6 +536,8 @@ def _endpoint_payload(**changes):
         "observed_at": "2026-09-23T12:59:31Z",
         "assignments": [
             {
+                "assignment_id": "33333333-3333-4333-8333-000000000001",
+                "desired_state": "running",
                 "alias": "coder",
                 "recipe_title": "Qwen Code",
                 "state": "published",
@@ -558,7 +565,10 @@ def test_profile_endpoint_is_short_until_wide(printed):
 
 def test_wide_endpoint_with_invalid_history_still_answers(printed):
     payload = _endpoint_payload(
-        projection_issue={"detail": "stored load history is invalid"}
+        projection_issue={
+            "code": "profile.application_intent.invalid",
+            "detail": "stored load history is invalid",
+        }
     )
     lines = printed(render_payload, payload, "profile", action="endpoint", wide=True)
     assert "Stored evidence: stored load history is invalid" in lines
