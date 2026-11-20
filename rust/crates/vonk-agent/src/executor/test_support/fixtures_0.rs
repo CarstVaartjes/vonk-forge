@@ -75,6 +75,10 @@ impl ObservationServer {
                         break index + 4;
                     }
                 };
+                // A probe of the loopback port is not the client under test.
+                if request.starts_with(b"GET / ") {
+                    continue;
+                }
                 let headers = std::str::from_utf8(&request[..header_end]).unwrap();
                 if let Some(path) = headers
                     .strip_prefix("GET ")

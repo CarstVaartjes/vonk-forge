@@ -392,10 +392,7 @@ async fn body_limit_refusals_report_the_layer_without_guessing_from_empty_bodies
             .map(|code| format!("X-Vonk-Error-Code: {code}\r\n"))
             .unwrap_or_default();
         let peer = thread::spawn(move || {
-            let mut stream = accept_peer(
-                &listener,
-                std::time::Instant::now() + Duration::from_secs(5),
-            );
+            let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
