@@ -33,11 +33,14 @@ from vonk_control.compiled_execution_plan import (
 from vonk_control.compiled_execution_plan import (
     compile_verified_execution_plan as _compile_verified_plan,
 )
+from vonk_control.distribution import ModelCacheObjectSource
+from vonk_control.distribution.types import plan_objects
 from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
     ExecutionPlanCompilationError,
     _placement,
     _PlacementTarget,
+    _role_model_objects,
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
@@ -1311,3 +1314,121 @@ def test_binder_produces_the_shared_rank_one_job_claim_vector() -> None:
         peer_addresses=("192.168.100.10", "192.168.100.11"),
     )
     assert bound == shared["payload"]["compiled_execution_plan"]
+
+
+def _role_files() -> list[tuple[str, bytes, list[str]]]:
+    return [
+        ("shared", b"shared weights", ["entrypoint", "worker"]),
+        ("rank0", b"rank zero only", ["entrypoint"]),
+        ("rank1", b"rank one only", ["worker"]),
+    ]
+
+
+def _role_spec(role: str) -> dict[str, object]:
+    spec = _spec()
+    _mapping(spec["topology"]).update(
+        {"name": "dual", "node_count": 2, "rank": int(role == "worker"), "role": role}
+    )
+    spec["artifacts"] = [
+        {
+            **_first_mapping(spec["artifacts"]),
+            "id": name,
+            "file_id": name,
+            "path": f"{name}.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload),
+            "roles": roles,
+        }
+        for name, payload, roles in _role_files()
+        if role in roles
+    ]
+    _mapping(spec["identity"])["execution_sha256"] = execution_identity_sha256(spec)
+    return spec
+
+
+def test_each_role_compiles_and_is_delivered_exactly_its_own_files() -> None:
+    receipts = [
+        {
+            **_model_objects()[0],
+            "file_id": name,
+            "path": f"{name}.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload),
+            "distribution_object": {
+                "name": f"{name}.bin",
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "bytes": len(payload),
+                "kind": "model",
+            },
+        }
+        for name, payload, _roles in _role_files()
+    ]
+    recipe = SimpleNamespace(
+        models=[
+            SimpleNamespace(
+                model=SimpleNamespace(content_sha256="e" * 64),
+                files=[
+                    SimpleNamespace(file_id=name, roles=roles)
+                    for name, _payload, roles in _role_files()
+                ],
+            )
+        ]
+    )
+    set_digest = "d" * 64
+    stored = [
+        {
+            "path": f"{name}.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload),
+            "file": Path("/unused"),
+        }
+        for name, payload, _roles in _role_files()
+    ]
+
+    class Cache:
+        def manifest_for_artifact_set(self, _digest: str) -> SimpleNamespace:
+            return SimpleNamespace(digest=set_digest)
+
+        def resolve_verified_artifact_set(self, _digest: str) -> list[dict]:
+            return stored
+
+    source = ModelCacheObjectSource.from_service(Cache())
+    expected = {"entrypoint": {"shared", "rank0"}, "worker": {"shared", "rank1"}}
+    for role, names in expected.items():
+        plan = compile_verified_execution_plan(
+            _role_spec(role),
+            model_artifact_set_sha256=set_digest,
+            model_objects=[
+                receipt.model_dump(mode="json")
+                for receipt in _role_model_objects(
+                    recipe,  # type: ignore[arg-type]
+                    [VerifiedModelObject.model_validate(r) for r in receipts],
+                    role,
+                )
+            ],
+            runtime_image=_image(),
+        )
+        assert {item.id for item in plan.artifacts} == names
+        wire = validate_compiled_launch_payload(
+            _launch(
+                plan,
+                _role_spec(role),
+                placement={
+                    "endpoint_address": None,
+                    "rank": int(role == "worker"),
+                    "role": role,
+                    "world_size": 2,
+                    "local_address": None,
+                    "master_address": None,
+                    "master_port": None,
+                    "port": 8000,
+                    "reserved_memory_bytes": 1,
+                    "memory_floor_bytes": 0,
+                },
+            )
+        )
+        objects = plan_objects(wire)
+        assert source.verify_artifact_set(set_digest, objects)
+        # A file the stored set does not hold with these bytes is refused.
+        other = objects[0].model_copy(update={"bytes": objects[0].bytes + 1})
+        assert not source.verify_artifact_set(set_digest, (other, *objects[1:]))

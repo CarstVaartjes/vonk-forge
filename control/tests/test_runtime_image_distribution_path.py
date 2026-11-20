@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,7 +121,11 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     monkeypatch.setattr(
         executor,
         "_model_objects",
-        lambda _plan, _progress: ((model,), model_set_digest, model.bytes),
+        lambda _plan, _progress: (
+            defaultdict(lambda: (model,)),
+            model_set_digest,
+            model.bytes,
+        ),
     )
     phase = RunSwitchPhase(
         index=0,

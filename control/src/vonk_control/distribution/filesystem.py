@@ -23,7 +23,7 @@ from .types import (
     DistributionUnknown,
     OpenedObject,
     _artifact_set_digest,
-    same_content,
+    contained_content,
 )
 
 
@@ -52,7 +52,7 @@ class FilesystemObjectSource:
         declared = self.artifact_manifests.get(artifact_set_sha256)
         if declared is None:
             return False
-        return same_content(
+        return contained_content(
             declared, objects
         ) and artifact_set_sha256 == _artifact_set_digest(declared)
 

@@ -135,7 +135,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             )
         if type(intent_ordinal) is not int or intent_ordinal < 1:
             raise RuntimeError("distribution requires its authorized workload intent")
-        model_objects, model_set_digest, model_set_bytes = self._model_objects(
+        node_objects, model_set_digest, model_set_bytes = self._model_objects(
             plan, progress
         )
         image_digest, layout_digest, image_bytes, build_id = self._runtime_identity(
@@ -151,7 +151,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             node_id: self._assignment(
                 plan,
                 node_id,
-                model_objects,
+                node_objects[node_id],
                 image,
                 model_set_digest=model_set_digest,
             )
