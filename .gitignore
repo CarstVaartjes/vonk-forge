@@ -35,4 +35,5 @@ __pycache__/
 
 # Coding-agent scratch notes (PR bodies, reports); never part of the tree.
 .sol-*
+/body*.md
 /*.log
