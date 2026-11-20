@@ -19,6 +19,7 @@ import os
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import ensure_web
+from protocol_wheel import protocol_wheel_name
 from hook_words_generated import HookFailureCode, HookFailureKind
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -108,6 +109,60 @@ def run_vm_cargo(command: list[str], deadline: float) -> None:
         raise subprocess.CalledProcessError(result.returncode, invocation)
 
 
+# The paths CI's `lint` job feeds to scripts/check-added-lines.
+ADDED_LINE_PATHS = [
+    "control",
+    "agent_protocol",
+    "src",
+    "scripts",
+    "rust",
+    "deploy",
+    "packaging",
+    "tests",
+    ".github",
+]
+
+
+def check_added_lines() -> None:
+    """Run CI's added-line guards on the staged diff, or skip with a message."""
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = ROOT / environment
+    python = environment / "bin/python"
+    wheel = ROOT / "inventory/wheels" / protocol_wheel_name(ROOT)
+    if not python.is_file() or not wheel.is_file():
+        print(
+            "added-line guards skipped: control environment or protocol wheel "
+            "missing; run scripts/build-control-wheel and "
+            "`uv sync --project control --frozen` (CI still runs them)",
+            file=sys.stderr,
+        )
+        return
+    patch = subprocess.check_output(
+        [
+            "git",
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--unified=0",
+            "--",
+            *ADDED_LINE_PATHS,
+        ],
+        cwd=ROOT,
+        timeout=30,
+    )
+    if patch:
+        subprocess.run(
+            [str(python), "-m", "control.tests.added_line_guards"],
+            cwd=ROOT,
+            input=patch,
+            check=True,
+            timeout=600,
+        )
+
+
 def main() -> None:
     changed = (
         subprocess.check_output(
@@ -141,6 +196,7 @@ def main() -> None:
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])
+    check_added_lines()
     if web or web_inputs:
         directory = ROOT / "control/web"
         biome = directory / "node_modules/.bin/biome"

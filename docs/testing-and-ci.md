@@ -518,6 +518,10 @@ New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consu
 an externally supplied unified diff. CI creates that patch against its explicit
 PR/merge-group base. Only added lines can fail. The adapter, scanners and fixture
 tests never read Git.
+The pre-commit hook (`scripts/check-staged-code`) runs the same guards on the
+staged diff with the same path set as CI, so a violation fails before push. It
+skips with a message, never blocks, when the control environment or protocol
+wheel is missing.
 There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
 In Rust and TypeScript a contract literal is new only when the change spells
@@ -592,7 +596,8 @@ Run `scripts/verify-supply-chain --json` to validate authored lockfiles, the
 third-party contract wheel digest, and image pins. CI builds the protocol
 wheel, generates SPDX documents and a digest manifest, and uploads them as
 verified release evidence. These generated files are not committed or staged
-by the pre-commit hook, which runs only lint, format, and types. See the
+by the pre-commit hook, which runs lint, format, types and the added-line
+guards. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
 ## What earns a test

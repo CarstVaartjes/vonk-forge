@@ -304,6 +304,9 @@ word only when the change adds it to a file more often than it removes it there
 (a reflow is not new). On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
+The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
+guards on the staged diff, so a violation fails before push; it skips with a
+message when the control environment or protocol wheel is missing.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 
