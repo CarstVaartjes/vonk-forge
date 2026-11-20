@@ -358,3 +358,35 @@ test("the section tabs follow the WAI-ARIA tabs pattern: roving tabindex, arrows
   fireEvent.keyDown(overview!, { key: "a" });
   expect(overview).toHaveAttribute("aria-selected", "true");
 });
+
+test("an empty Serving card offers to load a workload from the Library", async () => {
+  // Break caught: the empty card is a dead end that only says nothing is loaded.
+  const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
+  nodes = [node];
+  render(<SparkPage api={apiOf()} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("link", { name: "Load a workload from Library" }));
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/library");
+});
+
+test("each storage row keeps a long name and its size on one line, the size unbroken", () => {
+  // Break caught: a long model name pushes the size to a second line.
+  show({
+    ...node,
+    installed: [
+      { installation_id: "i1", title: "x".repeat(80), complete: true, installed_bytes: 1024 ** 3 },
+    ],
+  });
+  const size = screen.getByText("1.0 GiB");
+  expect(size).toHaveClass("spark-model-size");
+});
+
+test("the Logs tab shows the CLI command as a copyable block with one explanatory line", async () => {
+  // Break caught: the command is bare prose the user must select by hand.
+  show(node, { fleetLogs: vi.fn().mockResolvedValue({ entries: [] }) });
+  fireEvent.click(await screen.findByRole("tab", { name: "Logs" }));
+  expect(await screen.findByText("vonkctl fleet loginfo spk_1")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Copy command" })).toBeVisible();
+  expect(
+    screen.getByText("Read the same lines, with more history, from a terminal:"),
+  ).toBeVisible();
+});

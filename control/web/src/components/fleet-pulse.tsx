@@ -7,36 +7,55 @@ import { GPU_ONLY_CAPTION } from "./energy-card";
 import { Estimate } from "./estimate";
 import { MemoryIngot } from "./memory-ingot";
 
+/** A figure with no reading is a muted dash with a plain reason under it, never a display-size word. */
 function Tile({
   label,
   figure,
   unit,
   caption,
+  unavailable,
   children,
 }: {
   label: string;
-  figure: ReactNode;
+  figure?: ReactNode;
   unit?: string;
   caption?: string;
+  /** Why there is no figure; shown instead of the figure and caption. */
+  unavailable?: string;
   children?: ReactNode;
 }) {
   return (
     <section className="pulse-tile" aria-label={label}>
       <h2 className="pulse-label">{label}</h2>
-      <p className="pulse-fig">
-        {figure}
-        {unit && <small>{unit}</small>}
-      </p>
-      {caption && <p className="pulse-caption">{caption}</p>}
+      {unavailable ? (
+        <>
+          <p className="pulse-fig is-muted" aria-hidden="true">
+            —
+          </p>
+          <p className="pulse-caption">{unavailable}</p>
+        </>
+      ) : (
+        <>
+          <p className="pulse-fig">
+            {figure}
+            {unit && <small>{unit}</small>}
+          </p>
+          {caption && <p className="pulse-caption">{caption}</p>}
+        </>
+      )}
       {children}
     </section>
   );
 }
 
+/** No series (loading or a failed read) is a gateway problem; a series without a value is an idle gateway. */
+const noReading = (series: MetricsSeriesResponse | null | undefined) =>
+  series ? "No inference traffic" : "Gateway metrics unavailable";
+
 /**
  * Five fleet figures in one band. Each is the Controller's fleet line or total of a metric (output speed,
  * GPU power, tokens, GPU energy) or a plain sum of the snapshot's memory samples; a figure with no
- * reading says Not reported.
+ * reading is a muted dash with the reason.
  */
 export function FleetPulse({
   output,
@@ -64,21 +83,22 @@ export function FleetPulse({
     <div className="fleet-pulse card">
       <Tile
         label="Output now"
-        figure={speed ? formatValue(speed.value, "") : NOT_REPORTED_TEXT}
+        figure={speed ? formatValue(speed.value, "") : undefined}
         unit={speed?.symbol}
         caption="generated, counted by the gateway"
+        unavailable={speed ? undefined : noReading(output)}
       />
       <Tile
         label="GPU power"
-        figure={watts ? watts.value.toFixed(1) : NOT_REPORTED_TEXT}
+        figure={watts?.value.toFixed(1)}
         unit={watts?.symbol}
         caption={watts ? coverageText(watts.reporting, online) : undefined}
+        unavailable={watts ? undefined : NOT_REPORTED_TEXT}
       />
       <Tile
         label="Unified memory"
-        figure={
-          memory ? formatBytes(memory.split.usedBytes).replace(/ GiB$/, "") : NOT_REPORTED_TEXT
-        }
+        figure={memory ? formatBytes(memory.split.usedBytes).replace(/ GiB$/, "") : undefined}
+        unavailable={memory ? undefined : NOT_REPORTED_TEXT}
         unit={memory ? `GiB of ${formatBytes(memory.split.totalBytes)}` : undefined}
         caption={
           memory
@@ -102,10 +122,9 @@ export function FleetPulse({
         figure={
           generated && tokens ? (
             <Estimate basis={tokens.spec.basis}>{generated.figure}</Estimate>
-          ) : (
-            NOT_REPORTED_TEXT
-          )
+          ) : undefined
         }
+        unavailable={generated && tokens ? undefined : noReading(tokens)}
         unit={generated ? `${generated.unit} generated`.trim() : undefined}
         caption={generated ? "counted by the gateway, all models" : undefined}
       />
@@ -116,11 +135,10 @@ export function FleetPulse({
             <Estimate basis={gpuEnergy.basis}>
               {formatValue(gpuEnergy.value, gpuEnergy.symbol)}
             </Estimate>
-          ) : (
-            NOT_REPORTED_TEXT
-          )
+          ) : undefined
         }
         caption={GPU_ONLY_CAPTION}
+        unavailable={gpuEnergy ? undefined : NOT_REPORTED_TEXT}
       />
     </div>
   );

@@ -21,6 +21,8 @@ import { EnrollmentGrant } from "../components/enrollment-grant";
 import { ServingNow, servingKey } from "../components/serving-now";
 import { safeErrorText } from "../lib/error-display";
 
+const FAILED_ACTIVITY = "/activity?status=unsuccessful";
+
 export function OverviewPage({
   api,
   onLive,
@@ -48,6 +50,7 @@ export function OverviewPage({
   const [submitting, setSubmitting] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [failedToday, setFailedToday] = useState(0);
   async function upgradeAll() {
     setUpgradeBusy(true);
     try {
@@ -170,7 +173,20 @@ export function OverviewPage({
       )}
       <FleetFeedback fleet={fleet} />
       {fleet.snapshot && (
-        <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
+        <p className="fleet-status-line">
+          {fleetStatusLine(fleet.snapshot, fleet.now, failedToday)}
+          {failedToday > 0 && (
+            <>
+              {" · "}
+              <a
+                href={FAILED_ACTIVITY}
+                onClick={onNavigate && ((event) => onNavigate(event, FAILED_ACTIVITY))}
+              >
+                {failedToday} failed {failedToday === 1 ? "operation" : "operations"} today
+              </a>
+            </>
+          )}
+        </p>
       )}
       {fleet.snapshot && nodes.length > 0 && (
         <FleetPulse
@@ -224,6 +240,7 @@ export function OverviewPage({
               api={api}
               nodes={nodes}
               now={fleet.now}
+              onFailedToday={setFailedToday}
               onViewAll={onNavigate && ((event) => onNavigate(event, "/activity"))}
             />
           </div>

@@ -5,6 +5,7 @@ import { useMetricCatalogue } from "../hooks/use-metric-catalogue";
 import { AreaChart, type ChartSeries } from "./chart/area-chart";
 import { sparkColor } from "./chart/series";
 import { EstimateTag } from "./estimate";
+import { RangeSwitch } from "./range-switch";
 import { UNITS, formatValue } from "../lib/metric-units";
 
 import type {
@@ -42,7 +43,7 @@ export function formatTimeLeft(seconds: number): string {
   return `${count} ${name}${count === 1 ? "" : "s"}`;
 }
 
-function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
+export function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
   const node = labels.node_id;
   if (node) return names[node] ?? node;
   // A series without a label is the Controller's fleet line.
@@ -137,41 +138,29 @@ export function SeriesChart({
 // A tile holds its series, or the message of the read that failed.
 type Tile = MetricsSeriesResponse | string;
 
-function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): string[] {
-  return data.series.flatMap((series) => {
-    const last = [...series.points].reverse().find((point) => point.value !== null);
-    if (!last) return [];
-    const left = Number(last.value);
-    const name = seriesName(series.labels, names);
-    return [
-      left <= 0
-        ? `${name}: certificate expired`
-        : `${name}: certificate expires in ${formatTimeLeft(left)}`,
-    ];
-  });
-}
-
+/** The fleet's trends. The page owns the range; its switch sits in this header beside Refresh. */
 export function MetricsChart({
   api,
   node,
   range,
+  onRangeChange,
   names = {},
 }: {
   api: ControlApi;
   node?: string;
   range: MetricRange;
+  onRangeChange(range: MetricRange): void;
   names?: Record<string, string>;
 }) {
   const id = useId();
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
   const catalogue = useMetricCatalogue(api, retry);
-  const wanted: Metric[] = [...TILES, "certificate_expiry"];
   useEffect(() => {
     const controller = new AbortController();
     setTiles({});
     // Each tile reads on its own, so one failed read leaves the others standing.
-    for (const metric of wanted) {
+    for (const metric of TILES) {
       api.metricsSeries(metric, range, node, controller.signal).then(
         (data) => {
           if (!controller.signal.aborted) setTiles((current) => ({ ...current, [metric]: data }));
@@ -189,20 +178,21 @@ export function MetricsChart({
     }
     return () => controller.abort();
   }, [api, range, node, retry]);
-  const expiryRead = tiles.certificate_expiry;
-  const expiry = typeof expiryRead === "object" ? expiryRead : undefined;
   return (
     <section aria-labelledby={id} className="fleet-metrics">
-      <h2 id={id}>Trends</h2>
-      <div className="button-row">
-        <button
-          type="button"
-          className="button secondary"
-          onClick={() => setRetry((value) => value + 1)}
-        >
-          Refresh metrics
-        </button>
-      </div>
+      <header className="metrics-head">
+        <h2 id={id}>Trends</h2>
+        <div className="metrics-controls">
+          <RangeSwitch range={range} onChange={onRangeChange} />
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setRetry((value) => value + 1)}
+          >
+            Refresh metrics
+          </button>
+        </div>
+      </header>
       {typeof catalogue === "string" && <p role="status">Metrics unavailable: {catalogue}</p>}
       <div className="metric-tiles">
         {(Array.isArray(catalogue) ? TILES : []).map((metric) => {
@@ -225,7 +215,6 @@ export function MetricsChart({
           );
         })}
       </div>
-      {expiry && timeLeft(expiry, names).map((line) => <p key={line}>{line}</p>)}
     </section>
   );
 }

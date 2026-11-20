@@ -1138,3 +1138,67 @@ test("leads with the workload the Controller names, else with the Sparks", async
     screen.getByRole("heading", { name: /Mia Lab Spark.* · Recipe start finished/ }),
   ).toBeVisible();
 });
+
+test("a summary names Sparks by their friendly name, never by id, and ends at a word", async () => {
+  // Break caught: the Controller's sentence shows spk_ ids, or a long one is cut inside a word.
+  const long = `Installing on ${TARGET_ID} and ${"x".repeat(30)}, ${"preparing the image ".repeat(12)}`;
+  const operations = [
+    canonicalOperation({
+      id: "named",
+      kind: "recipe.start",
+      state: "succeeded",
+      failure: null,
+      summary: `Started on ${TARGET_ID}`,
+    }),
+    canonicalOperation({
+      id: "long",
+      kind: "recipe.start",
+      state: "succeeded",
+      failure: null,
+      summary: long,
+      created_at: "2026-08-15T11:00:00Z",
+    }),
+  ];
+  render(<ActivityPage api={canonicalApi(operations)} now={NOW} />);
+  expect(
+    await screen.findAllByRole("heading", {
+      level: 2,
+      name: /Mia Lab Spark · Started on Mia Lab Spark/,
+    }),
+  ).toHaveLength(1);
+  const headings = screen
+    .getAllByRole("heading", { level: 2 })
+    .map((heading) => heading.textContent ?? "");
+  expect(headings.join("\n")).not.toContain("spk_1111");
+  const cut = headings.find((text) => text.includes("Installing"))!;
+  expect(cut).toMatch(/…$/);
+  expect(cut).toMatch(/\b(preparing|the|image)…$/);
+});
+
+test("Refresh operation is offered for work in progress, not for a finished operation", async () => {
+  // Break caught: a completed operation keeps a button that can only re-read the same answer.
+  const finished = canonicalOperation({
+    id: "done",
+    kind: "recipe.start",
+    state: "succeeded",
+    failure: null,
+  });
+  render(<ActivityPage api={canonicalApi([finished])} now={NOW} />);
+  await screen.findByText(/Attempt 1/);
+  expect(screen.queryByRole("button", { name: "Refresh operation" })).toBeNull();
+});
+
+test("the filters are one row with More filters, and ?status= opens the page filtered", async () => {
+  // Break caught: seven stacked filters push the events below the fold, and a linked count opens unfiltered.
+  history.replaceState(null, "", "/activity?status=unsuccessful");
+  const user = userEvent.setup();
+  render(<ActivityPage api={canonicalApi(recordedOperations())} now={NOW} />);
+  expect(await screen.findByRole("combobox", { name: "Status" })).toHaveValue("unsuccessful");
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
+  const more = screen.getByRole("button", { name: "More filters" });
+  expect(more).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("combobox", { name: "Operator" })).toBeNull();
+  await user.click(more);
+  expect(screen.getByRole("combobox", { name: "Operator" })).toBeVisible();
+  history.replaceState(null, "", "/");
+});

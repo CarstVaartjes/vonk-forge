@@ -138,6 +138,14 @@ function statusTone(status: ActivityStatus): "neutral" | "ok" | "warn" | "bad" |
   return "ok";
 }
 
+const STATUSES: readonly ActivityStatus[] = [
+  "recorded",
+  "in_progress",
+  "attention",
+  "unsuccessful",
+  "unknown",
+];
+
 const OPERATION_STATES = [
   "queued",
   "running",
@@ -162,6 +170,12 @@ function readFilters(): ActivityFilters {
     target: params.get("target") || undefined,
     requestId: params.get("request_id") || undefined,
   };
+}
+
+/** `?status=unsuccessful` opens the page already filtered, so other pages can link a count to its events. */
+function readStatus(): ActivityStatus | "" {
+  const value = new URLSearchParams(location.search).get("status");
+  return STATUSES.find((status) => status === value) ?? "";
 }
 
 function writeFilters(filters: ActivityFilters): void {
@@ -324,13 +338,35 @@ function targetSummaryNames(event: ActivityRecord): string[] {
   return names;
 }
 
+const SPARK_ID = /\bspk_[0-9a-z]+/g;
+/** The longest summary shown whole; the Controller cuts its own at 256 characters, mid-word. */
+const SUMMARY_MAX = 160;
+
+/** A Spark id inside the Controller's words reads as the Spark's name; one the fleet no longer has says so. */
+function friendlySparks(text: string, event: ActivityRecord): string {
+  return text.replace(SPARK_ID, (id) => {
+    const name = event.target_names?.[event.targets.indexOf(id)];
+    return name || "a Spark no longer registered";
+  });
+}
+
+/** Long text ends at the last sentence or word that fits, never inside a word. */
+export function readableSummary(text: string): string {
+  if (text.length <= SUMMARY_MAX) return text;
+  const head = text.slice(0, SUMMARY_MAX);
+  const sentence = head.lastIndexOf(". ");
+  if (sentence >= SUMMARY_MAX / 2) return head.slice(0, sentence + 1);
+  const word = head.lastIndexOf(" ");
+  return `${(word > 0 ? head.slice(0, word) : head).replace(/[\s,;:.-]+$/, "")}…`;
+}
+
 /** The entry's headline: the workload (else the Sparks) it concerns, then what happened, in the Controller's words. */
 export function activityTitle(event: ActivityRecord): string {
   const names = targetSummaryNames(event);
   const sparks =
     names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
-  const subject = event.subject || sparks;
-  const summary = event.summary || "Recorded activity";
+  const subject = friendlySparks(event.subject || sparks, event);
+  const summary = readableSummary(friendlySparks(event.summary || "Recorded activity", event));
   return subject ? `${subject} · ${summary}` : summary;
 }
 
@@ -1103,6 +1139,15 @@ function CanonicalOperationDetails({
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [active, refresh]);
+  // A finished operation does not change; only one still moving, or in a state we do not know, is worth re-reading.
+  const refreshable = ["in_progress", "unknown"].includes(
+    activityStatus({
+      request_id: detail.id,
+      actor: "",
+      targets: [],
+      action: `operation.${detail.kind}.${detail.state}`,
+    }),
+  );
   const availability =
     detail.failure && "code" in detail.failure ? availabilityFailure(detail.failure) : undefined;
   return (
@@ -1147,11 +1192,13 @@ function CanonicalOperationDetails({
       ) : (
         detail.recovery?.explanation && <p style={{ margin: 0 }}>{detail.recovery.explanation}</p>
       )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
-        <button type="button" className="button secondary" onClick={() => void refresh()}>
-          Refresh operation
-        </button>
-      </div>
+      {refreshable && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
+          <button type="button" className="button secondary" onClick={() => void refresh()}>
+            Refresh operation
+          </button>
+        </div>
+      )}
       {error && <p role="alert">{error}</p>}
     </div>
   );
@@ -1216,12 +1263,17 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [actor, setActor] = useState("");
-  const [status, setStatus] = useState<ActivityStatus | "">("");
+  const [status, setStatus] = useState<ActivityStatus | "">(readStatus);
   const [filters, setFilters] = useState<ActivityFilters>(readFilters);
   const [requestText, setRequestText] = useState(() => readFilters().requestId ?? "");
   const [view, setView] = useState<ActivityView>(readViewPreference);
   const [sort, setSort] = useState<"recent" | "attention">("recent");
   const [targetNames, setTargetNames] = useState(new Map<string, string>());
+  // The rarely used filters hide behind one button, open from the start when a link already set one.
+  const [moreOpen, setMoreOpen] = useState(() => {
+    const initial = readFilters();
+    return Boolean(initial.state || initial.target || initial.requestId);
+  });
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
   const canonicalIds = useRef(new Set<string>());
@@ -1446,6 +1498,9 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
     changeFilters({});
   }
 
+  const moreActive = [actor, filters.state, filters.target, filters.requestId].filter(
+    Boolean,
+  ).length;
   const filtering = Boolean(
     query.trim() ||
       category ||
@@ -1514,18 +1569,18 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       )}
 
       <section className="activity-controls" aria-label="Activity controls">
-        <label className="activity-search">
-          <span>Search activity</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Action, operator, or technical ID"
-          />
-        </label>
-        <div className="activity-filters">
+        <div className="activity-bar">
+          <label className="activity-search">
+            <span className="sr-only">Search activity</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search activity: action, operator, or technical ID"
+            />
+          </label>
           <label>
-            <span>Area</span>
+            <span className="sr-only">Area</span>
             <select value={category} onChange={(event) => setCategory(event.target.value)}>
               <option value="">All areas</option>
               {categories.map((value) => (
@@ -1534,16 +1589,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             </select>
           </label>
           <label>
-            <span>Operator</span>
-            <select value={actor} onChange={(event) => setActor(event.target.value)}>
-              <option value="">All operators</option>
-              {actors.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
+            <span className="sr-only">Status</span>
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value as ActivityStatus | "")}
@@ -1554,6 +1600,26 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               <option value="attention">Needs review</option>
               <option value="unsuccessful">Unsuccessful</option>
               <option value="unknown">Unknown state</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="button secondary"
+            aria-expanded={moreOpen}
+            aria-controls="activity-more-filters"
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            More filters{moreActive > 0 ? ` (${moreActive})` : ""}
+          </button>
+        </div>
+        <div className="activity-filters" id="activity-more-filters" hidden={!moreOpen}>
+          <label>
+            <span>Operator</span>
+            <select value={actor} onChange={(event) => setActor(event.target.value)}>
+              <option value="">All operators</option>
+              {actors.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
             </select>
           </label>
           <label>

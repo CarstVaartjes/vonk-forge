@@ -346,8 +346,10 @@ function runNeedsAttention(run: VisualFleetNode["loaded"][number]): boolean {
 /**
  * The Fleet in one line: Sparks online, unified memory free, workloads serving, and what needs
  * attention (Sparks, lost or unhealthy running workloads, then firing alerts). `vonkctl fleet` prints the same line.
+ * `failedToday` is the Controller's unsuccessful operations of today that the page already shows; the page links
+ * them, so the line then never claims that nothing needs attention.
  */
-export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
+export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date, failedToday = 0): string {
   if (fleet.nodes.length === 0) return NO_SPARKS;
   const summary = summarizeFleet(fleet) as FleetSummary;
   const serving = new Set(
@@ -372,7 +374,7 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
     serving === 0
       ? "no workloads serving"
       : `${serving} ${serving === 1 ? "workload" : "workloads"} serving`,
-    ...(attention.length > 0 ? attention : ["nothing needs attention"]),
+    ...(attention.length > 0 || failedToday > 0 ? attention : ["nothing needs attention"]),
   ].join(" · ");
 }
 

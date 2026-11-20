@@ -26,10 +26,13 @@ export function ActivityPreview({
   nodes,
   now,
   onViewAll,
+  onFailedToday,
 }: {
   api: Pick<ControlApi, "operations">;
   nodes: VisualFleetNode[];
   now: Date;
+  /** How many of the rows shown ended unsuccessfully today, so the page's status line agrees with this rail. */
+  onFailedToday?(count: number): void;
   onViewAll?(event: MouseEvent<HTMLAnchorElement>): void;
 }) {
   // undefined: not read yet; null: the last read failed, which is not the same as nothing happening
@@ -61,6 +64,15 @@ export function ActivityPreview({
       clearInterval(timer);
     };
   }, [api]);
+  useEffect(() => {
+    const failed = (rows ?? []).filter(
+      (row) =>
+        row.tone === "bad" &&
+        row.occurredAt !== null &&
+        new Date(row.occurredAt).toDateString() === now.toDateString(),
+    ).length;
+    onFailedToday?.(failed);
+  }, [rows, now, onFailedToday]);
   return (
     <section className="card activity-preview" aria-labelledby="activity-preview-heading">
       <header>
@@ -81,7 +93,7 @@ export function ActivityPreview({
                 {whenText(row.occurredAt, now)}
               </time>
               <span className="activity-preview-what">
-                <strong>{row.label}</strong>
+                <strong title={row.label}>{row.label}</strong>
               </span>
               <StatusPill tone={row.tone}>{row.word}</StatusPill>
             </li>

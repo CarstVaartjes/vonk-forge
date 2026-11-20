@@ -1,4 +1,7 @@
-vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+vi.mock("../components/metrics-chart", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../components/metrics-chart")>()),
+  MetricsChart: () => null,
+}));
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
@@ -224,5 +227,44 @@ test("with no workload loaded the page says so and still lists every Spark", () 
   fireEvent.click(screen.getByRole("button", { name: "Open the Library" }));
   expect(onNavigateUrl).toHaveBeenCalledWith("/library");
   expect(screen.getByRole("heading", { name: "All Sparks" })).toBeInTheDocument();
+  nodes = [];
+});
+
+test("an expiring or expired certificate is one warning near the top, not a footer line", async () => {
+  // Break caught: certificate expiry is buried under the trend charts, or an expired one reads "expires in now".
+  nodes = [spark("Alpha", 40, 250)];
+  const id = (nodes[0] as { id: string }).id;
+  const certificate = (value: number) => ({
+    ...series("certificate_expiry", "seconds", value),
+    series: [
+      {
+        labels: { node_id: id },
+        points: [{ timestamp: 3600, value }],
+        summary: { latest: value },
+      },
+    ],
+  });
+  reads = { certificate_expiry: certificate(0) };
+  render(<WorkloadsPage api={api} />);
+  const banner = await screen.findByRole("status", { name: "Certificates" });
+  expect(banner).toHaveTextContent("Alpha: certificate expired");
+  expect(banner).not.toHaveTextContent("expires in");
+  expect(
+    banner.compareDocumentPosition(screen.getByRole("heading", { name: "All Sparks" })) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  reads = {};
+  nodes = [];
+});
+
+test("the Spark search appears only when there are more than four Sparks", () => {
+  // Break caught: a search box above a table that already fits on screen.
+  nodes = ["A", "B", "C", "D"].map((name) => spark(name, 40, 250));
+  const { unmount } = render(<WorkloadsPage api={api} />);
+  expect(screen.queryByRole("searchbox", { name: "Find a Spark" })).toBeNull();
+  unmount();
+  nodes = ["A", "B", "C", "D", "E"].map((name) => spark(name, 40, 250));
+  render(<WorkloadsPage api={api} />);
+  expect(screen.getByRole("searchbox", { name: "Find a Spark" })).toBeVisible();
   nodes = [];
 });

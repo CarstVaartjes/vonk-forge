@@ -27,9 +27,15 @@ export function SparkServing({
         <h2 id={id}>Serving</h2>
       </header>
       {runs.length === 0 && (
-        <p className="spark-panel-note">
-          Nothing is loaded. {installed} {installed === 1 ? "recipe is" : "recipes are"} installed.
-        </p>
+        <>
+          <p className="spark-panel-note">
+            Nothing is loaded. {installed} {installed === 1 ? "recipe is" : "recipes are"}{" "}
+            installed.
+          </p>
+          <a className="button" href="/library" onClick={(event) => onNavigate(event, "/library")}>
+            Load a workload from Library
+          </a>
+        </>
       )}
       {runs.map((run) => (
         <div className="spark-run" key={run.runId}>
