@@ -1,5 +1,9 @@
 use super::*;
 
+/// The retained-resolver list is process-global and supervision reaps every
+/// entry, so tests that retain children run one at a time.
+static RETAINED_RESOLVERS_TESTS: Mutex<()> = Mutex::new(());
+
 #[test]
 fn silent_probe_ends_and_a_fresh_probe_completes() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -328,6 +332,9 @@ fn failed_termination_retains_child_and_exhausted_owners_recover_after_reaping()
 
 #[test]
 fn exhausted_reap_budget_hands_actual_child_to_supervision_and_fresh_admission_recovers() {
+    let _serial = RETAINED_RESOLVERS_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // The old per-child infinite loop never reached a terminal ownership handoff.
     static OWNERS: AtomicUsize = AtomicUsize::new(0);
     let owner = ResolverOwner::acquire_at(&OWNERS).unwrap();
@@ -440,6 +447,9 @@ fn no_infallible_thread_spawn_remains_in_the_proxy() {
 
 #[test]
 fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
+    let _serial = RETAINED_RESOLVERS_TESTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // Wrong implementation: the unstarted reaper closure takes the child and its
     // claim down with it, leaking the process and the admission slot.
     static OWNERS: AtomicUsize = AtomicUsize::new(0);
