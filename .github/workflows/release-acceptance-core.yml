@@ -68,7 +68,7 @@ jobs:
           fetch-depth: 2
       - name: Install canonical publication model runtime
         id: runtime
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
           python-version: "3.14"
@@ -225,7 +225,7 @@ jobs:
 
       - name: Install uv and Python
         timeout-minutes: 5
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
           python-version: "3.14"
@@ -630,7 +630,7 @@ jobs:
           printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
           python-version: "3.14"
@@ -933,7 +933,7 @@ jobs:
           publication.\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install canonical publication model runtime
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version-file: .tool-versions
           python-version: "3.14"
