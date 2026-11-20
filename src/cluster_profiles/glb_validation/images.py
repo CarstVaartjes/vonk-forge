@@ -256,6 +256,10 @@ def _valid_jpeg(value: bytes) -> bool:
     return False
 
 
+class QualifyExtraMissing(RuntimeError):
+    """Pillow is not installed; this is not a verdict on the image."""
+
+
 def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
     start, length = view
     value = blob[start : start + length]
@@ -267,10 +271,15 @@ def _image_bytes(blob: bytes, view: tuple[int, int], mime_type: str) -> None:
     if valid and mime_type in {"image/jpeg", "image/webp"}:
         try:
             from PIL import Image
-
+        except ImportError as error:
+            raise QualifyExtraMissing(
+                "Checking JPEG/WebP images requires the qualify extra: "
+                "install vonkctl[qualify] (missing package: Pillow)"
+            ) from error
+        try:
             with Image.open(BytesIO(value)) as image:
                 image.verify()
-        except (ImportError, OSError, SyntaxError, ValueError):
+        except (OSError, SyntaxError, ValueError):
             valid = False
     if not valid:
         raise ValueError("GLB embedded image payload does not match its MIME type")

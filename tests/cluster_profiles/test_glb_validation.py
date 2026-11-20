@@ -6,11 +6,13 @@ import json
 import math
 import os
 import struct
+import sys
 import tempfile
 import unittest
 import zlib
 from pathlib import Path
 from types import ModuleType
+from unittest import mock
 
 import pytest
 
@@ -304,6 +306,20 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         document["extensionsUsed"] = ["EXT_texture_webp"]
         document["extensionsRequired"] = ["EXT_texture_webp"]
         self.validate(document, builder, "textured")
+
+    def test_missing_pillow_is_not_an_invalid_image(self) -> None:
+        webp = (
+            b"RIFF\x1c\0\0\0WEBPVP8L\x0f\0\0\0/\x01@\0\0\x07\x10"
+            b"\xfd\x8f\xfe\x07\x22\xa2\xff\x01\0"
+        )
+        with (
+            mock.patch.dict(sys.modules, {"PIL": None}),
+            self.assertRaisesRegex(
+                glb_validation.images.QualifyExtraMissing,
+                r"vonkctl\[qualify\].*Pillow",
+            ),
+        ):
+            glb_validation._image_bytes(webp, (0, len(webp)), "image/webp")
 
     def test_pbr_distinctness_uses_the_required_webp_sources(self) -> None:
         builder = Glb()
