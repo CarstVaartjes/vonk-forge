@@ -87,35 +87,45 @@ export function activityCategory(event: ActivitySummary): string {
   return CATEGORY_LABELS[category] ?? titleCase(category);
 }
 
+const OPERATION_STATUS: Record<string, ActivityStatus> = {
+  cancelled: "unsuccessful",
+  canceled: "unsuccessful",
+  error: "unsuccessful",
+  expired: "unsuccessful",
+  failed: "unsuccessful",
+  uncertain: "attention",
+  waiting: "in_progress",
+  [LifecycleState.NEEDS_OPERATOR]: "attention",
+  [LifecycleState.BACKOFF]: "in_progress",
+  [LifecycleState.OBSERVING]: "in_progress",
+  compensating: "in_progress",
+  pending: "in_progress",
+  planned: "in_progress",
+  queued: "in_progress",
+  running: "in_progress",
+  starting: "in_progress",
+  stopping: "in_progress",
+  compensated: "recorded",
+  completed: "recorded",
+  succeeded: "recorded",
+  // Replaced by a successor operation: not a fault.
+  superseded: "recorded",
+};
+
+/** An operation state as the Activity page classes it; a state not listed here is not known. */
+function operationStatus(state: string): ActivityStatus {
+  return OPERATION_STATUS[state] ?? "unknown";
+}
+
+/** Finished work does not change again; every other state (waiting, uncertain, not known) can. */
+export function operationEnded(state: string): boolean {
+  const status = operationStatus(state);
+  return status === "unsuccessful" || status === "recorded";
+}
+
 export function activityStatus(event: ActivitySummary): ActivityStatus {
-  if (event.action.startsWith("operation.")) {
-    const state = event.action.split(".").at(-1) ?? "";
-    const knownStates: Record<string, ActivityStatus> = {
-      cancelled: "unsuccessful",
-      canceled: "unsuccessful",
-      error: "unsuccessful",
-      expired: "unsuccessful",
-      failed: "unsuccessful",
-      uncertain: "attention",
-      waiting: "in_progress",
-      [LifecycleState.NEEDS_OPERATOR]: "attention",
-      [LifecycleState.BACKOFF]: "in_progress",
-      [LifecycleState.OBSERVING]: "in_progress",
-      compensating: "in_progress",
-      pending: "in_progress",
-      planned: "in_progress",
-      queued: "in_progress",
-      running: "in_progress",
-      starting: "in_progress",
-      stopping: "in_progress",
-      compensated: "recorded",
-      completed: "recorded",
-      succeeded: "recorded",
-      // Replaced by a successor operation: not a fault.
-      superseded: "recorded",
-    };
-    return knownStates[state] ?? "unknown";
-  }
+  if (event.action.startsWith("operation."))
+    return operationStatus(event.action.split(".").at(-1) ?? "");
   if (/(?:^|\.)(?:failed|rejected|throttled|denied|error)(?:\.|$)/.test(event.action))
     return "unsuccessful";
   if (/(?:^|\.)(?:uncertain|warning|conflict|stale)(?:\.|$)/.test(event.action)) return "attention";
@@ -137,6 +147,14 @@ function statusTone(status: ActivityStatus): "neutral" | "ok" | "warn" | "bad" |
   if (status === "unknown") return "neutral";
   return "ok";
 }
+
+/** The statuses a link can open the page on. */
+const LINKABLE_STATUSES: readonly ActivityStatus[] = [
+  "recorded",
+  "in_progress",
+  "attention",
+  "unsuccessful",
+];
 
 const OPERATION_STATES = [
   "queued",
@@ -162,6 +180,12 @@ function readFilters(): ActivityFilters {
     target: params.get("target") || undefined,
     requestId: params.get("request_id") || undefined,
   };
+}
+
+/** `?status=unsuccessful` opens the page already filtered, so other pages can link a count to its events. */
+function readStatus(): ActivityStatus | "" {
+  const value = new URLSearchParams(location.search).get("status");
+  return LINKABLE_STATUSES.find((status) => status === value) ?? "";
 }
 
 function writeFilters(filters: ActivityFilters): void {
@@ -1147,11 +1171,13 @@ function CanonicalOperationDetails({
       ) : (
         detail.recovery?.explanation && <p style={{ margin: 0 }}>{detail.recovery.explanation}</p>
       )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
-        <button type="button" className="button secondary" onClick={() => void refresh()}>
-          Refresh operation
-        </button>
-      </div>
+      {!operationEnded(detail.state) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
+          <button type="button" className="button secondary" onClick={() => void refresh()}>
+            Refresh operation
+          </button>
+        </div>
+      )}
       {error && <p role="alert">{error}</p>}
     </div>
   );
@@ -1208,6 +1234,16 @@ export function activityPreviewRows(
     });
 }
 
+/** How many of these operations ended unsuccessfully, by the same status the Activity filter uses. */
+export function unsuccessfulCount(
+  operations: OperationDetail[],
+  names: Map<string, string>,
+): number {
+  return operations.filter(
+    (operation) => activityStatus(canonicalRecord(operation, names)) === "unsuccessful",
+  ).length;
+}
+
 export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?: Date }) {
   const [events, setEvents] = useState<ActivityRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1216,12 +1252,17 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [actor, setActor] = useState("");
-  const [status, setStatus] = useState<ActivityStatus | "">("");
+  const [status, setStatus] = useState<ActivityStatus | "">(readStatus);
   const [filters, setFilters] = useState<ActivityFilters>(readFilters);
   const [requestText, setRequestText] = useState(() => readFilters().requestId ?? "");
   const [view, setView] = useState<ActivityView>(readViewPreference);
   const [sort, setSort] = useState<"recent" | "attention">("recent");
   const [targetNames, setTargetNames] = useState(new Map<string, string>());
+  // The rarely used filters hide behind one button, open from the start when a link already set one.
+  const [moreOpen, setMoreOpen] = useState(() => {
+    const initial = readFilters();
+    return Boolean(initial.state || initial.target || initial.requestId);
+  });
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
   const canonicalIds = useRef(new Set<string>());
@@ -1231,6 +1272,13 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
   const [canonicalAvailable, setCanonicalAvailable] = useState(true);
   const requestGeneration = useRef(0);
 
+  useEffect(() => {
+    // The link opened the page on a status; from here the filter is the page's own, like search.
+    const params = new URLSearchParams(location.search);
+    if (!params.has("status")) return;
+    params.delete("status");
+    history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
+  }, []);
   useEffect(() => {
     const generation = ++requestGeneration.current;
     let active = true;
@@ -1446,6 +1494,13 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
     changeFilters({});
   }
 
+  const moreActive = [
+    actor,
+    filters.state,
+    filters.target,
+    filters.requestId,
+    sort !== "recent",
+  ].filter(Boolean).length;
   const filtering = Boolean(
     query.trim() ||
       category ||
@@ -1461,14 +1516,32 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
         title="Activity"
         description="Meaningful control-plane changes, without technical identifiers by default."
         actions={
-          <button
-            type="button"
-            className="button"
-            disabled={loading || loadingMore}
-            onClick={() => setAttempt((value) => value + 1)}
-          >
-            {loading && events ? "Refreshing…" : "Refresh activity"}
-          </button>
+          <>
+            <div className="segmented" role="group" aria-label="Activity view">
+              <button
+                type="button"
+                aria-pressed={view === "timeline"}
+                onClick={() => chooseView("timeline")}
+              >
+                Timeline
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "table"}
+                onClick={() => chooseView("table")}
+              >
+                Table
+              </button>
+            </div>
+            <button
+              type="button"
+              className="button"
+              disabled={loading || loadingMore}
+              onClick={() => setAttempt((value) => value + 1)}
+            >
+              {loading && events ? "Refreshing…" : "Refresh activity"}
+            </button>
+          </>
         }
       />
 
@@ -1514,18 +1587,18 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       )}
 
       <section className="activity-controls" aria-label="Activity controls">
-        <label className="activity-search">
-          <span>Search activity</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Action, operator, or technical ID"
-          />
-        </label>
-        <div className="activity-filters">
+        <div className="activity-bar">
+          <label className="activity-search">
+            <span className="sr-only">Search activity</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search activity: action, operator, or technical ID"
+            />
+          </label>
           <label>
-            <span>Area</span>
+            <span className="sr-only">Area</span>
             <select value={category} onChange={(event) => setCategory(event.target.value)}>
               <option value="">All areas</option>
               {categories.map((value) => (
@@ -1534,16 +1607,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             </select>
           </label>
           <label>
-            <span>Operator</span>
-            <select value={actor} onChange={(event) => setActor(event.target.value)}>
-              <option value="">All operators</option>
-              {actors.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
+            <span className="sr-only">Status</span>
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value as ActivityStatus | "")}
@@ -1554,6 +1618,26 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               <option value="attention">Needs review</option>
               <option value="unsuccessful">Unsuccessful</option>
               <option value="unknown">Unknown state</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="button secondary"
+            aria-expanded={moreOpen}
+            aria-controls="activity-more-filters"
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            More filters{moreActive > 0 ? ` (${moreActive})` : ""}
+          </button>
+        </div>
+        <div className="activity-filters" id="activity-more-filters" hidden={!moreOpen}>
+          <label>
+            <span>Operator</span>
+            <select value={actor} onChange={(event) => setActor(event.target.value)}>
+              <option value="">All operators</option>
+              {actors.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
             </select>
           </label>
           <label>
@@ -1626,22 +1710,6 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               Clear filters
             </button>
           )}
-          <div className="segmented" role="group" aria-label="Activity view">
-            <button
-              type="button"
-              aria-pressed={view === "timeline"}
-              onClick={() => chooseView("timeline")}
-            >
-              Timeline
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === "table"}
-              onClick={() => chooseView("table")}
-            >
-              Table
-            </button>
-          </div>
         </div>
       </section>
 

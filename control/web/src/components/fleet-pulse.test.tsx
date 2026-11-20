@@ -96,14 +96,34 @@ test("the 8 GiB warning is a Spark's: a fleet sum of low free memory shows no wa
   expect(screen.queryByText(/Under \d GiB free/)).toBeNull();
 });
 
-test("without readings every figure says Not reported", () => {
+test("without readings a figure is a muted dash with a plain reason, not a display-size 'Not reported'", () => {
+  // Break caught: an idle or unreachable gateway shows a large "Not reported" word as the figure.
   render(<FleetPulse {...none} tokens={null} nodes={[spark("c", {}, false)]} />);
-  for (const name of [
-    "Output now",
-    "GPU power",
-    "Unified memory",
-    "Tokens, 24 h",
-    "GPU energy, 24 h",
-  ])
+  for (const name of ["Output now", "Tokens, 24 h"]) {
+    expect(tile(name)).toHaveTextContent("Gateway metrics unavailable");
+    expect(tile(name).querySelector(".pulse-fig")).toHaveClass("is-muted");
+  }
+  for (const name of ["GPU power", "Unified memory", "GPU energy, 24 h"])
     expect(tile(name)).toHaveTextContent("Not reported");
+});
+
+test("a figure still being read has no reason yet", () => {
+  // Break caught: loading reads "Gateway metrics unavailable".
+  render(<FleetPulse {...none} output={undefined} tokens={null} nodes={fleet} />);
+  expect(tile("Output now")).not.toHaveTextContent("Gateway metrics unavailable");
+  expect(tile("Output now").querySelector(".pulse-fig")).toHaveClass("is-muted");
+});
+
+test("a gateway that answers without traffic says so", () => {
+  const idle = { ...tokens, series: [{ labels: {}, points: [], summary: {} }] };
+  render(
+    <FleetPulse
+      {...none}
+      output={idle as unknown as MetricsSeriesResponse}
+      tokens={idle as unknown as MetricsSeriesResponse}
+      nodes={fleet}
+    />,
+  );
+  expect(tile("Output now")).toHaveTextContent("No inference traffic");
+  expect(tile("Tokens, 24 h")).toHaveTextContent("No inference traffic");
 });

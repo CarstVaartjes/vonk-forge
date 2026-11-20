@@ -1,0 +1,7 @@
+/* The Trends header: the heading on the left, the range and Refresh on the right, on one row. */
+.metrics-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;margin-bottom:.5rem}
+.metrics-head h2{margin:0}
+.metrics-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.metrics-controls .segmented{margin-left:0}
+.certificate-notice{margin:0 0 1rem;padding:.7rem .9rem;border:1px solid color-mix(in srgb,var(--warn) 32%,var(--panel));border-radius:var(--r-in);background:color-mix(in srgb,var(--warn) 8%,var(--panel));color:var(--ink)}
+.certificate-notice ul{margin:.25rem 0 0;padding-left:1.1rem;color:var(--muted)}

@@ -90,13 +90,15 @@ export function SparkGpuNow({
           <span>GPU power</span>
           <strong>{power === null ? NOT_REPORTED_TEXT : `${power.toFixed(1)} W`}</strong>
         </div>
-        <Sparkline
-          points={points.map((point) => ({ t: point.t, v: point.power }))}
-          start={end - HISTORY_SECONDS}
-          end={end}
-          color={color}
-          label="GPU power, last 30 minutes"
-        />
+        <div className="spark-power-trace">
+          <Sparkline
+            points={points.map((point) => ({ t: point.t, v: point.power }))}
+            start={end - HISTORY_SECONDS}
+            end={end}
+            color={color}
+            label="GPU power, last 30 minutes"
+          />
+        </div>
         <div>
           <span>GPU energy, 24 h</span>
           <strong>{NOT_REPORTED_TEXT}</strong>
