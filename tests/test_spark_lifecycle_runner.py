@@ -1118,10 +1118,28 @@ def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
         grant["token"],
     )
 
-    invalid = dict(grant, installer_url="https://install.vonkforge.ai/spark")
-    Control.request = staticmethod(lambda method, path, body: (201, {"grant": invalid}))
-    with pytest.raises(lifecycle.LifecycleError):
-        run._create_grant()
+    # A baseline Controller may still list a retired service name.
+    baseline = dict(
+        grant,
+        service_hostnames=[
+            *grant["service_hostnames"],
+            "registry.vonk-forge-acceptance.tailnet.example",
+        ],
+    )
+    Control.request = staticmethod(
+        lambda method, path, body: (201, {"grant": baseline})
+    )
+    assert run._create_grant()[0] == grant["id"]
+
+    for invalid in (
+        dict(grant, installer_url="https://install.vonkforge.ai/spark"),
+        dict(grant, service_hostnames=grant["service_hostnames"][:2]),
+    ):
+        Control.request = staticmethod(
+            lambda method, path, body, invalid=invalid: (201, {"grant": invalid})
+        )
+        with pytest.raises(lifecycle.LifecycleError):
+            run._create_grant()
 
 
 def test_installer_environment_routes_spark_bootstrap_to_acceptance_controller(
