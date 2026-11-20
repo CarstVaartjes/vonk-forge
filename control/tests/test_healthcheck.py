@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-from pathlib import Path
 
 import pytest
 
@@ -23,16 +22,11 @@ class _Response:
         return self._stream.read(maximum)
 
 
-def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) -> None:
+def test_healthcheck_probes_actual_readiness() -> None:
     from vonk_control import healthcheck
     from vonk_control.operation_api import ReadyzResponse
 
     events: list[object] = []
-    monkeypatch.setattr(
-        healthcheck,
-        "drop_runtime_privileges",
-        lambda **kwargs: events.append(("drop", kwargs)),
-    )
 
     def open_url(request, *, timeout: float):
         events.append(("request", request.full_url, timeout))
@@ -40,10 +34,7 @@ def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) 
 
     healthcheck.main(open_url=open_url)
 
-    assert events == [
-        ("drop", {"source_secrets": Path("/run/secrets")}),
-        ("request", "http://127.0.0.1:8000/api/readyz", 3),
-    ]
+    assert events == [("request", "http://127.0.0.1:8000/api/readyz", 3)]
 
 
 @pytest.mark.parametrize(
@@ -54,10 +45,8 @@ def test_healthcheck_drops_privileges_then_probes_actual_readiness(monkeypatch) 
         ["ready"],
     ),
 )
-def test_healthcheck_rejects_non_ready_response(monkeypatch, response: object) -> None:
+def test_healthcheck_rejects_non_ready_response(response: object) -> None:
     from vonk_control import healthcheck
-
-    monkeypatch.setattr(healthcheck, "drop_runtime_privileges", lambda **_kwargs: None)
 
     with pytest.raises(Exception) as _ending:
         healthcheck.main(open_url=lambda *_args, **_kwargs: _Response(response))

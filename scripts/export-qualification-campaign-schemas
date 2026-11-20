@@ -28,9 +28,11 @@ def rendered() -> dict[Path, str]:
         "qualification-campaign-manifest-v2.schema.json": campaign_manifest_json_schema(),
     }
     return {
-        ROOT / directory / name: json.dumps(schema, sort_keys=True, indent=2) + "\n"
+        ROOT / "src/cluster_profiles/schemas" / name: json.dumps(
+            schema, sort_keys=True, indent=2
+        )
+        + "\n"
         for name, schema in schemas.items()
-        for directory in ("src/cluster_profiles/schemas", "schemas")
     }
 
 

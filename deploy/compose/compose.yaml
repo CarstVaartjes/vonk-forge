@@ -74,7 +74,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
-    secrets: [host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -143,14 +143,13 @@ services:
     logging: *bounded-logging
     command: [python, -m, vonk_control.api]
     read_only: true
-    # The pre-exec reads the installer-owned administrator password as root,
-    # then drops to 10001 for good before the API starts.
-    user: "0:0"
+    # runtime-init stages everything the API reads, the administrator password
+    # included, so the API never holds a capability.
+    user: "10001:10001"
     cap_drop: [ALL]
-    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment: *control-environment
-    secrets: [admin-password]
+    secrets: []
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts

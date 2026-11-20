@@ -311,6 +311,6 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     XDG_CACHE_HOME=/tmp/control-cache \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
-USER 0:0
+USER 10001:10001
 ENTRYPOINT ["python", "-m", "vonk_control.api_preexec"]
 CMD ["python", "-m", "vonk_control.api"]

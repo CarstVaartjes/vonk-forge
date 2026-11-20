@@ -643,3 +643,28 @@ def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
     assert isolated_wheel_build_violations(tmp_path, [path.name])
     path.write_text("COPY inventory/wheels/contracts.whl /wheels/\n")
     assert isolated_wheel_build_violations(tmp_path, [path.name]) == []
+
+
+def test_python_targets_agree_across_projects() -> None:
+    """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
+
+    So three projects require 3.14, the protocol wheel requires 3.12, and the
+    one repository-wide ruff target is the lowest of them (see the
+    protocol-consumer step in ci.yml).
+    """
+    import tomllib
+
+    def load(path: str) -> dict:
+        return tomllib.loads((ROOT / path).read_text())
+
+    root = load("pyproject.toml")
+    for path in (
+        "pyproject.toml",
+        "control/pyproject.toml",
+        "nas_setup/pyproject.toml",
+    ):
+        assert load(path)["project"]["requires-python"] == ">=3.14", path
+    protocol = load("agent_protocol/pyproject.toml")
+    assert protocol["project"]["requires-python"] == ">=3.12"
+    assert root["tool"]["ruff"]["target-version"] == "py312"
+    assert root["tool"]["pyright"]["pythonVersion"] == "3.14"

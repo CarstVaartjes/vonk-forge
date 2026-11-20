@@ -186,8 +186,9 @@ with only `CHOWN`, `FOWNER` and `DAC_OVERRIDE`, no network, no database). Each
 time its container starts it stages, before the services that read it start:
 
 - each consumer's private copy of the installer's Compose secrets in
-  `normalized-private-keys` (owner and mode per consumer), and the gateway
-  master key under `secrets/gateway/authority`;
+  `normalized-private-keys` (owner and mode per consumer, the administrator
+  password included), and the gateway master key under
+  `secrets/gateway/authority`;
 - this release's runtime kit in `runtime-assets`, with files a release no
   longer ships removed;
 - the ownership of the shared volume roots (`/state`, the object stores,
@@ -215,6 +216,15 @@ recreates `runtime-init`, Compose restarts them after the new kit is staged.
 PostgreSQL does not restart with a release. The API keeps only the database
 half of startup (schema and administrator) in its pre-exec, because PostgreSQL
 itself starts from the staged entrypoint.
+
+`control-api` runs as 10001 with every capability dropped and no Compose
+secret: everything it reads, the administrator password included, is a staged
+copy. An older Compose file (before the NAS installer reran) still starts the
+API image as root; the pre-exec then steps down to 10001 at once and keeps
+serving, so it never writes a root-owned file into a volume the worker shares.
+That file stages no administrator password, so the administrator bootstrap is
+skipped (an existing administrator is unchanged), and `NasComposeBundleStale`
+asks for the installer rerun.
 
 After a NAS reboot Docker restarts every service by its restart policy, without
 Compose ordering. `runtime-init` restages the same release while the others

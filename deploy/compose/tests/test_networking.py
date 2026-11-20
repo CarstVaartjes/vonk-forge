@@ -153,9 +153,7 @@ def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
     assert "normalized-private-keys" in {
         item["source"] for item in services["control-api"]["volumes"]
     }
-    assert {item["source"] for item in services["control-api"]["secrets"]} == {
-        "admin-password"
-    }
+    assert services["control-api"].get("secrets", []) == []
     assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/litellm-master-key"
     )
@@ -201,16 +199,15 @@ def test_deleted_workload_signer_path_is_absent_from_fresh_graph() -> None:
     } & set(_rendered()["secrets"])
 
 
-def test_control_api_has_only_the_capabilities_required_by_its_preexec() -> None:
+def test_control_api_runs_without_root_or_any_capability() -> None:
+    # Catches the API regaining root or a capability: runtime-init stages
+    # everything it reads, so it needs neither.
     api = _rendered()["services"]["control-api"]
 
-    assert api["user"] == "0:0"
+    assert api["user"] == "10001:10001"
     assert api["cap_drop"] == ["ALL"]
-    # Read the administrator password, then drop to 10001; runtime-init owns
-    # every chown.
-    assert set(api["cap_add"]) == {"DAC_OVERRIDE", "SETUID", "SETGID"}
+    assert not api.get("cap_add")
     assert api["security_opt"] == ["no-new-privileges:true"]
-    assert "SYS_ADMIN" not in api["cap_add"]
     assert api["command"] == ["python", "-m", "vonk_control.api"]
 
 
@@ -226,8 +223,8 @@ def test_file_backed_private_keys_are_normalized_by_runtime_init() -> None:
         "host-runtime-grant-private-key",
         "database-url",
         "hf-token",
+        "admin-password",
     } <= staged
-    assert "admin-password" not in staged
     init_volumes = {volume["target"]: volume for volume in init["volumes"]}
     assert init_volumes["/normalized"].get("read_only") is not True
     api_volumes = {volume["target"]: volume for volume in api["volumes"]}
