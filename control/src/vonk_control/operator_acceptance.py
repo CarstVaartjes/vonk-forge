@@ -508,9 +508,16 @@ class OperatorReceiptResolver:
                 _require(result.request_id is not None)
                 identity = result.request_id
                 assert identity is not None
-                saved = _available(self.keys).receipt(
-                    result.name, identity, actor=actor.subject
-                )
+                keys = _available(self.keys)
+                try:
+                    saved = keys.receipt(result.name, identity, actor=actor.subject)
+                except HTTPException as error:
+                    if error.status_code != 404:
+                        raise
+                    raise _refused(
+                        "The owner cannot yet observe its acceptance receipt",
+                        unavailable=True,
+                    ) from None
                 _require(saved.completed)
                 return AcceptanceReceipt(
                     owner=ReceiptOwner.KEY,
@@ -546,6 +553,10 @@ class OperatorReceiptResolver:
                         getattr(error, "code", ReceiptCode.MISMATCH)
                     )
                 },
+            ) from None
+        except UnknownOutcomeError:
+            raise _refused(
+                "The owner cannot yet observe its acceptance receipt", unavailable=True
             ) from None
         except (KeyError, *AVAILABILITY_ERRORS):
             raise _refused(

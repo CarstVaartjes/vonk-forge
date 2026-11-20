@@ -16,8 +16,9 @@ from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 from vonk_agent_protocol import OperatorActionName
 from vonk_control.api import create_app
-from vonk_control.auth import AgentIdentity, TokenCodec
+from vonk_control.auth import Actor, AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
+from vonk_control.gateway_keys import GatewayKeyRevoked
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.operator_acceptance import (
@@ -144,3 +145,45 @@ def test_agent_receipt_with_no_owner_row_is_retryable() -> None:
             arguments,
         )
     assert refused.value.status_code == 503
+
+
+def _resolve_key(receipt: Any) -> HTTPException:
+    resolver = OperatorReceiptResolver(keys=SimpleNamespace(receipt=receipt))  # type: ignore[arg-type]
+    arguments = AcceptanceArguments(
+        Actor("owner", "administrator"),
+        None,
+        None,
+        None,
+        None,
+        OperatorActionName.RESUME,
+        None,
+        None,
+    )
+    created = GatewayKeyRevoked(name="k", request_id=str(uuid4()))
+    with pytest.raises(HTTPException) as refused:
+        resolver.resolve(ReceiptPolicy.KEY, created, arguments)
+    return refused.value
+
+
+def test_key_receipt_404_after_success_is_retryable() -> None:
+    """Catches the gateway-key owner's 404 escaping as a settled not-found."""
+
+    def absent(*_args: object, **_kwargs: object) -> object:
+        raise HTTPException(status_code=404)
+
+    refused = _resolve_key(absent)
+    assert refused.status_code == 503
+    assert refused.headers and refused.headers["retry-after"]
+
+
+def test_unknown_outcome_owner_is_retryable_not_500() -> None:
+    """Catches an UnknownOutcomeError owner (e.g. recipe admission) escaping as 500."""
+
+    def unsure(*_args: object, **_kwargs: object) -> object:
+        raise RecipeImageAvailabilityUnknown(
+            RecipeImageCode.BUILD_INPUT_MISSING, "build input is not ready yet"
+        )
+
+    refused = _resolve_key(unsure)
+    assert refused.status_code == 503
+    assert refused.headers and refused.headers["retry-after"]
