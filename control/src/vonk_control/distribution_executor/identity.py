@@ -65,10 +65,8 @@ class DistributionIdentity:
         self,
         plan: RunSwitchPlan,
         progress: RunSwitchOperationResult,
-    ) -> tuple[dict[str, tuple[DistributionObject, ...]], str, int]:
-        """The model objects each node's persisted compiled plan names, without a NAS copy.
-
-        Each node's plan names its own role's model files.
+    ) -> tuple[tuple[DistributionObject, ...], str, int]:
+        """The model objects the persisted compiled plan names, without a NAS copy.
 
         A node keeps the objects it holds, so a Spark holding the model's files
         is sent only the image even after the NAS evicted the set.
@@ -113,17 +111,15 @@ class DistributionIdentity:
                 RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
                 reason=WaitReason.SCOPE_CHANGED,
             )
-        # The set's files are the union of its nodes' role files.
-        actual_bytes = sum(
-            item.bytes
-            for item in content_objects(
-                tuple(
-                    item
-                    for compiled in stored.compiled_execution_plans.values()
-                    for item in plan_objects(compiled)
-                )
+        # Every node is delivered the whole model: the union of its roles' files.
+        objects = content_objects(
+            tuple(
+                item
+                for compiled in stored.compiled_execution_plans.values()
+                for item in plan_objects(compiled)
             )
         )
+        actual_bytes = sum(item.bytes for item in objects)
         model_set_bytes = (
             preparation.model.artifact_set_bytes if preparation is not None else None
         )
@@ -132,14 +128,7 @@ class DistributionIdentity:
                 RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
                 reason=WaitReason.SCOPE_CHANGED,
             )
-        return (
-            {
-                node_id: plan_objects(compiled)
-                for node_id, compiled in stored.compiled_execution_plans.items()
-            },
-            model_set_digest,
-            actual_bytes,
-        )
+        return objects, model_set_digest, actual_bytes
 
     @staticmethod
     def _runtime_identity(

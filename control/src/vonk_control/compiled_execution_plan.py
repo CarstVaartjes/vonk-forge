@@ -428,9 +428,10 @@ def compile_verified_execution_plan(
 ) -> VerifiedExecutionPlan:
     """Bind canonical compiler output to verified cache/build receipts.
 
-    ``model_objects`` must be the complete selected model object sequence for
-    this compiled execution scope, as returned by the model-cache/distribution
-    authority.  The function accepts no upstream source handle: repository,
+    ``model_objects`` is the recipe set's model object sequence, as returned by
+    the model-cache/distribution authority; the plan binds the receipts its
+    spec's artifacts select (a node's role files), and a selected artifact
+    without a receipt is refused.  The function accepts no upstream source handle: repository,
     revision and credential fields cannot enter the resulting payload.  The
     artifact-set digest is supplied separately by that authority; it is never
     recomputed from this input list.
@@ -459,7 +460,6 @@ def compile_verified_execution_plan(
         by_identity[key] = item
 
     artifacts: list[CompiledModelArtifact] = []
-    selected_keys: set[tuple[str, str]] = set()
     for item in spec.artifacts:
         model = item.model
         source = by_identity.get((model.content_sha256, item.file_id))
@@ -475,7 +475,6 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model file path, digest or size does not match the verified cache object"
             )
-        selected_keys.add((model.content_sha256, item.file_id))
         try:
             artifacts.append(
                 CompiledModelArtifact(
@@ -501,11 +500,6 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "canonical runtime artifact cannot bind the verified model object"
             ) from error
-    if selected_keys != set(by_identity):
-        raise CompiledExecutionPlanError(
-            "verified cache objects do not exactly cover the selected model files"
-        )
-
     if not spec.runtime.image.endswith(f"@{runtime_image.image_digest}"):
         raise CompiledExecutionPlanError(
             "verified runtime image does not match the compiled runtime projection"
@@ -517,7 +511,7 @@ def compile_verified_execution_plan(
             execution_sha256=execution_sha256,
             model_artifact_set_sha256=artifact_set_sha256,
             model_artifact_set_bytes=sum(
-                {item.sha256: item.bytes for item in model_objects}.values()
+                {item.sha256: item.bytes for item in artifacts}.values()
             ),
             artifacts=artifacts,
             runtime_image=runtime_image,

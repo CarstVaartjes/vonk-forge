@@ -295,7 +295,7 @@ class ControllerExecutionPlanService:
                 compiled = compile_verified_execution_plan(
                     runtime_spec,
                     model_artifact_set_sha256=artifact_set_sha256,
-                    model_objects=_role_model_objects(recipe, model_objects, node.role),
+                    model_objects=model_objects,
                     runtime_image=receipt,
                 )
                 placement = _placement(recipe, runtime_spec, node, world_size)
@@ -398,28 +398,6 @@ def _image_digest(value: str) -> str:
     if not digest.startswith("sha256:") or len(digest) != 71:
         raise ExecutionPlanCompilationError("compiled runtime image digest is invalid")
     return digest
-
-
-def _role_model_objects(
-    recipe: RecipeDefinition,
-    objects: Sequence[VerifiedModelObject],
-    role: str,
-) -> list[VerifiedModelObject]:
-    """The receipts of the files the recipe selects for ``role``.
-
-    The cache set holds every role's files; a node's plan covers its own.
-    """
-    selected = {
-        (selection.model.content_sha256, item.file_id)
-        for selection in recipe.models
-        for item in selection.files
-        if role in item.roles
-    }
-    return [
-        item
-        for item in objects
-        if (item.model_content_sha256, item.file_id) in selected
-    ]
 
 
 def _world_size(recipe: RecipeDefinition) -> int:

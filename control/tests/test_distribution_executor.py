@@ -4,7 +4,6 @@ import hashlib
 import json
 import threading
 import uuid
-from collections import defaultdict
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -252,7 +251,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         def _model_objects(self, _plan, _progress):
             if not self.source_available:
                 raise RuntimeError("NAS source is temporarily unavailable")
-            return defaultdict(lambda: (model, config)), "d" * 64, 15
+            return (model, config), "d" * 64, 15
 
         def _archive(self, **_kwargs):
             return archive
@@ -1556,11 +1555,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
 
     def planned_objects(plan, progress):
         del plan, progress
-        return (
-            defaultdict(lambda: planned),
-            artifact_set,
-            sum(item.bytes for item in planned),
-        )
+        return planned, artifact_set, sum(item.bytes for item in planned)
 
     executor._model_objects = planned_objects
     with services.sessions.begin() as session:
