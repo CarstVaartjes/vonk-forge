@@ -28,6 +28,7 @@ from . import (
     locked_io,
     model_set_first_requester,
     raw_barriers,
+    raw_loopback_bind,
     repeated_parse,
     request_path_scans,
     retention_head_digests,
@@ -122,6 +123,7 @@ MODES = (
     "barriers",
     "sync-in-async",
     "git-free-tests",
+    "loopback-bind",
     "job-owner-payload",
     "fixture-closures",
     "contract-constants",
@@ -2771,6 +2773,14 @@ def check_source(
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
             (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
+        )
+    if "loopback-bind" in modes and path.endswith(".rs"):
+        every_line = set(range(1, source.count("\n") + 2))
+        hits.extend(
+            (line, raw_loopback_bind.KIND)
+            for line in raw_loopback_bind.scan_source(
+                source, every_line if is_test else rust_test_lines(source)
+            )
         )
     if "git-free-tests" in modes:
         # A Rust file under tests/ is all test; elsewhere only cfg(test) items.

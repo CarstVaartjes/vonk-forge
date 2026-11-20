@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn silent_probe_ends_and_a_fresh_probe_completes() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let client = TcpStream::connect(address).unwrap();
     let (silent, _) = listener.accept().unwrap();
@@ -82,7 +82,7 @@ fn stalled_resolver_is_reaped_and_fresh_work_is_admitted() {
 #[test]
 fn handle_reobserves_dns_unknowns_then_forwards_and_admits_fresh_requests() {
     let hosts = BTreeSet::from(["allowed.example".to_owned()]);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     for replies in [
         vec![
             Ok(Vec::new()),
@@ -153,7 +153,7 @@ fn handle_reobserves_dns_unknowns_then_forwards_and_admits_fresh_requests() {
 
 #[test]
 fn probe_retries_malformed_replies_ends_and_admits_a_fresh_probe() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
@@ -172,7 +172,7 @@ fn probe_retries_malformed_replies_ends_and_admits_a_fresh_probe() {
     probe_available(address, Instant::now() + Duration::from_secs(2)).unwrap();
     probe_available(address, Instant::now() + Duration::from_secs(2)).unwrap();
     done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    let unavailable = TcpListener::bind("127.0.0.1:0").unwrap();
+    let unavailable = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = unavailable.local_addr().unwrap();
     drop(unavailable);
     let start = Instant::now();
@@ -373,7 +373,7 @@ fn exhausted_reap_budget_hands_actual_child_to_supervision_and_fresh_admission_r
 
 #[test]
 fn slow_headers_expire_the_connection_and_release_its_permit_for_fresh_work() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let active = Arc::new(AtomicUsize::new(1));
     let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     let (peer, _) = listener.accept().unwrap();
@@ -469,3 +469,7 @@ fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
         thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// Fixtures bind on `127.0.0.2`: OrbStack's VM port forwarder probes new
+/// `127.0.0.1` listeners with a `GET /` that a fixture would count.
+const FIXTURE_BIND: &str = "127.0.0.2:0";

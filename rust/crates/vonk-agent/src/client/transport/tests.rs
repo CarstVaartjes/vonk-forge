@@ -84,7 +84,7 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     for activation_status in [204, 403] {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         let first_received = Arc::new(tokio::sync::Notify::new());
         let release_first = Arc::new(tokio::sync::Notify::new());
@@ -216,7 +216,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
     // certificate request while activation can revoke that certificate.
     let budget = ROTATION_REQUEST_TIMEOUT * 2 + HEARTBEAT_REQUEST_TIMEOUT * 2;
     let deadline = tokio::time::Instant::now() + budget;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let activation_received = Arc::new(tokio::sync::Notify::new());
     let expected_progress = progress();

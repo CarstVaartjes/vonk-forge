@@ -372,7 +372,7 @@ async fn two_answers(
     statuses: [u16; 2],
 ) -> (AgentHttpClient, tokio::task::JoinHandle<Vec<String>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(FIXTURE_BIND).await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let mut bodies = Vec::new();

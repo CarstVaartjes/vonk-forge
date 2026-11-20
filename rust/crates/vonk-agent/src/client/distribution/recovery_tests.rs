@@ -197,7 +197,7 @@ async fn repeated_truncation_that_keeps_moving_bytes_finishes_without_spending_r
 async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_after_repair() {
     let model = b"small model object";
     let digest = hex_sha256(model);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
     let response_digest = digest.clone();

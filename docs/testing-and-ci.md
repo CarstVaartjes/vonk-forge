@@ -267,6 +267,16 @@ either is missing. The VM uses task-specific uv and Cargo directories under
 `VONK_RECIPE_LIBRARY_ROOT` when the sibling
 checkout is outside `/opt/vonk-forge-recipes`.
 
+On the `vonk-ci` OrbStack VM the port forwarder (`machines.forward_ports`, source
+`orbstack-agent`) probes every new `127.0.0.1` listener once with `GET /` from
+`Go-http-client`; a fixture that accepts first would count it as the client under
+test. `127.0.0.2` reaches the same loopback interface and is not probed, so every
+Rust TCP test fixture binds there (`FIXTURE_BIND` / `FIXTURE_HOST` /
+`FIXTURE_IP` in vonk-agent `client/test_support.rs`; a constant in
+`vonk-build-egress/src/tests.rs`). The `loopback-bind` added-line guard rejects a
+new `127.0.0.1` bind in Rust test code; Unix sockets bind a path and are not
+affected. GitHub runners have no probe.
+
 ### Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only

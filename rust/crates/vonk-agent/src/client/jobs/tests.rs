@@ -75,7 +75,7 @@ async fn unreadable_upload_ack_reobserves_exact_content_before_any_second_put() 
     let directory = tempfile::tempdir().unwrap();
     let archive = directory.path().join("image.tar");
     std::fs::write(&archive, b"accepted archive").unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
     let address = listener.local_addr().unwrap();
     let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
     let server = spawn_peer(move || {
