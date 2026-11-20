@@ -31,6 +31,8 @@
   /* links: warm champagne ink, green on hover and focus (AA on every surface in both themes) */
   --link: light-dark(#6b4a0a, #e8d8b0);
   --link-hover: var(--green-text);
+  /* the one focus ring colour, shared with the public site (AA on bg, panel and recess in both themes) */
+  --focus: var(--gold-text);
   --gold: #d9b56f;
   --gold-text: light-dark(#7d5c12, #d9b56f);
   --gold-wash: light-dark(rgb(217 181 111 / 16%), rgb(217 181 111 / 9%));
@@ -471,7 +473,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible {
-  outline: 3px solid var(--gold-text);
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 pre {
@@ -1052,8 +1054,13 @@ progress {
   color: var(--muted);
   font-size: 0.76rem;
 }
+.segmented button:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--ink);
+}
 .segmented button:is([aria-pressed="true"], [aria-selected="true"]) {
   background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-control);
   color: var(--ink);
 }
 .activity-state {
