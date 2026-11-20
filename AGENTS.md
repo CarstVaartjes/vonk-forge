@@ -298,6 +298,8 @@ word only when the change adds it to a file more often than it removes it there
 (a reflow is not new). On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
+`cross-repo-nightly.yml` runs the recipe validator, the consumer probe and the global-schema copy
+against `main` of vonk-forge, vonk-forge-recipes and vonk-forge-web every night; a red run is the drift alarm.
 
 A fresh clone must run `scripts/build-control-wheel` before any tests: the agent
 protocol wheel the `control` project installs is built locally, not kept in git.
