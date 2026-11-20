@@ -120,8 +120,8 @@ require Spark copies to be deleted to finish a Controller cache operation.
 Profiles persist exact cached model/recipe-image choices and show cache state
 alongside observed Spark running state. Loading a profile does not resolve a
 newer cache entry or select from a Spark copy. Cache updates and garbage
-collection do not change running workloads; a later apply must pass the cache
-gate before distributing exact assets to selected Sparks in parallel. Apply
+collection do not change running workloads; a later load must pass the cache
+gate before distributing exact assets to selected Sparks in parallel. Load
 skips verified local copies, then stops/replaces workloads and reports durable
 per-Spark progress and readiness. A runtime image is identified by its
 content, so every recipe revision with the same executable build inputs (an

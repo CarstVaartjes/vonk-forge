@@ -196,7 +196,7 @@ test("offers the same recipe filters as vonkctl recipe library", () => {
     />,
   );
   for (const name of [
-    "Filter usage",
+    "Filter capabilities",
     "Filter family",
     "Filter version",
     "Filter quantization",

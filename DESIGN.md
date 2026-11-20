@@ -291,7 +291,7 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 ### Navigation
 
-The header holds the brand mark (a link to Overview), Fleet, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.
+The header holds the brand mark (a link to Overview), Overview, Workloads, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.
 
 The administrator menu is four uniform left-aligned rows (download CLI token, API keys, Documentation, Logout) with a tonal hover fill and no row borders; a one-pixel separator sits above Logout. The avatar initial is centred in its circle. The programmatic heading focus on route change draws no outline for mouse navigation and keeps the focus ring for keyboard focus.
 

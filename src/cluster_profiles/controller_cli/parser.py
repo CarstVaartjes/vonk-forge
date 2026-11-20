@@ -220,8 +220,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
 
     model = commands.add_parser(
         "model",
-        help="Model library and the NAS model cache",
-        description="Published models and the copies cached on the NAS.",
+        help="Model library and the Controller model cache",
+        description="Published models and the copies cached on the Controller.",
         epilog="Without a command, lists cached models.",
     )
     _add_output(model)
@@ -245,7 +245,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(model_detail)
     model_download = model_actions.add_parser(
         Word.DOWNLOAD,
-        help="Download a model variant to the Controller (NAS cache)",
+        help="Download a model variant to the Controller cache",
     )
     _selector(model_download, "model", help="Exact model selector or friendly name")
     _action_flags(model_download, followable=True)
@@ -264,7 +264,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--unused",
         action="store_true",
         help="Instead of one MODEL: remove every cached model that no saved or "
-        "loaded profile, live operation or running workload keeps, on the NAS "
+        "loaded profile, live operation or running workload keeps, on the Controller "
         "and every Spark. Covers the models the library lists as cached; "
         "Spark-only leftovers are cleared by the 24 h Spark retention. Review it first with --review; --yes submits the "
         "removals (follow them with 'vonkctl model progress')",
@@ -272,7 +272,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     model_remove.add_argument(
         "--fleet",
         action="store_true",
-        help="Remove unused installations and model objects on the NAS and every Spark",
+        help="Remove unused installations and model objects on the Controller and every Spark",
     )
     _add_verbose(model_remove)
     model_remove.add_argument(
@@ -363,7 +363,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(recipe_detail)
     recipe_download = recipe_actions.add_parser(
         Word.DOWNLOAD,
-        help="Download a recipe and its missing model to the Controller (NAS cache)",
+        help="Download a recipe and its missing model to the Controller cache",
     )
     _selector(recipe_download, "recipe", help="Exact recipe selector or friendly name")
     _action_flags(recipe_download, followable=True)
