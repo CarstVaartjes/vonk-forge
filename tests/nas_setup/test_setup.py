@@ -186,13 +186,14 @@ def test_projection_repair_reuses_verified_authority(
         )
 
 
-def test_absent_custody_does_not_block_compose_and_fresh_request_recovers(
+def test_absent_custody_keeps_previous_compose_and_fresh_request_recovers(
     installed: Path, template: NasInstallTemplate
 ) -> None:
-    """Catch treating missing signer as permission to mint authority or poisoned state."""
+    """Catch treating missing signer as permission to mint authority or a half bundle."""
     signer = installed / "secrets/signing-key"
     retained = installed / ".vonk-verified-secrets/signing-key"
     original = signer.read_bytes()
+    compose = (installed / "docker-compose.yaml").read_bytes()
     signer.unlink()
     retained.unlink()
     template = template.model_copy(
@@ -200,11 +201,12 @@ def test_absent_custody_does_not_block_compose_and_fresh_request_recovers(
     )
     with pytest.raises(ObservationUnavailable):
         prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
-    assert (installed / "docker-compose.yaml").read_text() == ("services:\n  new: {}\n")
+    assert (installed / "docker-compose.yaml").read_bytes() == compose
     assert not signer.exists()
     retained.write_bytes(original)
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
     assert signer.read_bytes() == original
+    assert (installed / "docker-compose.yaml").read_text() == ("services:\n  new: {}\n")
 
 
 def test_consumed_symlinks_and_hardlinks_never_touch_outside_alias(

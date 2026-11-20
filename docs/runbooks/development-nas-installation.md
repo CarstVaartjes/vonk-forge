@@ -32,7 +32,9 @@ To update a prepared project, rerun the same command from its parent directory.
 The installer preserves the local
 configuration, credentials, and PKI while updating the immutable
 release-controlled Compose file. Upload the refreshed directory and redeploy
-without deleting named volumes.
+without deleting named volumes. A failed run (for example a PKI error) leaves
+the previous Compose file, `.env` and secrets unchanged; rerun after fixing the
+reported cause rather than redeploying in between.
 
 See [NAS control-plane deployment](../../deploy/compose/README.md) for startup
 and verification.

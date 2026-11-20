@@ -168,15 +168,6 @@ def upgrade_credentials(
             value = prompt.required(required)
         environment[required.env] = value
     dropped = retain_known(payload, environment)
-    # The Compose file follows the same selection as .env: no profile flags.
-    atomic_replace(
-        bundle / "docker-compose.yaml",
-        resolve_compose(payload.docker_compose_yaml, environment),
-        0o644,
-    )
-    # Compose and environment are independently repairable projections. A PKI
-    # custody failure below never rolls them back or fabricates signing authority.
-    atomic_replace(bundle / ".env", render_environment(environment))
     members = load_members(root, payload)
     retained = load_members(bundle / publication.VERIFIED, payload)
     for name, value in retained.items():
@@ -218,7 +209,16 @@ def upgrade_credentials(
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
         raise ObservationUnavailable()
+    # Publication is the commit point: it writes secrets and .env. Nothing in the
+    # bundle changes before it, so a failed run leaves the previous deployable
+    # bundle. The Compose file follows the same selection as .env (no profile
+    # flags) and is rewritten on every run, so a rerun repairs an interruption.
     publication.publish(payload, bundle, members, environment)
+    atomic_replace(
+        bundle / "docker-compose.yaml",
+        resolve_compose(payload.docker_compose_yaml, environment),
+        0o644,
+    )
     permission_note(payload, root, prompt)
     retired = root / "runtime-configs"
     if metadata(retired):

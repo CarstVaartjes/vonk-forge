@@ -132,6 +132,12 @@ and adding any newly required inputs. Settings a release no longer uses are
 dropped from `.env` and listed in the installer output. Place the resulting directory over the controller project, pull, and
 redeploy. Keep named volumes during normal upgrades.
 
+The installer leaves `docker-compose.yaml`, `.env` and `secrets/` untouched
+until every check, the PKI step included, has passed; it then publishes secrets
+and `.env` together and writes the Compose file last. A failed run therefore
+leaves the previous, coherent bundle, which a redeploy in between still starts.
+Fix the reported cause and rerun the installer.
+
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
 Prometheus and LiteLLM supervisor files) ships inside the
 Controller API image. The `runtime-init` helper, which runs that image, stages
