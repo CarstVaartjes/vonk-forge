@@ -69,6 +69,9 @@ class Source:
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         raise AssertionError(f"this snapshot has no recipes: {uri}")
 

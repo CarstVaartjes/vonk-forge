@@ -144,6 +144,9 @@ class FixtureReader:
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         item = self._items.get(uri)
         if item is None:

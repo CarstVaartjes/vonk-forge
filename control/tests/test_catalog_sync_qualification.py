@@ -89,6 +89,9 @@ def test_sync_carries_the_published_status_to_the_library_and_follows_new_eviden
         def list(self):
             return self.snapshot
 
+        def prepare(self, snapshot) -> None:
+            return None
+
         def fetch(self, uri):
             return self.snapshot.items[0]
 
@@ -161,6 +164,9 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_blocks(
         def list(self):
             return RecipeLibrarySnapshot("e" * 40, (gone,))
 
+        def prepare(self, snapshot) -> None:
+            return None
+
         def fetch(self, uri):
             return gone
 
@@ -222,6 +228,9 @@ def test_sync_records_the_published_measured_memory_for_admission_only():
 
         def list(self):
             return self.snapshot
+
+        def prepare(self, snapshot) -> None:
+            return None
 
         def fetch(self, uri):
             return self.snapshot.items[0]

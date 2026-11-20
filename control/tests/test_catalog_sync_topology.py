@@ -53,6 +53,9 @@ class _Reader:
     def list(self) -> RecipeLibrarySnapshot:
         return RecipeLibrarySnapshot("c" * 40, (self.item,))
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         return self.item
 

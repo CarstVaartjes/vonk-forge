@@ -82,6 +82,7 @@ class _AutomaticSyncStep:
 
 class RecipeLibrarySyncReader(Protocol):
     def list(self) -> RecipeLibrarySnapshot: ...
+    def prepare(self, snapshot: RecipeLibrarySnapshot) -> None: ...
     def fetch(self, uri: str) -> RecipeLibraryItem: ...
 
 
@@ -158,17 +159,17 @@ class ManagedRecipeCatalogSyncService:
     ) -> None:
         self._sessions = sessions
         self._catalog = catalog
-        self._optional_reader = reader
+        self._reader: RecipeLibrarySyncReader | None = reader
         self._clock = clock
         self._repository = repository
 
-    def _reader(self) -> RecipeLibrarySyncReader:
+    def _required_reader(self) -> RecipeLibrarySyncReader:
         # The API only reads sync status; the worker owns the GitHub reader.
-        if self._optional_reader is None:
+        if self._reader is None:
             raise CatalogSyncError(
                 CatalogSyncCode.FAILED, "this process does not read the recipe library"
             )
-        return self._optional_reader
+        return self._reader
 
     def sync(self, request: ManagedCatalogSyncRequest) -> CatalogSyncView:
         request_key, trigger, actor = (
@@ -251,7 +252,8 @@ class ManagedRecipeCatalogSyncService:
                 CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
             ) from taken
         try:
-            snapshot = self._reader().list()
+            reader = self._required_reader()
+            snapshot = reader.list()
             if (
                 reviewed_content is not None
                 and reviewed_catalog_content(snapshot) != reviewed_content
@@ -260,9 +262,7 @@ class ManagedRecipeCatalogSyncService:
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
                 )
-            prepare = getattr(self._reader(), "prepare", None)
-            if callable(prepare):
-                prepare(snapshot)
+            reader.prepare(snapshot)
             if self._initialize(run.id, snapshot):
                 applied = self._apply(
                     run.id,
@@ -494,7 +494,7 @@ class ManagedRecipeCatalogSyncService:
 
     def automatic(self) -> CatalogSyncView:
         try:
-            snapshot = self._reader().list()
+            snapshot = self._required_reader().list()
         except (RecipeLibraryError, CatalogSyncError, OSError) as error:
             # Reading the library failed before any sync could start; record
             # it so sync-status shows why the catalog is not advancing.
@@ -732,7 +732,7 @@ class ManagedRecipeCatalogSyncService:
                 result.unchanged_count += 1
             else:
                 try:
-                    hydrated = self._reader().fetch(item.uri)
+                    hydrated = self._required_reader().fetch(item.uri)
                     if (
                         hydrated.content_sha256 != item.content_sha256
                         or (

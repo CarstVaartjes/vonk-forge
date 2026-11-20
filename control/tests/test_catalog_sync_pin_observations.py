@@ -51,6 +51,9 @@ def test_sync_withdraws_pins_only_after_a_complete_authoritative_observation(par
         def list(self):
             return self.snapshot
 
+        def prepare(self, snapshot) -> None:
+            return None
+
         def fetch(self, uri):
             return self.snapshot.items[0]
 
@@ -115,6 +118,9 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
         def list(self):
             return RecipeLibrarySnapshot("c" * 40, (item,))
 
+        def prepare(self, snapshot) -> None:
+            return None
+
         def fetch(self, uri):
             return item
 
@@ -169,6 +175,9 @@ def test_current_sync_releases_receipt_connection_before_availability(postgres_e
         class Reader:
             def list(self):
                 return RecipeLibrarySnapshot("c" * 40, (item,))
+
+            def prepare(self, snapshot) -> None:
+                return None
 
             def fetch(self, uri):
                 return item

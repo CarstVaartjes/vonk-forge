@@ -105,6 +105,9 @@ class Reader:
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         self.fetches.append(uri)
         return next(item for item in self.snapshot.items if item.uri == uri)
@@ -176,6 +179,9 @@ class FailOnceReader(Reader):
         self._failing_uri = failing_uri
         self._failed = False
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         if uri == self._failing_uri and not self._failed:
             self.fetches.append(uri)
@@ -191,6 +197,9 @@ class UntypedFailOnceReader(Reader):
         super().__init__(snapshot)
         self._failing_uri = failing_uri
         self._failed = False
+
+    def prepare(self, snapshot) -> None:
+        return None
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
         if uri == self._failing_uri and not self._failed:

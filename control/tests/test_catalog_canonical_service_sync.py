@@ -34,6 +34,9 @@ class Reader:
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
 
+    def prepare(self, snapshot) -> None:
+        return None
+
     def fetch(self, uri: str) -> RecipeLibraryItem:
         self.fetches.append(uri)
         return self.snapshot.items[0]

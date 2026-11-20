@@ -54,6 +54,9 @@ def test_facts_are_withdrawn_only_by_a_complete_automatic_view() -> None:
         def list(self):
             return self.snapshot
 
+        def prepare(self, snapshot) -> None:
+            return None
+
         def fetch(self, uri):
             return self.snapshot.items[0]
 
