@@ -11,6 +11,8 @@ from vonk_control.catalog_sync import (
 )
 from vonk_control.recipe_packages import RecipePackageError
 
+from .signed_recipe_release import signed_recipe_releases
+
 
 class _PeriodicCatalog(ManagedRecipeCatalogSyncService):
     """Real shared retry owner with test-provided observations and storage."""
@@ -20,6 +22,9 @@ class _PeriodicCatalog(ManagedRecipeCatalogSyncService):
 
     def automatic_wait_delay(self) -> float:
         return 0.0
+
+    def held_elsewhere(self) -> bool:
+        return False
 
     def record_automatic_wait(
         self, delay_seconds: int, *, failed: bool, observed_id: str | None = None
@@ -72,19 +77,27 @@ def test_database_sync_log_reports_server_condition_without_private_sql() -> Non
     assert "private" not in rendered and "secret" not in rendered
 
 
-def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
-    tmp_path,
-) -> None:
-    import asyncio
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
 
-    from vonk_control.catalog_sync import CatalogSyncUnsettled, run_automatic_sync
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
+    tmp_path, monkeypatch
+) -> None:
+    from vonk_control.catalog_sync import AutomaticCatalogSync, CatalogSyncUnsettled
 
     from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
     completed = _sync(
         tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
     )
-    stop = asyncio.Event()
+    monkeypatch.setattr(
+        "vonk_control.catalog_sync.random.randint", lambda low, high: high
+    )
 
     class _Service(_PeriodicCatalog):
         def __init__(self) -> None:
@@ -100,30 +113,24 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
                 raise OSError("library unreachable")
             if self.attempts == 3:
                 raise ValueError("unclassified")
-            stop.set()
             return completed
 
     service = _Service()
-
-    async def run() -> None:
-        await asyncio.wait_for(
-            run_automatic_sync(
-                service,
-                stop,
-                interval_seconds=0,
-                settle_seconds=0.0,
-            ),
-            timeout=30,
-        )
-
-    asyncio.run(run())
-    assert service.attempts == 4
+    clock = _Clock()
+    cadence = AutomaticCatalogSync(service, interval_seconds=900, monotonic=clock)
+    ran = []
+    for _ in range(5):
+        ran.append(cadence.tick())
+        # Nothing runs again before the delay the attempt chose.
+        assert not cadence.tick()
+        clock.now += 900
+    assert ran == [True] * 5
+    assert service.attempts == 5
 
 
 def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     tmp_path, monkeypatch
 ):
-    import asyncio
     from dataclasses import replace
 
     from vonk_agent_protocol import CatalogSyncState
@@ -134,21 +141,12 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     completed = _sync(
         tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
     )
-    stop = asyncio.Event()
-    checks = []
+    episodes = []
     delay = catalog_sync.catalog_sync_retry_delay
-    wait_for = asyncio.wait_for
-    scheduled_delay = None
 
     def observe_delay(failures, interval_seconds):
-        nonlocal scheduled_delay
-        scheduled_delay = failures
+        episodes.append(failures)
         return delay(failures, interval_seconds)
-
-    async def observe_wait(awaitable, *, timeout):
-        if scheduled_delay is not None:
-            checks.append(scheduled_delay)
-        return await wait_for(awaitable, timeout=timeout)
 
     class Service(_PeriodicCatalog):
         attempts = 0
@@ -157,244 +155,48 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
             self.attempts += 1
             if self.attempts < 3:
                 return replace(completed, state=CatalogSyncState.PARTIAL)
-            stop.set()
             return completed
 
-    service = Service()
     monkeypatch.setattr(catalog_sync, "catalog_sync_retry_delay", observe_delay)
-    monkeypatch.setattr(asyncio, "wait_for", observe_wait)
-
-    async def run():
-        await asyncio.wait_for(
-            catalog_sync.run_automatic_sync(
-                service,
-                stop,
-                interval_seconds=0,
-                settle_seconds=0,
-            ),
-            timeout=30,
-        )
-
-    asyncio.run(run())
-    assert checks == [1, 2, 0]
-    assert service.attempts == 3
+    clock = _Clock()
+    cadence = catalog_sync.AutomaticCatalogSync(
+        Service(), interval_seconds=60, monotonic=clock
+    )
+    for _ in range(3):
+        assert cadence.tick()
+        clock.now += 60
+    assert episodes == [1, 2, 0]
     fresh = _sync(tmp_path, _Catalog(None), _item(_example("recipe-source-build.json")))
     assert fresh.id != completed.id and fresh.completed_at is not None
 
 
-def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_path):
-    import asyncio
-
-    import httpx2
-    from vonk_control.catalog_sync import run_automatic_sync
-    from vonk_control.gateway_keys import GatewayKeyService, keep_default_key
-
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
-    from .test_gateway_keys import MASTER, FakeLiteLlm
-
-    completed = _sync(
-        tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
-    )
-
-    peer = FakeLiteLlm()
-    ready = [False]
-
-    def transport(request):
-        if not ready[0]:
-            raise httpx2.ReadError("offline", request=request)
-        return peer.handle(request)
-
-    gateway = GatewayKeyService(
-        master_key=lambda: MASTER,
-        transport=httpx2.MockTransport(transport),
-        intent_root=tmp_path / "mutations",
-    )
-    path = tmp_path / "client-key"
-    stop = asyncio.Event()
-
-    class Catalog(_PeriodicCatalog):
-        def automatic(self):
-            stop.set()
-            return completed
-
-    async def run():
-        await asyncio.wait_for(
-            keep_default_key(
-                gateway, stop, path=path, first_delay=0.001, maximum_delay=0.001
-            ),
-            timeout=10,
-        )
-        assert not peer.keys
-        ready[0] = True
-        await asyncio.wait_for(
-            run_automatic_sync(
-                Catalog(),
-                stop,
-                interval_seconds=0,
-                settle_seconds=0,
-                reconcile=lambda: gateway.ensure_default(path),
-            ),
-            timeout=10,
-        )
-
-    asyncio.run(run())
-    assert peer.keys["default"]["key"] == path.read_text().strip()
-    assert peer.counter == 1
-    from .test_gateway_keys import _created
-
-    assert _created(gateway.create("fresh")).key != path.read_text().strip()
-
-
-@pytest.mark.parametrize("fault_owner", ["catalog", "reconcile"])
-def test_periodic_recovery_paths_do_not_suppress_each_other(
-    tmp_path, monkeypatch, fault_owner
-):
-    import asyncio
-
-    from vonk_control import catalog_sync
-
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
-
-    completed = _sync(
-        tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
-    )
-    stop = asyncio.Event()
-    attempts = {"catalog": 0, "reconcile": 0}
-    retry_episodes = []
-
-    def delay(failures, interval_seconds):
-        retry_episodes.append(failures)
-        return 0
-
-    def observe(owner):
-        attempts[owner] += 1
-        if owner == fault_owner and attempts[owner] < 3:
-            raise OSError("temporarily unavailable")
-
-    def reconcile():
-        observe("reconcile")
-
-    class Catalog(_PeriodicCatalog):
-        def automatic(self):
-            observe("catalog")
-            if attempts["catalog"] == 3:
-                stop.set()
-            return completed
-
-    monkeypatch.setattr(catalog_sync, "catalog_sync_retry_delay", delay)
-
-    async def run():
-        await asyncio.wait_for(
-            catalog_sync.run_automatic_sync(
-                Catalog(),
-                stop,
-                interval_seconds=0,
-                settle_seconds=0,
-                reconcile=reconcile,
-            ),
-            timeout=30,
-        )
-
-    asyncio.run(run())
-    assert attempts == {"catalog": 3, "reconcile": 3}
-    # Compute one delay for both logging and scheduling; recovery resets it.
-    assert retry_episodes == [1, 2, 0]
-    fresh = _sync(tmp_path, _Catalog(None), _item(_example("recipe-source-build.json")))
-    assert fresh.id != completed.id and fresh.completed_at is not None
-
-
-@pytest.mark.parametrize("typed_unknown", [False, True])
-def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
-    tmp_path, monkeypatch, caplog, typed_unknown
-):
-    """Catches dropping gateway failures or letting them suppress fresh syncs."""
-    import asyncio
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
+def test_worker_runs_the_first_sync_and_then_follows_the_persisted_wait(
+    tmp_path,
+) -> None:
+    """Catches a fresh install never syncing, or a restart ignoring the recorded wait."""
     from datetime import UTC, datetime, timedelta
 
-    import httpx2
-    from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
-    from vonk_control import catalog_sync
-    from vonk_control.capabilities import RecoveringService
-    from vonk_control.capability_contract import ControllerCapability
-    from vonk_control.gateway_keys import GatewayKeyService
+    from vonk_control.catalog_sync import AutomaticCatalogSync
 
-    from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
-    from .test_gateway_keys import MASTER, FakeLiteLlm, _authorizes
+    from .test_catalog_sync import _fixture
 
-    ready = False
-    now = datetime(2026, 10, 10, tzinfo=UTC)
-    peer = FakeLiteLlm()
-    stop = asyncio.Event()
-    key_path = tmp_path / "client-key"
-    item = _item(_example("recipe-source-build.json"))
-    catalog = _Catalog(None)
-
-    def transport(request):
-        if not ready:
-            return httpx2.Response(503, json={"error": "dependency unavailable"})
-        return peer.handle(request)
-
-    gateway = GatewayKeyService(
-        master_key=lambda: MASTER,
-        transport=httpx2.MockTransport(transport),
-        intent_root=tmp_path / "mutations",
+    sessions, catalog, reader, _item = _fixture(tmp_path)
+    now = [datetime(2026, 11, 20, tzinfo=UTC)]
+    service = ManagedRecipeCatalogSyncService(
+        sessions, catalog=catalog, reader=reader, clock=lambda: now[0]
     )
-    guarded = RecoveringService(
-        ControllerCapability.GATEWAY_KEYS,
-        GatewayKeyService,
-        lambda: gateway,
-        lambda: now,
-        check=lambda service: ready,
-    )
-
-    class Catalog(_PeriodicCatalog):
-        def automatic(self):
-            receipt = _sync(tmp_path, catalog, item)
-            if ready:
-                stop.set()
-            return receipt
-
-    def reconcile():
-        if typed_unknown and not ready:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        return guarded.ensure_default(key_path)
-
-    async def advance_dependency(awaitable, *, timeout):
-        nonlocal ready, now
-        awaitable.close()
-        if stop.is_set():
-            return
-        if timeout:
-            if typed_unknown:
-                assert "CatalogSyncUnsettled (observation-unavailable)" in caplog.text
-            else:
-                assert (
-                    "CapabilityUnavailableError (capability.dependency_unavailable)"
-                    in caplog.text
-                )
-                assert "capability=gateway-keys" in caplog.text
-            assert f"retrying in {timeout} seconds" in caplog.text
-            assert "unclassified" not in caplog.text
-            # A new request succeeds while the dependency remains unavailable.
-            assert _sync(tmp_path, catalog, item).state == "current"
-            ready = True
-            now += timedelta(minutes=1)
-        raise TimeoutError
-
-    monkeypatch.setattr(asyncio, "wait_for", advance_dependency)
-    asyncio.run(
-        catalog_sync.run_automatic_sync(
-            Catalog(),
-            stop,
-            interval_seconds=60,
-            settle_seconds=0,
-            reconcile=reconcile,
-        )
-    )
-    assert _authorizes(peer, key_path.read_text().strip())
+    assert service.latest() is None
+    clock = _Clock()
+    assert AutomaticCatalogSync(service, interval_seconds=60, monotonic=clock).tick()
+    first = service.latest()
+    assert first is not None and first.completed_at is not None
+    # A restarted worker waits out the recorded check, then syncs again.
+    restarted = AutomaticCatalogSync(service, interval_seconds=60, monotonic=clock)
+    assert not restarted.tick()
+    now[0] += timedelta(seconds=60)
+    clock.now += 60
+    assert restarted.tick()
 
 
 def test_retry_jitter_keeps_the_delay_capped(
@@ -407,24 +209,3 @@ def test_retry_jitter_keeps_the_delay_capped(
     assert catalog_sync_retry_delay(1, 60) == 15
     assert catalog_sync_retry_delay(10_000, 60) == 30
     assert catalog_sync_retry_delay(0, 60) == 60
-
-
-def test_reconcile_errors_are_logged_under_their_own_label(caplog) -> None:
-    """Catches a gateway or library refresh failure reported as a catalog sync failure."""
-    from types import SimpleNamespace
-
-    from vonk_control.catalog_sync import CatalogSyncState
-
-    class Service(_PeriodicCatalog):
-        def automatic(self):
-            return SimpleNamespace(id="sync", state=CatalogSyncState.CURRENT)
-
-    def reconcile() -> None:
-        raise OSError("gateway unreachable")
-
-    with caplog.at_level("WARNING"):
-        step = Service().advance_automatic(900, reconcile=reconcile)
-
-    assert step.failures == 1
-    assert "reconcile after the catalog sync failed" in caplog.text
-    assert "managed recipe catalog sync failed" not in caplog.text

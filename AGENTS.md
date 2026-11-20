@@ -165,6 +165,12 @@ SQL may reference an exact artifact identity without owning its availability.
 Use a database only where its transactions, coordination, or queries reduce
 total complexity; do not build a second job scheduler out of JSON files.
 
+Each periodic background loop runs in exactly one process. Key-free loops
+(the automatic catalog sync) run in the worker, which has egress; the API keeps
+only the loops that need the gateway master key (default key, route grants) or
+its in-memory library view. See
+[Background loops](docs/controller-startup-inventory.md#background-loops).
+
 Per-Spark facts have one owner: agent-reported data uses one canonical typed
 Pydantic contract per item in a typed column of `node_inventory_snapshots` or
 `node_telemetry_samples`; Controller observations of contact use columns of

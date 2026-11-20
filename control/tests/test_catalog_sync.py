@@ -715,10 +715,12 @@ def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> No
     assert reader.fetches == [reader.snapshot.items[0].uri]
 
 
-def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
+def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     tmp_path: Path,
 ) -> None:
-    """Catches the worker re-running the whole sync on its thread at every due time."""
+    """Catches an early re-read, or a second read beside a live request-led import."""
+    from vonk_control.catalog_sync import AutomaticCatalogSync
+
     sessions, service, reader, _item_value = _fixture(tmp_path)
     now = [datetime(2026, 9, 5, tzinfo=UTC)]
     sync = ManagedRecipeCatalogSyncService(
@@ -735,17 +737,19 @@ def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
         return listed()
 
     reader.list = counted
+    cadence = AutomaticCatalogSync(sync, interval_seconds=60, monotonic=lambda: 0.0)
 
-    now[0] = latest.wait.next_check
-    assert sync.redrive(latest.id, 60) is False
+    now[0] = latest.wait.next_check - timedelta(seconds=1)
+    assert cadence.tick() is False
     assert reads == []
 
-    now[0] = latest.wait.next_check + timedelta(seconds=61)
+    now[0] = latest.wait.next_check
+    cadence = AutomaticCatalogSync(sync, interval_seconds=60, monotonic=lambda: 0.0)
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
         run.state, run.active_slot = "running", "managed-recipes"
         run.completed_at, run.heartbeat_at = None, now[0]
-    assert sync.redrive(latest.id, 60) is False  # a long API import holds the slot
+    assert cadence.tick() is False  # a live import holds the slot
     assert reads == []
 
     with sessions.begin() as session:
@@ -753,7 +757,7 @@ def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
         run.heartbeat_at = now[0] - SYNC_HEARTBEAT_WINDOW - timedelta(seconds=1)
     # A dead claim no longer holds the slot: the worker observes the library
     # and the stale run is replaced.
-    assert sync.redrive(latest.id, 60) is True
+    assert cadence.tick() is True
     assert reads
     with sessions() as session:
         assert session.get(RecipeLibrarySyncRun, latest.id).state != "running"

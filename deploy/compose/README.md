@@ -67,8 +67,11 @@ fresh preparation. It does not install a resident NAS setup service.
 For gated or private Hugging Face model-cache downloads, see the
 [Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
 The background worker has a dedicated outbound `artifact-egress` network for
-model and OCI downloads. It publishes no ports. The API, PostgreSQL, and worker
-authority channel keep their internal networks.
+model and OCI downloads and for the signed recipe library releases on GitHub
+(the worker runs the automatic catalog sync). It publishes no ports. The API,
+PostgreSQL, and worker authority channel keep their internal networks; the
+API reaches GitHub only through Caddy's two read-only relays, for a
+request-led re-read of one recipe.
 
 The Hugging Face token is saved as an optional secret; leaving it blank keeps
 public model downloads anonymous. The LiteLLM upstream key is optional for

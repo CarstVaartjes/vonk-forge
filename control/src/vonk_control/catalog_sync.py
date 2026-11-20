@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import json
 import logging
 import random
 import re
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -17,13 +17,12 @@ from typing import Protocol
 
 from fastapi import HTTPException
 from pydantic import TypeAdapter
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
-    UnknownError,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -96,7 +95,7 @@ class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
     """The sync could not settle: another sync owns the catalog, or the library
     moved on since it was read.  Unknown, asked again.
 
-    ``run_automatic_sync`` retries on its bounded backoff; nothing was applied.
+    ``AutomaticCatalogSync`` retries on its bounded backoff; nothing was applied.
     """
 
     def __init__(self, code: str, detail: str) -> None:
@@ -161,6 +160,11 @@ class ManagedRecipeCatalogSyncService:
         self._reader = reader
         self._clock = clock
         self._repository = repository
+        # The worker times each recorded item, so a long import keeps its
+        # watchdog and readiness heartbeat current (observation only).
+        self.timed: Callable[[str, Callable[[], bool]], bool] = lambda _name, call: (
+            call()
+        )
 
     def sync(self, request: ManagedCatalogSyncRequest) -> CatalogSyncView:
         request_key, trigger, actor = (
@@ -373,19 +377,10 @@ class ManagedRecipeCatalogSyncService:
             return _view(row)
 
     def advance_automatic(
-        self,
-        interval_seconds: int,
-        failures: int = 0,
-        *,
-        reconcile: Callable[[], object] | None = None,
+        self, interval_seconds: int, failures: int = 0
     ) -> _AutomaticSyncStep:
-        """One automatic observation, shared by cadence and due-row redrive.
-
-        ``reconcile`` (the library refresh, the gateway-key observation) runs
-        after the observation, not before it.
-        """
+        """One automatic observation and its durable next check."""
         errors: list[Exception] = []
-        reconcile_errors: list[Exception] = []
         observed_id = None
         catalog_failed = True
         try:
@@ -405,21 +400,7 @@ class ManagedRecipeCatalogSyncService:
                 )
         except Exception as error:  # noqa: BLE001 - retain automatic observation intent
             errors.append(error)
-        # After the observation, so what a sync just applied (documents,
-        # displays) is served at once; it runs whether or not the sync failed.
-        if reconcile is not None:
-            try:
-                reconciled = reconcile()
-                if isinstance(reconciled, UnknownError):
-                    reconcile_errors.append(
-                        CatalogSyncUnsettled(
-                            reconciled.reason,
-                            "default gateway key observation unavailable",
-                        )
-                    )
-            except Exception as error:  # noqa: BLE001 - independent recovery path
-                reconcile_errors.append(error)
-        failures = failures + 1 if errors or reconcile_errors else 0
+        failures = failures + 1 if errors else 0
         delay = catalog_sync_retry_delay(failures, interval_seconds)
         try:
             self.record_automatic_wait(
@@ -429,46 +410,22 @@ class ManagedRecipeCatalogSyncService:
             errors.append(error)
         for error in errors:
             _log_automatic_failure(error, delay)
-        for error in reconcile_errors:
-            _log_reconcile_failure(error, delay)
         return _AutomaticSyncStep(failures, delay)
 
-    def redrive(self, sync_id: str, interval_seconds: int) -> bool:
-        """Backstop the API's sync cadence only once it is an interval late.
-
-        ``run_automatic_sync`` wakes exactly at the due time it recorded, so a
-        redrive at that instant would run the whole sync a second time on the
-        worker's only thread. The worker takes over only when that cadence has
-        missed its turn by a full interval (for example, the API is down), and
-        never while a sync run's claim is live (a long import holds the slot).
-        """
+    def last_completed_at(self) -> datetime | None:
+        """When the newest sync run finished: the API compares it to notice a sync."""
         with self._sessions() as session:
-            current = session.scalar(
-                select(RecipeLibrarySyncRun)
-                .where(
-                    RecipeLibrarySyncRun.repository == self._repository,
-                    RecipeLibrarySyncRun.wait_evidence.is_not(None),
-                )
-                .order_by(
-                    RecipeLibrarySyncRun.created_at.desc(), RecipeLibrarySyncRun.id
-                )
-                .limit(1)
-            )
-            if current is None or current.id != sync_id:
-                return False
-            wait = read_wait(current)
-            late = timedelta(seconds=interval_seconds)
-            if wait is None or wait.next_check + late > self._clock():
-                return False
+            return session.scalar(select(func.max(RecipeLibrarySyncRun.completed_at)))
+
+    def held_elsewhere(self) -> bool:
+        """Whether a live sync run holds the slot; its owner finishes it."""
+        with self._sessions() as session:
             running = session.scalar(
                 select(RecipeLibrarySyncRun).where(
                     RecipeLibrarySyncRun.state == LibrarySyncRunState.RUNNING
                 )
             )
-            if running is not None and not self._expired(session, running):
-                return False  # a live sync holds the slot; its owner finishes it
-        self.advance_automatic(interval_seconds)
-        return True
+            return running is not None and not self._expired(session, running)
 
     def automatic_wait_delay(self) -> float:
         with self._sessions() as session:
@@ -1006,7 +963,11 @@ class ManagedRecipeCatalogSyncService:
 
     def _progress(self, run_id: str, result: ManagedCatalogSyncResult) -> bool:
         """Record one step; ``False`` when this run was replaced meanwhile."""
+        return self.timed(
+            "catalog-sync:item", lambda: self._record_progress(run_id, result)
+        )
 
+    def _record_progress(self, run_id: str, result: ManagedCatalogSyncResult) -> bool:
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != LibrarySyncRunState.RUNNING:
@@ -1115,73 +1076,51 @@ def catalog_sync_failure_reason(error: Exception) -> str:
     )
 
 
-async def run_automatic_sync(
-    service: ManagedRecipeCatalogSyncService,
-    stop: asyncio.Event,
-    *,
-    interval_seconds: int,
-    settle_seconds: float = 10.0,
-    reconcile: Callable[[], object] | None = None,
-) -> None:
-    """Retry recoverable library observations until ``stop`` is set.
+class AutomaticCatalogSync:
+    """The worker's automatic catalog cadence; no other process runs it.
 
-    The shared owner contains observation failures. Programming faults escape
-    the cadence rather than repeating an unchanged error.
-    A sync that cannot finish (the library unreachable, another sync running, a
-    document unreadable) is unknown, not failed for good: the previously imported
-    catalog stays active and the sync is asked again with jittered backoff whose
-    ceiling doubles from 30 seconds up to ``interval_seconds``.
+    The persisted wait is the schedule, so a restarted worker keeps the delay
+    the last attempt recorded. An attempt that recorded nothing (no run row, or
+    the database was down) still waits its delay here before the next one. A
+    sync that cannot finish (the library unreachable, another sync running, a
+    document unreadable) keeps the previously imported catalog and is asked
+    again with jittered backoff whose ceiling doubles from 30 seconds up to
+    ``interval_seconds``.
     """
 
-    # Let migrations, health checks, and the local relay settle before the first
-    # network-bound refresh. The durable ledger remains authoritative.
-    try:
-        await asyncio.wait_for(stop.wait(), timeout=settle_seconds)
-        return
-    except TimeoutError:
-        pass
-    failures = 0
-    while not stop.is_set():
-        try:
-            retained_delay = await asyncio.to_thread(service.automatic_wait_delay)
-        except SQLAlchemyError as error:
-            _log_automatic_failure(error, CATALOG_SYNC_FIRST_RETRY_SECONDS)
-            retained_delay = CATALOG_SYNC_FIRST_RETRY_SECONDS
-        if retained_delay > 0:
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=retained_delay)
-            except TimeoutError:
-                pass
-            continue
-        # The same owner computes and persists one delay. Gateway observation
-        # remains independent of catalog discovery and shares its retry cadence.
-        step = await asyncio.to_thread(
-            service.advance_automatic,
-            interval_seconds,
-            failures,
-            reconcile=reconcile,
-        )
-        failures, delay = step.failures, step.delay_seconds
-        try:
-            await asyncio.wait_for(
-                stop.wait(),
-                timeout=delay,
-            )
-        except TimeoutError:
-            continue
+    def __init__(
+        self,
+        service: ManagedRecipeCatalogSyncService,
+        *,
+        interval_seconds: int,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._service = service
+        self._interval = interval_seconds
+        self._monotonic = monotonic
+        self._failures = 0
+        self._not_before = monotonic()
+
+    def tick(self) -> bool:
+        """Run one automatic sync when it is due; ``True`` when one ran."""
+        now = self._monotonic()
+        if now < self._not_before:
+            return False
+        waiting = self._service.automatic_wait_delay()
+        if waiting > 0:
+            self._not_before = now + waiting
+            return False
+        if self._service.held_elsewhere():
+            return False  # a request-led sync is importing; never read twice
+        step = self._service.advance_automatic(self._interval, self._failures)
+        self._failures = step.failures
+        self._not_before = self._monotonic() + step.delay_seconds
+        return True
 
 
 def _log_automatic_failure(error: Exception, delay: int) -> None:
     _LOGGER.warning(
         "automatic managed recipe catalog sync failed: %s; retrying in %s seconds",
-        catalog_sync_failure_reason(error),
-        delay,
-    )
-
-
-def _log_reconcile_failure(error: Exception, delay: int) -> None:
-    _LOGGER.warning(
-        "library or gateway reconcile after the catalog sync failed: %s; retrying in %s seconds",
         catalog_sync_failure_reason(error),
         delay,
     )

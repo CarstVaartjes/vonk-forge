@@ -206,4 +206,3 @@ from .production import production_app as production_app
 from .production import (
     register_model_cache_operation_provider as register_model_cache_operation_provider,
 )
-from .production import run_automatic_sync as run_automatic_sync
