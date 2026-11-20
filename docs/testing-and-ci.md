@@ -18,19 +18,21 @@ live repository ruleset, not the dated protection report under `inventory/`):
 
 Every change lands through an integration PR: a same-repository
 `integration/*` head, or any PR with the `release-acceptance` label. `full` in
-`scripts/select-ci-areas` owns that rule; `ci.yml` and the proof workflows (via
-`ci-scope.yml`) read it.
+`scripts/select-ci-areas` owns that rule; `ci.yml` reads it, and every proof is a `ci.yml` job behind
+`ci-gate`.
 
 | Run | What runs |
 | --- | --- |
 | Member PR | No jobs: only the selector and the gate, which reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. Check member work locally (targeted tests, `scripts/test-local --changed`, the fast guards); its integration PR proves it. |
 | Dependabot PR | Nothing, not even the selector or the gate: every job that could start on its own skips a PR authored by `dependabot[bot]`, so it uses no runner. Its skipped gate keeps the raw name expression, never the required `CI gate`. Fold it into an integration PR, which runs CI once (`tests/test_dependabot_updates.py`). |
-| Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and the path-filtered proof workflows. |
-| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. The proof workflows run on pull requests only. |
+| Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and every selected proof (agent repair recovery, client compatibility report, installed CLI, model-cache cancellation, OCI link fallback, privileged helper, profile-effect consumer). |
+| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. |
 
 A member PR is done when its review has passed.
-Adding the `release-acceptance` label re-runs `ci.yml` in full at once; the
-proof workflows do not trigger on labels, so they pick it up on the next push.
+Adding the `release-acceptance` label re-runs `ci.yml` in full at once.
+
+Jobs that build Rust set it up with `.github/actions/setup-rust` (toolchain
+from `rust-toolchain.toml`, read-only shared cache).
 
 Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,

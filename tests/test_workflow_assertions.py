@@ -177,55 +177,22 @@ def test_guard_rejects_pinned_passed_summary_but_allows_nonempty_pattern() -> No
     )
 
 
-_PROOF_PROVENANCE = re.compile(
-    r"\bhashlib\b|attest-build-provenance|provenance|git rev-parse HEAD:",
-    re.IGNORECASE,
-)
-
-
-def test_proof_lanes_have_named_external_prerequisites() -> None:
-    """Standalone lanes need an external prerequisite regular CI cannot supply."""
-    reasons = {
-        "installed-cli-proof.yml": "installed CLI signed update and release transition",
-        "model-cache-unknown-expiry-proof.yml": "process death with PostgreSQL and managed storage",
-        "profile-effect-consumer-proof.yml": "profile effects across PostgreSQL and runtime consumers",
-    }
-    workflows = {
-        path.name for path in (ROOT / ".github/workflows").glob("*-proof.y*ml")
-    }
-    assert workflows == reasons.keys(), "standalone lanes require a named prerequisite"
-    assert all(reasons.values())
-
-
-def test_proof_workflows_do_not_record_source_provenance() -> None:
-    """Splitting a source module cannot break an unrelated outcome check."""
-    for path in (ROOT / ".github/workflows").glob("*-proof.y*ml"):
-        assert not _PROOF_PROVENANCE.search(path.read_text()), path.name
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "hashlib.sha256(Path(path).read_bytes()).hexdigest()",
-        "uses: actions/attest-build-provenance@revision",
-        "git rev-parse HEAD:rust/crates/vonk-agent/src/client.rs",
-        "(output / 'source-provenance.json').write_text(report)",
-    ],
-)
-def test_guard_rejects_proof_provenance(source: str) -> None:
-    assert _PROOF_PROVENANCE.search(source)
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "assert expected <= {case.get('name') for case in cases}",
-        "uv pip install --require-hashes -r locked-requirements.txt",
-        "assert verified_wheel_sha256 == manifest_sha256",
-    ],
-)
-def test_guard_preserves_outcomes_and_ingress_integrity(source: str) -> None:
-    assert not _PROOF_PROVENANCE.search(source)
+def test_no_proof_runs_outside_the_ci_gate() -> None:
+    """Every proof is a ci.yml job that ci-gate needs, never a standalone lane."""
+    workflows = ROOT / ".github" / "workflows"
+    assert not list(workflows.glob("*-proof.y*ml"))
+    for name in (
+        "agent-repair-recovery",
+        "client-compatibility-report",
+        "installed-cli-proof",
+        "model-cache-unknown-expiry",
+        "oci-link-fallback",
+        "privileged-helper-oci-process",
+        "profile-effect-consumer",
+    ):
+        assert not (workflows / f"{name}.yml").exists()
+        jobs = yaml.safe_load((workflows / "ci.yml").read_text())["jobs"]
+        assert name in jobs["ci-gate"]["needs"]
 
 
 def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None:

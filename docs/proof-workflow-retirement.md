@@ -74,7 +74,12 @@ the pre-merge candidate acceptance (`release-acceptance.yml`):
 | installer-pty-recovery | Redundant; removed | `Build and test native Spark setup (linux-arm64)` in the pre-merge candidate acceptance runs `run_installer_pty_recovery.sh` for every change that selects it. |
 | installed-cli-transition-proof, installed-cli-update-proof | Merged into `installed-cli-proof` | Both unique lanes share one checkout, environment and isolated resolver cache; the two named cases run in one invocation. |
 
-Retained standalone lanes: `agent-repair-recovery` (full repair matrix on
+2026-11 follow-up: the five retained lanes, `installed-cli-proof` and
+`client-compatibility-report` are no longer standalone workflows. Each is a
+`ci.yml` job selected by the area of the code it proves and needed by `ci-gate`
+(`scripts/verify-ci-gate`), on the tested pull request merge commit;
+`ci-scope.yml` is deleted. Jobs: `agent-repair-recovery` (full repair matrix on
 disposable ARM64 systemd), `oci-link-fallback` (a bind-mounted cross-device
 store), `privileged-helper-oci-process` (the signed helper on ARM64 systemd),
-`model-cache-unknown-expiry-proof` and `profile-effect-consumer-proof`.
+`model-cache-unknown-expiry`, `profile-effect-consumer`, `installed-cli-proof`
+and the non-gating `client-compatibility-report`.

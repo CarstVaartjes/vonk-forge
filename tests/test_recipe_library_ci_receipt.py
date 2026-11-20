@@ -15,7 +15,6 @@ CONTRACTS_LOCK = ROOT / "control/packaging/public-contracts.lock"
 WORKFLOWS = (
     ROOT / ".github/workflows/ci.yml",
     ROOT / ".github/workflows/installer-publication.yml",
-    ROOT / ".github/workflows/profile-effect-consumer-proof.yml",
 )
 
 

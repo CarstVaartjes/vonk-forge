@@ -18,14 +18,20 @@ AREAS = (
     "lane",
 )
 AREA_JOBS = {
-    "rust": ("rust-platform",),
+    "rust": ("rust-platform", "oci-link-fallback", "privileged-helper-oci-process"),
     "repository": ("repository",),
-    "control": ("control",),
+    "control": (
+        "control",
+        "client-compatibility-report",
+        "installed-cli-proof",
+        "model-cache-unknown-expiry",
+        "profile-effect-consumer",
+    ),
     "web": ("web",),
     "generated": ("generated",),
     "compose": ("compose",),
     "nas-install": ("nas-install",),
-    "agent-package": ("agent-package",),
+    "agent-package": ("agent-package", "agent-repair-recovery"),
     # A change to the upgrade-carry lane's own code is merged only with a
     # green lane run on that head.
     "lane": ("lane-proof",),

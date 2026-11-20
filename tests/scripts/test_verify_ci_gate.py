@@ -51,6 +51,13 @@ def _valid(**overrides: str):
         "lane-proof": "skipped",
         "supply-chain": "success",
         "consumer-probe": "success",
+        "agent-repair-recovery": "success",
+        "client-compatibility-report": "success",
+        "installed-cli-proof": "success",
+        "model-cache-unknown-expiry": "success",
+        "oci-link-fallback": "success",
+        "privileged-helper-oci-process": "success",
+        "profile-effect-consumer": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
     results.update({key: value for key, value in overrides.items() if key in results})
@@ -81,6 +88,13 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "nas-install",
         "agent-package",
         "lane-proof",
+        "agent-repair-recovery",
+        "client-compatibility-report",
+        "installed-cli-proof",
+        "model-cache-unknown-expiry",
+        "oci-link-fallback",
+        "privileged-helper-oci-process",
+        "profile-effect-consumer",
     ):
         results[job] = "skipped"
     assert _module().verify("success", selected, results) == []
@@ -213,3 +227,30 @@ def test_consumer_probe_verification_is_required() -> None:
     results["consumer-probe"] = "failure"
     errors = _module().verify("success", selected, results)
     assert errors == ["consumer-probe result is 'failure', expected 'success'"]
+
+
+@pytest.mark.parametrize(
+    ("area", "job"),
+    [
+        ("rust", "oci-link-fallback"),
+        ("rust", "privileged-helper-oci-process"),
+        ("control", "client-compatibility-report"),
+        ("control", "installed-cli-proof"),
+        ("control", "model-cache-unknown-expiry"),
+        ("control", "profile-effect-consumer"),
+        ("agent-package", "agent-repair-recovery"),
+    ],
+)
+def test_folded_proofs_follow_their_area(area, job) -> None:
+    selected, results = _valid()
+    results[job] = "skipped"
+    assert _module().verify("success", selected, results) == [
+        f"{job} result is 'skipped', expected 'success'"
+    ]
+    selected[area] = "false"
+    # An unselected area leaves its proofs skipped; the other jobs of the
+    # area must skip too for the gate to pass.
+    for other in _module().AREA_JOBS[area]:
+        results[other] = "skipped"
+    errors = _module().verify("success", selected, results)
+    assert not any(job in error for error in errors)

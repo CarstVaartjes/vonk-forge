@@ -1260,6 +1260,445 @@ jobs:
             control/web/playwright-report
             control/web/test-results
 
+  # The standalone proof workflows run here, selected by the same areas and the
+  # same tested commit (the pull request merge commit) as every other job.
+  agent-repair-recovery:
+    name: Exercise full repair matrix on disposable ARM64 systemd
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.agent_package == 'true'
+    runs-on: ubuntu-24.04-arm
+    # Passing runs take about 10 minutes; a hung matrix must fail fast.
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-arm64
+      - name: Install native acceptance dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ci-apt-install \
+            acl adduser build-essential ca-certificates crun curl fuse-overlayfs \
+            init-system-helpers iproute2 iptables openssl podman shellcheck \
+            slirp4netns systemd uidmap util-linux
+      - name: Validate repair scripts before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh \
+            tests/nodes/test_agent_upgrade_repair_systemd.sh
+          shellcheck -S error \
+            packaging/debian/postinst-repair \
+            packaging/debian/preinst-repair
+          shellcheck \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh \
+            tests/nodes/test_agent_upgrade_repair_systemd.sh
+      - name: Build exact repair fixtures once
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          cargo build --locked --release --package vonk-repair-helper-probe
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
+          probe=$(realpath target/release/vonk-repair-helper-probe)
+          build_egress=$(realpath target/release/vonk-build-egress)
+          probe_staged="$probe.root-owned"
+          build_egress_staged="$build_egress.root-owned"
+          sudo install -o root -g root -m 0755 "$probe" "$probe_staged"
+          sudo install -o root -g root -m 0755 \
+            "$build_egress" "$build_egress_staged"
+          sudo mv -f "$probe_staged" "$probe"
+          sudo mv -f "$build_egress_staged" "$build_egress"
+          test "$(stat -c %u:%g:%a:%h "$probe")" = 0:0:755:1
+          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
+      - name: Exercise every repair success, refusal, and crash path
+        shell: bash
+        env:
+          REPAIR_MATRIX_MODE: full
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test -d /run/systemd/system
+          test "$(dpkg --print-architecture)" = arm64
+          probe=$(realpath target/release/vonk-repair-helper-probe)
+          build_egress=$(realpath target/release/vonk-build-egress)
+          sudo env REPAIR_MATRIX_MODE="$REPAIR_MATRIX_MODE" \
+            REPAIR_PROBE_BINARY="$probe" \
+            BUILD_EGRESS_BINARY="$build_egress" \
+            tests/nodes/test_agent_upgrade_repair_matrix.sh
+
+  client-compatibility-report:
+    # A report, never a gate: a deliberate break is legitimate. It shows, before
+    # the deploy, every response shape the published vonkctl would refuse.
+    name: Response shapes the published vonkctl would refuse
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare this Controller's bundled CLI contract
+        uses: ./.github/actions/python-env
+        with:
+          contracts: python
+          cli-dependencies: "false"
+      - name: Report against the published dev and stable vonkctl
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen python tools/client_compatibility_report.py \
+            --candidate src/cluster_profiles/schemas/control-openapi.json \
+            --channel dev --channel stable | tee -a "$GITHUB_STEP_SUMMARY"
+
+  installed-cli-proof:
+    name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_PRIOR_STABLE_SOURCE_SHA: aeefc93a96fd2bf9c209bbe8d2f3e1bded1b87f8
+      VONK_PRIOR_STABLE_CLI_ROOT: ${{ github.workspace }}/.prior-stable-cli
+      VONK_TRANSITION_SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the frozen prior stable CLI source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: aeefc93a96fd2bf9c209bbe8d2f3e1bded1b87f8
+          path: .prior-stable-cli
+          persist-credentials: false
+      - name: Verify exact proof checkouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VONK_TRANSITION_SOURCE_SHA"
+          test "$(git -C .prior-stable-cli rev-parse HEAD)" = "$VONK_PRIOR_STABLE_SOURCE_SHA"
+          git diff --exit-code HEAD --
+          git -C .prior-stable-cli diff --exit-code HEAD --
+      - name: Provide canonical recipe dependency
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python tooling
+        uses: ./.github/actions/python-env
+      - name: Prepare isolated locked CLI resolver cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ensure-project-venv "$RUNNER_TEMP/signed-update-dependencies"
+          UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
+            scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
+          uv export --project . --frozen --no-dev --no-emit-project \
+            --output-file "$RUNNER_TEMP/signed-update-requirements.txt"
+          UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
+            scripts/retry-dependency-fetch uv pip install \
+              --python "$RUNNER_TEMP/signed-update-dependencies/bin/python" \
+              --reinstall --require-hashes -r "$RUNNER_TEMP/signed-update-requirements.txt"
+          test -d "$RUNNER_TEMP/signed-update-cache"
+      - name: Prove the signed updater, manifest refusal, signed bootstrap and installed NDJSON command
+        shell: bash
+        env:
+          VONK_SIGNED_UPDATE_LANE_ENABLED: '1'
+          VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen pytest -q -n 0 \
+            tests/cluster_profiles/test_cli_update.py::test_installed_cli_signed_update_replaces_actual_uv_tool \
+            tests/cluster_profiles/test_cli_update.py::test_installed_stable_cli_updates_after_actual_controller_ndjson_transition \
+            --junitxml="$RUNNER_TEMP/installed-cli-junit.xml"
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          cases = ET.parse(root / 'installed-cli-junit.xml').findall('.//testcase')
+          assert cases, "no proof cases executed"
+          expected = {
+              'test_installed_cli_signed_update_replaces_actual_uv_tool',
+              'test_installed_stable_cli_updates_after_actual_controller_ndjson_transition',
+          }
+          assert expected <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
+          assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
+      - name: Retain scoped signed updater evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installed-cli-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/installed-cli-junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  model-cache-unknown-expiry:
+    name: Unknown cancellation expiry through fresh exact artifact claim
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_CACHE_CANCEL_RESPONSE_OUTPUT: ${{ github.workspace }}/model-cache-cancellation-responses.json
+      PYTHONPATH: src:control/src:agent_protocol/src
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Provide canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python dependencies
+        uses: ./.github/actions/python-env
+      - name: Build canonical recipe library index
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Prove shared manifest identity and unknown expiry through fresh admission
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_model_cache_unknown_expiry_recovery.py
+          control/tests/test_model_manifest_composition.py
+          --tb=short --junitxml=${{ runner.temp }}/model-cache-cancellation.xml
+      - name: Require named SQL and manifest outcomes
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'model-cache-cancellation.xml').findall('.//testcase')
+          assert cases, "no cancellation cases executed"
+          expected = {
+              'test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_old_owner',
+              'test_shared_catalog_files_resume_the_same_parent_after_producer_repair',
+          }
+          assert expected <= {case.get('name').partition('[')[0] for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
+      - name: Prepare pinned browser consumer toolchain
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+      - name: Generate consumers from the current cancellation owner
+        run: |
+          scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
+          scripts/generate-control-clients
+          scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Consume actual PostgreSQL/API cancellation observations in browser
+        run: |
+          npm exec -- vitest run src/components/model-cache-cancellation-consumer.test.tsx --reporter=junit --outputFile="$RUNNER_TEMP/model-cache-browser.xml"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'model-cache-browser.xml').findall('.//testcase')
+          assert cases, "no browser cancellation cases executed"
+          assert {'actual model cancellation responses preserve unknown and confirmed evidence in the browser'} <= {case.get('name') for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
+        working-directory: control/web
+
+  oci-link-fallback:
+    name: Actual EXDEV, visible layout fault and no private copies
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-amd64
+      - name: Generate canonical wire and compile the exact test
+        run: |
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+          cargo test --locked --package vonk-agent --lib --no-run
+      - name: Mount only the owned model-store fixture and exercise the production hardlink fault
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_root=$(mktemp -d "$RUNNER_TEMP/vonk-oci-exdev.XXXXXXXX")
+          source_root=$(mktemp -d /dev/shm/vonk-oci-exdev.XXXXXXXX)
+          target="$data_root/distribution/models"
+          mounted=false
+          owned=false
+          cleanup() {
+            status=$?
+            if [ "$mounted" = true ]; then
+              sudo umount "$target" || exit 1
+            fi
+            if [ "$owned" = true ]; then
+              rm -rf -- "$data_root" "$source_root"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          # Both paths were newly created for this job. Never mount or clean a
+          # repository, agent cache, shared data path or pre-existing directory.
+          case "$data_root" in "$RUNNER_TEMP"/vonk-oci-exdev.*) ;; *) exit 1 ;; esac
+          case "$source_root" in /dev/shm/vonk-oci-exdev.*) ;; *) exit 1 ;; esac
+          test -d "$data_root" && test ! -L "$data_root"
+          test -d "$source_root" && test ! -L "$source_root"
+          owned=true
+          mkdir -p "$target"
+          sudo mount --bind "$source_root" "$target"
+          mounted=true
+          test "$(stat -c %d "$target")" != "$(stat -c %d "$data_root")"
+          export VONK_OCI_CROSS_DEVICE_ROOT="$data_root"
+          cargo test --locked --package vonk-agent --lib \
+            oci::materialization::tests::real_cross_device_link_failure_reports_layout_without_copy \
+            -- --exact --ignored --nocapture --test-threads=1
+
+  privileged-helper-oci-process:
+    name: Exercise signed helper pull and start on ARM64
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          shared-key: linux-arm64
+      - name: Install bounded helper proof dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(dpkg --print-architecture)" = arm64
+          scripts/ci-apt-install \
+            acl adduser ca-certificates curl systemd-container
+          docker info
+      - name: Verify canonical installation access under the packaged helper filesystem policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 tests/nodes/test_helper_runtime_filesystem.py --disposable-systemd
+      - name: Build production helper and compiled-plan probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --package vonk-agent-helper --bin vonk-agent-helper
+          cargo build --locked --release --package vonk-agent \
+            --example privileged_oci_process_probe
+      - name: Run signed pull and start through the real helper process
+        shell: bash
+        env:
+          VONK_HELPER_BINARY: ${{ github.workspace }}/target/release/vonk-agent-helper
+          VONK_HELPER_PROBE_BINARY: ${{ github.workspace }}/target/release/examples/privileged_oci_process_probe
+          VONK_HELPER_FIXTURE: ${{ github.workspace }}/control/tests/fixtures/compiled_workload_v2.json
+          VONK_HELPER_REPORT_ROOT: ${{ runner.temp }}/vonk-helper-process-proof
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=VONK_HELPER_BINARY,VONK_HELPER_PROBE_BINARY,VONK_HELPER_FIXTURE,VONK_HELPER_REPORT_ROOT \
+            tests/acceptance/privileged_helper_oci_process.sh
+      - name: Normalize helper proof evidence permissions
+        if: always()
+        shell: bash
+        run: |
+          sudo chmod -R a+rX "$RUNNER_TEMP/vonk-helper-process-proof" 2>/dev/null || true
+      - name: Upload helper process evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: privileged-helper-oci-process-proof-${{ github.run_id }}
+          path: ${{ runner.temp }}/vonk-helper-process-proof
+          if-no-files-found: warn
+
+  profile-effect-consumer:
+    name: Real SQL Stop through installed CLI and recipes cleanup
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the reviewed recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python and CLI dependencies
+        uses: ./.github/actions/python-env
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Exercise connected producer and consumer
+        env:
+          VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.recipe-library
+          VONK_EFFECT_PLATFORM_SOURCE_SHA: ${{ github.sha }}
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_profile_effect_consumer_contract_postgres.py
+          --junitxml=${{ runner.temp }}/profile-effect-consumer.xml
+      - name: Require the installed CLI and recipes cleanup case
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(Path(os.environ['RUNNER_TEMP']) / 'profile-effect-consumer.xml').findall('.//testcase')
+          assert cases, "no consumer cases executed"
+          assert {'test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup'} <= {case.get('name') for case in cases}
+          assert all(case.find(tag) is None for case in cases for tag in ('skipped', 'failure', 'error'))
+          PY
+      - name: Upload consumer outcomes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: profile-effect-consumer-${{ github.run_id }}
+          path: ${{ runner.temp }}/profile-effect-consumer.xml
+          if-no-files-found: error
+          retention-days: 7
+
   lane-proof:
     name: Exact PR candidate acceptance
     # The candidate costs about 70 runner-minutes; a push that fails lint or a
@@ -1282,7 +1721,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1333,6 +1772,13 @@ jobs:
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
           NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
           AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
+          AGENT_REPAIR_RECOVERY_RESULT: ${{ needs.agent-repair-recovery.result }}
+          CLIENT_COMPATIBILITY_REPORT_RESULT: ${{ needs.client-compatibility-report.result }}
+          INSTALLED_CLI_PROOF_RESULT: ${{ needs.installed-cli-proof.result }}
+          MODEL_CACHE_UNKNOWN_EXPIRY_RESULT: ${{ needs.model-cache-unknown-expiry.result }}
+          OCI_LINK_FALLBACK_RESULT: ${{ needs.oci-link-fallback.result }}
+          PRIVILEGED_HELPER_OCI_PROCESS_RESULT: ${{ needs.privileged-helper-oci-process.result }}
+          PROFILE_EFFECT_CONSUMER_RESULT: ${{ needs.profile-effect-consumer.result }}
           LANE_PROOF_RESULT: ${{ needs.lane-proof.result }}
         run: |
           set -euo pipefail
@@ -1364,6 +1810,13 @@ jobs:
             --result "compose=$COMPOSE_RESULT" \
             --result "nas-install=$NAS_INSTALL_RESULT" \
             --result "agent-package=$AGENT_PACKAGE_RESULT" \
+            --result "agent-repair-recovery=$AGENT_REPAIR_RECOVERY_RESULT" \
+            --result "client-compatibility-report=$CLIENT_COMPATIBILITY_REPORT_RESULT" \
+            --result "installed-cli-proof=$INSTALLED_CLI_PROOF_RESULT" \
+            --result "model-cache-unknown-expiry=$MODEL_CACHE_UNKNOWN_EXPIRY_RESULT" \
+            --result "oci-link-fallback=$OCI_LINK_FALLBACK_RESULT" \
+            --result "privileged-helper-oci-process=$PRIVILEGED_HELPER_OCI_PROCESS_RESULT" \
+            --result "profile-effect-consumer=$PROFILE_EFFECT_CONSUMER_RESULT" \
             --result "lane-proof=$LANE_PROOF_RESULT"
 
       - name: Record the exact source and successful check selection
