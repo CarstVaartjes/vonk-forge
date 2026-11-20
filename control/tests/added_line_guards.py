@@ -316,6 +316,8 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/browser_auth.py",
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",
+        # The recipe source policy refusal: the source authority edge for builds.
+        "control/src/vonk_control/availability_production.py",
     }
 )
 
@@ -1244,6 +1246,43 @@ def start_budget_derivations(source: str) -> list[tuple[int, str]]:
             ):
                 found[node.lineno] = scope.name
     return sorted(found.items())
+
+
+def unknown_to_terminal_handlers(source: str) -> list[int]:
+    """An ``except *Unknown`` handler that builds a terminal value.
+
+    An unknown outcome is observed and retried; building ``LifecycleState.FAILED``
+    or ``retryable=False`` in its handler turns it into a decision nobody made
+    (the synthetic FAILED request view, 2026-11-20).
+    """
+    found: list[int] = []
+    for handler in ast.walk(ast.parse(source)):
+        if not isinstance(handler, ast.ExceptHandler) or handler.type is None:
+            continue
+        caught = {
+            ast.unparse(node).split(".")[-1]
+            for node in ast.walk(handler.type)
+            if isinstance(node, ast.Name | ast.Attribute)
+        }
+        if not any(
+            name.endswith("Unknown") or name == "UnknownOutcomeError" for name in caught
+        ):
+            continue
+        for node in (n for stmt in handler.body for n in ast.walk(stmt)):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "FAILED"
+                and ast.unparse(node.value).split(".")[-1] == "LifecycleState"
+            ) or (
+                isinstance(node, ast.keyword)
+                and node.arg == "retryable"
+                and isinstance(node.value, ast.Constant)
+                and node.value.value is False
+            ):
+                found.append(
+                    node.value.lineno if isinstance(node, ast.keyword) else node.lineno
+                )
+    return sorted(set(found))
 
 
 def replanned_digest_reads(source: str) -> list[int]:
@@ -2207,6 +2246,11 @@ def check_source(
             (line, "start budget derived from a stored start timestamp")
             for line, function in start_budget_derivations(source)
             if (path, function) not in START_BUDGET_VERDICTS
+        )
+    if python and not is_test and "waits" in modes:
+        hits.extend(
+            (line, "unknown outcome turned terminal (report it unknown; callers retry)")
+            for line in unknown_to_terminal_handlers(source)
         )
     if (
         python

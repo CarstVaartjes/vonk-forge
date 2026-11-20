@@ -677,7 +677,9 @@ revision id, including one that is no longer the newest.
 exactly `create` and `input_paths`. The `create` object contains the canonical
 artifact-job request fields: `interface`, optional `parameters`, optional
 `inputs`, `output_limits`, and `timeout_seconds`. Each input declaration has
-exactly `slot`, `name`, and `media_type`. `input_paths` maps every declared
+exactly `slot` and `name`; the Controller derives each input's media type from its
+file name and the slot's declared types and refuses a name that fits none,
+listing the accepted extensions. `input_paths` maps every declared
 input's safe file name to one local path. The local JSON document is limited to
 1 MiB and can declare at most 32 inputs; each local path is limited to 4,096
 characters. The Controller's advertised per-file, combined-byte, timeout,
@@ -693,7 +695,7 @@ For example, save a binding beside an `inputs/` directory as
     "interface": "image-job",
     "parameters": {},
     "inputs": [
-      {"slot": "input", "name": "source.png", "media_type": "image/png"}
+      {"slot": "input", "name": "source.png"}
     ],
     "output_limits": {
       "max_files": 1,

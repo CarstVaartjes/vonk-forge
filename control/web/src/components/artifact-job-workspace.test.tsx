@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   ArtifactJob,
+  ArtifactJobInputFile,
+  ArtifactJobInputRequest,
   ArtifactJobParameter,
   LibraryApi,
   LibraryViewRecipeDetail,
@@ -193,6 +195,23 @@ type JobInput = Omit<Partial<ArtifactJob>, "state"> & {
   state?: ArtifactJob["state"] | "draft" | "ready" | "cancelling";
 };
 
+// The Controller derives each input's media type from its file name.
+const mediaTypeByExtension: Record<string, string> = {
+  png: "image/png",
+  txt: "text/plain",
+  obj: "model/obj",
+  ply: "model/ply",
+  mov: "video/quicktime",
+  mkv: "video/x-matroska",
+};
+
+function declared(inputs: ArtifactJobInputRequest[] = []): ArtifactJobInputFile[] {
+  return inputs.map((item) => ({
+    ...item,
+    media_type: mediaTypeByExtension[item.name.split(".").pop() ?? ""] ?? "image/png",
+  }));
+}
+
 function job(given: JobInput = {}): ArtifactJob {
   const { state, ...rest } = given;
   const input: Partial<ArtifactJob> = { ...rest };
@@ -318,7 +337,7 @@ function api(initialJobs: ArtifactJob[] = []) {
             operation_id: null,
             submit_request_id: null,
             state: "draft",
-            input_declarations: input.inputs ?? [],
+            input_declarations: declared(input.inputs),
             input_files: [],
           });
           return Promise.resolve(storedDraft);
@@ -418,13 +437,11 @@ test("derives prompt, parameter, and input constraints from the running recipe a
     expect.objectContaining({
       slot: "reference",
       name: "source.png",
-      media_type: "image/png",
       size_bytes: 8,
     }),
     expect.objectContaining({
       slot: "prompt",
       name: "prompt.txt",
-      media_type: "text/plain",
       size_bytes: 23,
     }),
   ]);
@@ -461,7 +478,7 @@ test("reuses the create identity across lost receipts, resumed upload, and exact
           operation_id: null,
           state: "draft",
           submit_request_id: null,
-          input_files: body.inputs,
+          input_files: declared(body.inputs),
         }),
       ),
     )
@@ -471,7 +488,7 @@ test("reuses the create identity across lost receipts, resumed upload, and exact
           operation_id: null,
           state: "ready",
           submit_request_id: null,
-          input_files: body.inputs,
+          input_files: declared(body.inputs),
         }),
       ),
     );
@@ -892,7 +909,7 @@ test("ignores another job's pending cancellation when admitting a new independen
   expect(client.createArtifactJob).toHaveBeenCalledOnce();
 });
 
-test("infers recipe-declared mesh and video media types when the browser omits them", async () => {
+test("sends no media type and uploads with the one the Controller derived", async () => {
   const user = userEvent.setup();
   const client = api();
   const fallbackDetail = detail();
@@ -984,10 +1001,19 @@ test("infers recipe-declared mesh and video media types when the browser omits t
 
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
   expect(client.createArtifactJob.mock.calls[0][1].inputs).toEqual([
-    expect.objectContaining({ slot: "obj", name: "shape.obj", media_type: "model/obj" }),
-    expect.objectContaining({ slot: "ply", name: "shape.ply", media_type: "model/ply" }),
-    expect.objectContaining({ slot: "mov", name: "source.mov", media_type: "video/quicktime" }),
-    expect.objectContaining({ slot: "mkv", name: "source.mkv", media_type: "video/x-matroska" }),
+    expect.objectContaining({ slot: "obj", name: "shape.obj" }),
+    expect.objectContaining({ slot: "ply", name: "shape.ply" }),
+    expect.objectContaining({ slot: "mov", name: "source.mov" }),
+    expect.objectContaining({ slot: "mkv", name: "source.mkv" }),
+  ]);
+  for (const item of client.createArtifactJob.mock.calls[0][1].inputs) {
+    expect(item).not.toHaveProperty("media_type");
+  }
+  expect(client.uploadArtifactJobInput.mock.calls.map((call) => call[1].media_type)).toEqual([
+    "model/obj",
+    "model/ply",
+    "video/quicktime",
+    "video/x-matroska",
   ]);
 });
 

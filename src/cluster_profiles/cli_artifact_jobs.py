@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import math
-import mimetypes
 import os
 import re
 import shlex
@@ -70,7 +69,7 @@ _CREATE_FIELDS = {
     "output_limits",
     "timeout_seconds",
 }
-_INPUT_FIELDS = {"slot", "name", "media_type"}
+_INPUT_FIELDS = {"slot", "name"}
 _JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, NEEDS_OPERATOR}
 _RECOVERY_ATTEMPTS = 3
 _RUN_KEY_NAMESPACE = uuid.UUID("7d0c9a64-3f0e-5b1a-8c52-1f0b6a9e2d41")
@@ -493,24 +492,12 @@ def _binding_from_flags(
         chosen[slot_id].append(Path(raw_path).absolute())
     inputs = []
     paths: dict[str, Path] = {}
-    for slot_id, slot in slots.items():
+    for slot_id in slots:
         for path in chosen[slot_id]:
-            guessed = mimetypes.guess_type(path.name)[0]
-            if guessed in slot.media_types:
-                media_type = guessed
-            elif len(slot.media_types) == 1:
-                media_type = slot.media_types[0]
-            else:
-                raise ValueError(
-                    f"cannot tell the media type of {path.name} for slot "
-                    f"'{slot_id}'; it takes: {', '.join(slot.media_types)}"
-                )
             if path.name in paths:
                 raise ValueError(f"two inputs are named {path.name}")
             paths[path.name] = path
-            inputs.append(
-                {"slot": slot_id, "name": path.name, "media_type": media_type}
-            )
+            inputs.append({"slot": slot_id, "name": path.name})
     knobs = {knob.name: knob for knob in contract.parameters}
     parameters = {}
     for item in args.option:
@@ -797,8 +784,19 @@ def _deliver_inputs(
     transfer = _transfer_client(client)
     uploaded = cast(list[dict[str, object]], args.artifact_job_uploaded)
     uploaded_by_name = _declared_files(job.get("input_files"), "uploaded inputs")
-    for declaration in declarations:
-        name = cast(str, declaration["name"])
+    # The Controller derived each input's media type; the upload carries it.
+    accepted_by_name = _declared_files(job.get("input_declarations"), "declarations")
+    for local in declarations:
+        name = cast(str, local["name"])
+        declaration = accepted_by_name.get(name)
+        if (
+            declaration is None
+            or {key: value for key, value in declaration.items() if key != "media_type"}
+            != local
+        ):
+            raise ControlMalformedResponse(
+                "artifact job declarations differ from the requested inputs"
+            )
         current = uploaded_by_name.get(name)
         if current == declaration:
             continue
@@ -850,7 +848,8 @@ def _deliver_inputs(
     if preparation(job) == READY or (
         declarations
         and all(
-            uploaded_by_name.get(cast(str, item["name"])) == item
+            uploaded_by_name.get(cast(str, item["name"]))
+            == accepted_by_name.get(cast(str, item["name"]))
             for item in declarations
         )
         and preparation(job) is None
@@ -1194,16 +1193,14 @@ def _read_binding(source: str) -> tuple[dict[str, object], dict[str, Path]]:
     for item in inputs:
         if not isinstance(item, dict) or set(item) != _INPUT_FIELDS:
             raise ValueError(
-                "each local input declaration must contain exactly slot, name, and media_type"
+                "each local input declaration must contain exactly slot and name"
             )
         name = item.get("name")
         if not isinstance(name, str) or _NAME.fullmatch(name) is None or name in names:
             raise ValueError("artifact input names must be unique safe file names")
         names.add(name)
-        if not isinstance(item.get("slot"), str) or not isinstance(
-            item.get("media_type"), str
-        ):
-            raise TypeError("artifact input slot and media_type must be strings")
+        if not isinstance(item.get("slot"), str):
+            raise TypeError("artifact input slot must be a string")
     if set(paths_value) != names:
         raise ValueError("input_paths must name every declared input exactly once")
     base = Path.cwd() if source == "-" else Path(source).absolute().parent
@@ -1245,9 +1242,6 @@ def _prepare_inputs(
         if not isinstance(item, dict):
             raise TypeError("artifact input declaration is invalid")
         name = cast(str, item["name"])
-        media_type = cast(str, item["media_type"])
-        if _MEDIA_TYPE.fullmatch(media_type) is None:
-            raise ValueError(f"artifact input {name} has an invalid media type")
         if name in reserved_names_value:
             raise ValueError(
                 f"artifact input name is reserved by the Controller: {name}"
@@ -1258,7 +1252,6 @@ def _prepare_inputs(
             {
                 "slot": item["slot"],
                 "name": name,
-                "media_type": media_type,
                 "size_bytes": size,
                 "sha256": digest,
             }
@@ -1463,7 +1456,10 @@ def _match_input_binding(
     expected_by_name = {cast(str, item["name"]): item for item in declarations}
     if not isinstance(actual, (list, tuple)):
         raise ControlMalformedResponse("artifact job input declarations are invalid")
-    actual_by_name = _declared_files(actual, "input declarations")
+    actual_by_name = {
+        name: {key: value for key, value in item.items() if key != "media_type"}
+        for name, item in _declared_files(actual, "input declarations").items()
+    }
     if actual_by_name != expected_by_name:
         raise ControlMalformedResponse(
             "artifact create receipt differs from the requested declarations"

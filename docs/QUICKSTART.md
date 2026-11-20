@@ -9,7 +9,7 @@ are optional; without an upstream key, local model routes still work.
 ## Install
 
 On Intel or ARM macOS or Linux, provide `curl`, `openssl` and installed
-`uv`, then run the signed NAS installer. It verifies one portable Python setup
+`uv`, then run the signed installer. It verifies one portable Python setup
 wheel and its payload; `uv` manages the isolated Python 3.14 runtime:
 
 ```sh
@@ -17,15 +17,19 @@ curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
 Answer `lab` at the install mode prompt (the default, Secure remote, needs
-Tailscale), enter the NAS's reserved LAN IPv4 address, and optionally enter a
+Tailscale), enter the controller host's reserved LAN IPv4 address, and optionally enter a
 LiteLLM upstream key and a Hugging Face token for gated models. The project is created
 in `vonk-forge/`. The administrator username is `admin`; its generated password
 is saved in `vonk-forge/secrets/admin-password`.
 
-The Spark management network defaults to the NAS's own /24. To narrow it (for
+If you ran the installer on a workstation rather than on the controller host,
+move the complete `vonk-forge/` directory to the controller host before you
+continue.
+
+The Spark management network defaults to the controller host's own /24. To narrow it (for
 example to the Sparks' exact addresses), edit `VONK_MANAGEMENT_CIDRS` in `.env`. Add LAN DNS records for `vonk-forge.local`, `enroll.vonk-forge.local`,
 `agents.vonk-forge.local`, and `registry.vonk-forge.local`, all pointing to the
-NAS address. On a small lab network, equivalent host-file entries can be used.
+controller host address. On a small lab network, equivalent host-file entries can be used.
 
 ## Start and trust HTTPS
 
@@ -44,8 +48,10 @@ limited to your trusted LAN and do not forward port 8443 from the internet.
 
 ## Add a Spark
 
-Create a one-use enrollment grant in **Fleet**. On the Spark, run the generated
-install command; it already carries the NAS LAN address. The Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
+Create a one-use enrollment grant with **Enroll Spark** on the Overview page,
+or on the command line with `vonkctl fleet enroll NAME --output grant.json`.
+On the Spark, run the generated install command; it already carries the
+controller host's LAN address. The Spark must resolve the three `enroll`, `agents`, and `registry` hostnames above
 to that same address. Import the local CA certificate on any client that needs
 to connect to the controller or Spark-facing HTTPS endpoints.
 

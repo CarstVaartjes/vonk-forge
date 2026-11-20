@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationProgress,
     RecipeJobFile,
-    RecipeJobInputFile,
+    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
@@ -533,7 +533,6 @@ def artifact_create_request(run_id: str, request_id: str) -> _ArtifactCreateRequ
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
@@ -560,8 +559,8 @@ def create_artifact_job(service: ArtifactJobService, *args, **request):
     if "inputs" in request:
         request["inputs"] = [
             item
-            if isinstance(item, RecipeJobInputFile)
-            else RecipeJobInputFile.model_validate(item)
+            if isinstance(item, RecipeJobInputRequest)
+            else RecipeJobInputRequest.model_validate(item)
             for item in request["inputs"]
         ]
     if "output_limits" in request and not isinstance(
@@ -907,7 +906,6 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(input_content),
                 "sha256": input_digest,
             }
@@ -1220,7 +1218,6 @@ def test_artifact_job_rejects_unsafe_names(tmp_path) -> None:
                 {
                     "slot": "input",
                     "name": "../escape",
-                    "media_type": "image/png",
                     "size_bytes": 0,
                     "sha256": hashlib.sha256(b"").hexdigest(),
                 }
@@ -1235,10 +1232,6 @@ def test_artifact_job_rejects_unsafe_names(tmp_path) -> None:
         (lambda value: value["parameters"].update(extra=True), "undeclared"),
         (lambda value: value["parameters"].update(seed="101"), "wrong type"),
         (lambda value: value["inputs"][0].update(slot="other"), "undeclared"),
-        (
-            lambda value: value["inputs"][0].update(media_type="image/jpeg"),
-            "media type",
-        ),
         (lambda value: value["output_limits"].update(max_files=2), "exceed"),
         (
             lambda value: value["output_limits"].update(
@@ -1263,7 +1256,6 @@ def test_artifact_job_server_contract_rejects_client_escalation(
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
@@ -1280,6 +1272,39 @@ def test_artifact_job_server_contract_rejects_client_escalation(
     }
     change(request)
     with pytest.raises(ArtifactJobError):
+        create_artifact_job(service, **request)
+
+
+def test_artifact_job_refuses_an_input_name_that_fits_no_declared_extension(
+    tmp_path,
+) -> None:
+    def transform(document: dict[str, object]) -> None:
+        interface = _mapping(_sequence(document["interfaces"])[0])
+        interface["input"] = {
+            "required": True,
+            "media_types": ["image/png"],
+            "max_bytes": 4096,
+            "slots": [
+                {
+                    "id": "input",
+                    "label": "Input",
+                    "description": "Source image",
+                    "media_types": ["image/png"],
+                    "extensions": [".png"],
+                    "min_files": 1,
+                    "max_files": 1,
+                    "max_file_bytes": 1024,
+                    "max_total_bytes": 4096,
+                }
+            ],
+        }
+
+    _sessions, _operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path, recipe_transform=transform)
+    )
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000107")
+    request["inputs"][0]["name"] = "input.exe"
+    with pytest.raises(ArtifactJobError, match=r"extensions: \.png"):
         create_artifact_job(service, **request)
 
 
@@ -1584,7 +1609,6 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
                 {
                     "slot": "input",
                     "name": "input.png",
-                    "media_type": "image/png",
                     "size_bytes": len(content),
                     "sha256": hashlib.sha256(content).hexdigest(),
                 }
@@ -2151,7 +2175,6 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": digest,
             }

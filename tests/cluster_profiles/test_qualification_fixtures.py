@@ -474,6 +474,7 @@ class _ArtifactClient(_DownloadClient):
         )
 
         body = self.jobs[job_id]
+        declared = [{**item, "media_type": "image/png"} for item in body["inputs"]]
         value = {
             "id": job_id,
             "run_id": "11111111-1111-4111-8111-111111111111",
@@ -484,8 +485,8 @@ class _ArtifactClient(_DownloadClient):
             "contract_sha256": "d" * 64,
             "input_manifest_sha256": "e" * 64,
             "input_total_bytes": sum(item["size_bytes"] for item in body["inputs"]),
-            "input_declarations": body["inputs"],
-            "input_files": body["inputs"],
+            "input_declarations": declared,
+            "input_files": declared,
             "output_limits": body["output_limits"],
             "timeout_seconds": body["timeout_seconds"],
             "output_files": [],
@@ -554,6 +555,7 @@ class _ArtifactClient(_DownloadClient):
     def upload_file(self, path, source, *, media_type, expected_sha256, expected_size):
         assert hashlib.sha256(source.read_bytes()).hexdigest() == expected_sha256
         assert len(source.read_bytes()) == expected_size
+        assert media_type == "image/png"  # the type the create response declared
         self.uploaded.append(path)
         return self._response(path.split("/")[-3], preparation="draft")
 

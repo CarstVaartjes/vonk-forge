@@ -108,18 +108,23 @@ class RecipeJobFile(_RecipeJobModel):
         return parsed
 
 
-class RecipeJobInputFile(_RecipeJobModel):
+class RecipeJobInputRequest(_RecipeJobModel):
+    """What a client declares for one input: the Controller derives its type."""
+
     slot: ArtifactSlot
     name: ArtifactName
-    media_type: MediaType
     size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
     sha256: Digest
 
     @model_validator(mode="after")
-    def name_is_safe(self) -> RecipeJobInputFile:
+    def name_is_safe(self) -> RecipeJobInputRequest:
         if self.name == "manifest.json":
             raise ValueError("artifact name is invalid")
         return self
+
+
+class RecipeJobInputFile(RecipeJobInputRequest):
+    media_type: MediaType
 
     @classmethod
     def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobInputFile:

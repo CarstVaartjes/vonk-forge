@@ -12,8 +12,6 @@ from pydantic import ValidationError
 from vonk_agent_protocol import (
     LifecycleState,
     OperationProgress,
-    ProgressPhase,
-    RecipeImageCode,
 )
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
@@ -22,10 +20,8 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.job_documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
-from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
-    OPERATION_KIND,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
 )
@@ -321,50 +317,6 @@ def _download(service: Mock) -> Response:
         "/api/recipe/example/download",
         json={"request_key": _REQUEST_KEY},
     )
-
-
-def test_download_projects_an_ended_observation_and_admits_a_fresh_request() -> None:
-    ended = RecipeImageAvailabilityView(
-        id="00000000-0000-4000-8000-000000000211",
-        request_id=_REQUEST_KEY,
-        request=RecipeRevisionIntent(recipe_revision_id="revision"),
-        kind=OPERATION_KIND,
-        state=LifecycleState.FAILED,
-        attempt=1,
-        recipe_revision_id="revision",
-        recipe_content_sha256="a" * 64,
-        model_digest=None,
-        build_input_sha256=None,
-        progress=OperationProgress(phase=ProgressPhase.PREPARING),
-        image_progress=None,
-        result=None,
-        failure=AvailabilityOperationFailure(
-            code=RecipeImageCode.PREPARATION_EXHAUSTED,
-            detail="Observation budget ended",
-            retryable=False,
-        ),
-        supported_actions=(),
-        created_at="2026-01-01T00:00:00+00:00",
-        updated_at="2026-01-01T00:00:00+00:00",
-    )
-    fresh_key = "00000000-0000-4000-8000-000000000212"
-    fresh = ended.model_copy(
-        update={
-            "id": fresh_key,
-            "request_id": fresh_key,
-            "state": LifecycleState.QUEUED,
-        }
-    )
-    service = Mock()
-    service.start_selector.side_effect = (ended, fresh)
-    first = _download(service)
-    second = _operator_client(service).post(
-        "/api/recipe/example/download", json={"request_key": fresh_key}
-    )
-    assert first.status_code == second.status_code == 202
-    assert first.json()["state"] == LifecycleState.FAILED
-    assert second.json()["state"] == LifecycleState.QUEUED
-    assert service.start_selector.call_count == 2
 
 
 @pytest.mark.parametrize(

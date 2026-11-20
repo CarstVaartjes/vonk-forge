@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .cli_artifact_jobs import _create_with_reconcile, _job
+from .cli_artifact_jobs import _create_with_reconcile, _declared_files, _job
 from .cli_states import (
     DRAFT,
     ENDED_STATES,
@@ -252,6 +252,10 @@ class ArtifactJobSmokeAdapter:
                 )
 
             if not expired and preparation(status) == DRAFT:
+                # The Controller derived each input's media type at create.
+                accepted = _declared_files(
+                    status.get("input_declarations"), "input declarations"
+                )
                 with recipe.materialize() as inputs:
                     for declaration, source in inputs:
                         _observe(
@@ -259,7 +263,9 @@ class ArtifactJobSmokeAdapter:
                                 bounded.upload_file(
                                     f"{job_path}/inputs/{_quote(str(declaration['name']))}",
                                     source,
-                                    media_type=str(declaration["media_type"]),
+                                    media_type=str(
+                                        accepted[str(declaration["name"])]["media_type"]
+                                    ),
                                     expected_sha256=str(declaration["sha256"]),
                                     expected_size=declaration["size_bytes"],
                                 )
