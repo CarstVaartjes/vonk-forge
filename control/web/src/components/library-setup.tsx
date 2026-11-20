@@ -231,7 +231,7 @@ export function LibrarySetupStrip({
                   key={tile.value}
                   type="button"
                   aria-pressed={pressed}
-                  aria-label={`${sparkLabel(Number(tile.value))} or fewer: ${tile.count} ${noun}${tile.yours ? " (your fleet)" : ""}`}
+                  aria-label={`${sparkLabel(Number(tile.value))} or fewer: ${tile.count} ${noun}${tile.yours ? " (yours, your fleet)" : ""}`}
                   data-fleet={tile.yours ? "yours" : undefined}
                   disabled={tile.count === 0 && !pressed}
                   onClick={() => set({ sparks: pressed ? "" : tile.value })}

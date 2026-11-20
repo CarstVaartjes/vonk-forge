@@ -1054,6 +1054,10 @@ progress {
   color: var(--muted);
   font-size: 0.76rem;
 }
+.segmented button:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--ink);
+}
 .segmented button:is([aria-pressed="true"], [aria-selected="true"]) {
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--line-control);
