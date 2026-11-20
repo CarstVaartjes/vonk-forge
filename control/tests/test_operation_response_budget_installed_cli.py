@@ -243,7 +243,8 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
             check=False,
         )
         assert human.returncode == 0, human.stderr
-        assert affected in human.stdout
+        # Human Activity leads with the owner's id; the row id is JSON-only.
+        assert (unknown.get("owner") or {}).get("id", affected) in human.stdout
         oversized = False
         repaired = api.get(f"/api/operations/{affected}", headers=headers)
         assert repaired.status_code == 200
