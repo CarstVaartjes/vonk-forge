@@ -19,14 +19,16 @@ import {
   sparkLabel,
 } from "./library-workcell";
 
-// The Library opens the way the public site does: say what you have, see what
-// runs on it. Here the Controller knows what you have, so the Spark tile that
-// matches the live fleet is marked as yours, and every choice is the same
-// filter the toolbar, the URL and `vonkctl recipe library` use (--sparks,
-// --family, --engine, --creator, --fits-fleet). Counts are the records the
-// other filters leave. "Fits my fleet now" is the Controller's own placement
-// verdict against fresh capacity, carried on each recipe of the loaded page;
-// unknown evidence is counted apart and never presented as a non-fit.
+// The one Library toolbar (search, segmented Spark count, Fits fleet and Cached
+// only toggles, a Filters disclosure). Every control sets the same filter the
+// URL and `vonkctl recipe library` use (--sparks, --family, --engine,
+// --creator, --fits-fleet); the URL-backed `filters` the caller owns is the
+// only state. The Spark segment matching the live fleet is marked "yours".
+// Counts are the records the other filters leave; Models are counted by the
+// lineage fold key. "Fits fleet" is the Controller's own placement verdict
+// against fresh capacity: checking it makes the page ask for verdicts, so it
+// is never disabled for want of them; unknown evidence is counted apart and
+// never presented as a non-fit.
 
 type Facet = "family" | "engine" | "creator";
 // Proven fits, proven non-fits, and verdicts the Controller could not give.
@@ -51,6 +53,7 @@ export function countFleetFit(
   for (const record of open) {
     const rank = fleetFitRank(record.recipe!);
     const key = noun === "models" ? recordModelKey(record) : record.recipe!.recipe_id;
+    if (key === null) continue;
     const current = best.get(key);
     if (current === undefined || rank > current) best.set(key, rank);
   }
@@ -68,7 +71,7 @@ function countBy(
 ): number {
   const matching = filterLibraryRecipeRecords(records, filters, query);
   return noun === "models"
-    ? new Set(matching.map(recordModelKey)).size
+    ? new Set(matching.flatMap((record) => recordModelKey(record) ?? [])).size
     : new Set(matching.flatMap((record) => (record.recipe ? [record.recipe.recipe_id] : []))).size;
 }
 
@@ -179,6 +182,10 @@ export function LibrarySetupStrip({
       ? "Fleet state is not available yet"
       : `${summary.online} of ${summary.enrolled} Spark${summary.enrolled === 1 ? "" : "s"} online` +
         (freeMemoryText(summary) === null ? "" : ` · ${freeMemoryText(summary)}`);
+  const fitLine = assessed
+    ? `${fit.fits} of ${fit.fits + fit.nonFit} assessed ${noun} fit now` +
+      (fit.unknown > 0 ? `, ${fit.unknown} awaiting assessment` : "")
+    : "Placement not assessed yet; Fits fleet asks the Controller";
   const facet = (name: Facet) => facetOptions(name, records, filters, query, noun);
   const asOptions = (options: FacetOption[]): Option[] =>
     options.map((option) => ({
@@ -248,12 +255,7 @@ export function LibrarySetupStrip({
           <input
             type="checkbox"
             checked={filters.fits}
-            disabled={fit.fits === 0 && !filters.fits}
-            title={
-              assessed
-                ? `${fit.fits} of ${fit.fits + fit.nonFit} assessed ${noun} fit now; unknown verdicts stay visible (vonkctl recipe library --fits-fleet)`
-                : "The Controller has not assessed placement for this page yet"
-            }
+            title="Keep what the Controller can place on fresh fleet capacity; unknown verdicts stay visible (vonkctl recipe library --fits-fleet)"
             onChange={(event) => set({ fits: event.target.checked })}
           />
           Fits fleet
@@ -309,7 +311,11 @@ export function LibrarySetupStrip({
             name="Filter usage"
             all="All usage"
             value={filters.usage}
-            options={sorted(records.flatMap((r) => r.capabilities)).map((value) => ({
+            options={sorted(
+              records.flatMap((r) =>
+                noun === "models" ? (r.modelCapabilities ?? []) : r.capabilities,
+              ),
+            ).map((value) => ({
               value,
               label: words.label(value),
             }))}
@@ -351,9 +357,14 @@ export function LibrarySetupStrip({
             name="Filter exact model"
             all="All models"
             value={filters.model}
-            options={[...new Map(records.map((r) => [r.modelKey, r.modelTitle])).entries()].map(
-              ([value, label]) => ({ value, label }),
-            )}
+            options={[
+              ...new Map(
+                records.map((r) => [
+                  r.modelKey,
+                  `${r.modelTitle} · ${r.modelDocument?.identity.version ?? ""} · ${r.model?.content_sha256.slice(0, 8) ?? ""}`,
+                ]),
+              ).entries(),
+            ].map(([value, label]) => ({ value, label }))}
             onChange={(model) => set({ model })}
           />
           <FilterSelect
@@ -383,7 +394,9 @@ export function LibrarySetupStrip({
           </label>
         </div>
       </details>
-      <p className="library-toolbar-fleet">{fleetLine}.</p>
+      <p className="library-toolbar-fleet">
+        {fleetLine}. {fitLine}.
+      </p>
     </section>
   );
 }

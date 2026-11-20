@@ -198,20 +198,27 @@ export function activeFilterSummary(filters: LibraryWorkcellFilters, query: stri
   return parts;
 }
 
-/** The Model an exact variant belongs to. Variants (quantizations, derivatives)
- * fold into their Model by the display lineage; a Model with no lineage (a
- * helper, or a display not yet synced) declares no variants and counts as itself.
- * Every "N models" figure counts this key, never the exact variant. */
-export function modelFoldKey(display: ModelDisplay | null | undefined, exactKey: string): string {
+/** The Model an exact variant belongs to: its display lineage `family/line/model`.
+ * Variants (quantizations, derivatives) fold into it. A model with no lineage
+ * (a helper, drafter or encoder, or a display not yet synced) is not a Model and
+ * has no key: it is left out of every Model list and count, as on the public
+ * site. Every "N models" figure counts this key, never the exact variant. */
+export function modelFoldKey(display: ModelDisplay | null | undefined): string | null {
   const lineage = display?.lineage;
-  return lineage ? `${lineage.family}/${lineage.line}/${lineage.model}` : exactKey;
+  return lineage ? `${lineage.family}/${lineage.line}/${lineage.model}` : null;
 }
-export function recordModelKey(record: LibraryRecipeRecord): string {
-  return modelFoldKey(record.modelDisplay, record.modelKey);
+export function recordModelKey(record: LibraryRecipeRecord): string | null {
+  return modelFoldKey(record.modelDisplay);
 }
+/** Distinct Models among exact variants. */
 export function countModels(models: LibraryViewModel[]): number {
-  return new Set(models.map((model) => modelFoldKey(model.model_display, modelKey(model.model))))
-    .size;
+  return new Set(models.flatMap((model) => modelFoldKey(model.model_display) ?? [])).size;
+}
+/** Distinct exact variants of the counted Models. */
+export function countVariants(models: LibraryViewModel[]): number {
+  return new Set(
+    models.flatMap((model) => (modelFoldKey(model.model_display) ? [modelKey(model.model)] : [])),
+  ).size;
 }
 
 function modelTitle(model: LibraryViewModel): string {
@@ -429,7 +436,7 @@ export function EmptyLibrary({
 
 const SHOW_STEP = 40;
 /** Bounds a long list: the first page, a "Show more" button, back to one page when `resetKey` changes. */
-export function useShowMore(resetKey: string, total: number, atLeast = 0) {
+export function useShowMore(resetKey: string, total: number, atLeast = 0, noun = "rows") {
   const [pages, setPages] = useState(1);
   useEffect(() => setPages(1), [resetKey]);
   const limit = Math.max(pages * SHOW_STEP, atLeast);
@@ -440,7 +447,7 @@ export function useShowMore(resetKey: string, total: number, atLeast = 0) {
         className="button secondary library-load-more"
         onClick={() => setPages(Math.ceil(limit / SHOW_STEP) + 1)}
       >
-        Show more ({total - limit} more)
+        Show more ({total - limit} more {noun})
       </button>
     ) : null;
   return { limit, more };
@@ -503,34 +510,43 @@ export function LibraryWorkcell({
   const records = buildLibraryRecipeRecords(snapshot);
   const matching = filterLibraryRecipeRecords(records, filters, query);
   // One entry per Model: variants fold into it (see `modelFoldKey`). The list,
-  // its "x of y" count and the Spark/Any counts all use this one predicate.
+  // its "x of y" count and the Spark/Any counts all use this one predicate. The
+  // row stands for the Model, so its representative comes from the whole library
+  // (the base variant when there is one), never from what a filter leaves.
   const requestedKey = route.kind === LibraryPath.MODELS ? route.modelKey : filters.model;
+  const variantKeys = new Map<string, Set<string>>();
   const reps = new Map<string, LibraryRecipeRecord>();
-  for (const record of matching) {
-    const key = recordModelKey(record);
-    if (!reps.has(key) || record.modelKey === requestedKey) reps.set(key, record);
-  }
-  const models = [...reps.values()];
-  const totalModels = new Set(records.map(recordModelKey)).size;
-  const variantCounts = new Map<string, Set<string>>();
   for (const record of records) {
     const key = recordModelKey(record);
-    variantCounts.set(key, (variantCounts.get(key) ?? new Set()).add(record.modelKey));
+    if (key === null) continue;
+    variantKeys.set(key, (variantKeys.get(key) ?? new Set()).add(record.modelKey));
+    const rep = reps.get(key);
+    if (
+      !rep ||
+      (record.modelDisplay?.lineage?.variant_kind === "base" &&
+        rep.modelDisplay?.lineage?.variant_kind !== "base")
+    )
+      reps.set(key, record);
   }
+  const shown = new Set(matching.flatMap((record) => recordModelKey(record) ?? []));
+  const models = [...reps].filter(([key]) => shown.has(key)).map(([, record]) => record);
+  const totalModels = reps.size;
   const requested = records.find((record) => record.modelKey === requestedKey);
-  const selectedModelKey = requested ? recordModelKey(requested) : undefined;
+  const requestedFold = requested ? recordModelKey(requested) : null;
   const selectedModel =
-    models.find((record) => recordModelKey(record) === selectedModelKey) ??
+    models.find((record) => recordModelKey(record) === requestedFold) ??
     (requested ? undefined : models[0]);
   const selectedFold = selectedModel ? recordModelKey(selectedModel) : undefined;
   const selectedRecipes = matching.filter(
     (record) => recordModelKey(record) === selectedFold && record.recipe,
   );
   const selectedIndex = models.findIndex((record) => recordModelKey(record) === selectedFold);
+  const selectedVariants = selectedFold ? (variantKeys.get(selectedFold)?.size ?? 0) : 0;
   const { limit, more } = useShowMore(
     JSON.stringify([filters, query]),
     models.length,
     selectedIndex + 1,
+    "models",
   );
   const recipePaneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -582,7 +598,7 @@ export function LibraryWorkcell({
           <div className="library-model-pane" aria-label="Models">
             <ul>
               {models.slice(0, limit).map((model) => (
-                <li key={recordModelKey(model)}>
+                <li key={recordModelKey(model)!}>
                   <NavigateLink
                     current={recordModelKey(model) === selectedFold}
                     href={modelLibraryPath(model.modelKey)}
@@ -593,14 +609,15 @@ export function LibraryWorkcell({
                     >
                       <strong>{model.modelTitle}</strong>
                       <small>
-                        {model.model?.publisher}/{model.model?.slug}
-                        {(variantCounts.get(recordModelKey(model))?.size ?? 0) > 1 &&
-                          ` · ${variantCounts.get(recordModelKey(model))!.size} variants`}
+                        {(variantKeys.get(recordModelKey(model)!)?.size ?? 0) > 1
+                          ? `${variantKeys.get(recordModelKey(model)!)!.size} variants`
+                          : `${model.model?.publisher}/${model.model?.slug}`}
                       </small>
-                      <small>
-                        {formatWire(model.modelFileCount)} files · {formatBytes(model.modelBytes)}
-                      </small>
-                      <em>{model.capabilities.map(words.label).join(" · ") || NOT_REPORTED}</em>
+                      <em>
+                        {(model.modelCapabilities ?? model.capabilities)
+                          .map(words.label)
+                          .join(" · ") || NOT_REPORTED}
+                      </em>
                     </span>
                   </NavigateLink>
                 </li>
@@ -630,11 +647,17 @@ export function LibraryWorkcell({
               <div className="library-selected-model-context">
                 <strong>{selectedModel.modelTitle}</strong>
                 <span>
-                  {formatWire(selectedModel.modelFileCount)} files ·{" "}
-                  {formatBytes(selectedModel.modelBytes)} ·{" "}
-                  {selectedModel.capabilities.map(words.label).join(" · ") || NOT_REPORTED}
+                  {selectedVariants <= 1 && (
+                    <>
+                      {formatWire(selectedModel.modelFileCount)} files ·{" "}
+                      {formatBytes(selectedModel.modelBytes)} ·{" "}
+                    </>
+                  )}
+                  {(selectedModel.modelCapabilities ?? selectedModel.capabilities)
+                    .map(words.label)
+                    .join(" · ") || NOT_REPORTED}
                 </span>
-                {selectedModel.cacheUsage && (
+                {selectedVariants <= 1 && selectedModel.cacheUsage && (
                   <span>
                     {formatBytes(selectedModel.cacheUsage.unique_bytes)} unique ·{" "}
                     {formatBytes(selectedModel.cacheUsage.shared_bytes)} shared

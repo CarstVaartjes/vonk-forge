@@ -22,10 +22,13 @@ const TONE: Record<CatalogSyncStatus["state"], StatusTone> = {
 export function CatalogSyncStatusLine({
   api,
   release,
+  attention = false,
   children,
 }: {
   api: Pick<LibraryApi, "catalogSyncStatus">;
   release?: LibraryViewSnapshot["library"];
+  /** Open the details by themselves: something besides the sync needs a look. */
+  attention?: boolean;
   children?: ReactNode;
 }) {
   const [status, setStatus] = useState<CatalogSyncStatus | null | undefined>();
@@ -71,14 +74,14 @@ export function CatalogSyncStatusLine({
     return release || children ? (
       <div className="library-sync" role="status">
         <p>{name}</p>
-        {details(false, null)}
+        {details(attention, null)}
       </div>
     ) : null;
   if (status === null)
     return (
       <div className="library-sync" role="status">
         <p>{name} · sync has not run yet. The Controller syncs automatically.</p>
-        {details(false, null)}
+        {details(attention, null)}
       </div>
     );
   const at = lastSyncAt(status);
@@ -93,7 +96,7 @@ export function CatalogSyncStatusLine({
         <Time value={at} />
       </p>
       {details(
-        status.state !== "current",
+        status.state !== "current" || attention,
         <>
           <p>
             {status.commit && (

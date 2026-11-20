@@ -867,3 +867,4 @@
   align-self: center;
   color: var(--muted, inherit);
 }
+.library-sync summary { align-items: center; cursor: pointer; display: inline-flex; min-height: 2.75rem; }

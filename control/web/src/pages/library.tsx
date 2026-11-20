@@ -407,7 +407,11 @@ export function LibraryPage({
           ) : undefined
         }
       >
-        <CatalogSyncStatusLine api={api} release={snapshot?.library}>
+        <CatalogSyncStatusLine
+          api={api}
+          release={snapshot?.library}
+          attention={Boolean(snapshot?.storage_observation?.storage_reason)}
+        >
           {snapshot && <LibraryStorageObservation snapshot={snapshot} />}
         </CatalogSyncStatusLine>
       </PageHeader>

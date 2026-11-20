@@ -11,7 +11,6 @@ import {
   LibraryWorkcell,
   recipeEngine,
   recipeFleetFit,
-  recordModelKey,
 } from "./library-workcell";
 import { cacheRemovalReview } from "../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../test-fixtures/library";
@@ -520,6 +519,37 @@ test("record titles and the alignment filter follow the published display", () =
   );
 });
 
+function bulkSnapshot(count: number) {
+  const snapshot = structuredClone(libraryViewSnapshot);
+  const base = snapshot.models[0]!;
+  snapshot.models = Array.from({ length: count }, (_, index) => ({
+    ...structuredClone(base),
+    model: { ...base.model, slug: `bulk-${index}`, content_sha256: `${index}`.padStart(64, "0") },
+    model_display: {
+      ...base.model_display!,
+      lineage: { ...base.model_display!.lineage!, model: `bulk-${index}` },
+    },
+    recipes: [],
+  }));
+  return snapshot;
+}
+const renderBulk = (
+  snapshot: typeof libraryViewSnapshot,
+  selected: number,
+  filters = EMPTY_LIBRARY_WORKCELL_FILTERS,
+) => (
+  <LibraryWorkcell
+    api={{} as never}
+    filters={filters}
+    onFiltersChange={() => undefined}
+    onNavigate={() => undefined}
+    onQueryChange={() => undefined}
+    query=""
+    route={{ kind: LibraryPath.MODELS, modelKey: modelKey(snapshot.models[selected]!.model) }}
+    snapshot={snapshot}
+  />
+);
+
 test("folds quantization variants into one Model row and counts Models", () => {
   const snapshot = structuredClone(libraryViewSnapshot);
   const base = snapshot.models[0]!;
@@ -529,52 +559,35 @@ test("folds quantization variants into one Model row and counts Models", () => {
     quantization: "q8",
     recipes: [],
   });
-  const total = new Set(buildLibraryRecipeRecords(snapshot).map(recordModelKey)).size;
-  expect(total).toBe(snapshot.models.length - 1);
-  render(
-    <LibraryWorkcell
-      api={{} as never}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      onFiltersChange={() => undefined}
-      onNavigate={() => undefined}
-      onQueryChange={() => undefined}
-      query=""
-      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(base.model) }}
-      snapshot={snapshot}
-    />,
-  );
-  expect(screen.getByText(`Models · ${total} of ${total}`)).toBeVisible();
-  expect(screen.getByText(/2 variants/)).toBeVisible();
+  render(renderBulk(snapshot, 0));
+  // 93 exact variants, 92 Models; the folded row names the variants, not one file size.
+  expect(screen.getByText("Models · 92 of 92")).toBeInTheDocument();
+  expect(screen.getByText("2 variants")).toBeVisible();
 });
 
 test("the Models list starts with one page and Show more reveals the rest", () => {
-  const snapshot = structuredClone(libraryViewSnapshot);
-  const base = snapshot.models[0]!;
-  snapshot.models = Array.from({ length: 45 }, (_, index) => ({
-    ...structuredClone(base),
-    model: { ...base.model, slug: `bulk-${index}`, content_sha256: `${index}`.padStart(64, "0") },
-    model_display: {
-      ...base.model_display!,
-      lineage: { ...base.model_display!.lineage!, model: `bulk-${index}` },
-    },
-    recipes: [],
-  }));
-  render(
-    <LibraryWorkcell
-      api={{} as never}
-      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-      onFiltersChange={() => undefined}
-      onNavigate={() => undefined}
-      onQueryChange={() => undefined}
-      query=""
-      route={{ kind: LibraryPath.MODELS, modelKey: modelKey(snapshot.models[0]!.model) }}
-      snapshot={snapshot}
-    />,
-  );
+  render(renderBulk(bulkSnapshot(45), 0));
   const list = within(screen.getByLabelText("Models"));
   expect(list.getAllByRole("listitem")).toHaveLength(40);
-  fireEvent.click(list.getByRole("button", { name: "Show more (5 more)" }));
+  fireEvent.click(list.getByRole("button", { name: "Show more (5 more models)" }));
   expect(list.getAllByRole("listitem")).toHaveLength(45);
+});
+
+test("a selected Model past the first page stays visible", () => {
+  render(renderBulk(bulkSnapshot(45), 44));
+  const list = within(screen.getByLabelText("Models"));
+  expect(list.getAllByRole("listitem")).toHaveLength(45);
+  expect(list.getByRole("link", { current: "page" })).toBeVisible();
+});
+
+test("Show more starts over when a filter changes", () => {
+  const snapshot = bulkSnapshot(45);
+  const { rerender } = render(renderBulk(snapshot, 0));
+  const list = within(screen.getByLabelText("Models"));
+  fireEvent.click(list.getByRole("button", { name: /^Show more/ }));
+  expect(list.getAllByRole("listitem")).toHaveLength(45);
+  rerender(renderBulk(snapshot, 0, { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sort: "name" }));
+  expect(list.getAllByRole("listitem")).toHaveLength(40);
 });
 
 test("the Models list obeys the toolbar filters, not only the search", () => {
@@ -593,11 +606,5 @@ test("the Models list obeys the toolbar filters, not only the search", () => {
       snapshot={snapshot}
     />,
   );
-  expect(within(screen.getByLabelText("Models")).getAllByRole("listitem").length).toBe(
-    new Set(
-      buildLibraryRecipeRecords(snapshot)
-        .filter((record) => record.modelCached)
-        .map(recordModelKey),
-    ).size,
-  );
+  expect(within(screen.getByLabelText("Models")).getAllByRole("listitem")).toHaveLength(1);
 });

@@ -70,7 +70,7 @@ test("groups model revisions and keeps recipe links and downloads bound to the s
 
   const list = screen.getByLabelText("Model library");
   expect(within(list).getAllByRole("article")).toHaveLength(1);
-  expect(screen.getByText("1 of 1 models")).toBeVisible();
+  expect(screen.getByText("1 of 1 models · 2 variants")).toBeVisible();
   expect(within(list).getByRole("link", { name: current.recipes[0]!.title })).toBeVisible();
   const revisions = within(list).getByRole("combobox", { name: /Revision for / });
   expect(revisions).toHaveValue(
@@ -320,9 +320,9 @@ test("counts Models, not quantization variants, and bounds the list with Show mo
       query=""
     />,
   );
-  expect(screen.getByText("46 of 46 models")).toBeVisible();
+  expect(screen.getByText("46 of 46 models · 47 variants")).toBeVisible();
   const list = screen.getByLabelText("Model library");
   expect(within(list).getAllByRole("article")).toHaveLength(40);
-  fireEvent.click(screen.getByRole("button", { name: "Show more (7 more)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show more (7 more rows)" }));
   expect(within(list).getAllByRole("article")).toHaveLength(47);
 });

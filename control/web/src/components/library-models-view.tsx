@@ -15,6 +15,7 @@ import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   countModels,
+  countVariants,
   EMPTY_LIBRARY_WORKCELL_FILTERS,
   EmptyLibrary,
   filterLibraryRecipeRecords,
@@ -81,7 +82,7 @@ export function LibraryModelsView({
         modelTitle(model).toLowerCase().includes(normalizedQuery),
     );
   const groups = groupModels(visible);
-  const { limit, more } = useShowMore(JSON.stringify([filters, query]), groups.size);
+  const { limit, more } = useShowMore(JSON.stringify([filters, query]), groups.size, 0, "rows");
   const refresh = () => void onRefresh(new AbortController().signal);
 
   function updateFilters(patch: Partial<LibraryWorkcellFilters>) {
@@ -106,7 +107,7 @@ export function LibraryModelsView({
           </p>
         </div>
         <span>
-          {countModels(visible)} of {countModels(models)} models
+          {countModels(visible)} of {countModels(models)} models · {countVariants(visible)} variants
         </span>
       </header>
       <LibrarySetupStrip

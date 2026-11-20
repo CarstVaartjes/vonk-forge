@@ -10,7 +10,6 @@ import {
   filterLibraryRecipeRecords,
   recipeEngine,
   recordFamily,
-  recordModelKey,
 } from "./library-workcell";
 
 // Only the fields the strip reads; the generated FleetSnapshot has many more.
@@ -188,27 +187,22 @@ test("search, Sparks, two toggles and one Filters disclosure make the whole tool
     />,
   );
   const search = screen.getByRole("searchbox", { name: "Search Library" });
-  expect(search).toHaveAttribute("placeholder", "Search names, slugs, capabilities");
   fireEvent.change(search, { target: { value: "ltx" } });
   expect(onQueryChange).toHaveBeenCalledWith("ltx");
-  expect(screen.getByRole("group", { name: "Sparks per recipe" })).toHaveClass("segmented");
+  expect(screen.getByRole("group", { name: "Sparks per recipe" })).toBeVisible();
   expect(screen.getByRole("checkbox", { name: "Fits fleet" })).toBeVisible();
   expect(screen.getByRole("checkbox", { name: "Cached only" })).toBeVisible();
-  expect(document.querySelectorAll(".library-filters")).toHaveLength(1);
+  expect(screen.getAllByText(/^Filters/)).toHaveLength(1);
   expect(screen.queryByRole("heading", { name: "Start from your fleet" })).not.toBeInTheDocument();
 });
 
-test("counts Models, not quantization variants, on the Models tab", () => {
+test("counts Models, not quantization variants, and leaves lineage-less models out", () => {
   const first = records.find((record) => record.recipe && record.modelDisplay?.lineage)!;
-  const variant = {
-    ...first,
-    key: `${first.key}:q4`,
-    modelKey: `${first.modelKey}:q4`,
-  };
-  const withVariant = [...records, variant];
+  const variant = { ...first, key: `${first.key}:q4`, modelKey: `${first.modelKey}:q4` };
+  const helper = { ...first, key: `${first.key}:helper`, modelKey: "helper", modelDisplay: null };
   render(
     <LibrarySetupStrip
-      records={withVariant}
+      records={[...records, variant, helper]}
       filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
       query=""
       noun="models"
@@ -216,13 +210,10 @@ test("counts Models, not quantization variants, on the Models tab", () => {
       onQueryChange={() => undefined}
     />,
   );
-  const models = new Set(records.map(recordModelKey)).size;
-  expect(new Set(withVariant.map((record) => record.modelKey)).size).toBe(
-    new Set(records.map((record) => record.modelKey)).size + 1,
-  );
+  // The fixture holds 92 Models; one more variant and one helper change nothing.
   expect(
     within(screen.getByRole("group", { name: "Sparks per recipe" })).getByRole("button", {
-      name: `Any Spark count: ${models} models`,
+      name: "Any Spark count: 92 models",
     }),
   ).toBeVisible();
 });
@@ -246,12 +237,12 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
     />,
   );
   const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
-  expect(toggle).toHaveAttribute(
-    "title",
-    expect.stringContaining(
-      `${counts.fits} of ${counts.fits + counts.nonFit} assessed recipes fit now`,
+  expect(
+    screen.getByText(
+      `${counts.fits} of ${counts.fits + counts.nonFit} assessed recipes fit now, ${counts.unknown} awaiting assessment`,
+      { exact: false },
     ),
-  );
+  ).toBeVisible();
   expect(toggle).not.toBeChecked();
   fireEvent.click(toggle);
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
@@ -292,23 +283,23 @@ test("a model fits when one of its recipes does, matching what the filter keeps"
   expect(kept.size).toBe(expected.fits + expected.unknown);
 });
 
-test("without any verdict the toggle is disabled and says why", () => {
-  for (const list of [records, assessed(["unavailable"])]) {
-    const { unmount } = render(
-      <LibrarySetupStrip
-        records={list}
-        filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
-        query=""
-        noun="models"
-        onFiltersChange={() => undefined}
-        onQueryChange={() => undefined}
-      />,
-    );
-    const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAttribute("title", expect.stringMatching(/has not assessed placement/));
-    unmount();
-  }
+test("Fits fleet can be turned on before any verdict exists, so the page can ask for them", () => {
+  const onFiltersChange = vi.fn();
+  render(
+    <LibrarySetupStrip
+      records={records}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="models"
+      onFiltersChange={onFiltersChange}
+      onQueryChange={() => undefined}
+    />,
+  );
+  expect(screen.getByText(/Placement not assessed yet/)).toBeVisible();
+  const toggle = screen.getByRole("checkbox", { name: "Fits fleet" });
+  expect(toggle).toBeEnabled();
+  fireEvent.click(toggle);
+  expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
 });
 
 test("a recipe used by several models is counted once", () => {

@@ -326,3 +326,41 @@ test("one quiet sync line; commit, counters and storage cadence sit in its detai
   fireEvent.click(screen.getByText("Details"));
   expect(screen.getByText("abcdef123456")).toBeVisible();
 });
+
+test("degraded storage observation opens the sync details by itself", async () => {
+  history.replaceState(null, "", "/library");
+  const { ModelStorageObservationReason } = await import("../api/vocabulary.generated");
+  const api = {
+    ...libraryApi,
+    modelLibrary: async () => ({
+      ...modelLibrary,
+      storage_reason: ModelStorageObservationReason.FAILED,
+      storage_error_type: "OSError",
+    }),
+  } as unknown as ControlApi;
+  render(<App api={api} />);
+  expect(await screen.findByText(/FAILED|failed/i, { selector: "p" })).toBeVisible();
+});
+
+test("Fits fleet can be turned on from a fresh load and asks for fits_fleet", async () => {
+  history.replaceState(null, "", "/library");
+  const fits: Array<boolean | undefined> = [];
+  const api = {
+    ...libraryApi,
+    recipeLibrary: async (
+      _cursor?: string,
+      _sort?: string,
+      _updated?: string,
+      _signal?: AbortSignal,
+      fitsFleet?: boolean,
+    ) => {
+      fits.push(fitsFleet);
+      return recipeLibrary;
+    },
+  } as unknown as ControlApi;
+  render(<App api={api} />);
+  const toggle = await screen.findByRole("checkbox", { name: "Fits fleet" });
+  expect(toggle).toBeEnabled();
+  fireEvent.click(toggle);
+  await waitFor(() => expect(fits).toContain(true));
+});
