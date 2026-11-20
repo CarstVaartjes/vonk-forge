@@ -182,7 +182,7 @@ export function LibraryProfileComposer({
           </p>
         </div>
         <a className="button" href={`/library/profiles?profile=${formatWire(saved.number)}`}>
-          Review and apply profile {formatWire(saved.number)}
+          Review and load profile {formatWire(saved.number)}
         </a>
       </section>
     );

@@ -387,7 +387,7 @@ class FleetProfileService:
             fleet=fleet,
             status=ProfileDocumentState.LOADED.value
             if loaded_revision is not None
-            else ProfileDocumentState.DRAFT.value,
+            else ProfileDocumentState.SAVED.value,
             loaded_revision=loaded_revision,
             cache_summary=FleetCacheSummary(
                 cached=cache_cached, missing=cache_missing, unknown=cache_unknown

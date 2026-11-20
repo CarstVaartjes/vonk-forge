@@ -79,7 +79,7 @@ test("offers the profile page's connection example and never calls the gateway",
 
 test("shows nothing when no profile is loaded", async () => {
   // Break caught: an empty "Serving now" heading appears on a fleet that serves nothing.
-  const api = apiWith([{ number: 1, status: "draft" }], []);
+  const api = apiWith([{ number: 1, status: "saved" }], []);
   render(<ServingNow api={api} refreshKey="a" pollKey="1" />);
 
   await vi.waitFor(() => expect(api.profiles).toHaveBeenCalled());

@@ -243,7 +243,7 @@ test("selects the largest canonical profile identity and preserves its revision"
     expect.objectContaining({ expected_revision: revision }),
   );
   expect(
-    await screen.findByRole("link", { name: "Review and apply profile 2147483647" }),
+    await screen.findByRole("link", { name: "Review and load profile 2147483647" }),
   ).toHaveAttribute("href", "/library/profiles?profile=2147483647");
 });
 

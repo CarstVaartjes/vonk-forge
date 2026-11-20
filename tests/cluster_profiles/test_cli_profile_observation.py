@@ -508,7 +508,7 @@ def test_a_followed_read_still_publishes_every_snapshot_to_the_final_one(
 def test_a_one_shot_profile_read_publishes_no_progress_snapshot():
     class Reading:
         def request(self, *_args, **_kwargs):
-            return {"id": "1", "number": 1, "status": "draft"}
+            return {"id": "1", "number": 1, "status": "saved"}
 
     args = cli._parser().parse_args(("profile",))
     snapshots = []

@@ -765,13 +765,13 @@ vonkctl job download JOB_UUID --output artifact-results
 ## Profile
 
 Profiles cover the entire enrolled, non-revoked fleet. Editing autosaves a
-permissive draft; it does not stop or restart workloads. Every current Spark
+permissive saved profile; it does not stop or restart workloads. Every current Spark
 remains visible, and an unassigned Spark is explicitly idle. Review resolves
 the latest verified cached compatible recipe/model and checks complete
 topology. Load requires
 the digest of that reviewed decision and a client-generated request key.
 
-A save receipt confirms the complete committed draft and revision. Its cache
+A save receipt confirms the complete committed profile and revision. Its cache
 and live workload observations are unknown: saving does not walk managed model
 files, resolve runtime image presence, or assess running workloads. Read the
 profile or review a load for those observations. A lost save response may still
@@ -847,12 +847,12 @@ profile (`--profile N` is required, like every profile edit), previews the compl
 confirmation, follows the application, and prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
 Spark is included. `run` has two separate effects: the recipe is saved into
-the profile as a draft (the Controller can only review a saved profile, and
+the profile (the Controller can only review a saved profile, and
 saving does not change the running fleet), then the reviewed plan is loaded.
 Everything that can be refused is refused before the first effect: without
 `--yes`, a run that cannot ask (JSON, redirected input, `--no-input`) saves
 nothing. If you decline the confirmation, or the review is blocked, the saved
-draft remains, the fleet is unchanged, and the command exits non-zero.
+profile remains, the fleet is unchanged, and the command exits non-zero.
 Interactively, the load is bound to the effects you reviewed exactly as
 `profile load` is (see below) and asks again if they changed.
 
@@ -1248,7 +1248,7 @@ judges only the exact observed batch; protected prefixes never hide the tail.
 Each assignment can carry `gpu_clock: {min_mhz, max_mhz}`. Omission (or
 `null`) selects 300–2200 MHz, including Sparks with no assignment. Conflicting
 ranges on assignments sharing a Spark are refused. Save and export/import
-retain this setting; saving a draft does not change the active profile.
+retain this setting; saving a profile does not change the active profile.
 
 ```bash
 vonkctl --profile 2 profile configure --assignment coding --gpu-clock 300,1800
