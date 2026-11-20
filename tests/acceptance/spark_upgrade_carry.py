@@ -390,7 +390,14 @@ def resolve_release(
         raise LifecycleError(
             "source-bound renderer image roles differ from publication"
         )
-    if set(image_services) != set(compose_image_roles.values()) | retired:
+    # One role may bind several services (the API image also runs runtime-init).
+    bound = {
+        service
+        for service, definition in image_services.items()
+        if require_object(definition, "rendered image service").get("image")
+        in images.values()
+    }
+    if set(image_services) != bound | retired:
         raise LifecycleError("source-bound renderer adds an unbound service")
     for role, service in compose_image_roles.items():
         rendered_service = require_object(
