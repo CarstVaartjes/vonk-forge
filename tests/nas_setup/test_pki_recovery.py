@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup import publication
-from vonk_nas_setup.environment import parse_environment
+from vonk_nas_setup.environment import parse_environment, render_environment
 from vonk_nas_setup.pki import renew_controller_leaf, validate_pki_material
 from vonk_nas_setup.prompts import PromptIo
 from vonk_nas_setup.setup import prepare
@@ -152,12 +152,51 @@ def test_well_formed_foreign_controller_key_remains_explicit_blocker(
     )
     target = bundle / "secrets" / request.files.controller_server_private_key
     target.write_bytes(foreign)
+    compose = (bundle / "docker-compose.yaml").read_bytes()
     template = template.model_copy(
         update={"docker_compose_yaml": "services: {upgraded: {}}\n"}
     )
     with pytest.raises(ValueError, match="PKI"):
         prepare(template, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
     assert target.read_bytes() == foreign
-    assert (bundle / "docker-compose.yaml").read_text() == (
-        "services:\n  upgraded: {}\n"
+    assert (bundle / "docker-compose.yaml").read_bytes() == compose
+
+
+def test_failed_pki_renewal_keeps_previous_bundle_and_rerun_publishes(
+    tmp_path: Path,
+    pki_project: tuple[Path, NasInstallTemplate],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch a failed run leaving a new Compose/.env next to old secrets."""
+    from vonk_agent_protocol.installer_setup import NasInternalValue
+    from vonk_nas_setup import pki
+
+    source, template = pki_project
+    bundle = tmp_path / "vonk-forge"
+    shutil.copytree(source, bundle)
+    request = template.step_ca_controller
+    assert request is not None
+    environment = parse_environment(bundle / ".env")
+    environment[request.hostname_env] = "control.renamed.example.test"
+    (bundle / ".env").write_bytes(render_environment(environment))
+    before = {
+        name: (bundle / name).read_bytes() for name in ("docker-compose.yaml", ".env")
+    }
+    newer = template.model_copy(
+        update={
+            "docker_compose_yaml": "services: {upgraded: {}}\n",
+            "internal_values": [NasInternalValue(env="VONK_RELEASE", value="next")],
+        }
     )
+
+    def broken_renewal(*_: object) -> dict[str, bytes]:
+        raise ValueError("PKI renewal failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pki, "renew_controller_leaf", broken_renewal)
+        with pytest.raises(ValueError, match="PKI"):
+            prepare(newer, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
+    assert {name: (bundle / name).read_bytes() for name in before} == before
+    prepare(newer, tmp_path, PromptIo(io.StringIO("")), upgrade=True)
+    assert (bundle / "docker-compose.yaml").read_text() == "services:\n  upgraded: {}\n"
+    assert parse_environment(bundle / ".env")["VONK_RELEASE"] == "next"

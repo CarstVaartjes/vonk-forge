@@ -29,6 +29,9 @@ class PromptIo:
     ) -> None:
         self.reader = reader
         self.remaining_input_bytes = MAX_MEMBER_BYTES
+        # A retried setup attempt reuses answers instead of asking again.
+        # Keyed by env name for required values and file name for secrets.
+        self.answers: dict[str, str] = {}
         self.writer = (
             writer
             if writer is not None
@@ -77,6 +80,9 @@ class PromptIo:
         return value.rstrip("\r\n")
 
     def required(self, prompt: NasRequiredValuePrompt) -> str:
+        key = prompt.env
+        if key in self.answers:
+            return self.answers[key]
         label = prompt.prompt + (
             f" [{prompt.default}]" if prompt.default is not None else ""
         )
@@ -85,17 +91,22 @@ class PromptIo:
             if not value and prompt.default is not None:
                 value = prompt.default
             if valid_required_value(value, prompt.validation):
+                self.answers[key] = value
                 return value
             self.note("The value is invalid.")
         raise InputEnded()
 
     def secret(self, prompt: NasSecretPrompt) -> str:
+        key = prompt.file
+        if key in self.answers:
+            return self.answers[key]
         label = prompt.prompt
         if prompt.optional and "optional" not in label.lower():
             label += " (optional; leave blank to skip)"
         while self.remaining_input_bytes > 0:
             value = self.line(label, secret=True)
             if single_line(value) and (value or prompt.optional):
+                self.answers[key] = value
                 return value
             self.note("The value is invalid.")
         raise InputEnded()
