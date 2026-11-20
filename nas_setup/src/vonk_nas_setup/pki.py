@@ -223,11 +223,18 @@ def _builder(
     key: ed25519.Ed25519PrivateKey,
     name: str,
     issuer: x509.Certificate | None,
-    issuer_key: ed25519.Ed25519PrivateKey,
     now: datetime,
     validity: timedelta,
 ) -> x509.CertificateBuilder:
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    key_id = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
+    # The authority identifier is the issuer's recorded SKI, never one derived
+    # from its key: retained CAs from earlier producers use another SKI method.
+    authority_id = (
+        key_id
+        if issuer is None
+        else issuer.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    )
     return (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -236,11 +243,11 @@ def _builder(
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(hours=1))
         .not_valid_after(now + validity)
+        .add_extension(key_id, False)
         .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False
-        )
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                authority_id
+            ),
             False,
         )
     )
@@ -256,7 +263,7 @@ def _ca(
     now: datetime,
 ) -> x509.Certificate:
     return (
-        _builder(key, name, issuer, issuer_key, now, timedelta(days=validity_days))
+        _builder(key, name, issuer, now, timedelta(days=validity_days))
         .add_extension(x509.BasicConstraints(ca=True, path_length=path_length), True)
         .add_extension(
             x509.KeyUsage(True, False, False, False, False, True, True, False, False),
@@ -274,7 +281,7 @@ def _leaf(
     now: datetime,
 ) -> x509.Certificate:
     return (
-        _builder(key, hostnames[0], intermediate, intermediate_key, now, _VALIDITY)
+        _builder(key, hostnames[0], intermediate, now, _VALIDITY)
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
         .add_extension(
             x509.SubjectAlternativeName([x509.DNSName(name) for name in hostnames]),
