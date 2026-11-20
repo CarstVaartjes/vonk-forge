@@ -1008,6 +1008,31 @@ def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None
     ]
 
 
+def test_fleet_resume_asks_in_a_terminal_and_refuses_without_input(monkeypatch) -> None:
+    class Terminal(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    job_id = "11111111-1111-4111-8111-111111111111"
+    monkeypatch.setattr(cli.sys, "stderr", Terminal())
+    monkeypatch.setattr(cli.sys, "stdin", Terminal("n\n"))
+    client = FakeClient({})
+    assert cli.main(("fleet", "resume", job_id), control_client=client) != 0
+    assert client.calls == []
+
+    monkeypatch.setattr(cli.sys, "stdin", Terminal("y\n"))
+    client = FakeClient(
+        {("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"}}
+    )
+    assert cli.main(("fleet", "resume", job_id), control_client=client) == 0
+    assert [call[:2] for call in client.calls[:1]] == [
+        ("POST", f"/api/jobs/{job_id}/resume")
+    ]
+
+    status, _ = run(("--no-input", "fleet", "resume", job_id, "--json"), client)
+    assert status == 2 and len(client.calls) == 1
+
+
 def test_a_confirmed_fleet_resume_posts_the_resume_and_exits_zero() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     client = FakeClient(

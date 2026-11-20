@@ -215,7 +215,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     resume.set_defaults(outcome_context="mutation")
     resume.add_argument("operation_id")
     resume.add_argument("--request-key", type=_uuid_argument)
-    resume.add_argument("--yes", action="store_true", required=True)
+    _add_yes(resume)
     _add_output(resume)
 
     model = commands.add_parser(
