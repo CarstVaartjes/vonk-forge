@@ -49,5 +49,5 @@
     "Critical: The control API or its database dependency is unavailable",
     "Warning: A node left the fleet (spk_99999999999999999999999999999999)"
   ],
-  "unavailable": "Prometheus alerts unavailable. Retrying automatically."
+  "unavailable": "Alerts cannot be shown right now. Retrying automatically."
 }

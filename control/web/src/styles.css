@@ -79,9 +79,8 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
 .fleet-page{min-width:0;isolation:isolate}
 @media (max-width:54rem){.shell{display:block}.shell>main{padding:1.25rem}}
 @media (max-width:34rem){.shell>main{padding:.9rem}}
-.fleet-kicker{margin:0 0 .55rem;color:var(--green-text);font-size:.72rem;font-weight:850;letter-spacing:.15em;text-transform:uppercase}
 .fleet-error,.fleet-empty{display:flex;align-items:center;gap:1rem;min-width:0;margin:1.25rem 0;padding:clamp(1rem,4vw,2rem);border:1px solid var(--line-strong);border-radius:var(--r-card);background:var(--panel)}
-.fleet-error h3,.fleet-empty h3{margin:.2rem 0}.fleet-error>p:not(.fleet-kicker),.fleet-empty p{color:var(--muted)}
+.fleet-error h3,.fleet-empty h3{margin:.2rem 0}.fleet-error>p,.fleet-empty p{color:var(--muted)}
 .loading-orb{width:2.35rem;height:2.35rem;flex:0 0 auto;border:3px solid var(--line-control);border-top-color:var(--green);border-radius:50%;animation:fleet-spin .85s linear infinite}
 @keyframes fleet-spin{to{transform:rotate(360deg)}}
 .fleet-error{display:block;border-color:color-mix(in srgb, var(--bad) 24%, var(--panel))}.fleet-error button{margin-top:.5rem}.fleet-empty{display:block;text-align:center;padding-block:clamp(2.5rem,8vw,6rem)}.fleet-empty .button{margin-top:.75rem}

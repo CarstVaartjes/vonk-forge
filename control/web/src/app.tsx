@@ -148,7 +148,6 @@ export function App({ api }: { api: ControlApi }) {
     }[page]
   ) : (
     <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
-      <p className="fleet-kicker">Unknown workspace</p>
       <h1
         id="not-found-heading"
         ref={(element) => {

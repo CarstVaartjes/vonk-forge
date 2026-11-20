@@ -212,3 +212,41 @@ test("Fleet shows the Controller headless memory recommendation without an apply
   render(<OverviewPage api={api} />);
   expect(screen.getByText(`${detail} ${recommendation}`)).toBeVisible();
 });
+
+test("Upgrade agents is disabled with no Sparks enrolled and enabled once one is", () => {
+  nodes = [];
+  const { unmount } = render(<OverviewPage api={api} />);
+  expect(screen.getByRole("button", { name: "Upgrade agents" })).toBeDisabled();
+  unmount();
+  nodes = [spark("Alpha", 40, 250)];
+  render(<OverviewPage api={api} />);
+  expect(screen.getByRole("button", { name: "Upgrade agents" })).toBeEnabled();
+  nodes = [];
+});
+
+test("the upgrade notice links to Activity instead of printing the operation id", async () => {
+  nodes = [spark("Alpha", 40, 250)];
+  const upgradeFleet = vi
+    .fn()
+    .mockResolvedValue({ state: "accepted", operation_id: "11111111-2222-4333-8444-555555555555" });
+  const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
+  render(
+    <ToastProvider>
+      <OverviewPage
+        api={{ ...api, upgradeFleet } as unknown as ControlApi}
+        onNavigate={onNavigate}
+      />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Upgrade agents" }));
+  const dialog = screen.getByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Upgrade agents" }));
+  const link = await screen.findByRole("link", { name: "Follow it in Activity" });
+  expect(link).toHaveAttribute("href", "/activity");
+  expect(screen.getByRole("region", { name: "Notifications" }).textContent).not.toContain(
+    "11111111-2222",
+  );
+  fireEvent.click(link);
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/activity");
+  nodes = [];
+});

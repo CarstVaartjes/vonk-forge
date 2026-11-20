@@ -623,7 +623,7 @@ def _alert_notes(payload: object) -> list[str]:
             + (f" ({names.get(node_id, _text(node_id))})" if node_id else "")
         )
     if document.get("attention_unavailable"):
-        notes.append("Prometheus alerts unavailable. Retrying automatically.")
+        notes.append("Alerts cannot be shown right now. Retrying automatically.")
     return notes
 
 
