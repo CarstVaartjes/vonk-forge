@@ -254,20 +254,42 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
         assert steps.index(listing) < steps.index(run)
 
 
-def test_built_recipe_library_cache_is_keyed_by_the_build_identity_and_saved_after_it() -> (
+def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_restore_key() -> (
     None
 ):
-    """Catches a cache that survives a build-script change or is saved unbuilt."""
+    """Catches a cache that survives a build-script change, is saved unbuilt, is
+    saved under a key nothing restores, or is saved on pull requests."""
     action = yaml.safe_load(
         (ROOT / ".github/actions/recipe-library/action.yml").read_text()
     )
     steps = action["runs"]["steps"]
-    built = [s for s in steps if "recipe-library-built" in str(s.get("with", {}))]
-    assert len(built) == 2
-    for step in built:
-        assert "hashFiles('scripts/build-recipe-library')" in step["with"]["key"]
-        assert "revision" in step["with"]["key"]
+    [restore] = [s for s in steps if s.get("id") == "built"]
+    [save] = [
+        s
+        for s in steps
+        if s.get("uses", "").startswith("actions/cache/save")
+        and "recipe-library-built" in s["with"]["key"]
+    ]
+    key = restore["with"]["key"]
+    assert "hashFiles('scripts/build-recipe-library')" in key
+    assert "revision" in key
+    assert save["with"]["key"] == key
+    assert "refs/heads/main" in save["if"]
     build = next(
         i for i, s in enumerate(steps) if "build-recipe-library" in s.get("run", "")
     )
-    assert steps.index(built[1]) > build
+    assert steps.index(save) > build
+
+
+def test_main_warms_the_built_recipe_library() -> None:
+    """ci.yml rarely runs on main, so the warm workflow saves the built tree."""
+    warm = yaml.safe_load((ROOT / ".github/workflows/ci-cache-warm.yml").read_text())
+    paths = warm[True]["push"]["paths"]
+    for path in (
+        "tests/acceptance/recipe-library-revision.txt",
+        "scripts/build-recipe-library",
+        ".github/actions/recipe-library/action.yml",
+    ):
+        assert path in paths
+    uses = [s.get("uses") for s in warm["jobs"]["recipe-library"]["steps"]]
+    assert "./.github/actions/recipe-library" in uses
