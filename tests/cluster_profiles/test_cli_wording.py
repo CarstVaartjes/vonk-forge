@@ -8,6 +8,7 @@ here renders a vector's input and compares the exact text vonkctl prints. The
 out of every other test in ``tests/cluster_profiles``.
 """
 
+import argparse
 import json
 import re
 import textwrap
@@ -19,6 +20,7 @@ import pytest
 from library_route_fixtures import _library_detail, _recipe_projection
 from library_route_fixtures import _recipe as _recipe_document
 
+from cluster_profiles.cli import _parser
 from cluster_profiles.cli_render import _library_item, render_payload
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
@@ -443,3 +445,61 @@ def test_fleet_failed_route_names_the_publication_outcome(printed):
     assert "route publication failed" in "\n".join(
         printed(render_payload, payload, "fleet")
     )
+
+
+# Help words: the runbook's "Words" list is the vocabulary; retired words stay out.
+
+
+def _help_strings(parser, path=()):
+    """Every help text, description, epilog, metavar, flag and destination.
+
+    Choices are not walked: `--source job` is an API value, not a word of ours.
+    """
+    for action in parser._actions:
+        for text in (action.help, action.metavar, action.dest, *action.option_strings):
+            if isinstance(text, str):
+                yield path, text
+        if isinstance(action, argparse._SubParsersAction):
+            for name, child in action.choices.items():
+                yield from _help_strings(child, (*path, str(name)))
+    for text in (parser.description, parser.epilog):
+        if text:
+            yield path, text
+
+
+_HELP = list(_help_strings(_parser()))
+# Words split on `_` and `-` too, so a flag or destination like `job_id` is caught.
+_JOB = re.compile(r"(?<![a-z])jobs?(?![a-z])", re.IGNORECASE)
+_APPLICATION = re.compile(r"(?<![a-z])applications?(?![a-z])|recipe job", re.IGNORECASE)
+_DRAFT = re.compile(r"(?<![a-z])draft(?![a-z])", re.IGNORECASE)
+
+
+def test_help_walk_reaches_the_subcommands():
+    assert {("fleet", "progress"), ("profile", "load")} <= {p for p, _ in _HELP}
+    assert any(text == "--load" for _, text in _HELP)
+
+
+def test_fleet_help_says_operation_not_job():
+    assert [t for p, t in _HELP if p[:1] == ("fleet",) and _JOB.search(t)] == []
+
+
+def test_help_uses_load_not_application():
+    assert [t for _, t in _HELP if _APPLICATION.search(t)] == []
+
+
+def test_help_says_draft_only_for_unsaved_edits():
+    assert [t for _, t in _HELP if _DRAFT.search(t) and "unsaved" not in t] == []
+
+
+def test_rendered_profile_text_uses_load_words(printed):
+    texts = []
+    for application_id in (None, "load-1"):
+        payload = {
+            "number": 1,
+            "application_id": application_id,
+            "application_state": "succeeded",
+            "assignments": [],
+        }
+        texts += printed(_profile_endpoints, payload)
+    assert [t for t in texts if _APPLICATION.search(t)] == []
+    assert any("vonkctl job run" in t for t in texts)

@@ -131,7 +131,7 @@ def test_installed_follow_sigint_retains_exact_application_without_remote_mutati
             str(installed_vonkctl),
             "profile",
             "progress",
-            "--application",
+            "--load",
             identity,
             "--json",
         ]
@@ -305,7 +305,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
                 str(installed_vonkctl),
                 "profile",
                 "progress",
-                "--application",
+                "--load",
                 newer_application_id,
                 "--json",
             ],

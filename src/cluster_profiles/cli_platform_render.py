@@ -50,7 +50,7 @@ def render_platform(observation: PlatformObservation) -> None:
         # Informative: these loads repeat the same wait with no progress.
         print("STALLED profile loads:")
         _table(
-            ("APPLICATION", "STATE", "REPEATS", "SINCE", "WAIT"),
+            ("LOAD", "STATE", "REPEATS", "SINCE", "WAIT"),
             [
                 (
                     item.application_id,

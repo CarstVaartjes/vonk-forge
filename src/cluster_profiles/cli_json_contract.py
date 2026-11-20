@@ -37,7 +37,7 @@ class DocumentKind(StrEnum):
     ERROR = "error"
 
 
-#: The command words a kind is chosen by (``argparse`` destinations' values).
+#: The command words a result kind is chosen by (``argparse`` subcommand names).
 class Word(StrEnum):
     FLEET = "fleet"
     PROFILE = "profile"
@@ -57,6 +57,9 @@ class Word(StrEnum):
     UPLOAD = "upload"
     SUBMIT = "submit"
     RESULT = "result"
+    RESUME = "resume"
+    RETRY = "retry"
+    REMOVE = "remove"
 
 
 class Reconcile(TypedDict):

@@ -120,7 +120,35 @@ def _activity(
     if not operations:
         print("No activity matches this request.")
     for operation in operations:
-        _field("Operation", operation.get("id"))
+        owner = _optional(operation.get("owner"), "operation owner")
+        # One operation shows one id: the owner's, which `Reconnect` follows.
+        # The row's own id is in the JSON document only.
+        _field("Operation", owner.get("id", operation.get("id")))
+        if owner:
+            owner_kind = owner.get("kind")
+            owner_id = owner.get("id")
+            reconnect = None
+            if isinstance(owner_id, str) and owner_id:
+                if owner_kind == "job":
+                    reconnect = ["vonkctl", "fleet", "progress", owner_id, "--follow"]
+                elif owner_kind == "model-cache-operation":
+                    reconnect = ["vonkctl", "model", "progress", owner_id, "--follow"]
+                elif owner_kind == "fleet-profile-application":
+                    reconnect = [
+                        "vonkctl",
+                        "profile",
+                        "progress",
+                        "--load",
+                        owner_id,
+                        "--follow",
+                    ]
+            _field(
+                "Reconnect",
+                ENDPOINT_UNAVAILABLE if reconnect is None else shlex.join(reconnect),
+            )
+            _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
+            if owner.get("request_id") is not None:
+                _field("Request", owner.get("request_id"))
         _field("Kind", operation.get("kind"))
         _field("State", operation.get("state"))
         if operation.get("projection_issues") is not None:
@@ -135,32 +163,6 @@ def _activity(
         _field("Targets", _words(operation.get("node_ids")))
         if operation.get("attempt") is not None:
             _field("Attempt", operation.get("attempt"))
-        owner = _optional(operation.get("owner"), "operation owner")
-        if owner:
-            _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
-            if owner.get("request_id") is not None:
-                _field("Request", owner.get("request_id"))
-            owner_kind = owner.get("kind")
-            owner_id = owner.get("id")
-            reconnect = None
-            if isinstance(owner_id, str) and owner_id:
-                if owner_kind == "job":
-                    reconnect = ["vonkctl", "fleet", "progress", owner_id, "--follow"]
-                elif owner_kind == "model-cache-operation":
-                    reconnect = ["vonkctl", "model", "progress", owner_id, "--follow"]
-                elif owner_kind == "fleet-profile-application":
-                    reconnect = [
-                        "vonkctl",
-                        "profile",
-                        "progress",
-                        "--application",
-                        owner_id,
-                        "--follow",
-                    ]
-            _field(
-                "Reconnect",
-                ENDPOINT_UNAVAILABLE if reconnect is None else shlex.join(reconnect),
-            )
         cancellation = _optional(operation.get("cancellation"), "profile cancellation")
         if cancellation:
             _field(
