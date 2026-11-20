@@ -167,7 +167,7 @@ async fn distribution_downloads_overlap_without_reordering_evidence_or_progress(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = spawn_async_peer(async move {
-        let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())
+        let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, accept_client(&listener))
             .await
             .expect("fixture I/O deadline")
             .unwrap();
@@ -193,7 +193,7 @@ async fn distribution_downloads_overlap_without_reordering_evidence_or_progress(
         // downloader cannot pass this barrier; no throughput threshold is used.
         let mut pending = Vec::new();
         for _ in 0..2 {
-            let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())
+            let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, accept_client(&listener))
                 .await
                 .expect("fixture I/O deadline")
                 .unwrap();

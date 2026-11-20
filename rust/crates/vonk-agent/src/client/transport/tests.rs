@@ -96,10 +96,11 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
             spawn_async_peer(async move {
                 let mut handlers = Vec::new();
                 for index in 0..4 {
-                    let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())
-                        .await
-                        .expect("fixture I/O deadline")
-                        .unwrap();
+                    let (mut stream, _) =
+                        tokio::time::timeout(PEER_BUDGET, accept_client(&listener))
+                            .await
+                            .expect("fixture I/O deadline")
+                            .unwrap();
                     let first_received = first_received.clone();
                     let release_first = release_first.clone();
                     let first_finished = first_finished.clone();
@@ -234,7 +235,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
         tokio::time::timeout_at(deadline, async move {
             let mut requests = Vec::new();
             for index in 0..4 {
-                let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept()).await.expect("fixture I/O deadline").unwrap();
+                let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, accept_client(&listener)).await.expect("fixture I/O deadline").unwrap();
                 let mut request = Vec::new();
                 let mut buffer = [0_u8; 4096];
                 let header_end = loop {
@@ -268,7 +269,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
                 if index == 0 {
                     received.notify_one();
                     assert!(tokio::time::timeout(
-                        Duration::from_millis(200), listener.accept()
+                        Duration::from_millis(200), accept_client(&listener)
                     ).await.is_err(), "old request overlapped activation");
                     // Withhold all response bytes. The real reqwest
                     // activation deadline must close this exact socket.
