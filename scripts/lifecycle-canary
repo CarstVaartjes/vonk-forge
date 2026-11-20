@@ -171,7 +171,7 @@ class Canary:
         last_state = None
         while True:
             code, document = self.controller.call(
-                "profile", "progress", "--application", application, timeout=60
+                "profile", "progress", "--load", application, timeout=60
             )
             if code != 0:
                 self.tolerated_errors += 1

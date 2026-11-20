@@ -258,10 +258,10 @@ def _profile(
             raise ValueError("profile cancel requires --yes")
         _confirm_action(
             args,
-            f"Cancel profile {number} application {args.application_id} and reconcile issued effects?",
+            f"Cancel profile {number} load {args.load_id} and reconcile issued effects?",
         )
         request_key = _request_key(args, factory)
-        application_id = args.application_id
+        application_id = args.load_id
         path = f"/api/profile/applications/{_quoted(application_id)}/cancel"
         lookup = (
             f"/api/profile/applications/{_quoted(application_id)}"

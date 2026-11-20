@@ -8,6 +8,7 @@ here renders a vector's input and compares the exact text vonkctl prints. The
 out of every other test in ``tests/cluster_profiles``.
 """
 
+import argparse
 import json
 import re
 import textwrap
@@ -19,6 +20,7 @@ import pytest
 from library_route_fixtures import _library_detail, _recipe_projection
 from library_route_fixtures import _recipe as _recipe_document
 
+from cluster_profiles.cli import _parser
 from cluster_profiles.cli_render import _library_item, render_payload
 from cluster_profiles.cli_render.host_checks import host_check_lines
 from cluster_profiles.cli_render.metrics import metric_value_text
@@ -443,3 +445,63 @@ def test_fleet_failed_route_names_the_publication_outcome(printed):
     assert "route publication failed" in "\n".join(
         printed(render_payload, payload, "fleet")
     )
+
+
+# Help words: the runbook's "Words" list is the vocabulary; retired words stay out.
+
+
+def _help_strings(parser, path=()):
+    """Every help text, description, epilog and metavar in the argparse tree."""
+    for action in parser._actions:
+        for text in (action.help, action.metavar):
+            if isinstance(text, str):
+                yield path, text
+        if not action.option_strings and isinstance(action.dest, str):
+            yield path, action.dest
+        if isinstance(action, argparse._SubParsersAction):
+            for name, child in action.choices.items():
+                yield from _help_strings(child, (*path, str(name)))
+    for text in (parser.description, parser.epilog):
+        if text:
+            yield path, text
+
+
+_HELP = list(_help_strings(_parser()))
+
+
+def test_help_walk_reaches_the_subcommands():
+    assert {("fleet", "progress"), ("profile", "load")} <= {p for p, _ in _HELP}
+
+
+def test_fleet_help_says_operation_not_job():
+    stale = [
+        t
+        for p, t in _HELP
+        if p[:1] == ("fleet",) and re.search(r"\bjobs?\b", t, re.IGNORECASE)
+    ]
+    assert stale == []
+
+
+def test_help_uses_load_not_application_or_apply():
+    stale = [
+        t
+        for _, t in _HELP
+        if re.search(
+            r"\bapplications?\b|\bapply\b|\bapplying\b|recipe job", t, re.IGNORECASE
+        )
+    ]
+    assert stale == []
+
+
+def test_help_says_draft_only_for_unsaved_edits():
+    stale = [
+        t
+        for _, t in _HELP
+        if re.search(r"\bdraft\b", t, re.IGNORECASE) and "unsaved" not in t
+    ]
+    assert stale == []
+
+
+def test_render_text_has_no_removed_command_hint():
+    render = Path(__file__).parents[2] / "src" / "cluster_profiles" / "cli_render"
+    assert [f.name for f in render.glob("*.py") if "recipe job" in f.read_text()] == []

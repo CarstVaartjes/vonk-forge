@@ -38,7 +38,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
 ) -> None:
     """Register the Fleet, Model, Recipe, Profile and Key command namespaces."""
     platform = commands.add_parser(
-        "platform", help="Actual Controller processes and installed contracts"
+        "platform", help="Controller version and running services"
     )
     _add_output(platform)
     metrics = commands.add_parser(
@@ -169,9 +169,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(loginfo)
 
     fleet_progress = fleet_actions.add_parser(
-        "progress", help="Show or follow one fleet job"
+        "progress", help="Show or follow one fleet operation"
     )
-    fleet_progress.add_argument("job_id")
+    fleet_progress.add_argument("operation_id")
     fleet_progress.add_argument(
         "--follow", action="store_true", help="Keep following until it finishes"
     )
@@ -208,10 +208,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(evidence)
 
     resume = fleet_actions.add_parser(
-        "resume", help="Resume a job that waits for an operator"
+        "resume", help="Resume an operation that waits for an operator"
     )
     resume.set_defaults(outcome_context="mutation")
-    resume.add_argument("job_id")
+    resume.add_argument("operation_id")
     resume.add_argument("--request-key", type=_uuid_argument)
     resume.add_argument("--yes", action="store_true", required=True)
     _add_output(resume)
@@ -241,7 +241,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--technical", action="store_true", help="Include the canonical definition"
     )
     _add_output(model_detail)
-    model_download = model_actions.add_parser("download", help="Cache a model variant")
+    model_download = model_actions.add_parser(
+        "download", help="Download a model variant to the Controller (NAS cache)"
+    )
     _selector(model_download, "model", help="Exact model selector or friendly name")
     _action_flags(model_download, followable=True)
     model_remove = model_actions.add_parser(
@@ -357,7 +359,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(recipe_detail)
     recipe_download = recipe_actions.add_parser(
-        "download", help="Cache a recipe and missing model"
+        "download",
+        help="Download a recipe and its missing model to the Controller (NAS cache)",
     )
     _selector(recipe_download, "recipe", help="Exact recipe selector or friendly name")
     _action_flags(recipe_download, followable=True)
@@ -379,7 +382,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Show the Controller-owned removal impact without submitting it",
     )
     recipe_retry = recipe_actions.add_parser(
-        "retry", help="Submit preparation using the original frozen recipe intent"
+        "retry", help="Retry a failed recipe preparation"
     )
     recipe_retry.add_argument("operation_id", type=_uuid_argument)
     _action_flags(recipe_retry, followable=True)
@@ -441,7 +444,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         description="A profile is the saved set of recipes the whole fleet "
         "should run. Commands act on profile 1 unless you pass "
         "--profile N, before or after the command.",
-        epilog="Without a command, shows the selected profile.",
+        epilog="Without a command, shows the selected profile. To stop a workload, "
+        "remove it from the active profile (profile remove ALIAS), or switch to "
+        "another profile, then profile load.",
     )
     _add_output(profile)
     profile_actions = profile.add_subparsers(
@@ -469,9 +474,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _profile_edit_flags(profile_add)
     _selection_controls(profile_add)
     profile_remove = profile_actions.add_parser(
-        "remove", help="Remove an assignment or Spark members"
+        "remove", help="Remove a recipe alias or Spark members from the profile"
     )
-    profile_remove.add_argument("assignment")
+    profile_remove.add_argument("assignment", metavar="ALIAS")
     profile_remove.add_argument("--spark", action="append", default=[])
     _profile_edit_flags(profile_remove)
     _selection_controls(profile_remove)
@@ -491,7 +496,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     profile_configure.add_argument(
         "--assignment",
         metavar="NAME",
-        help="Assignment whose --option choices to change (default: the only one)",
+        help="Alias whose --option choices to change (default: the only one)",
     )
     clock = profile_configure.add_mutually_exclusive_group()
     clock.add_argument(
@@ -523,14 +528,14 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _profile_edit_flags(profile_delete)
     profile_load = profile_actions.add_parser(
-        "load", help="Apply the entire profile to the fleet"
+        "load", help="Load the entire profile onto the fleet"
     )
     profile_load.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_load.add_argument(
         "--review",
         dest="dry_run",
         action="store_true",
-        help="Review the plan without applying it",
+        help="Review the plan without loading it",
     )
     profile_load.add_argument(
         "--yes",
@@ -546,10 +551,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(profile_load)
     _add_output(profile_load)
     profile_cancel = profile_actions.add_parser(
-        "cancel", help="Cancel one profile application and reconcile its effects"
+        "cancel", help="Cancel one profile load and reconcile its effects"
     )
     profile_cancel.set_defaults(outcome_context="mutation", requires_profile=True)
-    profile_cancel.add_argument("application_id", type=_uuid_selector)
+    profile_cancel.add_argument("load_id", type=_uuid_selector)
     profile_cancel.add_argument(
         "--yes", action="store_true", help="Confirm without asking"
     )
@@ -568,7 +573,9 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--follow", action="store_true", help="Keep following until it finishes"
     )
     profile_progress_selectors = profile_progress.add_mutually_exclusive_group()
-    profile_progress_selectors.add_argument("--application", type=_uuid_selector)
+    profile_progress_selectors.add_argument(
+        "--load", dest="application", type=_uuid_selector, metavar="LOAD_ID"
+    )
     profile_progress_selectors.add_argument("--request-key", type=_uuid_selector)
     _watch_controls(profile_progress)
     _add_output(profile_progress)
@@ -639,8 +646,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "run",
         help="Run a recipe in a profile",
         description="Prepare a recipe, review the plan, and start it on the fleet. "
-        "The recipe is first saved into the profile as a draft so the plan can be "
-        "reviewed; declining leaves that draft and the fleet unchanged.",
+        "The recipe is first saved into the profile so the plan can be "
+        "reviewed; declining leaves it saved and the fleet unchanged.",
     )
     run.set_defaults(outcome_context="mutation", requires_profile=True)
     run.add_argument(

@@ -129,6 +129,26 @@ Source the generated script from your shell configuration after inspecting it;
 Zsh requires its normal `compinit` setup. Generation never edits shell files or
 queries the Controller.
 
+## Words
+
+The CLI, the Controller and the site use one word per thing:
+
+| Word | Means |
+| --- | --- |
+| recipe | A published, tested way to run a model. |
+| alias | The name a recipe has in your profile (`run RECIPE --as coder`). |
+| workload | What runs on the fleet for one alias. |
+| profile | The saved set of recipes the whole fleet should run. |
+| saved | A profile edit stored on the Controller. "Draft" is only for edits you have not saved. |
+| load | Putting the saved profile onto the fleet (`profile load`); `profile progress --load ID` follows one. |
+| operation | One fleet task such as an upgrade, a removal or a resume (`fleet progress OPERATION_ID`). |
+| job | One artifact-producing request to a job recipe (`vonkctl job run`). |
+
+To stop a workload, remove its alias from the active profile
+(`profile remove ALIAS`) or switch to another profile, then `profile load`.
+There is no stop command. The CLI help is checked against this list by
+`tests/cluster_profiles/test_cli_wording.py`.
+
 ## Fleet
 
 `vonkctl fleet` groups installed-but-stopped rows with the same recipe title on the same
@@ -152,17 +172,17 @@ vonkctl fleet remove Atlas --yes
 vonkctl fleet upgrade Atlas --yes
 vonkctl fleet upgrade --all --yes
 vonkctl fleet loginfo Atlas --since 15m --lines 100 --follow
-vonkctl fleet progress JOB_ID --follow
+vonkctl fleet progress OPERATION_ID --follow
 vonkctl fleet activity --state needs-operator --limit 20
 vonkctl fleet evidence OPERATION_ID --output evidence.json
 vonkctl fleet locks
-vonkctl fleet resume JOB_ID --yes
+vonkctl fleet resume OPERATION_ID --yes
 ```
 
 Friendly Spark names and exact stable selectors are accepted. Mutations are
 single-step Controller operations. Asynchronous Model/Recipe mutations and
 Profile loads follow to a terminal response by default. Use `fleet progress`
-to inspect or follow the job identity returned by a fleet upgrade.
+to inspect or follow the operation identity returned by a fleet upgrade.
 Use `--detach` on an asynchronous Model or Recipe
 mutation to return the accepted operation immediately. `--yes` is required for
 Model and Recipe cache removals. `fleet remove` resolves and displays the
@@ -256,7 +276,7 @@ database transactions that could hold a row lock; use it when a load reports
 `admission.capacity_busy`. It is empty on a SQLite Controller. `--json` returns
 `{"held": [...], "open_transactions": [...]}`.
 
-`fleet resume JOB_ID --yes` first checks the owner's advertised resume action.
+`fleet resume OPERATION_ID --yes` first checks the owner's advertised resume action.
 The Controller rechecks current authorization and the intent of every target
 before accepting it. Resume does not grant permission to replay superseded or
 revoked work. Already authorized retries retain their original retry budget.
@@ -694,7 +714,7 @@ Replace the sample interface, slot, parameters, and limits with values accepted
 by the run's recipe contract. Relative input paths are resolved from the
 binding file's directory; absolute paths are also accepted. Input files must be
 readable regular non-symlink files. The CLI computes each file's size and
-SHA-256 before creating the draft and rechecks the bytes before upload, so keep
+SHA-256 before creating the job and rechecks the bytes before upload, so keep
 the binding and its input files unchanged when retrying.
 
 ```bash
@@ -703,9 +723,9 @@ vonkctl job upload JOB_UUID --file artifact-job.json
 vonkctl job submit JOB_UUID --request-key SUBMIT_UUID
 ```
 
-Create reserves a draft using the request key, uploads declared files, and
+Create reserves a job (not submitted) using the request key, uploads declared files, and
 finalizes the inputs. It does not submit the job. Submit is a separate,
-explicit command; only use it after inspecting the ready draft. For scripted
+explicit command; only use it after inspecting the ready job. For scripted
 work or recovery after process loss, choose and save a caller UUID with
 `--request-key` before creating or submitting. Human create output prints the
 generated key before sending the create request, but JSON output is emitted
@@ -715,8 +735,8 @@ If create's response is uncertain, retry the identical create command with the
 same run, binding, input bytes, and request key. The CLI looks up that key and
 reconciles the original intent before replaying it. Do not start a replacement
 job with a new key while the original create is uncertain. If input delivery
-fails after draft creation, retain the draft UUID and binding file, then run
-`job upload` for that UUID. It verifies the binding against the draft,
+fails after job creation, retain the job UUID and binding file, then run
+`job upload` for that UUID. It verifies the binding against the job,
 skips complete inputs already accepted by the Controller, uploads missing
 files, and finalizes when they are all present. Recovery is at complete-file
 granularity; the CLI does not promise byte-offset or range resume for an
@@ -778,11 +798,11 @@ profile or review a load for those observations. A lost save response may still
 commit; reconnect through the definition read before editing again. Retrying
 identical content returns the committed revision without another edit.
 
-Today a profile load creates an application; application history is not a
+Today a profile load is recorded as a load; load history is not a
 standing fleet policy. The target behavior keeps one durable selected-profile
-record in PostgreSQL, pointing to the immutable accepted application snapshot
+record in PostgreSQL, pointing to the immutable accepted load snapshot
 as desired state for the whole fleet. Saving another profile does not select it,
-and the latest application alone does not decide which profile is current. The
+and the latest load alone does not decide which profile is current. The
 Controller worker reconciles that snapshot after enrollment or revocation; a
 roster event does not need a new operator decision. A new Spark appears idle,
 while a removed Spark's independent assignment is ignored without changing the
@@ -821,9 +841,9 @@ vonkctl --profile 2 profile load --review
 vonkctl --profile 2 profile load
 vonkctl --profile 2 profile load --detach
 vonkctl --profile 2 profile progress --follow
-vonkctl --profile 2 profile progress --application APPLICATION_UUID --follow
+vonkctl --profile 2 profile progress --load LOAD_UUID --follow
 vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow
-vonkctl --profile 2 profile cancel APPLICATION_UUID --yes --request-key CANCEL_UUID
+vonkctl --profile 2 profile cancel LOAD_UUID --yes --request-key CANCEL_UUID
 vonkctl --profile 2 profile delete --yes
 vonkctl --profile 2 profile endpoint
 vonkctl --profile 2 profile endpoint coding
@@ -832,9 +852,9 @@ vonkctl --profile 2 run google/gemma-4-26B-A4B-it --yes
 ```
 
 A load the Controller replaces (its own automatic retry after a failed step, or a
-later accepted intent) ends `superseded`, never `failed`. The application names
+later accepted intent) ends `superseded`, never `failed`. The load names
 its `reason_code` and, when a successor exists, `superseded_by`; `profile progress
---follow` follows that chain to the live application and lists the replaced ids as
+--follow` follows that chain to the live load and lists the replaced ids as
 `supersedes_chain`. A `superseded` end without a successor means the reviewed
 effects changed during admission: review and load again.
 
@@ -844,7 +864,7 @@ three lines: the profile edited, the Sparks selected, and what will stop.
 `run` accepts one unambiguous recipe or model from the active library. It
 prepares the recipe and its model, adds the assignment to the selected saved
 profile (`--profile N` is required, like every profile edit), previews the complete profile change, asks for
-confirmation, follows the application, and prints the current endpoints. Use
+confirmation, follows the load, and prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
 Spark is included. `run` has two separate effects: the recipe is saved into
 the profile (the Controller can only review a saved profile, and
@@ -860,7 +880,7 @@ For scripts, JSON, redirected input, or `--no-input`, pass `--yes`: nothing is
 asked, so the command shows the current Controller review and starts the plan
 that is current when the Controller accepts it. A lost response keeps the same
 request key and prints the reconnect command (`profile progress
---request-key`), as `profile load` does. It waits for the application before
+--request-key`), as `profile load` does. It waits for the load before
 looking up the endpoint.
 
 The CLI currently runs recipes from the active catalog. It does not turn an
@@ -882,7 +902,7 @@ effects (profile revision, placements, what stops, starts or is installed, and
 which workloads are replaced). Free capacity, readiness, timestamps and other
 observations do not invalidate a review. If the effects changed, nothing is
 accepted (`profile.review_stale`); the CLI shows the current plan and asks
-again. `--detach` returns the accepted application instead of following it.
+again. `--detach` returns the accepted load instead of following it.
 For scripts, JSON, redirected input, or `--no-input`, use `--yes`: nothing was
 reviewed, so the CLI submits the load without a digest and the Controller
 applies the plan that is current when it accepts the request:
@@ -913,7 +933,7 @@ binding is re-observed within the invocation budget; it cannot turn a reviewed
 load into current-plan authorization. Explicit `--yes` omits `review` and
 authorizes the current plan. The Controller plans the current profile at
 admission and parks requests with waitable blockers until their dependencies
-clear. A replayed request key returns the original application even if the
+clear. A replayed request key returns the original load even if the
 plan has changed since.
 
 ### Batched recipe qualification
@@ -958,7 +978,7 @@ A reviewed stop permits reuse only of that exact run's ports. Unknown capacity s
 a deficit is shown as “short by.” The planner owns these decisions.
 
 Review does not create or reset build records. Missing cache artifacts remain
-blockers for a fresh load. Typed cache-loss recovery of an accepted application
+blockers for a fresh load. Typed cache-loss recovery of an accepted load
 may defer rebuilding to its worker; capacity and invalid-contract blockers still
 apply. The plan digest binds semantic effects, eligibility and demand. Changing
 free-capacity observations without changing eligibility, transfer counters, or
@@ -975,7 +995,7 @@ this review authorizes those stops; preparation or start can still wait or be
 refused if the subsequent capacity check does not pass. Unknown capacity and
 demand beyond physical capacity remain blockers before any stop.
 
-An accepted application's intended configuration retains `reviewed_plan_digest`
+An accepted load's intended configuration retains `reviewed_plan_digest`
 and its original `reviewed_application_id`, separately from the execution-attempt
 `plan_digest`. Retry admission rejects plans that add a workload stop or
 installation removal to that original review. The required numbered-load precondition, current-user
@@ -997,7 +1017,7 @@ then already in the free space), unless a run of it is live. A load waiting for
 disk does not keep the installations on its own Sparks, and an operation that
 just finished makes an installation recently used (removed last), not in use;
 the waiting load says how many bytes stay and why. A disk blocker names who holds the bytes, for
-example `reserved by cancelled profile application 3f68e2f4`. If another capacity
+example `reserved by cancelled profile load 3f68e2f4`. If another capacity
 writer is briefly busy, progress names the dependency and next retry time,
 and the same operation continues automatically.
 
@@ -1021,12 +1041,12 @@ includes pending profile work and counts an overlapping port once.
 
 After an uncertain submission, the CLI looks up the original request key before
 considering a bounded identical replay. A changed profile does not redirect that
-lookup to a newer application. An unavailable or denied lookup does not authorize
+lookup to a newer load. An unavailable or denied lookup does not authorize
 a new request. Keep the key from the accepted or uncertain-submission receipt and
 reconnect with `vonkctl --profile 2 profile progress --request-key REQUEST_UUID --follow`.
-When combining `--profile` with `profile progress --application`, the application
-must belong to that profile. An application ID alone supports a direct reconnect;
-following remains pinned to that exact ID even if a newer application starts.
+When combining `--profile` with `profile progress --load`, the load
+must belong to that profile. A load ID alone supports a direct reconnect;
+following remains pinned to that exact ID even if a newer load starts.
 
 Edits read the complete saved definition and preserve fields that were not
 explicitly changed, including metadata, desired state, and model variant.
@@ -1065,12 +1085,12 @@ delete unless the saved profile is at revision N; omitted, the newest request
 wins. Profile 1 can be deleted like any other; commands without `--profile`
 then report a missing profile and name `vonkctl profile list`.
 
-Cancel a profile application by its exact application ID and explicit Profile
+Cancel a profile load by its exact load ID and explicit Profile
 number. Cancellation retains resource claims while already issued effects are
 reconciled; it cannot pretend a late start never happened. Use `--detach` to
-return the accepted receipt and reconnect with the same application ID. Pending
+return the accepted receipt and reconnect with the same load ID. Pending
 cancellation appears in Activity with its effect reconciliation. A lost
-cancellation response is recovered using the original application and
+cancellation response is recovered using the original load and
 cancellation request key; retrying does not create another cancellation intent.
 This receipt does not mean issued effects have already stopped.
 
@@ -1177,9 +1197,9 @@ fake percentage. A failed refresh preserves the last verified cache copy.
 A new profile load reconciles current fleet/cache state and supersedes older
 overlapping requests. Reusing its request key returns the same durable
 operation. Observation can be interrupted without cancelling accepted work.
-Profile progress without an explicit selector resolves the latest application
-once, then pins following to that ID. Reconnect to a particular application
-with the exact `--application` or `--request-key` form above.
+Profile progress without an explicit selector resolves the latest load
+once, then pins following to that ID. Reconnect to a particular load
+with the exact `--load` or `--request-key` form above.
 
 Observation defaults to 30 seconds (accepted range 0–300), with a one-second
 poll interval (0.01–30). These limits do not alter execution deadlines. At

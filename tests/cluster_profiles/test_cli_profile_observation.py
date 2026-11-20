@@ -410,7 +410,7 @@ def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_wor
     argv = (
         "profile",
         "progress",
-        "--application",
+        "--load",
         identity,
         "--follow",
         "--timeout-seconds",
@@ -530,7 +530,7 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     argv = (
         "profile",
         "progress",
-        "--application",
+        "--load",
         identity,
         "--follow",
         "--json",

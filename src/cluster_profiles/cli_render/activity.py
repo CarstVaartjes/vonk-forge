@@ -153,7 +153,7 @@ def _activity(
                         "vonkctl",
                         "profile",
                         "progress",
-                        "--application",
+                        "--load",
                         owner_id,
                         "--follow",
                     ]

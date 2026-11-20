@@ -103,7 +103,7 @@ def _reconnect_command(args: argparse.Namespace, path: str) -> str:
             str(_profile_number(args)),
             "profile",
             "progress",
-            "--application",
+            "--load",
             urllib.parse.unquote(parts[4]),
             "--follow",
         ]

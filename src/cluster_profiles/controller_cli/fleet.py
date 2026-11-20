@@ -278,10 +278,10 @@ def _fleet(
             client, path, {}, args, fetch_initial=True, terminal=lambda _: True
         )
     if action == "progress":
-        path = f"/api/jobs/{_quoted(args.job_id)}"
+        path = f"/api/jobs/{_quoted(args.operation_id)}"
 
         def same_job(observed: Mapping[str, object]) -> None:
-            if observed.get("id") != args.job_id:
+            if observed.get("id") != args.operation_id:
                 raise ControlMalformedResponse(
                     "fleet progress observation identifies another job"
                 )
@@ -390,10 +390,10 @@ def _fleet(
     if action == "resume":
         from ..generated_control.models.job_resume_request import JobResumeRequest
 
-        job_id = args.job_id
+        job_id = args.operation_id
         path = f"/api/jobs/{_quoted(job_id)}"
         deadline = time.monotonic() + _bounded_timeout(args)
-        _confirm_action(args, f"Resume Controller-owned job {job_id}?")
+        _confirm_action(args, f"Resume Controller-owned operation {job_id}?")
 
         request_body = JobResumeRequest()
         key = _request_key(args, factory)
