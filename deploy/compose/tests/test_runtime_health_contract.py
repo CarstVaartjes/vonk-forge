@@ -10,6 +10,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
 DEFAULT_SERVICES = {
+    "runtime-init",
     "image-janitor",
     "caddy",
     "control-api",
@@ -76,6 +77,7 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
 
     expected_evidence = {
         "image-janitor": ("unused.json", "network-tick-ok", "st_mtime"),
+        "runtime-init": ("/tmp/runtime-staged",),
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),
@@ -103,17 +105,16 @@ def _seconds(duration: str) -> float:
 def test_worker_health_grace_covers_its_startup_waits() -> None:
     """Catches a worker marked unhealthy while it still waits for the API.
 
-    The worker waits for the API-staged secret and then for the API-owned
-    schema, each within the startup budget; one probe may overrun it by a lock
-    wait. `compose up --wait` must not see that wait as a failure.
+    The worker waits for the API-owned schema within the startup budget; one
+    probe may overrun it by a lock wait. `compose up --wait` must not see that
+    wait as a failure.
     """
     from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
     from vonk_control.settings import DATABASE_WAIT_BUDGETS
 
     healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
     waits = (
-        2 * _DATABASE_STARTUP_TIMEOUT_SECONDS
-        + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
+        _DATABASE_STARTUP_TIMEOUT_SECONDS + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
     )
     assert _seconds(healthcheck["start_period"]) > waits
 
@@ -224,6 +225,6 @@ def test_default_graph_is_warning_free_and_does_not_couple_configurator_to_profi
     configurator = secure_remote["tailscale-configurator"]
     assert set(configurator["depends_on"]) == {
         "caddy",
-        "control-api",
+        "runtime-init",
         "tailscale-gateway",
     }

@@ -1,24 +1,23 @@
-"""Missing staged assets must end one attempt and recover on the next attempt."""
+"""Staged runtime assets exist before their consumers start, without polling."""
 
 from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import os
-import re
-import subprocess
 from pathlib import Path
 
-import pytest
-from vonk_control.runtime_init import (
-    stage_runtime_assets,
-    write_runtime_asset_inventory,
-)
+from vonk_control.runtime_init import STAGED_MARKER
 
 ROOT = Path(__file__).resolve().parents[3]
+STAGED = "runtime-init"
+STAGED_VOLUMES = ("runtime-assets", "normalized-private-keys")
+# Readers that load their kit only at start restart once a new one is staged.
+# PostgreSQL must not bounce with every release; the API image changes with
+# runtime-init's, so Compose recreates it anyway.
+RESTART_WITH_KIT = {"litellm", "prometheus", "caddy", "tailscale-configurator"}
 
 
-def _commands() -> list[tuple[str, str]]:
+def _services() -> dict[str, dict]:
     loader = importlib.machinery.SourceFileLoader(
         "runtime_asset_compose", str(ROOT / "scripts/render-dev-compose")
     )
@@ -26,105 +25,66 @@ def _commands() -> list[tuple[str, str]]:
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
-    model = module._compose_document(ROOT / "deploy/compose/compose.yaml")
-    commands = [
-        (name, service["entrypoint"][2].replace("$$", "$"))
-        for name, service in model["services"].items()
-        if isinstance(service.get("entrypoint"), list)
-        and len(service["entrypoint"]) >= 3
-        and "until [ -f /run/vonk-runtime-assets/" in service["entrypoint"][2]
-    ]
-    assert {name for name, _command in commands} == {
-        "postgres",
-        "litellm",
-        "prometheus",
-        "caddy",
-        "tailscale-configurator",
-    }, "a changed entrypoint must not silently remove its recovery proof"
-    return commands
+    return module._compose_document(ROOT / "deploy/compose/compose.yaml")["services"]
 
 
-@pytest.mark.parametrize(("service", "command"), _commands())
-def test_asset_timeout_then_staging_recovers_the_same_shell_command(
-    service: str,
-    command: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Wrong implementation: the old unbounded loop never returns a failure;
-    # an exec before the asset exists or a lost quoted argument also fails here.
-    assets = tmp_path / "assets"
-    source = tmp_path / "shipped"
-    source.mkdir()
-    script = tmp_path / "consumer"
-    script.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$EXEC_CALLS"\n')
-    script.chmod(0o755)
-    command = command.replace("/run/vonk-runtime-assets", str(assets))
-    asset_match = re.search(r"until \[ -f ([^ ]+) \]", command)
-    assert asset_match is not None
-    asset = Path(asset_match[1])
-    executable = command.split("; exec ", 1)[1]
-    if executable.startswith("/bin/sh "):
-        entrypoint = Path(executable.split()[1])
-        relative = entrypoint.relative_to(assets)
-        (source / relative).parent.mkdir(parents=True, exist_ok=True)
-        (source / relative).write_bytes(script.read_bytes())
-    else:
-        # The image-owned executable is outside this asset-read boundary. Keep
-        # the actual wait and arguments; substitute only that final executable.
-        executable_name = executable.split()[0]
-        command = command.replace(f"; exec {executable_name}", f"; exec {script}")
-    relative = asset.relative_to(assets)
-    if not (source / relative).exists():
-        (source / relative).parent.mkdir(parents=True, exist_ok=True)
-        (source / relative).write_text("shipped asset\n")
-    calls = tmp_path / "exec-calls"
-    sleeps = tmp_path / "sleeps"
-    environment = {
-        **os.environ,
-        "EXEC_CALLS": str(calls),
-        "SLEEPS": str(sleeps),
-        "VONK_RUNTIME_ASSET_WAIT_SECONDS": "120",  # the compose service's value
+def _volume_mounts(service: dict) -> list[tuple[str, bool]]:
+    """(source, read_only) for each mount, in short or long syntax."""
+    mounts = []
+    for entry in service.get("volumes", []):
+        if isinstance(entry, dict):
+            mounts.append(
+                (str(entry.get("source", "")), entry.get("read_only") is True)
+            )
+        else:
+            fields = entry.split(":")
+            mounts.append((fields[0], fields[-1] == "ro" and len(fields) == 3))
+    return mounts
+
+
+def test_every_staged_volume_reader_starts_after_runtime_init_and_never_polls() -> None:
+    """Catches a consumer that can start before staging, or waits in a loop.
+
+    The edge orders startup and never gates it (required: false): a failed
+    staging run leaves the previous kit in the volume and its readers still
+    start on it.
+    """
+    services = _services()
+    readers = {
+        name
+        for name, service in services.items()
+        if name != STAGED
+        and any(volume in STAGED_VOLUMES for volume, _ in _volume_mounts(service))
     }
-    # Virtualize only time: the production counter/test/exit stays untouched.
-    # The external subprocess timeout catches the old unbounded implementation.
-    virtual_sleep = 'sleep() { printf "%s\\n" "$1" >> "$SLEEPS"; }; '
-    argv = ["/bin/sh", "-c", virtual_sleep + command, service, "a b", "line\nbreak"]
-    missing = subprocess.run(
-        argv, env=environment, check=False, capture_output=True, text=True, timeout=30
-    )
-    assert missing.returncode == 1
-    assert f"runtime-asset-timeout: {asset}; retry via restart policy" in missing.stderr
-    assert not calls.exists(), "missing configuration must never launch a consumer"
-    observations = sleeps.read_text().splitlines()
-    assert 0 < len(observations) <= 120
-    assert set(observations) == {"1"}
+    assert readers == RESTART_WITH_KIT | {"postgres", "control-api", "control-worker"}
+    for name in readers:
+        service = services[name]
+        assert service["depends_on"][STAGED] == {
+            "condition": "service_healthy",
+            "required": False,
+            **({"restart": True} if name in RESTART_WITH_KIT else {}),
+        }, name
+        assert "until [" not in str(service.get("entrypoint", "")), name
 
-    # An unassembled kit ends without publishing or poisoning the next request.
-    # Wrong implementation: a missing inventory publishes files, launches a
-    # consumer, or leaves staging permanently blocked after assembly completes.
-    monkeypatch.setattr(os, "fchown", lambda *_args: None)
-    ended = False
-    try:
-        stage_runtime_assets(source, assets)
-    except Exception:  # noqa: BLE001 - assert effects and fresh recovery, not taxonomy
-        ended = True
-    assert ended
-    assert not assets.exists()
-    assert not calls.exists()
 
-    # Image assembly owns membership, just as in the production Dockerfile.
-    # The real producer then publishes the formerly missing files atomically.
-    assert write_runtime_asset_inventory(source)
-    stage_runtime_assets(source, assets)
-    sleeps.unlink()
-    repaired = subprocess.run(
-        argv, env=environment, check=False, capture_output=True, text=True, timeout=30
-    )
-    assert repaired.returncode == 0, repaired.stderr
-    assert not sleeps.exists(), "present assets must execute without another wait"
-    assert calls.exists()
-    if '"$@"' in command:
-        assert calls.read_text() == "a b\nline\nbreak\n"
-    else:
-        assert calls.read_text() == "\n"
+def test_runtime_init_is_the_one_staging_writer_and_healthy_per_run() -> None:
+    """Catches a second staging writer, a stale health marker, or network use."""
+    services = _services()
+    init = services[STAGED]
+    assert init["image"] == services["control-api"]["image"]
+    assert init["entrypoint"] == ["python", "-m", "vonk_control.runtime_init"]
+    # Resident: an exited container shows the project as failed in NAS UIs.
+    # A failed run exits and the restart policy runs it again.
+    assert init["restart"] == "unless-stopped"
+    assert init["network_mode"] == "none"
+    # The marker is on a tmpfs, so every start begins unhealthy.
+    assert init["tmpfs"] == ["/tmp"]
+    assert init["healthcheck"]["test"] == ["CMD", "cat", str(STAGED_MARKER)]
+    assert init["cap_add"] == ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+    writers = {
+        name
+        for name, service in services.items()
+        for volume, read_only in _volume_mounts(service)
+        if volume in STAGED_VOLUMES and not read_only
+    }
+    assert writers == {STAGED}

@@ -811,6 +811,10 @@ def _acceptance_caddy_entrypoint(value: object) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(part, str) for part in value):
         raise LifecycleError("Caddy acceptance startup wrapper is invalid")
     entrypoint = [part for part in value if isinstance(part, str)]
+    # Current bundles run the staged entrypoint directly; Compose appends the
+    # command to it.
+    if entrypoint == ["/bin/sh", "/run/vonk-runtime-assets/caddy/entrypoint.sh"]:
+        return entrypoint
     native = "exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh"
     if len(entrypoint) not in {3, 4} or entrypoint[:2] != ["/bin/sh", "-c"]:
         raise LifecycleError("Caddy acceptance startup wrapper is invalid")

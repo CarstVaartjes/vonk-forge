@@ -22,7 +22,7 @@ IMAGE_REPOSITORIES = {
     "litellm": "ghcr.io/carstvaartjes/vonk-forge-litellm",
 }
 ROLE_SERVICES = {
-    "api": ("control-api",),
+    "api": ("runtime-init", "control-api"),
     "worker": ("control-worker",),
     "litellm": ("litellm",),
 }

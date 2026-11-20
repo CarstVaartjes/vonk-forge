@@ -689,7 +689,7 @@ jobs:
           # Point those services at the images just built, never at GHCR.
           {
             echo services:
-            for pair in control-api:api control-worker:worker \
+            for pair in runtime-init:api control-api:api control-worker:worker \
               litellm:litellm; do
               printf '  %s:\n    image: %s-%s:%s\n    pull_policy: never\n' \
                 "${pair%%:*}" "$IMAGE_PREFIX" "${pair##*:}" "$IMAGE_TAG"

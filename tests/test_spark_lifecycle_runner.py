@@ -182,11 +182,26 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
         )
         for argument in service["entrypoint"]
     ]
-    # The former published wrapper discarded command arguments. Its native
-    # entrypoint therefore selected the packaged configuration, not the
-    # fixture's source-bound configuration. Exercise that exact countercase.
-    old_wrapper = wrapper[:3]
-    old_wrapper[2] = old_wrapper[2].removesuffix(' "$@"')
+    # A historical signed bundle's wrapper waited for the staged entrypoint and
+    # discarded command arguments. Its native entrypoint therefore selected the
+    # packaged configuration, not the fixture's source-bound configuration.
+    # Exercise that exact countercase.
+    historical = [
+        "/bin/sh",
+        "-c",
+        (
+            "attempts=0; until [ -f /run/vonk-runtime-assets/caddy/entrypoint.sh ]; "
+            'do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then '
+            "exit 1; fi; sleep 1; done; "
+            "exec /bin/sh /run/vonk-runtime-assets/caddy/entrypoint.sh"
+        ),
+    ]
+    old_wrapper = [
+        argument.replace("$$", "$").replace(
+            "/run/vonk-runtime-assets/caddy/entrypoint.sh", str(native)
+        )
+        for argument in historical
+    ]
     environment = {
         "PATH": str(executable.parent) + os.pathsep + os.defpath,
         "VONK_CONTROL_HOSTNAME": "spark.acceptance.invalid",
@@ -201,11 +216,8 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
         old_selected[old_selected.index("--config") + 1]
         == "/run/vonk-runtime-assets/caddy/Caddyfile"
     )
-    # A previous signed bundle uses the same native startup boundary without
-    # argv forwarding. Its fixture adaptation preserves the entire release's
-    # wait script and applies only the reviewed final-argv correction.
-    historical = published["services"]["caddy"]["entrypoint"][:3]
-    historical[2] = historical[2].removesuffix(' "$$@"')
+    # Its fixture adaptation preserves the entire release's wait script and
+    # applies only the reviewed final-argv correction.
     adapted = lifecycle._acceptance_caddy_entrypoint(historical)
     historical_wrapper = [
         argument.replace("$$", "$").replace(

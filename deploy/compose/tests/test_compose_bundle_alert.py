@@ -1,6 +1,6 @@
 """``NasComposeBundleStale`` judges the running Controller, not the one before.
 
-Compose restarts Prometheus with control-api (``depends_on: restart: true``),
+Compose restarts Prometheus with runtime-init (``depends_on: restart: true``),
 and Prometheus writes no staleness marker when it stops. For five minutes after
 a redeploy it still sees the previous process's series, whose labels name the
 previous release. On 2026-10-17 that series (``expected`` = the previous
