@@ -620,7 +620,7 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
 
         human = _run_json(
             installed_vonkctl,
-            ("--profile", "1", "profile", "endpoint"),
+            ("--profile", "1", "profile", "endpoint", "--wide"),
             environment,
             tmp_path,
         )
