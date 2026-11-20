@@ -156,10 +156,14 @@ def test_typescript_shapes_match_formatter_line_breaks(tmp_path: Path) -> None:
         type Str =
           | "a"
           | "b";
+        type Keyed<T extends { a: string; b: number }> = {
+          value: T;
+        };
         """,
     )
     assert scans.typescript_shapes(tmp_path) == [
         ("control/web/src/api/y.ts", "Gen"),
+        ("control/web/src/api/y.ts", "Keyed"),
         ("control/web/src/api/y.ts", "Msg"),
         ("control/web/src/api/y.ts", "Wide"),
         ("control/web/src/api/y.ts", "Wrapped"),

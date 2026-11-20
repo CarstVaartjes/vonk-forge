@@ -82,7 +82,7 @@ TS_ALLOWLIST = TOOLS / "ts-shapes-allowlist.json"
 WEB_SRC = ROOT / "control/web/src"
 _TS_SHAPE = re.compile(
     r"^[ \t]*(?:export\s+)?(?:declare\s+)?"
-    r"(?:type\s+(\w+)(?:<[^;{]*?>)?\s*=\s*(?:\|\s*)?\{|interface\s+([A-Z]\w*)[^{;]*\{)",
+    r"(?:type\s+(\w+)(?:<[^=\n]*>|<[^;{]*?>)?\s*=\s*(?:\|\s*)?\{|interface\s+([A-Z]\w*)[^{;]*\{)",
     re.MULTILINE,
 )
 

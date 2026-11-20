@@ -125,7 +125,7 @@
     {
       "file": "control/web/src/components/cache-removal-operations.ts",
       "type": "CacheRemovalIntent",
-      "reason": "UI-only discriminated union for one screen or hook; not an API document"
+      "reason": "UI-only request bookkeeping shared by the cache-removal components; never sent as a body (calls go through typed client methods)"
     },
     {
       "file": "control/web/src/components/cache-removal-operations.ts",
