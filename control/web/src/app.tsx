@@ -13,6 +13,7 @@ import { KeysPage } from "./pages/keys";
 import { LibraryPage } from "./pages/library";
 import { WorkloadsPage } from "./pages/workloads";
 import { sparkPath, sparkRouteId } from "./lib/spark-route";
+import { interceptPlainClick } from "./lib/plain-click";
 
 function pageTitle(pathname: string): string {
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
@@ -88,7 +89,7 @@ export function App({ api }: { api: ControlApi }) {
   }
 
   function navigate(event: React.MouseEvent<HTMLAnchorElement>, target: AppRoute) {
-    event.preventDefault();
+    if (!interceptPlainClick(event)) return false;
     const nextPath = `/${target}`;
     return requestNavigation(() => {
       history.pushState(null, "", nextPath);
@@ -98,7 +99,7 @@ export function App({ api }: { api: ControlApi }) {
   }
 
   function navigatePath(event: React.MouseEvent<HTMLAnchorElement>, nextPath: string) {
-    event.preventDefault();
+    if (!interceptPlainClick(event)) return;
     requestNavigation(() => {
       history.pushState(null, "", nextPath);
       activeUrl.current = nextPath;
