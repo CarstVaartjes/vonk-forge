@@ -285,6 +285,59 @@ def test_a_reflowed_contract_literal_is_not_new_but_an_extra_one_is():
     ]
 
 
+def test_a_relocated_block_does_not_also_excuse_a_new_literal():
+    # Wrong implementation: the deleted lines a moved block spent were counted
+    # again, so the move paid for a new spelling of the same word.
+    path = "control/web/src/components/x.tsx"
+    patch = (
+        f"--- a/{path}\n+++ b/{path}\n@@ -1,4 +1,5 @@\n"
+        "-const p = 1;\n"
+        '-const q = push("error");\n'
+        "-const r = 2;\n"
+        " const a = 1;\n"
+        '+if (s === "error") {}\n'
+        "+const p = 1;\n"
+        '+const q = push("error");\n'
+        "+const r = 2;\n"
+    )
+    source = (
+        'const a = 1;\nif (s === "error") {}\n'
+        'const p = 1;\nconst q = push("error");\nconst r = 2;\n'
+    )
+    added, removed = changed_lines(patch)
+    assert check_source(
+        path,
+        source,
+        added[path],
+        modes=("vocabulary",),
+        words=frozenset({"error"}),
+        removed=removed[path],
+    ) == [f"{path}:2: contract literal"]
+
+
+def test_python_keeps_every_added_contract_literal_and_reason_code():
+    # Python passes no removed text: its scanner also reports reason codes that
+    # are not contract words and skips comments the removed text would count.
+    path = "control/src/vonk_control/x.py"
+
+    def check(old: str, new: str) -> list[str]:
+        patch = f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-{old}\n+{new}\n"
+        added, removed = changed_lines(patch)
+        return check_source(
+            path,
+            new + "\n",
+            added[path],
+            modes=("vocabulary",),
+            words=frozenset({"failed"}),
+            removed=removed[path],
+        )
+
+    old = 'return Outcome(state="failed")'
+    assert check(old, 'return Outcome(state="failed", reason_code="disk.full-new")')
+    assert check(old, 'return Outcome(state = "failed")')
+    assert check('# "failed" means stopped', 'ok = state == "failed"')
+
+
 def test_added_source_that_resembles_a_patch_header():
     patch = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+++ b/inside-source\n"
     assert added_lines(patch) == {"x.py": {1}}

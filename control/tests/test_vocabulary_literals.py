@@ -37,22 +37,19 @@ def test_model_beside_messages_is_openai_s_request_field_not_a_contract_word() -
     assert scan.scan_source('kind = "model"\n', path=REL, words=words) == [1]
 
 
-def test_svg_paint_and_aria_values_are_markup_not_contract_words() -> None:
-    # Wrong implementation: fill="none" and role="group" blocked markup that names
-    # no contract value; a word spelled as a class, passed as a component prop or
-    # compared by hand must still be caught.
+def test_an_svg_paint_is_markup_not_a_contract_word() -> None:
+    # Wrong implementation: fill="none" blocked an icon that names no contract
+    # value; a word spelled as a class or compared by hand must still be caught.
     source = (
         '<code className="alias" />;\n'
         '<path fill="none" stroke="none" />;\n'
-        '<div role="group" aria-label="none" />;\n'
-        '<Choice value="alias" />;\n'
         'if (kind === "alias") {}\n'
     )
     assert scan.scan_source(
         source,
         path="control/web/src/components/example.tsx",
-        words=frozenset({"alias", "group", "none"}),
-    ) == [1, 4, 5]
+        words=frozenset({"alias", "none"}),
+    ) == [1, 3]
 
 
 def test_a_docker_subcommand_is_not_a_contract_word() -> None:

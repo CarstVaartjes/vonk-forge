@@ -486,12 +486,12 @@ PR/merge-group base. Only added lines can fail. The adapter, scanners and fixtur
 tests never read Git.
 There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
-A contract literal is new only when the change spells that word more often in a
-file than its removed lines did, so a formatter reflow or an edit of an old line
-passes while an extra spelling fails every added line that carries it. In
-TypeScript, SVG paint and ARIA values (`fill=`, `stroke=`, `role=`, `aria-*=`)
-are web-standard markup and are not scanned; class names and component props
-(`className=`, `value=`, `state=`) are.
+In Rust and TypeScript a contract literal is new only when the change spells
+that word more often in a file than its removed lines did, so a formatter reflow
+or an edit of an old line passes while an extra spelling fails every added line
+that carries it. Python keeps reporting every added line the scanner flags: its
+scanner also reports reason codes that are not words and skips comments and
+docstrings the removed text would count.
 
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,

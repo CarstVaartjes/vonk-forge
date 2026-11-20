@@ -837,7 +837,11 @@ def new_literal_lines(
     A formatter reflow or an edit of an old line re-adds its literals; only a
     word the change spells more often than it removed is new debt, and then
     every added line spelling it is reported. A line whose literal the quote
-    pattern cannot see stays reported.
+    pattern cannot see stays reported. Only Rust and TypeScript pass removed
+    text: there the scanner reports exactly the quoted words this pattern
+    counts. The Python scanner also reports reason codes that are not words
+    and skips docstrings and keys the removed text would count, so Python
+    passes none and every reported added line stays reported.
     """
     lines = source.splitlines()
     # A line is counted once, however many hits the scanner reported on it.
@@ -1940,7 +1944,7 @@ def check_source(
                 ),
                 source,
                 added,
-                removed,
+                () if python else removed,
                 contract,
             )
         )
