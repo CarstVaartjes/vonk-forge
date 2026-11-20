@@ -586,18 +586,9 @@ def test_runtime_init_marks_only_a_completed_run_healthy_then_idles(
     assert attempts == ["stage"] * 3
     assert not marker.exists()
 
-    class Stopped(Exception):
-        pass
-
     idles: list[str] = []
-
-    def idle() -> None:
-        idles.append("idle")
-        raise Stopped
-
     monkeypatch.setattr(runtime_init, "stage_runtime", lambda: attempts.append("ok"))
-    with pytest.raises(Stopped):
-        runtime_init.main(marker=marker, idle=idle)
+    runtime_init.main(marker=marker, idle=lambda: idles.append("idle"))
     assert attempts[-1] == "ok"
     assert marker.read_text() == "staged\n"
     assert idles == ["idle"]

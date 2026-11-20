@@ -686,8 +686,9 @@ def main(
     else:
         raise SystemExit(1)
     marker.write_text("staged\n", encoding="utf-8")
-    while True:
-        idle()
+    # Blocks until a signal is handled; SIGTERM exits. Any other wake ends the
+    # process and the restart policy stages again.
+    idle()
 
 
 if __name__ == "__main__":
