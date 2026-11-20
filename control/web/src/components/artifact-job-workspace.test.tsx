@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   ArtifactJob,
+  ArtifactJobInputFile,
+  ArtifactJobInputRequest,
   ArtifactJobParameter,
   LibraryApi,
   LibraryViewRecipeDetail,
@@ -49,7 +51,12 @@ function detail(running = true): LibraryViewRecipeDetail {
     definition,
     topology: definition.topology,
     model_documents: [],
-    operational_state: { builds: [], mappings: [], installations: [], runs: running ? [run] : [] },
+    operational_state: {
+      builds: [],
+      mappings: [],
+      installations: [],
+      runs: running ? [run] : [],
+    },
     placement: [],
     reasons: [],
   } as unknown as LibraryViewRecipeDetail;
@@ -152,7 +159,13 @@ function canonicalDefinition(interfaces: unknown[]): RecipeDefinition {
       name: "solo",
       mode: "single",
       node_count: 1,
-      parallelism: { world_size: 1, tensor: 1, pipeline: 1, data: 1, backend: "local" },
+      parallelism: {
+        world_size: 1,
+        tensor: 1,
+        pipeline: 1,
+        data: 1,
+        backend: "local",
+      },
       fabric: { connectivity: "none", minimum_bandwidth_mbps: 0 },
       roles: [
         {
@@ -182,8 +195,15 @@ function canonicalDefinition(interfaces: unknown[]): RecipeDefinition {
       stop_order: ["entrypoint"],
     },
     interfaces,
-    validation: { benchmarks: [], serving: { interface: "image-job", checks: [] } },
-    provenance: { source_kind: "local", source_reference: null, attribution: [] },
+    validation: {
+      benchmarks: [],
+      serving: { interface: "image-job", checks: [] },
+    },
+    provenance: {
+      source_kind: "local",
+      source_reference: null,
+      attribution: [],
+    },
     release: { version: "3", released_at: "2026-08-28T12:00:00Z", history: [] },
   } as unknown as RecipeDefinition;
 }
@@ -193,13 +213,33 @@ type JobInput = Omit<Partial<ArtifactJob>, "state"> & {
   state?: ArtifactJob["state"] | "draft" | "ready" | "cancelling";
 };
 
+// The Controller derives each input's media type from its file name.
+const mediaTypeByExtension: Record<string, string> = {
+  png: "image/png",
+  txt: "text/plain",
+  obj: "model/obj",
+  ply: "model/ply",
+  mov: "video/quicktime",
+  mkv: "video/x-matroska",
+};
+
+function declared(inputs: ArtifactJobInputRequest[] = []): ArtifactJobInputFile[] {
+  return inputs.map((item) => ({
+    ...item,
+    media_type: mediaTypeByExtension[item.name.split(".").pop() ?? ""] ?? "image/png",
+  }));
+}
+
 function job(given: JobInput = {}): ArtifactJob {
   const { state, ...rest } = given;
   const input: Partial<ArtifactJob> = { ...rest };
   if (state === "draft" || state === "ready")
     Object.assign(input, { state: null, preparation: state });
   else if (state === "cancelling")
-    Object.assign(input, { state: "observing", cancel_requested_at: "2026-08-28T12:02:00Z" });
+    Object.assign(input, {
+      state: "observing",
+      cancel_requested_at: "2026-08-28T12:02:00Z",
+    });
   else if (state !== undefined) Object.assign(input, { state });
   return {
     id: "00000000-0000-4000-8000-000000000020",
@@ -304,11 +344,11 @@ function api(initialJobs: ArtifactJob[] = []) {
     }),
     artifactJobContract: vi.fn().mockResolvedValue(contractRead(contractParameters)),
     artifactJobsForRun: vi.fn().mockResolvedValue({ jobs: initialJobs }),
-    artifactJobByRequestId: vi
-      .fn()
-      .mockRejectedValue(
-        Object.assign(new Error("artifact job request not found"), { status: 404 }),
-      ),
+    artifactJobByRequestId: vi.fn().mockRejectedValue(
+      Object.assign(new Error("artifact job request not found"), {
+        status: 404,
+      }),
+    ),
     createArtifactJob: vi
       .fn()
       .mockImplementation(
@@ -318,7 +358,7 @@ function api(initialJobs: ArtifactJob[] = []) {
             operation_id: null,
             submit_request_id: null,
             state: "draft",
-            input_declarations: input.inputs ?? [],
+            input_declarations: declared(input.inputs),
             input_files: [],
           });
           return Promise.resolve(storedDraft);
@@ -418,13 +458,11 @@ test("derives prompt, parameter, and input constraints from the running recipe a
     expect.objectContaining({
       slot: "reference",
       name: "source.png",
-      media_type: "image/png",
       size_bytes: 8,
     }),
     expect.objectContaining({
       slot: "prompt",
       name: "prompt.txt",
-      media_type: "text/plain",
       size_bytes: 23,
     }),
   ]);
@@ -461,7 +499,7 @@ test("reuses the create identity across lost receipts, resumed upload, and exact
           operation_id: null,
           state: "draft",
           submit_request_id: null,
-          input_files: body.inputs,
+          input_files: declared(body.inputs),
         }),
       ),
     )
@@ -471,7 +509,7 @@ test("reuses the create identity across lost receipts, resumed upload, and exact
           operation_id: null,
           state: "ready",
           submit_request_id: null,
-          input_files: body.inputs,
+          input_files: declared(body.inputs),
         }),
       ),
     );
@@ -525,7 +563,11 @@ test("does not let a matching old submit receipt override an explicit permission
   const client = api();
   client.submitArtifactJob.mockImplementationOnce((_jobId: string, requestId: string) => {
     client.artifactJob.mockResolvedValueOnce(
-      job({ state: "queued", operation_id: "old-operation", submit_request_id: requestId }),
+      job({
+        state: "queued",
+        operation_id: "old-operation",
+        submit_request_id: requestId,
+      }),
     );
     return Promise.reject(Object.assign(new Error("permission denied"), { status: 403 }));
   });
@@ -638,7 +680,11 @@ test("does not replay submit after cancellation when the exact job is still read
           "abort",
           () => {
             client.artifactJob.mockResolvedValueOnce(
-              job({ state: "ready", operation_id: null, submit_request_id: null }),
+              job({
+                state: "ready",
+                operation_id: null,
+                submit_request_id: null,
+              }),
             );
             reject(new DOMException("cancelled", "AbortError"));
           },
@@ -884,7 +930,9 @@ test("ignores another job's pending cancellation when admitting a new independen
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
 
   await user.type(screen.getByRole("textbox", { name: "Prompt" }), "Independent request");
-  const submit = await screen.findByRole("button", { name: "Submit artifact job" });
+  const submit = await screen.findByRole("button", {
+    name: "Submit artifact job",
+  });
   expect(submit).toBeEnabled();
   await user.click(submit);
 
@@ -892,7 +940,7 @@ test("ignores another job's pending cancellation when admitting a new independen
   expect(client.createArtifactJob).toHaveBeenCalledOnce();
 });
 
-test("infers recipe-declared mesh and video media types when the browser omits them", async () => {
+test("sends no media type and uploads with the one the Controller derived", async () => {
   const user = userEvent.setup();
   const client = api();
   const fallbackDetail = detail();
@@ -984,10 +1032,19 @@ test("infers recipe-declared mesh and video media types when the browser omits t
 
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
   expect(client.createArtifactJob.mock.calls[0][1].inputs).toEqual([
-    expect.objectContaining({ slot: "obj", name: "shape.obj", media_type: "model/obj" }),
-    expect.objectContaining({ slot: "ply", name: "shape.ply", media_type: "model/ply" }),
-    expect.objectContaining({ slot: "mov", name: "source.mov", media_type: "video/quicktime" }),
-    expect.objectContaining({ slot: "mkv", name: "source.mkv", media_type: "video/x-matroska" }),
+    expect.objectContaining({ slot: "obj", name: "shape.obj" }),
+    expect.objectContaining({ slot: "ply", name: "shape.ply" }),
+    expect.objectContaining({ slot: "mov", name: "source.mov" }),
+    expect.objectContaining({ slot: "mkv", name: "source.mkv" }),
+  ]);
+  for (const item of client.createArtifactJob.mock.calls[0][1].inputs) {
+    expect(item).not.toHaveProperty("media_type");
+  }
+  expect(client.uploadArtifactJobInput.mock.calls.map((call) => call[1].media_type)).toEqual([
+    "model/obj",
+    "model/ply",
+    "video/quicktime",
+    "video/x-matroska",
   ]);
 });
 
@@ -1052,10 +1109,14 @@ test("renders every declared job interface as a native bounded form and clears l
   await screen.findByRole("button", { name: "Submit artifact job" });
   const selector = screen.getByRole("combobox", { name: "Job interface" });
   expect(
-    within(selector).getByRole("option", { name: "Image Job · 2 bounded slots" }),
+    within(selector).getByRole("option", {
+      name: "Image Job · 2 bounded slots",
+    }),
   ).toBeInTheDocument();
   expect(
-    within(selector).getByRole("option", { name: "Video Job · 1 bounded slot" }),
+    within(selector).getByRole("option", {
+      name: "Video Job · 1 bounded slot",
+    }),
   ).toBeInTheDocument();
   await user.type(screen.getByRole("textbox", { name: "Prompt" }), "Unsaved local prompt");
   await user.selectOptions(selector, "1");
@@ -1104,7 +1165,9 @@ test("restores durable multi-output results with safe native previews and exact 
   const client = api([job({ output_files: [image, metadata, audio, video, mesh] })]);
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
 
-  const history = await screen.findByRole("article", { name: /artifact job .* succeeded/i });
+  const history = await screen.findByRole("article", {
+    name: /artifact job .* succeeded/i,
+  });
   expect(within(history).getByRole("img", { name: "Generated output frame.png" })).toHaveAttribute(
     "src",
     `/api/artifact-jobs/00000000-0000-4000-8000-000000000020/results/${image.name}/${image.sha256}`,
@@ -1242,7 +1305,11 @@ test("surfaces an unconfirmed upload cancellation and retries with the same requ
 
 test("keeps the contract visible without a run and provides explicit cancel confirmation and retry recovery", async () => {
   const user = userEvent.setup();
-  const queued = job({ state: "queued", output_manifest_sha256: null, result_evidence: null });
+  const queued = job({
+    state: "queued",
+    output_manifest_sha256: null,
+    result_evidence: null,
+  });
   const client = api([queued]);
   const { rerender } = render(
     <ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail(false)} />,
@@ -1362,7 +1429,10 @@ test("checks browser input bytes against the Controller's exact declared transpo
   const capabilities = await client.artifactJobCapabilities();
   client.artifactJobCapabilities.mockResolvedValue({
     ...capabilities,
-    transport: { ...capabilities.transport, max_input_file_bytes: new LosslessNumber("2") },
+    transport: {
+      ...capabilities.transport,
+      max_input_file_bytes: new LosslessNumber("2"),
+    },
   });
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);
   await screen.findByText("No artifact jobs yet");
@@ -1391,7 +1461,14 @@ test("renders an enum as a select and a bounded float input", async () => {
         allowed_values: [49, 97],
         label: "Frames",
       },
-      { name: "scale", type: "float", default: 1.5, minimum: 0.5, maximum: 4, allowed_values: [] },
+      {
+        name: "scale",
+        type: "float",
+        default: 1.5,
+        minimum: 0.5,
+        maximum: 4,
+        allowed_values: [],
+      },
     ] as ArtifactJobParameter[]),
   );
   render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()} />);

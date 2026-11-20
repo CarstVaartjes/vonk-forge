@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeJobFile,
     RecipeJobInputFile,
+    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobOutputMapping,
     SecurityRefusalError,
@@ -51,6 +52,7 @@ from ..artifact_job_evidence import (
     OutputContractRule,
 )
 from ..compiled_artifact_contract import (
+    ArtifactSlotContract,
     CompiledArtifactContract,
     ParameterDefinition,
     ParameterScalar,
@@ -460,16 +462,93 @@ def _effective_output_limits(
     return requested
 
 
+#: The one extension -> media type table for job inputs of every recipe. A client never names a type: the Controller derives it from the file
+#: name, intersected with the slot's own declared media types.
+EXTENSION_MEDIA_TYPES: Mapping[str, str] = {
+    ".flac": "audio/flac",
+    ".gif": "image/gif",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".json": "application/json",
+    ".m4a": "audio/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".obj": "model/obj",
+    ".ogg": "audio/ogg",
+    ".pdf": "application/pdf",
+    ".ply": "model/ply",
+    ".png": "image/png",
+    ".txt": "text/plain",
+    ".wav": "audio/wav",
+    ".webm": "video/webm",
+    ".webp": "image/webp",
+}
+
+
+def slot_input_media_type(slot: ArtifactSlotContract, name: str) -> str | None:
+    """The slot's media type for a file name, or ``None`` when it fits none."""
+    lowered = name.lower()
+    extensions = [ext for ext in slot.extensions if lowered.endswith(ext)]
+    if slot.extensions and not extensions:
+        return None
+    candidates = {
+        EXTENSION_MEDIA_TYPES[ext]
+        for ext in extensions
+        if EXTENSION_MEDIA_TYPES.get(ext) in slot.media_types
+    }
+    if candidates:
+        return min(candidates)
+    if not slot.extensions and len(slot.media_types) == 1:
+        return slot.media_types[0]
+    return None
+
+
+def _derive_inputs(
+    parsed: CompiledArtifactContract,
+    requests: Sequence[RecipeJobInputRequest],
+) -> tuple[RecipeJobInputFile, ...]:
+    slots = {item.id: item for item in parsed.input.slots}
+    derived: list[RecipeJobInputFile] = []
+    for item in requests:
+        slot = slots.get(item.slot)
+        if slot is None:
+            if not slots:
+                raise ArtifactJobInvalid(
+                    "recipe does not accept artifact input files",
+                    reason=InvalidRequestReason.UNSUPPORTED,
+                )
+            raise ArtifactJobInvalid(
+                f"artifact input slot {item.slot} is undeclared",
+                reason=InvalidRequestReason.UNKNOWN_FIELD,
+            )
+        media_type = slot_input_media_type(slot, item.name)
+        if media_type is None:
+            raise ArtifactJobInvalid(
+                f"artifact input {item.name} does not fit slot {item.slot}; "
+                f"it takes the extensions: {', '.join(slot.extensions)}",
+                reason=InvalidRequestReason.UNSUPPORTED,
+            )
+        derived.append(
+            RecipeJobInputFile(
+                slot=item.slot,
+                name=item.name,
+                size_bytes=item.size_bytes,
+                sha256=item.sha256,
+                media_type=media_type,
+            )
+        )
+    return tuple(derived)
+
+
 def _validate_inputs_against_contract(
     parsed: CompiledArtifactContract,
     inputs: tuple[RecipeJobInputFile, ...],
 ) -> None:
     slots = {item.id: item for item in parsed.input.slots}
-    if not slots and inputs:
-        raise ArtifactJobInvalid(
-            "recipe does not accept artifact input files",
-            reason=InvalidRequestReason.UNSUPPORTED,
-        )
     for item in inputs:
         slot = slots.get(item.slot)
         if slot is None:
@@ -477,23 +556,10 @@ def _validate_inputs_against_contract(
                 f"artifact input slot {item.slot} is undeclared",
                 reason=InvalidRequestReason.UNKNOWN_FIELD,
             )
-        if item.media_type not in slot.media_types:
-            raise ArtifactJobInvalid(
-                f"artifact input {item.name} media type is not allowed",
-                reason=InvalidRequestReason.UNSUPPORTED,
-            )
         if item.size_bytes > slot.max_file_bytes:
             raise ArtifactJobInvalid(
                 f"artifact input {item.name} exceeds its slot limit",
                 reason=InvalidRequestReason.LIMIT_EXCEEDED,
-            )
-        extensions = slot.extensions
-        if extensions and not any(
-            item.name.lower().endswith(ext) for ext in extensions
-        ):
-            raise ArtifactJobInvalid(
-                f"artifact input {item.name} extension is not allowed",
-                reason=InvalidRequestReason.UNSUPPORTED,
             )
     for slot_id, slot in slots.items():
         selected = [item for item in inputs if item.slot == slot_id]

@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationProgress,
     RecipeJobFile,
-    RecipeJobInputFile,
+    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
@@ -533,7 +533,6 @@ def artifact_create_request(run_id: str, request_id: str) -> _ArtifactCreateRequ
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
@@ -560,8 +559,8 @@ def create_artifact_job(service: ArtifactJobService, *args, **request):
     if "inputs" in request:
         request["inputs"] = [
             item
-            if isinstance(item, RecipeJobInputFile)
-            else RecipeJobInputFile.model_validate(item)
+            if isinstance(item, RecipeJobInputRequest)
+            else RecipeJobInputRequest.model_validate(item)
             for item in request["inputs"]
         ]
     if "output_limits" in request and not isinstance(
@@ -907,7 +906,6 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(input_content),
                 "sha256": input_digest,
             }
@@ -1220,7 +1218,6 @@ def test_artifact_job_rejects_unsafe_names(tmp_path) -> None:
                 {
                     "slot": "input",
                     "name": "../escape",
-                    "media_type": "image/png",
                     "size_bytes": 0,
                     "sha256": hashlib.sha256(b"").hexdigest(),
                 }
@@ -1235,10 +1232,6 @@ def test_artifact_job_rejects_unsafe_names(tmp_path) -> None:
         (lambda value: value["parameters"].update(extra=True), "undeclared"),
         (lambda value: value["parameters"].update(seed="101"), "wrong type"),
         (lambda value: value["inputs"][0].update(slot="other"), "undeclared"),
-        (
-            lambda value: value["inputs"][0].update(media_type="image/jpeg"),
-            "media type",
-        ),
         (lambda value: value["output_limits"].update(max_files=2), "exceed"),
         (
             lambda value: value["output_limits"].update(
@@ -1263,7 +1256,6 @@ def test_artifact_job_server_contract_rejects_client_escalation(
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
@@ -1584,7 +1576,6 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
                 {
                     "slot": "input",
                     "name": "input.png",
-                    "media_type": "image/png",
                     "size_bytes": len(content),
                     "sha256": hashlib.sha256(content).hexdigest(),
                 }
@@ -2151,7 +2142,6 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
             {
                 "slot": "input",
                 "name": "input.png",
-                "media_type": "image/png",
                 "size_bytes": len(content),
                 "sha256": digest,
             }
