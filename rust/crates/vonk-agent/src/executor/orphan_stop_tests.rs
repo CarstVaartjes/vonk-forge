@@ -72,7 +72,7 @@ impl World {
             &plan.identity.recipe_revision_sha256,
         )
         .unwrap();
-        plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+        plan.runtime.placement.endpoint_address = Some("127.0.0.2".parse().unwrap());
         plan.security.network_mode = "bridge".parse().unwrap();
         plan.validate().unwrap();
         let run = Uuid::new_v4();
@@ -339,11 +339,13 @@ async fn a_slow_disposition_never_costs_a_running_run_its_report() {
         .host
         .run(known, Some(labels_of(known, installation, 2)));
     world.controller.say(known, FakeDisposition::Wanted(2));
-    world.controller.delay_dispositions(Duration::from_secs(11));
+    world
+        .controller
+        .delay_dispositions(Duration::from_millis(2200));
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
-    cycle(&executor).await;
+    cycle_within(&executor, short_inspection()).await;
 
     assert!(
         world
@@ -389,9 +391,8 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     let (run, installation) = world.prepared_run(2);
     world.host.run(run, Some(labels_of(run, installation, 2)));
     world.controller.say(run, FakeDisposition::Unowned);
-    // The stop outlasts the (scaled) stop window. The pass also spends the
-    // endpoint probe's own 2 s connect timeout on the unreachable address, so
-    // a pass that waited for the stop would take 5 s, not 2.3 s.
+    // The stop outlasts the (scaled) stop window: a pass that waited for it
+    // would take 3 s, a bounded one about 0.3 s.
     let windows = ObservationWindows {
         orphan_stop: Duration::from_millis(300),
         ..ObservationWindows::default()
@@ -403,7 +404,7 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     let started = Instant::now();
     cycle_within(&executor, windows).await;
     assert!(
-        started.elapsed() < Duration::from_secs(4),
+        started.elapsed() < Duration::from_millis(1800),
         "the pass waited for the stop: {:?}",
         started.elapsed()
     );
