@@ -1,9 +1,5 @@
 use super::*;
 
-/// Fixtures bind on `127.0.0.2`: OrbStack's VM port forwarder probes new
-/// `127.0.0.1` listeners with a `GET /` that a fixture would count.
-const FIXTURE_BIND: &str = "127.0.0.2:0";
-
 #[test]
 fn silent_probe_ends_and_a_fresh_probe_completes() {
     let listener = TcpListener::bind(FIXTURE_BIND).unwrap();
@@ -473,3 +469,7 @@ fn a_reaper_that_cannot_start_hands_its_child_and_claim_to_supervision() {
         thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// Fixtures bind on `127.0.0.2`: OrbStack's VM port forwarder probes new
+/// `127.0.0.1` listeners with a `GET /` that a fixture would count.
+const FIXTURE_BIND: &str = "127.0.0.2:0";
