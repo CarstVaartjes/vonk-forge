@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(state.limit, 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn waits_for_a_slot_and_wakes_when_one_is_released() {
         let governor = StreamGovernor::new(2, 2);
         let first = governor.acquire().await;
