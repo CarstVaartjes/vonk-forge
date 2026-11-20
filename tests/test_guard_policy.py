@@ -299,3 +299,7 @@ def test_guard_keeps_runtime_effects_resource_limits_and_named_rules(
     source: str,
 ) -> None:
     assert not structural_counters(source)
+
+
+def test_repository_root_has_no_stray_pr_body_files() -> None:
+    assert sorted(path.name for path in ROOT.glob("body-*.md")) == []

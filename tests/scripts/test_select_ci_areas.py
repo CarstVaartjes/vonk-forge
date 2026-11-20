@@ -227,7 +227,8 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "repository": "success", "control": "success", "web": "success",
         "generated": "success", "compose": "success", "nas-install": "success",
         "agent-package": "success", "control-image-build": "success",
-        "controller-spark-wire": "success", "lane-proof": "skipped",
+        "controller-spark-wire": "success", "consumer-probe": "success",
+        "lane-proof": "skipped",
     }  # fmt: skip
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
