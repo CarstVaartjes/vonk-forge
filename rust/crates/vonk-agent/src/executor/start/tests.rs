@@ -385,7 +385,7 @@ fn counting_dropper(
 ) {
     let drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counted = drops.clone();
-    let dropper: crate::page_cache::Dropper = Arc::new(move || {
+    let dropper: crate::page_cache::Dropper = Arc::new(move |_| {
         counted.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             vonk_agent_protocol::generated::PageCacheDropReport {
@@ -427,12 +427,18 @@ async fn a_host_that_refuses_the_drop_still_starts_its_workload() {
 
 #[test]
 fn every_workload_container_start_drops_the_page_cache_first() {
-    // Guard: a Start plan is built only inside `launch_after_drop`, so no new
-    // start path can skip the drop. Matches (`Start(_)`, `Start(plan)) =>`)
-    // only read plans.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut pending = vec![root];
-    let mut builders = Vec::new();
+    // Guard: a container-launching plan (a run Start or a JobRun) is built
+    // only in a function that begins a load phase's drop (`load.drop_now()`),
+    // so no new launch path can skip it. Matches (`Start(_)`, `Start(plan)) =>`)
+    // only read plans; test sources are skipped.
+    let patterns = [
+        ["HostRuntimePlan::", "Start("],
+        ["HostRuntimePlan::", "JobRun("],
+    ]
+    .map(|parts| parts.concat());
+    let mut pending = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    let mut sites = Vec::new();
+    let mut unguarded = Vec::new();
     while let Some(path) = pending.pop() {
         if path.is_dir() {
             pending.extend(
@@ -442,60 +448,39 @@ fn every_workload_container_start_drops_the_page_cache_first() {
             );
             continue;
         }
+        if path.to_string_lossy().contains("tests") {
+            continue;
+        }
         let source = fs::read_to_string(&path).unwrap();
-        for (index, line) in source.lines().enumerate() {
-            if line.contains("HostRuntimePlan::Start(") && !line.contains("=>") {
-                builders.push((path.clone(), index, source.clone()));
+        let lines: Vec<&str> = source.lines().collect();
+        for (index, line) in lines.iter().enumerate() {
+            if !patterns
+                .iter()
+                .any(|pattern| line.contains(pattern.as_str()))
+                || line.contains("=>")
+            {
+                continue;
+            }
+            sites.push(format!("{}:{}", path.display(), index + 1));
+            let start = lines[..index]
+                .iter()
+                .rposition(|line| line.trim_start().contains("fn ") && line.contains('('))
+                .unwrap();
+            let end = lines[index..]
+                .iter()
+                .position(|line| line.starts_with("    async fn ") || line.starts_with("fn "))
+                .map_or(lines.len(), |offset| index + offset);
+            if !lines[start..end]
+                .iter()
+                .any(|line| line.contains("load.drop_now().await"))
+            {
+                unguarded.push(sites.last().unwrap().clone());
             }
         }
     }
-    let sites: Vec<_> = builders
-        .iter()
-        .map(|(path, index, _)| format!("{}:{}", path.display(), index + 1))
-        .collect();
-    assert_eq!(sites.len(), 1, "Start plans built at {sites:?}");
-    let (path, index, source) = &builders[0];
-    assert!(path.ends_with("executor/start.rs"));
-    let before: Vec<&str> = source.lines().take(*index).collect();
-    let function = before
-        .iter()
-        .rev()
-        .find(|line| line.trim_start().starts_with("async fn "))
-        .unwrap();
-    assert!(function.contains("fn launch_after_drop("), "{function}");
-    let body = before
-        .iter()
-        .rev()
-        .take_while(|line| !line.trim_start().starts_with("async fn "))
-        .any(|line| line.contains("load.drop_now().await"));
-    assert!(body, "launch_after_drop drops before it starts");
-}
-
-#[test]
-fn every_job_container_start_holds_a_page_cache_load_phase() {
-    // Guard: the job plan is built at one site, which begins a phase and drops
-    // the cache first, so no job path can load without the drop loop.
-    let source = fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/executor/jobs.rs"),
-    )
-    .unwrap();
-    let lines: Vec<&str> = source.lines().collect();
-    let sites: Vec<usize> = lines
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| line.contains("HostRuntimePlan::JobRun(") && !line.contains("=>"))
-        .map(|(index, _)| index)
-        .collect();
-    assert_eq!(sites.len(), 1, "JobRun plans built at {sites:?}");
-    let before = &lines[..sites[0]];
-    let begin = before
-        .iter()
-        .rposition(|line| line.contains(".begin(request.job_id)"))
-        .expect("a job begins a load phase before its container starts");
+    assert_eq!(sites.len(), 2, "launch plans built at {sites:?}");
     assert!(
-        before[begin..]
-            .iter()
-            .any(|line| line.contains("load.drop_now().await")),
-        "the job drops the cache before it starts"
+        unguarded.is_empty(),
+        "no drop before launch at {unguarded:?}"
     );
 }

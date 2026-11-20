@@ -17,8 +17,8 @@ use std::{
 };
 
 use vonk_agent_protocol::generated::{
-    PageCacheDropProblem, PageCacheDropReport, PageCacheDropRequest, PageCacheSync,
-    ResourceTermProblem,
+    PageCacheDropProblem, PageCacheDropPurpose, PageCacheDropReport, PageCacheDropRequest,
+    PageCacheSync, ResourceTermProblem,
 };
 use vonk_agent_protocol::host_memory_guard_policy::{
     LOADING_PHASE_WINDOW, MEMORY_COMPACTION_TIMEOUT, PAGE_CACHE_SYNC_TIMEOUT,
@@ -170,19 +170,26 @@ pub fn drop_page_cache(
     report
 }
 
-/// The last authorized drop ask: the agent asks before each container start and
-/// every PAGE_CACHE_DROP_INTERVAL while any run loads, so this cadence is the
-/// one owner of "a load is in progress" for the host memory guard.
+/// The last authorized load-purpose drop ask: the agent asks before each
+/// serving start and every PAGE_CACHE_DROP_INTERVAL while any run loads, so
+/// this cadence is the one owner of "a load is in progress" for the host memory
+/// guard. Hygiene-purpose asks (a job's drops) never set it: R4 stays strict
+/// while a job runs.
 static LAST_LOAD_ASK: Mutex<Option<Instant>> = Mutex::new(None);
 
-/// Records an ask; true when it starts a load phase.
-fn record_load_ask(now: Instant) -> bool {
-    enter(
+/// Records an ask; true when it starts a load phase. A hygiene ask is no load.
+fn record_load_ask(purpose: PageCacheDropPurpose, now: Instant) -> bool {
+    record(
         &mut LAST_LOAD_ASK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        purpose,
         now,
     )
+}
+
+fn record(last: &mut Option<Instant>, purpose: PageCacheDropPurpose, now: Instant) -> bool {
+    purpose == PageCacheDropPurpose::Load && enter(last, now)
 }
 
 /// An ask starts a load phase when none came within `LOADING_PHASE_WINDOW`
@@ -221,7 +228,7 @@ pub fn handle(
     verifier.authorize_peer(peer)?;
     // Heard at the ask and again at its answer: a slow drop never reads as a
     // finished load. Only the first ask after a quiet window compacts.
-    let entering = record_load_ask(Instant::now());
+    let entering = record_load_ask(request.purpose, Instant::now());
     let mut report = drop_page_cache(
         Path::new("/"),
         &SYNC,
@@ -237,7 +244,7 @@ pub fn handle(
         MEMORY_COMPACTION_TIMEOUT,
         rustix::param::page_size() as u64,
     );
-    record_load_ask(Instant::now());
+    record_load_ask(request.purpose, Instant::now());
     Ok(Some(report))
 }
 
@@ -262,6 +269,19 @@ mod tests {
         assert!(!enter(&mut last, ask + 2 * PAGE_CACHE_DROP_INTERVAL));
         let quiet = ask + 2 * PAGE_CACHE_DROP_INTERVAL + LOADING_PHASE_WINDOW;
         assert!(enter(&mut last, quiet + Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn hygiene_drops_never_mark_a_load_and_load_drops_do() {
+        let (mut last, ask) = (None, Instant::now());
+        assert!(!record(&mut last, PageCacheDropPurpose::Hygiene, ask));
+        assert!(!loading_since(last, ask));
+        assert!(record(&mut last, PageCacheDropPurpose::Load, ask));
+        assert!(loading_since(last, ask));
+        // A hygiene ask inside a load's window neither extends nor ends it.
+        let late = ask + LOADING_PHASE_WINDOW + Duration::from_millis(1);
+        assert!(!record(&mut last, PageCacheDropPurpose::Hygiene, late));
+        assert!(!loading_since(last, late));
     }
 
     #[test]
@@ -445,6 +465,7 @@ mod tests {
         assert!(handle(other_frame, &verifier, &agent).unwrap().is_none());
         let frame = vonk_agent_protocol::canonical_generated_json(&PageCacheDropRequest {
             kind: vonk_agent_protocol::generated::PageCacheDropKind::PageCacheDrop,
+            purpose: PageCacheDropPurpose::Load,
             request_id: uuid::Uuid::new_v4(),
         })
         .unwrap();

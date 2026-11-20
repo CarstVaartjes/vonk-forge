@@ -256,6 +256,16 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         bounded_job_result(result)
     }
 
+    /// A job's page-cache phase: drops for its whole run, never marking the
+    /// host as loading, so the memory guard's R4 stays strict for it. Keyed by
+    /// the job, so it never ends a serving run's phase.
+    fn job_hygiene_phase(&self, job_id: uuid::Uuid) -> crate::page_cache::LoadPhase {
+        crate::page_cache::LoadPhases::for_helper(self.helper_socket).begin(
+            job_id,
+            vonk_agent_protocol::generated::PageCacheDropPurpose::Hygiene,
+        )
+    }
+
     async fn run_job(
         &self,
         claim: &AgentClaim,
@@ -361,6 +371,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     job_scope: &job_scope,
                     started,
                 };
+                // An agent restarted mid-job: its phase is held again.
+                let _load = self.job_hygiene_phase(request.job_id);
                 let deadline = reobserve::job_deadline(Instant::now(), &request);
                 let receipt = match self
                     .reobserve_job(&job, deadline, &mut cancellation, stage, cause)
@@ -517,8 +529,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // The job loads like a run: one drop now, then every interval
                 // until it exits, on every way out. Keyed by the job, so it
                 // never ends a serving run's phase.
-                let load = crate::page_cache::LoadPhases::for_helper(self.helper_socket)
-                    .begin(request.job_id);
+                let load = self.job_hygiene_phase(request.job_id);
                 load.drop_now().await;
                 let dispatched = Instant::now();
                 let outcome = run_interruptible_job(
