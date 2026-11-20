@@ -25,13 +25,6 @@ export function effectiveTheme(): Theme {
   return storedTheme() ?? systemTheme();
 }
 
-/** Sets data-theme from the owner's pick; with none, the stylesheet follows the system. */
-export function applyStoredTheme(): void {
-  const theme = storedTheme();
-  if (theme) document.documentElement.dataset.theme = theme;
-  else delete document.documentElement.dataset.theme;
-}
-
 export function setTheme(theme: Theme): void {
   try {
     localStorage.setItem(STORAGE_KEY, theme);

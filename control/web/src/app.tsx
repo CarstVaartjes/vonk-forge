@@ -134,7 +134,14 @@ export function App({ api }: { api: ControlApi }) {
           onOpenSpark={openSpark}
         />
       ),
-      workloads: <WorkloadsPage api={api} onLive={setLive} onOpenSpark={openSpark} />,
+      workloads: (
+        <WorkloadsPage
+          api={api}
+          onLive={setLive}
+          onOpenSpark={openSpark}
+          onNavigateUrl={navigateUrl}
+        />
+      ),
       library: (
         <LibraryPage
           api={api}
@@ -149,7 +156,6 @@ export function App({ api }: { api: ControlApi }) {
     }[page]
   ) : (
     <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
-      <p className="fleet-kicker">Unknown workspace</p>
       <h1
         id="not-found-heading"
         ref={(element) => {

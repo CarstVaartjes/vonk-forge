@@ -3,7 +3,7 @@
 import pytest
 from vonk_agent_protocol import LifecycleState
 
-from .added_line_guards import AGENT_REQUESTS, added_lines, check_source
+from .added_line_guards import AGENT_REQUESTS, added_lines, changed_lines, check_source
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -242,6 +242,100 @@ def test_patch_context_deleted_lines_and_multiple_hunks():
         modes=("vocabulary", "waits"),
         words=frozenset({"running"}),
     )
+
+
+def test_a_reflowed_contract_literal_is_not_new_but_an_extra_one_is():
+    # Wrong implementation: a formatter reflow of an old `push("error", m)` line
+    # re-reported its literal, so no edit to the file could pass.
+    path = "control/web/src/components/x.tsx"
+    old = 'const t = {error: m => push("error", m), info: m => show("info", "error", m)};\n'
+    new = (
+        "const t = {\n"
+        '  error: (m) => push("error", m),\n'
+        '  info: (m) => show("info", "error", m),\n'
+        "};\n"
+    )
+    extra = new.replace("};", '  fail: (m) => push("error", m),\n};')
+
+    def check(source: str) -> list[str]:
+        body = "".join(f"+{line}\n" for line in source.splitlines())
+        patch = f"--- a/{path}\n+++ b/{path}\n@@ -1 +1,9 @@\n-{old}{body}"
+        added, removed = changed_lines(patch)
+        return check_source(
+            path,
+            source,
+            added[path],
+            modes=("vocabulary",),
+            words=frozenset({"error", "info"}),
+            removed=removed[path],
+        )
+
+    assert check(new) == []
+    # Every added line spelling the grown word is reported, a reflowed one too.
+    assert check(extra) == [
+        f"{path}:2: contract literal",
+        f"{path}:3: contract literal",
+        f"{path}:4: contract literal",
+    ]
+    # Per file and word: replacing one spelling with another is not more debt.
+    assert check('if (state === "info") {}\n') == []
+    assert check('if (state === "info") {}\nconst x = "info";\n') == [
+        f"{path}:1: contract literal",
+        f"{path}:2: contract literal",
+    ]
+
+
+def test_a_relocated_block_does_not_also_excuse_a_new_literal():
+    # Wrong implementation: the deleted lines a moved block spent were counted
+    # again, so the move paid for a new spelling of the same word.
+    path = "control/web/src/components/x.tsx"
+    patch = (
+        f"--- a/{path}\n+++ b/{path}\n@@ -1,4 +1,5 @@\n"
+        "-const p = 1;\n"
+        '-const q = push("error");\n'
+        "-const r = 2;\n"
+        " const a = 1;\n"
+        '+if (s === "error") {}\n'
+        "+const p = 1;\n"
+        '+const q = push("error");\n'
+        "+const r = 2;\n"
+    )
+    source = (
+        'const a = 1;\nif (s === "error") {}\n'
+        'const p = 1;\nconst q = push("error");\nconst r = 2;\n'
+    )
+    added, removed = changed_lines(patch)
+    assert check_source(
+        path,
+        source,
+        added[path],
+        modes=("vocabulary",),
+        words=frozenset({"error"}),
+        removed=removed[path],
+    ) == [f"{path}:2: contract literal"]
+
+
+def test_python_keeps_every_added_contract_literal_and_reason_code():
+    # Python passes no removed text: its scanner also reports reason codes that
+    # are not contract words and skips comments the removed text would count.
+    path = "control/src/vonk_control/x.py"
+
+    def check(old: str, new: str) -> list[str]:
+        patch = f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-{old}\n+{new}\n"
+        added, removed = changed_lines(patch)
+        return check_source(
+            path,
+            new + "\n",
+            added[path],
+            modes=("vocabulary",),
+            words=frozenset({"failed"}),
+            removed=removed[path],
+        )
+
+    old = 'return Outcome(state="failed")'
+    assert check(old, 'return Outcome(state="failed", reason_code="disk.full-new")')
+    assert check(old, 'return Outcome(state = "failed")')
+    assert check('# "failed" means stopped', 'ok = state == "failed"')
 
 
 def test_added_source_that_resembles_a_patch_header():

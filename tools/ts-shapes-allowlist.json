@@ -209,6 +209,11 @@
     },
     {
       "file": "control/web/src/components/toast.tsx",
+      "type": "ToastLink",
+      "reason": "UI-only follow-up link inside a notice (label, href, click handler); never serialized to the API"
+    },
+    {
+      "file": "control/web/src/components/toast.tsx",
       "type": "Toasts",
       "reason": "UI-only state or form draft; never serialized to the API"
     },

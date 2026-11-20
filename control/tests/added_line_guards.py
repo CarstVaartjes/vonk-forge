@@ -5,7 +5,8 @@ from __future__ import annotations
 import ast
 import re
 import sys
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Iterable, Sequence
 from difflib import SequenceMatcher
 from functools import cache
 from itertools import pairwise
@@ -654,12 +655,18 @@ def paging_count_ceilings(source: str) -> list[int]:
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
+    return changed_lines(patch)[0]
+
+
+def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]]:
     """Parse hunks, carrying unchanged relocated blocks without duplicating debt.
 
     A deleted block may account for one identical added block in the same
     language. Copies and changed lines remain additions. Matching preserves
     context and permits a uniform extraction indentation shift, so a common isolated line cannot hide new work.
     All evidence comes from the supplied patch, never repository history.
+    Returns each file's added line numbers and its removed text; a deleted line
+    that a relocated block spent is no longer in the removed text.
     """
     files: dict[str, set[int]] = {}
     additions: list[tuple[str, list[tuple[int, str]]]] = []
@@ -803,7 +810,50 @@ def added_lines(patch: str) -> dict[str, set[int]]:
                 for offset in range(match.size):
                     files[target].discard(lines[match.b + offset][0])
                     removed[match.a + offset] = f"\0consumed:{match.a + offset}"
-    return files
+    return files, deleted_by_file
+
+
+_QUOTED = re.compile(r"""(["'])([^"'\n]*)\1""")
+
+
+def _spelled(lines: Iterable[str], words: frozenset[str]) -> Counter[str]:
+    return Counter(
+        match.group(2)
+        for text in lines
+        for match in _QUOTED.finditer(text)
+        if match.group(2) in words
+    )
+
+
+def new_literal_lines(
+    found: Iterable[int],
+    source: str,
+    added: set[int],
+    removed: Sequence[str],
+    words: frozenset[str],
+) -> list[int]:
+    """A contract word the file's removed lines spelled as often is reflowed, not new.
+
+    A formatter reflow or an edit of an old line re-adds its literals; only a
+    word the change spells more often than it removed is new debt, and then
+    every added line spelling it is reported. A line whose literal the quote
+    pattern cannot see stays reported. Only Rust and TypeScript pass removed
+    text: there the scanner reports exactly the quoted words this pattern
+    counts. The Python scanner also reports reason codes that are not words
+    and skips docstrings and keys the removed text would count, so Python
+    passes none and every reported added line stays reported.
+    """
+    lines = source.splitlines()
+    # A line is counted once, however many hits the scanner reported on it.
+    reported = sorted({line for line in found if line in added})
+    old = _spelled(removed, words)
+    new = _spelled((lines[line - 1] for line in reported), words)
+    grown = {word for word, count in new.items() if count > old[word]}
+    return [
+        line
+        for line in reported
+        if not (spelled := _spelled([lines[line - 1]], words)) or grown & spelled.keys()
+    ]
 
 
 # Words of bookkeeping drift: an owner that is unavailable waits, state that
@@ -1591,8 +1641,12 @@ def check_source(
     *,
     modes: Sequence[str] = MODES,
     words: frozenset[str] | None = None,
+    removed: Sequence[str] = (),
 ) -> list[str]:
-    """Old findings cannot fail the change; only a reported added line can."""
+    """Old findings cannot fail the change; only a reported added line can.
+
+    ``removed`` is the file's removed text from the same patch.
+    """
     if not added or "generated_control" in path or "/generated/" in path:
         return []
     is_test = (
@@ -1896,14 +1950,22 @@ def check_source(
         definitions = _enum_member_lines(source) if python else set()
         if path.endswith(".rs"):
             definitions.update(rust_test_lines(source))
+        contract = vocabulary.contract_words() if words is None else words
         hits.extend(
             (line, "contract literal")
-            for line in vocabulary.scan_source(
+            for line in new_literal_lines(
+                (
+                    line
+                    for line in vocabulary.scan_source(
+                        source, path=path, words=contract
+                    )
+                    if line not in definitions
+                ),
                 source,
-                path=path,
-                words=vocabulary.contract_words() if words is None else words,
+                added,
+                () if python else removed,
+                contract,
             )
-            if line not in definitions
         )
     if (
         "retries" in modes
@@ -3100,11 +3162,19 @@ def planner_defect_waits(source: str) -> list[int]:
 
 def main(*, modes: Sequence[str] = MODES) -> int:
     messages = []
-    changes = added_lines(sys.stdin.read())
+    changes, removed = changed_lines(sys.stdin.read())
     for path, lines in changes.items():
         target = ROOT / path
         if target.is_file() and target.resolve().is_relative_to(ROOT):
-            messages.extend(check_source(path, target.read_text(), lines, modes=modes))
+            messages.extend(
+                check_source(
+                    path,
+                    target.read_text(),
+                    lines,
+                    modes=modes,
+                    removed=removed.get(path, ()),
+                )
+            )
     for message in messages:
         print(message, file=sys.stderr)
     return int(bool(messages))
