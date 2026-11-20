@@ -72,6 +72,7 @@ flowchart LR
 - [`vonkctl` controller CLI](runbooks/vonkctl.md)
 - [PostgreSQL authority administration](runbooks/authority-administration.md)
 - [Node onboarding and health](runbooks/node-onboarding.md)
+- [Display reserved memory](runbooks/display-reserved-memory.md)
 - [Agent installation and enrollment](operations/install-vonk-agent.md)
 - [Spark host checks](operations/spark-host-checks.md)
 - [Remove Vonk Forge](operations/uninstall.md)
