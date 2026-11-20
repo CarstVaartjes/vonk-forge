@@ -66,7 +66,7 @@ from tests.acceptance.runtime import (
     AcceptanceError,
     assert_compose_services_healthy,
 )
-from tests.acceptance.test_fresh_nas_install import generate_bundle
+from tests.acceptance.test_fresh_nas_install import TAILSCALE_SERVICES, generate_bundle
 from tests.acceptance.test_spark_lifecycle import (
     CHANNEL,
     COMPOSE_IMAGE_ROLES,
@@ -773,12 +773,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             declared = require_object(document.get("services"), "baseline services")
             # A service only the baseline declares (the standing registry that
             # Caddy depended on) starts with it and is expected until the
-            # upgrade's --remove-orphans removes it.
-            services |= {
-                name
-                for name, definition in declared.items()
-                if "profiles" not in require_object(definition, "baseline service")
-            }
+            # upgrade's --remove-orphans removes it. The installer writes no
+            # `profiles:` key, so the Tailscale pair is excluded by name: the
+            # lane runs with a disabled Tailscale credential.
+            services |= set(declared) - TAILSCALE_SERVICES
             services.intersection_update(declared)
         return services
 
