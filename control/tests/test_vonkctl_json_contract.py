@@ -284,7 +284,7 @@ def test_cancel_follow_and_controller_failures_match_their_published_schemas(
         "1",
         "profile",
         "progress",
-        "--application",
+        "--load",
         loaded["id"],
         "--follow",
         "--timeout-seconds",

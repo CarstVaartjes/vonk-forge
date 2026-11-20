@@ -87,6 +87,15 @@ before adding a rule.
   `drop_caches` `1` (page cache only), not `3`: measured on both Sparks
   (2026-10-27), dentries and inodes add little while the starting container
   needs them for its opens.
+- Every container-launching path holds a page-cache phase: a run start, a rank
+  launch and a job (keyed by its job id, from just before its container starts
+  until it exits; a re-observed job after an agent restart holds it again).
+  The drop request carries a purpose: `load` (a serving start) marks the host
+  as loading, so R4 is lenient for it; `hygiene` (a job) only drops, and R4
+  stays strict while a job runs. The agent and helper change together (no
+  old-agent path; agents upgrade right after the helper). On GB10 the driver does not reclaim page cache for CUDA
+  context creation, so a job that read its model files first would otherwise
+  fail with `NVRM: Out of memory` (observed 2026-11-20, 143 GB of safetensors).
 - A loader "sponge" and `TORCH_DIST_USE_NCCL2=0` (eager NCCL communicators
   returning memory on a head rank) are engine and recipe settings, owned by
   the recipe, not host settings.

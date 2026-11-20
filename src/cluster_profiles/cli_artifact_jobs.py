@@ -156,8 +156,8 @@ def add_artifact_job_commands(
     )
     run.add_argument(
         "--file",
-        help="Bounded JSON binding file (create object and local input paths) "
-        "instead of --input/--option",
+        help="Binding file: the job's inputs and options, as JSON "
+        "(instead of --input/--option)",
     )
     run.add_argument(
         "--input",
@@ -222,7 +222,8 @@ def add_artifact_job_commands(
     add_output(list_jobs)
 
     create = actions.add_parser(
-        "create", help="Create a draft and deliver its declared input files"
+        Word.CREATE,
+        help="Create a job and deliver its input files, without submitting it",
     )
     create.add_argument("--run", required=True, type=_uuid_argument, metavar="ID")
     create.add_argument(
@@ -235,7 +236,7 @@ def add_artifact_job_commands(
     add_output(create)
 
     upload = actions.add_parser(
-        "upload", help="Resume missing inputs on an existing draft"
+        "upload", help="Resume missing inputs on an existing unsubmitted job"
     )
     upload.add_argument("job_id", type=_uuid_argument, metavar="ID")
     upload.add_argument(
@@ -244,7 +245,7 @@ def add_artifact_job_commands(
     upload.set_defaults(outcome_context="mutation")
     add_output(upload)
 
-    submit = actions.add_parser("submit", help="Submit a ready draft for execution")
+    submit = actions.add_parser("submit", help="Submit a ready job for execution")
     submit.add_argument("job_id", type=_uuid_argument, metavar="ID")
     submit.add_argument("--request-key", type=_uuid_argument)
     submit.set_defaults(outcome_context="mutation")
@@ -684,7 +685,7 @@ def _create(
         args, client, path, body, key, quote, expected_run=args.run
     )
     if not _json_mode(args):
-        print(f"Draft ID: {job['id']}", file=sys.stderr, flush=True)
+        print(f"Job ID (not submitted): {job['id']}", file=sys.stderr, flush=True)
     args.artifact_job_id = job["id"]
     args.artifact_job_reconcile = f"vonkctl job upload {job['id']} --file {args.file}"
     if preparation(job) is not None:

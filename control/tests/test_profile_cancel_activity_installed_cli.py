@@ -185,7 +185,7 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
                     for effect in cancellation["pending_effects"]
                 )
                 observed = run(
-                    "profile", "progress", "--application", application.id, "--json"
+                    "profile", "progress", "--load", application.id, "--json"
                 )
                 assert observed.returncode == 0, observed.stdout + observed.stderr
                 pending = json.loads(observed.stdout)
@@ -215,7 +215,7 @@ def test_installed_cancel_reports_issued_child_until_late_receipt_is_reconciled(
             sessions, clock=service._clock, run_switch_operations=switch
         )
         assert restarted.tick()
-        settled = run("profile", "progress", "--application", application.id, "--json")
+        settled = run("profile", "progress", "--load", application.id, "--json")
         assert settled.returncode == 0, settled.stdout + settled.stderr
         terminal = json.loads(settled.stdout)
         assert terminal["state"] == "cancelled"

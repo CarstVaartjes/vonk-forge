@@ -244,9 +244,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
             )
 
         def observe(application_id=original.id):
-            result = run(
-                "profile", "progress", "--application", application_id, "--json"
-            )
+            result = run("profile", "progress", "--load", application_id, "--json")
             assert result.returncode == 0, result.stdout + result.stderr
             return json.loads(result.stdout)
 
@@ -297,7 +295,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         malformed = run(
             "profile",
             "progress",
-            "--application",
+            "--load",
             original.id,
             "--timeout-seconds",
             "5",

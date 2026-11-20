@@ -295,7 +295,7 @@ def test_poll_deadline_bounds_sleep_and_retains_reconnect_identity(monkeypatch, 
     assert document["result"]["state"] == "running"
     assert document["observation"]["status"] == "timed_out"
     assert identity in document["observation"]["reconnect_command"]
-    assert "--application" in document["observation"]["reconnect_command"]
+    assert "--load" in document["observation"]["reconnect_command"]
 
 
 def test_completion_scripts_parse_and_follow_option_values(tmp_path):

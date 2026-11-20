@@ -32,7 +32,7 @@ class _Alarm(StrEnum):
 
 
 def stalls(blockers: object) -> list[object]:
-    """The details of the Controller's stall alarms among an application's blockers."""
+    """The details of the Controller's stall alarms among a load's blockers."""
     return [
         blocker.get("detail")
         for blocker in (blockers if isinstance(blockers, list) else [])
@@ -41,11 +41,11 @@ def stalls(blockers: object) -> list[object]:
 
 
 def _run_result(payload: Mapping[str, object]) -> None:
-    """A finished run is its recipe, its application, and where it is served."""
+    """A finished run is its recipe, its load, and where it is served."""
 
     application = payload.get("application")
     if not isinstance(application, Mapping):
-        # An interrupted or timed-out run reports the application it was following.
+        # An interrupted or timed-out run reports the load it was following.
         _application(payload)
         return
     _field("Recipe", payload.get("recipe"))
@@ -56,7 +56,7 @@ def _run_result(payload: Mapping[str, object]) -> None:
 
 
 def _application(payload: Mapping[str, object]) -> None:
-    _field("Application", payload.get("id"))
+    _field("Load", payload.get("id"))
     _field("State", payload.get("state"))
     for detail in stalls(payload.get("blockers")):
         # Informative: the Controller cancels nothing; it clears on progress.
@@ -70,7 +70,7 @@ def _application(payload: Mapping[str, object]) -> None:
         _field("Continued by", payload["superseded_by"])
     chain = payload.get("supersedes_chain")
     if isinstance(chain, list) and chain:
-        _field("Superseded applications", _words(chain))
+        _field("Superseded loads", _words(chain))
     cancellation = _optional(payload.get("cancellation"), "cancellation")
     if cancellation:
         _field("Cancellation", cancellation.get("state"))
@@ -181,12 +181,12 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
 
 
 def _job(payload: Mapping[str, object]) -> None:
-    _field("Job", payload.get("id"))
+    _field("Operation", payload.get("id"))
     _field("State", payload.get("state"))
     _field("Targets", _words(payload.get("targets")))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
-    progress = _optional(payload.get("progress"), "job progress")
+    progress = _optional(payload.get("progress"), "operation progress")
     if progress:
         _field(
             "Completed",
@@ -202,7 +202,7 @@ def _job(payload: Mapping[str, object]) -> None:
         _field("Spark", operation.get("node_id"))
         _field("Spark state", operation.get("state"))
         _field("Progress", progress_line(operation))
-        failure = _optional(operation.get("failure"), "job failure")
+        failure = _optional(operation.get("failure"), "operation failure")
         if "code" in failure:
             _failure(failure)
         elif failure:
@@ -219,11 +219,11 @@ def _job(payload: Mapping[str, object]) -> None:
             ):
                 if failure.get(key) is not None:
                     _warn(f"{key.title()}: {_text(failure[key])}")
-        recovery = _optional(operation.get("recovery"), "job recovery")
+        recovery = _optional(operation.get("recovery"), "operation recovery")
         if recovery.get("explanation") is not None:
             _field("Recovery", recovery["explanation"])
         _actions(recovery.get("actions"))
     for key in ("target_next_cursor", "operation_next_cursor"):
         if payload.get(key) is not None:
             _field(key.replace("_", " ").title(), payload[key])
-            print("Partial page; additional job evidence is available.")
+            print("Partial page; additional operation evidence is available.")

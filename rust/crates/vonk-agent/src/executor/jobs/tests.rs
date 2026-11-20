@@ -981,3 +981,73 @@ fn a_bound_rank_one_job_is_prepared_and_is_a_companion_that_owns_no_outputs() {
     let other: vonk_agent_protocol::RecipeJobRunRequest = serde_json::from_value(other).unwrap();
     assert!(prepare_job_invocation(&installed, &other).is_err());
 }
+
+#[tokio::test]
+async fn a_job_holds_hygiene_drops_until_it_exits() {
+    use crate::page_cache::{Dropper, LoadPhases, install_for_helper};
+    use vonk_agent_protocol::generated::{PageCacheDropPurpose, PageCacheDropReport};
+    // The re-observation path: the same phase the fresh dispatch holds.
+    let (claim, request) = job_claim();
+    let peers = super::reobserve_tests::peers(
+        request.job_id,
+        vec![
+            super::reobserve_tests::Answer::Running,
+            super::reobserve_tests::Answer::Running,
+            super::reobserve_tests::Answer::Exited(3),
+        ],
+    );
+    let data = tempdir().unwrap();
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&asked);
+    let dropper: Dropper = Arc::new(move |purpose| {
+        log.lock().unwrap().push(purpose);
+        Box::pin(async move {
+            PageCacheDropReport {
+                compaction: None,
+                request_id: Uuid::new_v4(),
+                dropped_at: Utc::now().fixed_offset(),
+                cached_before_bytes: None,
+                cached_after_bytes: None,
+                mem_available_after_bytes: None,
+                sync: None,
+                problem: None,
+            }
+        })
+    });
+    let phases = LoadPhases::new(dropper, Duration::from_millis(20));
+    install_for_helper(&peers.socket, &phases);
+    let client = AgentHttpClient::for_http_test(&peers.controller, NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: &peers.socket,
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+        },
+        runtime_root: peers.runtime_root.path(),
+    };
+    fs::create_dir_all(
+        data.path()
+            .join("runs")
+            .join(request.job_id.to_string())
+            .join("outputs"),
+    )
+    .unwrap();
+    executor.runtime.persist_job_intent(&request).unwrap();
+    let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    executor
+        .execute_job_run(&claim, lease, cancel, request)
+        .await;
+    let made = asked.lock().unwrap().len();
+    assert!(made >= 1, "a job drops the cache");
+    assert!(
+        asked
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|purpose| *purpose == PageCacheDropPurpose::Hygiene)
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(asked.lock().unwrap().len(), made, "no drop after the exit");
+}

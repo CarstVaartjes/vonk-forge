@@ -278,12 +278,12 @@ def _fleet(
             client, path, {}, args, fetch_initial=True, terminal=lambda _: True
         )
     if action == "progress":
-        path = f"/api/jobs/{_quoted(args.job_id)}"
+        path = f"/api/jobs/{_quoted(args.operation_id)}"
 
         def same_job(observed: Mapping[str, object]) -> None:
-            if observed.get("id") != args.job_id:
+            if observed.get("id") != args.operation_id:
                 raise ControlMalformedResponse(
-                    "fleet progress observation identifies another job"
+                    "fleet progress observation identifies another operation"
                 )
 
         return _poll_path(
@@ -390,10 +390,10 @@ def _fleet(
     if action == "resume":
         from ..generated_control.models.job_resume_request import JobResumeRequest
 
-        job_id = args.job_id
+        job_id = args.operation_id
         path = f"/api/jobs/{_quoted(job_id)}"
         deadline = time.monotonic() + _bounded_timeout(args)
-        _confirm_action(args, f"Resume Controller-owned job {job_id}?")
+        _confirm_action(args, f"Resume Controller-owned operation {job_id}?")
 
         request_body = JobResumeRequest()
         key = _request_key(args, factory)
@@ -402,7 +402,7 @@ def _fleet(
         def resume_identity(observed: object) -> str:
             if not isinstance(observed, Mapping) or observed.get("id") != job_id:
                 raise ControlMalformedResponse(
-                    "resume observation identifies another job"
+                    "resume observation identifies another operation"
                 )
             return job_id
 
@@ -578,7 +578,7 @@ def _fleet(
                 or observed.get("targets") != result.get("targets")
             ):
                 raise ControlMalformedResponse(
-                    "fleet upgrade observation identifies another job"
+                    "fleet upgrade observation identifies another operation"
                 )
 
         if not result.get("targets") and _state(result) == "succeeded":
