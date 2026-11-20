@@ -4947,7 +4947,7 @@ def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
 
     captured = capsys.readouterr()
     assert status == 0
-    assert "Operation: upgrade-job" in captured.out
+    assert job_id in captured.out
     assert "not a valid object" not in captured.out + captured.err
 
 

@@ -222,7 +222,8 @@ def add_artifact_job_commands(
     add_output(list_jobs)
 
     create = actions.add_parser(
-        "create", help="Create a job and deliver its input files, without submitting it"
+        "create",
+        help="Create a job and deliver its input files, without submitting it",
     )
     create.add_argument("--run", required=True, type=_uuid_argument, metavar="ID")
     create.add_argument(

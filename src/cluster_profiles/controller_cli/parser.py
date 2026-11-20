@@ -208,7 +208,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _add_output(evidence)
 
     resume = fleet_actions.add_parser(
-        "resume", help="Resume an operation that waits for an operator"
+        "resume",
+        help="Resume an operation that waits for an operator",
     )
     resume.set_defaults(outcome_context="mutation")
     resume.add_argument("operation_id")
@@ -242,7 +243,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _add_output(model_detail)
     model_download = model_actions.add_parser(
-        "download", help="Download a model variant to the Controller (NAS cache)"
+        "download",
+        help="Download a model variant to the Controller (NAS cache)",
     )
     _selector(model_download, "model", help="Exact model selector or friendly name")
     _action_flags(model_download, followable=True)
@@ -382,7 +384,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         help="Show the Controller-owned removal impact without submitting it",
     )
     recipe_retry = recipe_actions.add_parser(
-        "retry", help="Retry a failed recipe preparation"
+        "retry",
+        help="Start a failed recipe preparation again",
     )
     recipe_retry.add_argument("operation_id", type=_uuid_argument)
     _action_flags(recipe_retry, followable=True)
@@ -474,7 +477,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _profile_edit_flags(profile_add)
     _selection_controls(profile_add)
     profile_remove = profile_actions.add_parser(
-        "remove", help="Remove a recipe alias or Spark members from the profile"
+        "remove",
+        help="Remove a recipe alias or Spark members from the profile",
     )
     profile_remove.add_argument("assignment", metavar="ALIAS")
     profile_remove.add_argument("--spark", action="append", default=[])
@@ -551,7 +555,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     _watch_controls(profile_load)
     _add_output(profile_load)
     profile_cancel = profile_actions.add_parser(
-        "cancel", help="Cancel one profile load and reconcile its effects"
+        "cancel",
+        help="Cancel one profile load and reconcile its effects",
     )
     profile_cancel.set_defaults(outcome_context="mutation", requires_profile=True)
     profile_cancel.add_argument("load_id", type=_uuid_selector)
@@ -645,7 +650,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     run = commands.add_parser(
         "run",
         help="Run a recipe in a profile",
-        description="Prepare a recipe, review the plan, and start it on the fleet. "
+        description="Get a recipe ready, review the plan, and start it on the fleet. "
         "The recipe is first saved into the profile so the plan can be "
         "reviewed; declining leaves it saved and the fleet unchanged.",
     )
