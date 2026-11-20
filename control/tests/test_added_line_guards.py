@@ -4426,3 +4426,25 @@ def test_vonkctl_failure_needs_its_own_typed_error():
         {2},
         modes=("boundaries",),
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "rejected"),
+    [
+        (
+            "try:\n    f()\nexcept RecipeImageAvailabilityUnknown as e:\n    s = LifecycleState.FAILED\n",
+            True,
+        ),
+        (
+            "try:\n    f()\nexcept UnknownOutcomeError:\n    return Failure(retryable=False)\n",
+            True,
+        ),
+        ("try:\n    f()\nexcept RecipeImageAvailabilityUnknown:\n    raise\n", False),
+        ("try:\n    f()\nexcept ValueError:\n    s = LifecycleState.FAILED\n", False),
+    ],
+)
+def test_unknown_outcome_handlers_cannot_build_terminal_values(source, rejected):
+    """Catches an Unknown handler fabricating FAILED / retryable=False."""
+    lines = set(range(1, len(source.splitlines()) + 1))
+    hits = check_source(PATH, source, lines, modes=("waits",))
+    assert bool([h for h in hits if "unknown outcome turned terminal" in h]) is rejected

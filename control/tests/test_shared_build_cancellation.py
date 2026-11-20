@@ -2,22 +2,22 @@
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+import vonk_control.recipe_image_availability.requests as availability_requests
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
 from vonk_control.recipe_build_cancellation import current_build_consumers
+from vonk_control.recipe_image_availability import RecipeImageAvailabilityUnknown
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_operations import build_cancellation as operations_module
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .non_blocking import assert_ended_without_blocking
 from .test_build_cancellation_recovery import _active_claims, _issue, _settle_cleanup
-from .test_build_consumer_ownership import _assert_observation_failure, _availability
+from .test_build_consumer_ownership import _availability
 from .test_run_switch_build_fencing import _direct_parent, _snapshot
 
 
@@ -233,6 +233,7 @@ def test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes
 def test_new_consumer_cannot_join_across_last_consumer_cleanup(
     tmp_path, postgres_engine, monkeypatch, issued
 ):
+    monkeypatch.setattr(availability_requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
     sessions, planner, parent, _request, selected = _direct_parent(
         tmp_path, postgres_engine
     )
@@ -274,15 +275,15 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
         cleaning = pool.submit(lifecycle.reconcile_cancelled_builds)
         try:
             assert reached.wait(10), "cleanup did not reach its ownership boundary"
-            ended = availability.start(revision.id, actor="admin", request_id=key)
-            assert ended.artifact is None
+            with pytest.raises(RecipeImageAvailabilityUnknown):
+                availability.start(revision.id, actor="admin", request_id=key)
         finally:
             resume.set()
         assert cleaning.result(timeout=10)
     monkeypatch.setattr(operations_module, "current_build_consumers", original)
     if executor_id is not None:
-        ended = availability.start(revision.id, actor="admin", request_id=key)
-        assert ended.failure_evidence is not None
+        with pytest.raises(RecipeImageAvailabilityUnknown):
+            availability.start(revision.id, actor="admin", request_id=key)
         _settle_cleanup(
             sessions,
             lifecycle,
@@ -292,15 +293,7 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
         )
     with sessions() as session:
         assert session.scalar(select(Job.id).where(Job.request_id == key)) is None
-    assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        ended,
-        end=lambda receipt: receipt,
-        assert_reason=_assert_observation_failure,
-        fresh=lambda _: availability.start(
-            revision.id, actor="admin", request_id=str(uuid4())
-        ),
-    )
+    availability.start(revision.id, actor="admin", request_id=str(uuid4()))
     assert lifecycle.get(child_id).state == "cancelled"
 
 

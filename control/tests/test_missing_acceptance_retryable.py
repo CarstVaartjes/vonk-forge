@@ -14,7 +14,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
-from vonk_agent_protocol import OperatorActionName
+from vonk_agent_protocol import (
+    LifecycleState,
+    OperationProgress,
+    OperatorActionName,
+    ProgressPhase,
+)
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
@@ -26,8 +31,15 @@ from vonk_control.operator_acceptance import (
     OperatorReceiptResolver,
 )
 from vonk_control.operator_receipt_contract import ReceiptPolicy
-from vonk_control.recipe_availability_intent import RecipeSelectorIntent
-from vonk_control.recipe_image_availability import requests
+from vonk_control.recipe_availability_intent import (
+    RecipeRevisionIntent,
+    RecipeSelectorIntent,
+)
+from vonk_control.recipe_image_availability import (
+    OPERATION_KIND,
+    RecipeImageAvailabilityView,
+    requests,
+)
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
     RecipeImageCode,
@@ -60,31 +72,45 @@ class _Recipes:
         return self.rows[request_key]
 
 
+def _queued_view(request_id: str) -> RecipeImageAvailabilityView:
+    return RecipeImageAvailabilityView(
+        id=request_id,
+        request_id=request_id,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
+        kind=OPERATION_KIND,
+        state=LifecycleState.QUEUED,
+        attempt=1,
+        recipe_revision_id="revision",
+        recipe_content_sha256="a" * 64,
+        model_digest=None,
+        build_input_sha256=None,
+        progress=OperationProgress(phase=ProgressPhase.PREPARING),
+        image_progress=None,
+        result=None,
+        failure=None,
+        supported_actions=(),
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+
 def test_unconfirmed_recipe_request_answers_503_then_same_key_is_accepted(
     monkeypatch,
 ) -> None:
-    """Catches an outcome-unknown submission (no Job row) answering a permanent 409."""
+    """Catches an outcome-unknown submission answering a settled view or 409."""
     recipes = _Recipes()
     monkeypatch.setattr(requests, "REQUEST_OBSERVATION_BUDGET_SECONDS", 0)
-    ended: list[Any] = []
 
     def once(service, intent, *, actor, request_id, update_claim):
         if recipes.unsure:
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.BUILD_INPUT_MISSING, "build input is not ready yet"
             )
-        view = ended[0].model_copy(update={"state": "queued", "failure": None})
+        view = _queued_view(request_id)
         recipes.rows[request_id] = view
         return view
 
-    real_end = requests._unaccepted_request_end
-
-    def remember(*args, **kwargs):
-        ended.append(real_end(*args, **kwargs))
-        return ended[0]
-
     monkeypatch.setattr(requests, "_start_request_once", once)
-    monkeypatch.setattr(requests, "_unaccepted_request_end", remember)
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )

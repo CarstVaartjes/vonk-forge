@@ -216,7 +216,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
                         {
                             "slot": "input",
                             "name": "input.png",
-                            "media_type": "image/png",
                         }
                     ],
                     "output_limits": OUTPUT_LIMITS,
@@ -543,7 +542,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                         {
                             "slot": "input",
                             "name": "input.png",
-                            "media_type": "image/png",
                         }
                     ],
                     "output_limits": OUTPUT_LIMITS,

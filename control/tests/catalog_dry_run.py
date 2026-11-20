@@ -38,7 +38,7 @@ from vonk_control.catalog_sync_contract import (
     reviewed_catalog_content,
 )
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
-from vonk_control.distribution.types import plan_objects
+from vonk_control.distribution.types import content_objects, plan_objects
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
@@ -196,13 +196,16 @@ class CatalogDryRun:
         )
 
     def transfer(self, digest: str) -> Transfer:
-        """What target-copy sends: the objects each Spark's compiled plan names."""
+        """What target-copy sends: every Spark gets the whole model, the union of
+        the objects its roles' compiled plans name (as DistributionIdentity)."""
 
-        plan = next(iter(self.plans(digest).values()))
-        objects = plan_objects(plan)
+        plans = tuple(self.plans(digest).values())
+        objects = content_objects(
+            tuple(item for plan in plans for item in plan_objects(plan))
+        )
         return Transfer(
             objects,
-            plan.identity.model_artifact_set_sha256,
+            plans[0].identity.model_artifact_set_sha256,
             sum(item.bytes for item in objects),
         )
 

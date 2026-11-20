@@ -19,6 +19,7 @@ import { sparkColor } from "./chart/series";
 import { MemoryIngot } from "./memory-ingot";
 import { StatusPill } from "./status-pill";
 import { TraceTile } from "./trace-tile";
+import { interceptPlainClick } from "../lib/plain-click";
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */
 function Traces({
@@ -106,8 +107,7 @@ export function SparkCard({
           <a
             href={sparkPath(node.id)}
             onClick={(event) => {
-              if (!onOpen) return;
-              event.preventDefault();
+              if (!onOpen || !interceptPlainClick(event)) return;
               onOpen(node.id);
             }}
           >

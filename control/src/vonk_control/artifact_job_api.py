@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     InvalidRequestError,
     InvalidRequestReason,
-    RecipeJobInputFile,
+    RecipeJobInputRequest,
     RecipeJobOutputLimits,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -79,7 +79,7 @@ class ArtifactJobCreate(ArtifactJobModel):
         pattern=r"^(audio-job|video-job|image-job|mesh-job|artifact-job)$"
     )
     parameters: dict[str, ParameterScalar] = Field(default_factory=dict)
-    inputs: list[RecipeJobInputFile] = Field(
+    inputs: list[RecipeJobInputRequest] = Field(
         default_factory=list, max_length=MAX_INPUT_FILES
     )
     output_limits: RecipeJobOutputLimits

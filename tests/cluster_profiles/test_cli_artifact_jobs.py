@@ -173,6 +173,7 @@ class ArtifactJobClient:
         self.job: dict[str, object] | None = None
         self.calls: list[tuple[str, str, object, object]] = []
         self.upload_calls: list[str] = []
+        self.upload_media: dict[str, str] = {}
         self.download_calls: list[str] = []
         self.lose_create_response = False
         self.fail_create_lookup = False
@@ -211,7 +212,14 @@ class ArtifactJobClient:
                         not isinstance(key, str) for key in item
                     ):
                         raise AssertionError("input declaration is not an object")
-                    declarations.append({key: value for key, value in item.items()})
+                    declarations.append(
+                        {
+                            **item,
+                            "media_type": "text/plain"
+                            if str(item.get("name")).endswith(".txt")
+                            else "image/png",
+                        }
+                    )
                 self.job = _job(declarations=declarations)
             if self.lose_create_response:
                 self.lose_create_response = False
@@ -285,6 +293,7 @@ class ArtifactJobClient:
     ) -> dict[str, object]:
         name = path.rsplit("/", 1)[-1]
         self.upload_calls.append(name)
+        self.upload_media[name] = media_type
         if name == self.fail_input_name:
             self.fail_input_name = None
             raise ControlTransportError("input transfer interrupted")
@@ -351,7 +360,7 @@ def _binding(
     for name, content in files.items():
         (path.parent / name).write_bytes(content)
         paths[name] = name
-        declarations.append({"slot": "input", "name": name, "media_type": "image/png"})
+        declarations.append({"slot": "input", "name": name})
     path.write_text(
         json.dumps(
             {
@@ -1633,8 +1642,8 @@ def test_job_run_builds_the_binding_from_input_and_option_flags(
     assert status == 0
     body, _ = _create_call(client)
     assert body["parameters"] == {"steps": 4}
-    assert [(i["slot"], i["name"], i["media_type"]) for i in body["inputs"]] == [
-        ("prompt", "prompt.txt", "text/plain")
+    assert [(i["slot"], i["name"]) for i in body["inputs"]] == [
+        ("prompt", "prompt.txt")
     ]
 
 
@@ -1656,6 +1665,31 @@ def test_job_run_flags_are_checked_against_the_contract(
     )
     assert status == 2
     assert not [c for c in client.calls if c[0] == "POST"]
+
+
+def test_job_run_sends_no_media_type_and_uploads_the_controllers(
+    tmp_path, vonkctl_json
+) -> None:
+    client = RunClient(_loaded("image", RUN_ID))
+    client.contract = _contract_for_flags()
+    song = tmp_path / "prompt.txt"
+    song.write_bytes(b"a")
+    status, _ = vonkctl_json(
+        "job",
+        "run",
+        "image",
+        "--input",
+        f"prompt={song}",
+        "--no-wait",
+        control_client=client,
+    )
+    assert status == 0
+    body, _ = _create_call(client)
+    assert all("media_type" not in item for item in body["inputs"])
+    assert client.job is not None
+    declared = cast(list[dict[str, str]], client.job["input_declarations"])
+    assert client.upload_media == {i["name"]: i["media_type"] for i in declared}
+    assert client.upload_media == {"prompt.txt": "text/plain"}
 
 
 def _typed_knobs_contract() -> dict[str, object]:

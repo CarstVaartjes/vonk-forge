@@ -6,7 +6,7 @@ import type {
   ArtifactJobParameter,
   ArtifactJobParameterValue,
   ArtifactJobFile,
-  ArtifactJobInputFile,
+  ArtifactJobInputRequest,
   ArtifactJobInterface,
   LibraryApi,
   LibraryViewRecipeDetail,
@@ -85,7 +85,7 @@ type ContractState =
   | { kind: "awaiting" }
   | { kind: "received"; parameters: RecipeParameter[] }
   | { kind: "unreadable"; detail: string };
-type InputPayload = { declaration: ArtifactJobInputFile; blob: Blob };
+type InputPayload = { declaration: ArtifactJobInputRequest; blob: Blob };
 type CancelRecovery = {
   jobId: string;
   runId: string;
@@ -166,7 +166,6 @@ function recoveredInputIndexes(job: ArtifactJob, prepared: InputPayload[]): Set<
     if (
       !expected ||
       matched.has(index) ||
-      expected.media_type !== uploaded.media_type ||
       compareWire(expected.size_bytes, uploaded.size_bytes) !== 0 ||
       expected.sha256 !== uploaded.sha256
     ) {
@@ -218,37 +217,6 @@ export { jobTone };
 function filename(value: string): string {
   const clean = value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return (clean || "input").slice(0, 128);
-}
-
-const extensionMediaTypes: Record<string, string> = {
-  ".flac": "audio/flac",
-  ".glb": "model/gltf-binary",
-  ".gltf": "model/gltf+json",
-  ".jpeg": "image/jpeg",
-  ".jpg": "image/jpeg",
-  ".json": "application/json",
-  ".mp3": "audio/mpeg",
-  ".mp4": "video/mp4",
-  ".mkv": "video/x-matroska",
-  ".mov": "video/quicktime",
-  ".obj": "model/obj",
-  ".pdf": "application/pdf",
-  ".ply": "model/ply",
-  ".png": "image/png",
-  ".txt": "text/plain",
-  ".wav": "audio/wav",
-  ".webm": "video/webm",
-  ".webp": "image/webp",
-};
-
-function fileMediaType(slot: RecipeInputSlot, file: File): string {
-  if (slot.media_types.includes(file.type)) return file.type;
-  const extension = slot.extensions.find((item) =>
-    file.name.toLowerCase().endsWith(item.toLowerCase()),
-  );
-  const inferred = extension ? extensionMediaTypes[extension.toLowerCase()] : undefined;
-  if (inferred && slot.media_types.includes(inferred)) return inferred;
-  return slot.media_types.length === 1 ? slot.media_types[0] : file.type;
 }
 
 function scalarText(value: Scalar): string {
@@ -707,8 +675,6 @@ export function ArtifactJobWorkspace({
       inputErrors.push(
         `${slot.label}: every file must be ${formatBytes(wireMinimum(slot.max_file_bytes, controllerFileLimit))} or smaller.`,
       );
-    if (slotFiles.some((file) => !slot.media_types.includes(fileMediaType(slot, file))))
-      inputErrors.push(`${slot.label}: every file must use an allowed media type.`);
     if (
       slot.extensions.length > 0 &&
       slotFiles.some(
@@ -799,18 +765,17 @@ export function ArtifactJobWorkspace({
   const featuredTerminalId = jobs.find((job) => isTerminal(job))?.id;
 
   async function payloads(signal: AbortSignal): Promise<InputPayload[]> {
-    const sources: Array<{ slot: string; name: string; media_type: string; blob: Blob }> =
-      selectedFiles.map(({ slot, file }) => ({
+    const sources: Array<{ slot: string; name: string; blob: Blob }> = selectedFiles.map(
+      ({ slot, file }) => ({
         slot: slot.id,
         name: filename(file.name),
-        media_type: fileMediaType(slot, file),
         blob: file,
-      }));
+      }),
+    );
     if (textSlot && prompt.trim())
       sources.push({
         slot: textSlot.id,
         name: "prompt.txt",
-        media_type: "text/plain",
         blob: new Blob([prompt.trim()], { type: "text/plain" }),
       });
     if (new Set(sources.map((source) => source.name)).size !== sources.length)
@@ -827,7 +792,6 @@ export function ArtifactJobWorkspace({
         declaration: {
           slot: source.slot,
           name: source.name,
-          media_type: source.media_type,
           size_bytes: source.blob.size,
           sha256,
         },
@@ -1121,9 +1085,16 @@ export function ArtifactJobWorkspace({
         setPhase(`Uploading input ${index + 1} of ${prepared.length}…`);
         const alreadyUploaded = completed;
         const uploadJobId = job.id;
+        // The Controller derived the media type at create; the upload carries it.
+        const accepted = job.input_declarations?.find(
+          (declared) =>
+            declared.slot === item.declaration.slot && declared.name === item.declaration.name,
+        );
+        if (!accepted)
+          throw new Error(`Job ${job.id} did not declare input ${item.declaration.name}`);
         const uploadedJob = await api.uploadArtifactJobInput(
           uploadJobId,
-          item.declaration,
+          accepted,
           item.blob,
           controller.signal,
           (progress) =>

@@ -603,7 +603,8 @@ for their merge, honoring authorization already given for that action. Describe
 the deployment impact in the PR. Controller startup reconciles the live schema
 to current model metadata transactionally under the startup advisory lock.
 Missing tables, safe columns, indexes and constraints are applied. Unknown
-tables and columns are preserved, while obsolete constraints and indexes are
+columns are preserved (the NOT NULL barrier is lifted); undeclared tables are dropped
+(see the schema reconciliation rule above), while obsolete constraints and indexes are
 replaced only after a safe replacement is installed. Data conflicts and unsafe
 casts are logged and deferred when the application can continue safely.
 Merging source does not itself wipe a database. A deliberate database reset
