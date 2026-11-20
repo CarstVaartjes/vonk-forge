@@ -224,7 +224,8 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
     # Every job the gate knows is green; only the lane is not selected.
     results = {job: "success" for jobs in gate["AREA_JOBS"].values() for job in jobs}
     results.update(
-        {job: "success" for job in ("lint", "supply-chain", "repository-guards")}
+        {job: "success" for job in ("shared-inputs", "lint", "supply-chain")}
+        | {"repository-guards": "success"}
         | {job: "success" for job in ("consumer-probe", "rust-quality", "rust-tests")}
         | {job: "success" for job in ("control-image-build", "controller-spark-wire")}
         | {"lane-proof": "skipped"}
