@@ -63,13 +63,6 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
 | Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored_columns.py` (read and written through `stored_json`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |
-| Global container-runtime policy and problem schemas | `vonk-forge-web` `schemas/`, copied into `schemas/global/` at the commit in `schemas/global/contract.lock.json` | Rust agent OCI policy (`vonk-agent/src/oci.rs`) |
-
-To take a newer `vonk-forge-web` revision of the global schemas, run
-`scripts/update-global-contracts --commit <full-sha>` with a clean
-`vonk-forge-web` checkout next to this repository (or pass `--repo`). It
-copies the schemas byte for byte and rewrites the lock with their hashes;
-review and commit both.
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
