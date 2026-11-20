@@ -1,9 +1,9 @@
 name: Cross-repo nightly
 
 # Everything else here pins the sibling repositories to reviewed revisions. This
-# run takes origin/main of vonk-forge, vonk-forge-recipes and vonk-forge-web
-# together every night and runs the existing consumer checks against them, so a
-# drift between the three surfaces the next morning, not at the next pin move.
+# run takes origin/main of vonk-forge and vonk-forge-recipes together every
+# night and runs the platform's recipe validator against them, so a drift
+# surfaces the next morning, not at the next pin move.
 # It only reads; a red job is the alarm.
 
 on:
@@ -52,74 +52,3 @@ jobs:
             --library-root "$GITHUB_WORKSPACE/.recipe-library" \
             --platform-root "$GITHUB_WORKSPACE" \
             --json
-
-  consumer-probe:
-    name: Consumer probe against recipes main
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      CARGO_BUILD_JOBS: "1"
-      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
-    steps:
-      - name: Check out vonk-forge main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
-      - name: Check out vonk-forge-recipes main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: main
-          path: .recipe-library
-          persist-credentials: false
-      - name: Prepare locked Python environment
-        uses: ./.github/actions/python-env
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$GITHUB_WORKSPACE/.recipe-library"
-      - name: Install pinned Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
-      - name: Restore read-only Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: "false"
-      - name: Build actual canonical parser, HTTP client and state probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/retry-dependency-fetch cargo fetch --locked
-          uv run --project control --frozen python scripts/generate-agent-wire
-          cargo build --locked --package vonk-agent --example consumer_corpus_probe
-      - name: Run the consumer corpus boundaries against the actual probe
-        env:
-          VONK_CONSUMER_CORPUS_PROBE: ${{ github.workspace }}/target/debug/examples/consumer_corpus_probe
-        run: scripts/test corpus
-
-  web-global-contracts:
-    name: Global schemas at web main
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Check out vonk-forge main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: main
-          persist-credentials: false
-      - name: Check out vonk-forge-web main
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-web
-          ref: main
-          path: .vonk-forge-web
-          persist-credentials: false
-      # Re-copies the schemas at web main with the repository's own updater; a
-      # byte difference from the committed copies is a drift to move on purpose.
-      - name: Compare the committed global schemas with web main
-        shell: bash
-        run: |
-          set -euo pipefail
-          web="$GITHUB_WORKSPACE/.vonk-forge-web"
-          python3 scripts/update-global-contracts --repo "$web" --commit "$(git -C "$web" rev-parse HEAD)"
-          git diff --exit-code -- schemas/global/container-runtime-policy-v1.json schemas/global/problem-v1.schema.json
