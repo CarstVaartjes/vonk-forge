@@ -235,15 +235,20 @@ test("the frame shows the Spark's own facts, or Not reported", () => {
 
 test("an address that names no enrolled Spark says so", () => {
   nodes = [];
+  const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
   render(
     <SparkPage
       api={{ metricsSeries: vi.fn().mockRejectedValue(new Error("none")) } as unknown as ControlApi}
       id="spk_gone"
-      onNavigate={vi.fn()}
+      onNavigate={onNavigate}
       onGone={vi.fn()}
     />,
   );
   expect(screen.getByRole("heading", { name: "Spark not found" })).toBeVisible();
+  const back = screen.getByRole("link", { name: "Back to Overview" });
+  expect(back).toHaveAttribute("href", "/overview");
+  fireEvent.click(back);
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/overview");
 });
 
 const GIB = 1024 ** 3;
@@ -319,4 +324,37 @@ test("Serving names the run, its rank and partner as a link; Storage lists model
   const models = screen.getByRole("list", { name: "Models on disk" });
   expect(models).toHaveTextContent("GLM212.0 GiB · in use");
   expect(models).toHaveTextContent("QwenNot reported");
+});
+
+test("the section tabs follow the WAI-ARIA tabs pattern: roving tabindex, arrows, Home and End", async () => {
+  show(node, { fleetLogs: vi.fn().mockResolvedValue({ lines: [] }) });
+  const tablist = await screen.findByRole("tablist", { name: "Spark sections" });
+  const [overview, settings, logs] = within(tablist).getAllByRole("tab");
+  expect(overview).toHaveAttribute("aria-selected", "true");
+  expect(overview).toHaveAttribute("tabindex", "0");
+  expect(settings).toHaveAttribute("tabindex", "-1");
+  expect(logs).toHaveAttribute("tabindex", "-1");
+  const panel = screen.getByRole("tabpanel");
+  expect(overview).toHaveAttribute("aria-controls", panel.id);
+  expect(panel).toHaveAttribute("aria-labelledby", overview!.id);
+
+  fireEvent.keyDown(overview!, { key: "ArrowRight" });
+  expect(settings).toHaveAttribute("aria-selected", "true");
+  expect(settings).toHaveAttribute("tabindex", "0");
+  expect(overview).toHaveAttribute("tabindex", "-1");
+  expect(settings).toHaveFocus();
+  expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", settings!.id);
+
+  fireEvent.keyDown(settings!, { key: "End" });
+  expect(logs).toHaveAttribute("aria-selected", "true");
+  expect(logs).toHaveFocus();
+  fireEvent.keyDown(logs!, { key: "ArrowRight" });
+  expect(overview).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(overview!, { key: "ArrowLeft" });
+  expect(logs).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(logs!, { key: "Home" });
+  expect(overview).toHaveAttribute("aria-selected", "true");
+  expect(overview).toHaveFocus();
+  fireEvent.keyDown(overview!, { key: "a" });
+  expect(overview).toHaveAttribute("aria-selected", "true");
 });

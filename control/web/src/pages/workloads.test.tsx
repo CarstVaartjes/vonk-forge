@@ -218,8 +218,11 @@ test("a workload is one row with its Sparks, measured speed and requests; openin
 
 test("with no workload loaded the page says so and still lists every Spark", () => {
   nodes = [spark("Alpha", 40, 250)];
-  render(<WorkloadsPage api={api} />);
-  expect(screen.getByText("Nothing is loaded on any Spark.")).toBeInTheDocument();
+  const onNavigateUrl = vi.fn();
+  render(<WorkloadsPage api={api} onNavigateUrl={onNavigateUrl} />);
+  expect(screen.getByRole("heading", { name: "Nothing is loaded" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open the Library" }));
+  expect(onNavigateUrl).toHaveBeenCalledWith("/library");
   expect(screen.getByRole("heading", { name: "All Sparks" })).toBeInTheDocument();
   nodes = [];
 });

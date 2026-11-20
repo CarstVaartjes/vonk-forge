@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
+import { EmptyState } from "../components/empty-state";
 import { EnginePanel } from "../components/engine-panel";
 import { ClusterUnit } from "../components/workload-units";
 import { FleetFeedback } from "../components/fleet-feedback";
@@ -22,10 +23,12 @@ export function WorkloadsPage({
   api,
   onLive,
   onOpenSpark,
+  onNavigateUrl,
 }: {
   api: ControlApi;
   onLive?(status: LiveStatus | null): void;
   onOpenSpark?(id: string): void;
+  onNavigateUrl?(url: string): void;
 }) {
   const fleet = useFleetStream(api);
   const live = liveStatus(fleet);
@@ -49,7 +52,11 @@ export function WorkloadsPage({
         <section className="workloads-section" aria-labelledby="workloads-heading">
           <h2 id="workloads-heading">By workload</h2>
           {clusters.length === 0 ? (
-            <p>Nothing is loaded on any Spark.</p>
+            <EmptyState
+              title="Nothing is loaded"
+              description="No Spark is serving a model yet. Pick a recipe in the Library to load one."
+              action={{ label: "Open the Library", onClick: () => onNavigateUrl?.("/library") }}
+            />
           ) : (
             <ul className="workload-rows">
               {clusters.flatMap((cluster) =>
