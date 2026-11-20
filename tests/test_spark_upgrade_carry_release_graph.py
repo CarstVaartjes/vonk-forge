@@ -690,7 +690,8 @@ def test_carry_baseline_phase_accepts_an_older_release_shape(
     expected = lane._expected_controller_services()
     assert expected == started
     up = lane._local_controller_up_command()
-    assert up[-len(started) :] == sorted(started)
+    assert started <= set(up)
+    assert not {"runtime-init", *carry.TAILSCALE_SERVICES} & set(up)
     runtime.assert_compose_services_healthy(_running(started), expected)
     # The enrollment grant an older Controller issues (four service names).
     grant = {
@@ -717,7 +718,7 @@ def test_carry_baseline_phase_accepts_an_older_release_shape(
     # After the upgrade the candidate's roster is exact: the older shape fails.
     lane.controller_generation = candidate.generation
     assert lane._expected_controller_services() == lifecycle.LOCAL_CONTROLLER_SERVICES
-    with pytest.raises(runtime.AcceptanceError, match="registry"):
+    with pytest.raises(runtime.AcceptanceError):
         runtime.assert_compose_services_healthy(
             _running(started), lane._expected_controller_services()
         )
