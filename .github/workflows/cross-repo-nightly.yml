@@ -1,0 +1,54 @@
+name: Cross-repo nightly
+
+# Everything else here pins the sibling repositories to reviewed revisions. This
+# run takes origin/main of vonk-forge and vonk-forge-recipes together every
+# night and runs the platform's recipe validator against them, so a drift
+# surfaces the next morning, not at the next pin move.
+# It only reads; a red job is the alarm.
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cross-repo-nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  recipes-validate:
+    name: Recipes main against platform main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out vonk-forge main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Check out vonk-forge-recipes main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: main
+          path: .recipe-library
+          persist-credentials: false
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$GITHUB_WORKSPACE/.recipe-library"
+      # The command validate-recipe-library.yml runs for recipes pull requests.
+      - name: Validate recipe library with the platform validator
+        run: |
+          uv run --project control --frozen \
+            --with-editable "$GITHUB_WORKSPACE/.recipe-library/contracts" \
+            scripts/validate-recipe-library \
+            --library-root "$GITHUB_WORKSPACE/.recipe-library" \
+            --platform-root "$GITHUB_WORKSPACE" \
+            --json
