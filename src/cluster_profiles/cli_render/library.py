@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from urllib.parse import quote
 
@@ -382,6 +382,40 @@ def _applied_filters(payload: Mapping[str, object]) -> list[str]:
     return applied
 
 
+def _model_counts(rows: Sequence[object]) -> tuple[int, int]:
+    """Models and exact variants among model rows, as the web Library counts them.
+
+    A Model is the display lineage ``family/line/model``; quantizations and other
+    variants fold into it. A model with no lineage (a helper, drafter or encoder)
+    is not a Model and is left out of both counts. The shared vector
+    ``tests/fixtures/library-model-count.json`` pins the rule for web and vonkctl.
+    """
+    models: set[tuple[str, str, str]] = set()
+    variants: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        display = row.get("model_display")
+        lineage = display.get("lineage") if isinstance(display, Mapping) else None
+        if not isinstance(lineage, Mapping):
+            continue
+        models.add(
+            (
+                str(lineage.get("family")),
+                str(lineage.get("line")),
+                str(lineage.get("model")),
+            )
+        )
+        identity = row.get("identity")
+        variants.add(
+            "/".join(
+                str(identity.get(field)) if isinstance(identity, Mapping) else ""
+                for field in ("publisher", "slug", "content_sha256")
+            )
+        )
+    return len(models), len(variants)
+
+
 def _library(
     payload: Mapping[str, object], noun: str, *, detail: bool, wide: bool
 ) -> None:
@@ -424,7 +458,11 @@ def _library(
             f"Recipe library v{_text(library.get('version'))}, "
             f"updated {_time(library.get('updated_at'))}"
         )
-    print(f"{noun.title()}s: {len(rows)}{more}")
+    if noun == LibraryNoun.MODEL:
+        models, variants = _model_counts(rows)
+        print(f"Models: {models} ({variants} variants){more}")
+    else:
+        print(f"{noun.title()}s: {len(rows)}{more}")
     applied = _applied_filters(payload)
     if not rows:
         if applied:

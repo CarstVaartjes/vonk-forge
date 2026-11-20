@@ -31,6 +31,7 @@ from cluster_profiles.cli_render import (
 )
 from cluster_profiles.cli_render.common import _utc
 from cluster_profiles.cli_render.host_checks import host_check_lines
+from cluster_profiles.cli_render.library import _model_counts
 from cluster_profiles.cli_render.metrics import metric_value_text
 from cluster_profiles.cli_render.profile import (
     _connection_examples,
@@ -233,6 +234,27 @@ def test_fleet_detail_prints_every_host_check_after_the_warnings(printed):
 
 _WORDING = _vector("library-vocabulary-wording.json")
 _RECIPE = _vector("library-list.json")["recipes"][0]
+
+
+_MODEL_COUNT = _vector("library-model-count.json")
+
+
+@pytest.mark.parametrize("case", _MODEL_COUNT["cases"], ids=lambda c: c["name"])
+def test_model_count_folds_variants_like_the_web(case):
+    rows = [
+        {
+            "identity": {
+                "publisher": "p",
+                "slug": model["id"],
+                "content_sha256": "0" * 64,
+            },
+            "model_display": None
+            if model["lineage"] is None
+            else {"lineage": model["lineage"]},
+        }
+        for model in case["models"]
+    ]
+    assert _model_counts(rows) == (case["models_count"], case["variants_count"])
 
 
 @pytest.fixture
