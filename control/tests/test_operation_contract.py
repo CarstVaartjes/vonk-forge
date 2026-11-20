@@ -4,8 +4,16 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import OperationCheckpoint, ProgressPhase, canonical_message
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from vonk_agent_protocol import (
+    LifecycleState,
+    OperationCheckpoint,
+    ProgressPhase,
+    canonical_message,
+)
 from vonk_control.bounded_json import require_mapping, require_sequence, text
+from vonk_control.models import AgentOperation, Base, RecipeRun
 from vonk_control.operation_contract import (
     OperationMemberProgress,
     OperationPhase,
@@ -17,6 +25,7 @@ from vonk_control.operation_contract import (
     sanitize_failure_evidence,
     validate_progress_update,
 )
+from vonk_control.operation_summary import operation_summary, workload_aliases
 
 
 @pytest.mark.parametrize("phase", list(OperationPhase))
@@ -279,3 +288,51 @@ def test_progress_update_retains_in_place_default_members(partial: bool) -> None
     merged = validate_progress_update(previous, current, partial=partial)
     restored = OperationProgress.model_validate_json(merged.model_dump_json())
     assert restored.members == [member]
+
+
+def test_operation_summary_is_plain_for_known_and_unknown_kinds() -> None:
+    assert operation_summary("recipe.job.run.v1", "running") == "Recipe job running"
+    assert (
+        operation_summary("recipe.start", LifecycleState.BACKOFF)
+        == "Recipe start retrying"
+    )
+    # An unknown kind or state reads as its own words, never with a version.
+    assert operation_summary("widget.rebuild.v7", "failed") == "Widget rebuild failed"
+    assert (
+        operation_summary("widget.rebuild", "odd-state") == "Widget rebuild odd state"
+    )
+    assert operation_summary("x", "") == "X recorded"
+
+
+def test_workload_aliases_resolve_runs_in_one_batch_and_skip_runless_operations() -> (
+    None
+):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    run_id = "00000000-0000-4000-8000-000000000012"
+    with Session(engine) as session:
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id="i",
+                mapping_id="m",
+                mapping_generation=1,
+                run_generation=1,
+                alias="h3video",
+                plan_digest="1" * 64,
+                plan={},
+                state="running",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=__import__("datetime").datetime.now(),
+                updated_at=__import__("datetime").datetime.now(),
+            )
+        )
+        session.flush()
+        with_run = AgentOperation(id="op-1", payload={"run_id": run_id})
+        unknown_run = AgentOperation(id="op-2", payload={"run_id": "gone"})
+        without_run = AgentOperation(id="op-3", payload={"supported_actions": []})
+        assert workload_aliases(session, [with_run, unknown_run, without_run]) == {
+            "op-1": "h3video"
+        }
+        assert workload_aliases(session, [without_run]) == {}

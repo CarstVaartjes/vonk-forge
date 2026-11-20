@@ -812,6 +812,7 @@ def create_app(
                 node_ids=node_ids,
                 kind="unreadable",
                 state="unavailable",
+                summary="Operation history is unreadable",
                 attempt=0,
                 created_at=created_at,
                 owner=owner,

@@ -45,6 +45,9 @@ type ActivityRecord = ActivitySummary & {
   source: "job" | "operation";
   target_names?: string[];
   operation?: OperationDetail;
+  /** The Controller's plain phrase for the event, and the workload it acts on. */
+  summary?: string;
+  subject?: string | null;
 };
 type ActivityApi = Pick<
   ControlApi,
@@ -77,48 +80,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-/** An operation kind as plain words: no schema version, sentence case, never empty. The one place kinds become text. */
-function kindPhrase(kind: string): string {
-  const words = kind
-    .replace(/[._-]v\d+$/i, "")
-    .replace(/[._-]+/g, " ")
-    .trim()
-    .toLowerCase();
-  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : "Operation";
-}
-
-export function activityActionLabel(action: string): string {
-  if (action.startsWith("operation.")) {
-    const parts = action.split(".").slice(1);
-    const state = parts.pop() ?? "unknown";
-    const kind = kindPhrase(parts.join("."));
-    const stateLabels: Record<string, string> = {
-      cancelled: "Cancelled",
-      compensated: "Recovered",
-      compensating: "Recovering",
-      completed: "Completed",
-      failed: "Failed",
-      pending: "Pending",
-      planned: "Planned",
-      queued: "Queued",
-      running: "Running",
-      succeeded: "Completed",
-      uncertain: "Needs review",
-      waiting: "Waiting to recheck",
-      [LifecycleState.NEEDS_OPERATOR]: "Waiting for operator",
-      [LifecycleState.BACKOFF]: "Retrying",
-      [LifecycleState.OBSERVING]: "Checking",
-    };
-    return `${kind} · ${stateLabels[state] ?? titleCase(state)}`;
-  }
-  const parts = action.split(".").filter(Boolean);
-  const useful = parts.length > 1 ? parts.slice(1) : parts;
-  const label = titleCase(useful.join(" "));
-  return label
-    ? `${label.charAt(0).toUpperCase()}${label.slice(1).toLowerCase()}`
-    : "Recorded activity";
 }
 
 export function activityCategory(event: ActivitySummary): string {
@@ -363,13 +324,14 @@ function targetSummaryNames(event: ActivityRecord): string[] {
   return names;
 }
 
-/** The entry's headline: the Sparks it concerns first, then what happened. */
+/** The entry's headline: the workload (else the Sparks) it concerns, then what happened, in the Controller's words. */
 export function activityTitle(event: ActivityRecord): string {
   const names = targetSummaryNames(event);
-  const subject =
+  const sparks =
     names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
-  const label = activityActionLabel(event.action);
-  return subject ? `${subject} · ${label}` : label;
+  const subject = event.subject || sparks;
+  const summary = event.summary || "Recorded activity";
+  return subject ? `${subject} · ${summary}` : summary;
 }
 
 function TargetSummary({ compact = false, event }: { compact?: boolean; event: ActivityRecord }) {
@@ -735,11 +697,7 @@ function JobProgressDetails({
                   {visibleOperations.map((operation) => (
                     <li key={operation.id}>
                       <div>
-                        <strong>
-                          {operation.kind === "artifact.distribution.v1"
-                            ? "Model distribution"
-                            : titleCase(operation.kind)}
-                        </strong>
+                        <strong>{operation.summary}</strong>
                         <span>{friendlyTarget(operation.node_id, targetNames)}</span>
                       </div>
                       <StatusPill
@@ -1062,6 +1020,8 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
       occurred_at: detail.created_at,
       targets: detail.node_ids,
       target_names: detail.node_ids.map((id) => names.get(id) ?? ""),
+      summary: detail.summary,
+      subject: detail.subject,
       source: "job",
     };
   }
@@ -1072,6 +1032,8 @@ function canonicalRecord(detail: OperationDetail, names: Map<string, string>): A
     occurred_at: detail.created_at,
     targets: detail.node_ids,
     target_names: detail.node_ids.map((id) => names.get(id) ?? ""),
+    summary: detail.summary,
+    subject: detail.subject,
     source: "operation",
     operation: detail,
   };
@@ -1407,7 +1369,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       if (status && activityStatus(event) !== status) return false;
       if (!normalized) return true;
       return [
-        activityActionLabel(event.action),
+        activityTitle(event),
         activityCategory(event),
         event.action,
         event.actor,
@@ -1433,6 +1395,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
                 ? {
                     ...event,
                     action: `operation.${detail.kind}.${detail.state}`,
+                    summary: detail.summary,
                     targets: detail.targets,
                     target_names: detail.targets.map((target) => targetNames.get(target) ?? ""),
                   }

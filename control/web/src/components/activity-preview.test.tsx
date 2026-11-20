@@ -8,7 +8,15 @@ const nodes = [
 ] as unknown as VisualFleetNode[];
 
 function operation(id: string, state: string, createdAt: string) {
-  return { id, kind: "recipe.start", state, created_at: createdAt, node_ids: ["spk_a"] };
+  const word = state === "succeeded" ? "completed" : state;
+  return {
+    id,
+    kind: "recipe.start",
+    state,
+    summary: `Recipe start ${word}`,
+    created_at: createdAt,
+    node_ids: ["spk_a"],
+  };
 }
 const apiWith = (operations: unknown[]) =>
   ({
@@ -22,8 +30,8 @@ test("shows the newest seven activities in the Activity page's words, newest fir
   rows.push(operation("op-fail", "failed", "2026-11-12T12:30:00Z"));
   render(<ActivityPreview api={apiWith(rows)} nodes={nodes} now={NOW} />);
   expect(await screen.findAllByRole("listitem")).toHaveLength(7);
-  expect(screen.getAllByText("spark-3542 · Recipe start · Completed").length).toBe(6);
-  expect(screen.getByText("spark-3542 · Recipe start · Failed")).toBeInTheDocument();
+  expect(screen.getAllByText("spark-3542 · Recipe start completed").length).toBe(6);
+  expect(screen.getByText("spark-3542 · Recipe start failed")).toBeInTheDocument();
   expect(screen.getByText("Unsuccessful")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View all" })).toHaveAttribute("href", "/activity");
 });

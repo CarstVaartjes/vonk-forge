@@ -225,6 +225,8 @@ class OperationItem(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     kind: str
     state: str
+    #: The workload alias the operation acts on, when it has a run.
+    subject: str | None = None
     attempt: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     progress: OperationProgress | None = None
     created_at: str | None = None

@@ -202,6 +202,8 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
         parent_id: null,
         kind: "recipe.start",
         state: "succeeded",
+        summary: "Recipe start completed",
+        subject: "h3video",
         attempt: 1,
         node_ids: [targetId],
         created_at: "2026-08-24T08:55:00Z",
@@ -214,6 +216,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
         parent_id: null,
         kind: "agent-upgrade",
         state: "needs-operator",
+        summary: "Agent upgrade waiting for operator",
         attempt: 1,
         node_ids: [targetId],
         created_at: "2026-08-24T08:58:00Z",
@@ -232,6 +235,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
       id: "upgrade-1",
       kind: "agent-upgrade",
       state: "needs-operator",
+      summary: "Agent upgrade waiting for operator",
       authority_revision: "a".repeat(64),
       targets: [targetId],
       target_next_cursor: null,
@@ -244,6 +248,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
           node_id: targetId,
           kind: "agent.upgrade.v1",
           state: "needs-operator",
+          summary: "Agent upgrade waiting for operator",
           attempt: 3,
           progress: null,
           updated_at: "2026-08-24T08:59:30Z",
@@ -286,9 +291,9 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Recipe start · Completed$/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Recipe start completed$/ })).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: /Agent upgrade · Waiting for operator$/ }),
+    page.getByRole("heading", { name: /Agent upgrade waiting for operator$/ }),
   ).toBeVisible();
   await page.getByText("View operation progress").click();
   await expect(page.getByText("Retry queued behind safety delay")).toBeVisible();
