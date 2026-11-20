@@ -5,8 +5,6 @@ import { App } from "./app";
 import { AuthProvider } from "./auth";
 import "@fontsource-variable/onest/wght.css";
 import "./styles.css";
-import { applyStoredTheme } from "./lib/theme";
-applyStoredTheme();
 const api = new ApiClient();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

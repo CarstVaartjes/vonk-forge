@@ -52,9 +52,11 @@ export function OverviewPage({
     setUpgradeBusy(true);
     try {
       const response = await api.upgradeFleet(true, [], crypto.randomUUID());
-      toast.info(
-        `Upgrade ${response.state}${response.operation_id ? `. Follow it in Activity (${response.operation_id}).` : "."}`,
-      );
+      toast.info(`Upgrade ${response.state}.`, {
+        label: "Follow it in Activity",
+        href: "/activity",
+        onClick: (event) => onNavigate?.(event, "/activity"),
+      });
     } catch (error) {
       toast.error(
         safeErrorText(error instanceof Error ? error.message : "Could not start the agent upgrade"),
@@ -102,7 +104,12 @@ export function OverviewPage({
             <button type="button" className="button secondary" onClick={fleet.retry}>
               Refresh
             </button>
-            <button type="button" className="button secondary" onClick={() => setUpgrading(true)}>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={fleet.snapshot?.nodes.length === 0}
+              onClick={() => setUpgrading(true)}
+            >
               Upgrade agents
             </button>
             <button type="button" className="button" onClick={startEnrolling}>
@@ -185,7 +192,7 @@ export function OverviewPage({
         <div className="overview-grid">
           <div className="overview-attention">
             {fleet.snapshot.attention_unavailable && (
-              <p role="status">Prometheus alerts unavailable. Retrying automatically.</p>
+              <p role="status">Alerts cannot be shown right now. Retrying automatically.</p>
             )}
             {!!fleet.snapshot.attention?.length && (
               <section className="card attention-card" aria-label="Needs attention">

@@ -73,13 +73,19 @@ export function AppShell({
         Skip to content
       </a>
       <header className="app-header">
-        <div className="brand">
+        <a
+          className="brand"
+          href="/overview"
+          aria-label="Vonk Forge Controller, Overview"
+          {...disabledLinkProps}
+          onClick={(event) => navigate(event, "overview")}
+        >
           <BrandMark />
-          <div>
+          <div className="brand-text">
             <strong>Vonk Forge</strong>
             <small>Controller</small>
           </div>
-        </div>
+        </a>
         <nav className="primary-navigation" aria-label="Primary">
           <a
             href="/overview"

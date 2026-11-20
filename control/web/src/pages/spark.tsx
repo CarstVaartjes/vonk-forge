@@ -1,5 +1,5 @@
 import "./spark.css";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { RangeSwitch } from "../components/range-switch";
@@ -28,6 +28,15 @@ const TABS: Array<[Tab, string]> = [
   ["logs", "Logs"],
 ];
 
+/** WAI-ARIA tabs: Left/Right wrap, Home/End jump; the arrowed tab is selected and focused. */
+function nextTab(key: string, from: number): number | null {
+  if (key === "Home") return 0;
+  if (key === "End") return TABS.length - 1;
+  if (key === "ArrowRight") return (from + 1) % TABS.length;
+  if (key === "ArrowLeft") return (from - 1 + TABS.length) % TABS.length;
+  return null;
+}
+
 /**
  * One Spark on its own page: breadcrumb, colour key, name and status, tabs, the range every chart
  * shares, and the facts that need no chart. The Spark is read from the fleet stream, so everything
@@ -53,6 +62,18 @@ export function SparkPage({
   const [tab, setTab] = useState<Tab>("overview");
   const [range, setRange] = useState<MetricRange>("24h");
   useEffect(() => setTab("overview"), [id]);
+
+  function moveTab(event: KeyboardEvent<HTMLDivElement>) {
+    const target = nextTab(
+      event.key,
+      TABS.findIndex(([key]) => key === tab),
+    );
+    if (target === null) return;
+    event.preventDefault();
+    const [key] = TABS[target]!;
+    setTab(key);
+    event.currentTarget.querySelector<HTMLElement>(`#spark-tab-${key}`)?.focus();
+  }
 
   const nodes = fleet.snapshot?.nodes ?? [];
   const index = nodes.findIndex((candidate) => candidate.id === id);
@@ -82,6 +103,13 @@ export function SparkPage({
         <section className="fleet-empty" role="status">
           <h1>Spark not found</h1>
           <p>No enrolled Spark has this address. It may have been removed.</p>
+          <a
+            className="button"
+            href="/overview"
+            onClick={(event) => onNavigate(event, "/overview")}
+          >
+            Back to Overview
+          </a>
         </section>
       )}
       {node && status && (
@@ -98,7 +126,12 @@ export function SparkPage({
               seen <Time value={node.connection.last_seen_at} />
             </span>
             <div className="spark-page-controls">
-              <div className="segmented" role="tablist" aria-label="Spark sections">
+              <div
+                className="segmented"
+                role="tablist"
+                aria-label="Spark sections"
+                onKeyDown={moveTab}
+              >
                 {TABS.map(([key, label]) => (
                   <button
                     key={key}
@@ -106,6 +139,7 @@ export function SparkPage({
                     role="tab"
                     id={`spark-tab-${key}`}
                     aria-selected={tab === key}
+                    tabIndex={tab === key ? 0 : -1}
                     aria-controls="spark-tab-panel"
                     onClick={() => setTab(key)}
                   >

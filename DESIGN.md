@@ -131,7 +131,7 @@ Precision comes from rows, rails, thin dividers, tabular measurements, and exact
 
 The palette is one graphite operating shell with a small state vocabulary that text and shape reinforce.
 
-**Themes.** Dark is the first theme and light is a designed one (warm paper, darker green, gold, warning and series steps, not an inversion). Every colour token is one `light-dark(light, dark)` pair in `:root` of `control/web/src/styles.css`, the single owner of both values. The system setting decides until the owner picks with the top-bar switch; `lib/theme.ts` then stores the pick per browser and sets `data-theme`. Glows (the live-dot halo) are dark only. A new colour is added as a pair, never as a hex outside `:root`.
+**Themes.** Dark is the first theme and light is a designed one (warm paper, darker green, gold, warning and series steps, not an inversion). Every colour token is one `light-dark(light, dark)` pair in `:root` of `control/web/src/styles.css`, the single owner of both values. The system setting decides until the owner picks with the top-bar switch; `lib/theme.ts` then stores the pick per browser and sets `data-theme`; the blocking `public/theme-init.js` applies the stored pick before first paint so a light-mode owner never sees a dark flash. Glows (the live-dot halo) are dark only. A new colour is added as a pair, never as a hex outside `:root`.
 
 ### Primary
 
@@ -286,7 +286,7 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 ### Navigation
 
-The header holds the brand mark, Fleet, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.
+The header holds the brand mark (a link to Overview), Fleet, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.
 
 ### Named Rules
 
