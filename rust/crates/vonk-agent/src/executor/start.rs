@@ -253,7 +253,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         // The load begins: what preparation read stays cached until dropped.
         let load = &*load.insert(
-            crate::page_cache::LoadPhases::for_helper(self.helper_socket).begin(request.run_id),
+            crate::page_cache::LoadPhases::for_helper(self.helper_socket).begin(
+                request.run_id,
+                vonk_agent_protocol::generated::PageCacheDropPurpose::Load,
+            ),
         );
         let mut runtime_result = run_until_cancelled(
             async {

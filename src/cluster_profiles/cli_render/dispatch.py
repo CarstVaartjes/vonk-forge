@@ -120,7 +120,7 @@ def render_payload(
             elif action == "resume":
                 job_id = payload.get("id")
                 print(
-                    f"Resumed job {_text(job_id)}; it is now {_text(payload.get('state'))}."
+                    f"Resumed operation {_text(job_id)}; it is now {_text(payload.get('state'))}."
                 )
                 _field(
                     "Next",
@@ -134,7 +134,7 @@ def render_payload(
                 if payload.get("detail") is not None:
                     _field("Detail", payload["detail"])
                 if payload.get("operation_id") is not None:
-                    _field("Job", payload["operation_id"])
+                    _field("Operation", payload["operation_id"])
                     _field(
                         "Next",
                         f"vonkctl fleet progress {shlex.quote(str(payload['operation_id']))} --follow",

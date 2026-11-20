@@ -225,7 +225,7 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
             lambda *_args, **_kwargs: service.get_operation(operation.id),
         )
         unchanged = api.post(path, json=body, headers=headers)
-        assert unchanged.status_code == 409
+        assert unchanged.status_code == 503
         assert unchanged.headers["x-vonk-error-code"]
         monkeypatch.setattr(service, "cancel_operation", original)
         with pytest.raises(httpx.ReadError):

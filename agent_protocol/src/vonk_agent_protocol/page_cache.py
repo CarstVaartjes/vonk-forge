@@ -26,10 +26,22 @@ class PageCacheDropKind(WireEnum):
     PAGE_CACHE_DROP = "page-cache-drop"
 
 
+class PageCacheDropPurpose(WireEnum):
+    """Why the agent asks: a load phase or plain hygiene.
+
+    Only ``load`` marks the host as loading for the memory guard (its lenient
+    R4); ``hygiene`` (a job's drops) never does, so R4 stays strict for it.
+    """
+
+    LOAD = "load"
+    HYGIENE = "hygiene"
+
+
 class PageCacheDropRequest(WireModel):
     """Peer-authorized helper request; carries no path or container authority."""
 
     kind: PageCacheDropKind
+    purpose: PageCacheDropPurpose
     request_id: UUID
 
 

@@ -111,7 +111,14 @@ class DistributionIdentity:
                 RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
                 reason=WaitReason.SCOPE_CHANGED,
             )
-        objects = plan_objects(next(iter(stored.compiled_execution_plans.values())))
+        # Every node is delivered the whole model: the union of its roles' files.
+        objects = content_objects(
+            tuple(
+                item
+                for compiled in stored.compiled_execution_plans.values()
+                for item in plan_objects(compiled)
+            )
+        )
         actual_bytes = sum(item.bytes for item in objects)
         model_set_bytes = (
             preparation.model.artifact_set_bytes if preparation is not None else None

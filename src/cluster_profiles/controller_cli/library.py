@@ -129,10 +129,10 @@ def _model(
 def _fleet_job_progress_hint(
     client: ControllerClient, args: argparse.Namespace, error: ControlNotFound
 ) -> ControlNotFound:
-    """The recipe operation was not found; a fleet job under that id names its view.
+    """The recipe operation was not found; a fleet operation under that id names its view.
 
     ``recipe progress`` follows recipe preparation. A recipe job's run is a
-    fleet job (for a job's own result, ``vonkctl job detail``), so when
+    fleet operation (for a job's own result, ``vonkctl job detail``), so when
     the id resolves as one, the not-found carries ``vonkctl fleet progress`` as
     its recovery action.
     """
@@ -153,7 +153,7 @@ def _fleet_job_progress_hint(
         return error
     return ControlNotFound(
         404,
-        f"operation {operation_id} is a fleet job, not a recipe operation",
+        f"operation {operation_id} is a fleet operation, not a recipe operation",
         code=error.code,
         recovery=(f"vonkctl fleet progress {operation_id}",),
         operation=error.operation,
