@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -12,6 +13,7 @@ from ..cli_states_generated import (
     RUN_RUNNING,
     UNKNOWN,
     GpuClockMetric,
+    RouteState,
 )
 from ..cli_telemetry_render import NOT_REPORTED, gpu_readings, round_half_up
 from ..cli_telemetry_render import size as _size
@@ -49,6 +51,22 @@ from .host_checks import host_check_lines
 from .throttle import throttle_words
 
 NO_SPARKS = "No Sparks are enrolled."
+#: Installed-but-stopped recipes shown by default; `--wide` shows every one.
+STOPPED_LIST_LIMIT = 10
+#: What a run's route state means to a person: whether clients can reach it.
+_ROUTE_WORDS = {
+    RouteState.WITHDRAWN: "not taking requests",
+    RouteState.PENDING: "about to take requests",
+    RouteState.PUBLISHED: "taking requests",
+    RouteState.FAILED: "could not take requests",
+}
+
+
+def _route_words(state: object) -> str:
+    for known, words in _ROUTE_WORDS.items():
+        if state == known:
+            return words
+    return _text(state)
 
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
@@ -663,7 +681,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         print(f"  {title}")
         print(
             f"    {_text(first.get('run_state'))}, group {_text(first.get('group_state'))}, "
-            f"route {_text(first.get('route_state'))}, {ranks}"
+            f"{_route_words(first.get('route_state'))}, {ranks}"
         )
         print(f"    Recipe: {_text(first.get('title'))}")
         sparks = ", ".join(
@@ -720,10 +738,22 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             entry[1].append(_text(node.get("display_name")))
     if stopped:
         print("Installed, not running")
-        for installation, (title, sparks) in sorted(stopped.items()):
-            print(f"  {title} on {', '.join(sparks)}")
-            if wide:
+        if wide:
+            for installation, (title, sparks) in sorted(stopped.items()):
+                print(f"  {title} on {', '.join(sparks)}")
                 print(f"    Installation: {_text(installation)}")
+        else:
+            grouped = Counter(
+                (title, ", ".join(sparks)) for title, sparks in stopped.values()
+            )
+            shown = sorted(grouped.items())[:STOPPED_LIST_LIMIT]
+            for (title, sparks), count in shown:
+                print(f"  {title} on {sparks}" + (f" (x{count})" if count > 1 else ""))
+            hidden = sum(grouped.values()) - sum(count for _, count in shown)
+            if hidden:
+                print(
+                    f"  +{hidden} more; `vonkctl fleet --wide` lists every installation"
+                )
     if runs or stopped:
         print()
     return notes

@@ -388,3 +388,47 @@ def test_unused_removal_unknown_acceptance_reads_unknown_not_refused(printed):
     assert "Unknown" in labels and "Refused" in labels
     unknown = next(line for line in lines if line.startswith("Unknown"))
     assert "reconnect: vonkctl model remove a --fleet --yes" in unknown
+
+
+def _stopped_fleet(titles: list[str]) -> dict[str, object]:
+    node = {
+        "id": "spk_1",
+        "display_name": "Spark One",
+        "lifecycle": "ready",
+        "connection": {"online_state": "online", "last_seen_at": None},
+        "inventory": None,
+        "telemetry": None,
+        "loaded": [],
+        "warnings": [],
+        "installed": [
+            {"installation_id": f"inst-{index}", "title": title}
+            for index, title in enumerate(titles)
+        ],
+    }
+    return {"nodes": [node]}
+
+
+def test_fleet_groups_identical_installs_and_caps_the_stopped_list(printed):
+    titles = ["Twin", "Twin"] + [f"Recipe {index:02d}" for index in range(12)]
+    payload = _stopped_fleet(titles)
+    lines = printed(render_payload, payload, "fleet")
+    stopped = lines[lines.index("Installed, not running") + 1 :]
+    assert stopped[0] == "  Recipe 00 on Spark One"
+    assert "  Twin on Spark One (x2)" not in stopped  # beyond the cap
+    assert len([line for line in stopped if line.startswith("  Recipe")]) == 10
+    assert stopped[10] == "  +4 more; `vonkctl fleet --wide` lists every installation"
+    wide = printed(render_payload, payload, "fleet", wide=True)
+    assert sum(line.startswith("  Twin on") for line in wide) == 2
+    assert not any("+4 more" in line for line in wide)
+    twin = printed(render_payload, _stopped_fleet(["Twin", "Twin"]), "fleet")
+    assert twin.count("  Twin on Spark One (x2)") == 1
+
+
+def test_fleet_workload_route_is_plain_words(printed):
+    node = _WORKLOADS["nodes"][0]
+    payload = _stopped_fleet([])
+    cast(list[dict[str, Any]], payload["nodes"])[0]["loaded"] = [
+        {**node["loaded"][0], "route_state": "withdrawn", "group_state": "ready"}
+    ]
+    text = "\n".join(printed(render_payload, payload, "fleet"))
+    assert "not taking requests" in text and "withdrawn" not in text
