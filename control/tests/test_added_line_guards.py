@@ -248,8 +248,13 @@ def test_a_reflowed_contract_literal_is_not_new_but_an_extra_one_is():
     # Wrong implementation: a formatter reflow of an old `push("error", m)` line
     # re-reported its literal, so no edit to the file could pass.
     path = "control/web/src/components/x.tsx"
-    old = 'const t = {error: m => push("error", m)};\n'
-    new = 'const t = {\n  error: (m) => push("error", m),\n};\n'
+    old = 'const t = {error: m => push("error", m), info: m => show("info", "error", m)};\n'
+    new = (
+        "const t = {\n"
+        '  error: (m) => push("error", m),\n'
+        '  info: (m) => show("info", "error", m),\n'
+        "};\n"
+    )
     extra = new.replace("};", '  fail: (m) => push("error", m),\n};')
 
     def check(source: str) -> list[str]:
@@ -261,18 +266,20 @@ def test_a_reflowed_contract_literal_is_not_new_but_an_extra_one_is():
             source,
             added[path],
             modes=("vocabulary",),
-            words=frozenset({"error"}),
+            words=frozenset({"error", "info"}),
             removed=removed[path],
         )
 
     assert check(new) == []
+    # Every added line spelling the grown word is reported, a reflowed one too.
     assert check(extra) == [
         f"{path}:2: contract literal",
         f"{path}:3: contract literal",
+        f"{path}:4: contract literal",
     ]
     # Per file and word: replacing one spelling with another is not more debt.
-    assert check('if (state === "error") {}\n') == []
-    assert check('if (state === "error") {}\nconst x = "error";\n') == [
+    assert check('if (state === "info") {}\n') == []
+    assert check('if (state === "info") {}\nconst x = "info";\n') == [
         f"{path}:1: contract literal",
         f"{path}:2: contract literal",
     ]

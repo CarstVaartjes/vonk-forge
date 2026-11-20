@@ -293,9 +293,9 @@ instead of repeating on every retry (the `retry-dispositions` added-line guard).
 The [testing policy](docs/testing-and-ci.md) owns verification commands,
 worktree-local environments, OrbStack setup, lane selection, pinned lint/type/
 generation checks, and added-line principle guards. Use those instructions from the
-active task worktree. The contract-literal guard reports a word only when a file
-spells it more often than the change removed (a reflow is not new), and skips
-SVG paint and ARIA attribute values. On macOS, check the intended OrbStack engine before
+active task worktree. The contract-literal guard reports a word only when the change
+adds it to a file more often than it removes it there (a reflow is not new), and
+skips SVG paint and ARIA attribute values. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 

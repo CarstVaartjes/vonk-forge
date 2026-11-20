@@ -840,7 +840,8 @@ def new_literal_lines(
     pattern cannot see stays reported.
     """
     lines = source.splitlines()
-    reported = [line for line in found if line in added]
+    # A line is counted once, however many hits the scanner reported on it.
+    reported = sorted({line for line in found if line in added})
     old = _spelled(removed, words)
     new = _spelled((lines[line - 1] for line in reported), words)
     grown = {word for word, count in new.items() if count > old[word]}
