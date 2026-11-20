@@ -179,7 +179,9 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
     let (controller_log, controller_done) = (log.clone(), done.clone());
     let controller_grants = grants.clone();
     std::thread::spawn(move || {
-        while let Some((mut stream, _)) = accept(&controller_done, || controller.accept()) {
+        while let Some((mut stream, _)) = accept(&controller_done, || {
+            crate::loopback_probe::accept(&controller)
+        }) {
             stream.set_nonblocking(false).unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 4096];

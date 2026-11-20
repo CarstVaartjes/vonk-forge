@@ -202,7 +202,8 @@ async fn refused_output_upload_is_redelivered_from_the_durable_exit_receipt() {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while tokio::time::Instant::now() < deadline {
             let Ok(Ok((mut stream, _))) =
-                tokio::time::timeout_at(deadline, listener.accept()).await
+                tokio::time::timeout_at(deadline, crate::loopback_probe::accept_async(&listener))
+                    .await
             else {
                 break;
             };

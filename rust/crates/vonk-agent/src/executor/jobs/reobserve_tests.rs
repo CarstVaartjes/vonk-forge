@@ -174,8 +174,9 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
     });
     let (controller_log, controller_done) = (log.clone(), done.clone());
     std::thread::spawn(move || {
-        while let Some((mut stream, _)) = accept(&controller_done, deadline, || controller.accept())
-        {
+        while let Some((mut stream, _)) = accept(&controller_done, deadline, || {
+            crate::loopback_probe::accept(&controller)
+        }) {
             stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))

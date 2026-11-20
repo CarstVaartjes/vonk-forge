@@ -392,7 +392,7 @@ async fn body_limit_refusals_report_the_layer_without_guessing_from_empty_bodies
             .map(|code| format!("X-Vonk-Error-Code: {code}\r\n"))
             .unwrap_or_default();
         let peer = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

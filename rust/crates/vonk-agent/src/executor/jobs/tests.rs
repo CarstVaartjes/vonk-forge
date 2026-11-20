@@ -343,7 +343,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
                     Instant::now() < deadline,
                     "bounded output peer did not receive a request"
                 );
-                match listener.accept() {
+                match crate::loopback_probe::accept(&listener) {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(1))

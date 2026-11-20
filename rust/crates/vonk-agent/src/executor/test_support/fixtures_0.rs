@@ -54,7 +54,7 @@ impl ObservationServer {
             let mut reports = Vec::new();
             let mut posts = 0_usize;
             while !stopped.load(Ordering::SeqCst) {
-                let (mut stream, _) = match listener.accept() {
+                let (mut stream, _) = match crate::loopback_probe::accept(&listener) {
                     Ok(connection) => connection,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1));
@@ -75,10 +75,6 @@ impl ObservationServer {
                         break index + 4;
                     }
                 };
-                // A probe of the loopback port is not the client under test.
-                if request.starts_with(b"GET / ") {
-                    continue;
-                }
                 let headers = std::str::from_utf8(&request[..header_end]).unwrap();
                 if let Some(path) = headers
                     .strip_prefix("GET ")

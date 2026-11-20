@@ -265,6 +265,14 @@ either is missing. The VM uses task-specific uv and Cargo directories under
 `VONK_RECIPE_LIBRARY_ROOT` when the sibling
 checkout is outside `/opt/vonk-forge-recipes`.
 
+On the `vonk-ci` OrbStack VM the port forwarder (`machines.forward_ports`)
+probes every new `127.0.0.1` listener once with `GET /` from `Go-http-client`
+(source `orbstack-agent`; `127.0.0.2` is not probed). GitHub runners have no such
+probe. vonk-agent test fixtures therefore accept TCP connections through
+`crate::loopback_probe::accept` / `accept_async`, which drop only that probe by
+its `User-Agent`; the `loopback-accept` added-line guard rejects a raw `.accept()`
+in vonk-agent test code (mark a Unix-socket accept `// unix-socket`).
+
 ### Local Linux and container testing
 
 On macOS, use OrbStack for container-backed tests before treating a Linux-only

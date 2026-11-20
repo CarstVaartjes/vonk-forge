@@ -19,6 +19,8 @@ mod host_tuning;
 pub mod identity;
 pub mod image_store;
 pub mod inventory;
+#[cfg(test)]
+mod loopback_probe;
 pub mod network;
 pub mod oci;
 pub mod outcome;

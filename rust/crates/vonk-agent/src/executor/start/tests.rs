@@ -55,7 +55,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         let mut requests = Vec::new();
         while !peer_done.load(Ordering::SeqCst) {
             assert!(Instant::now() < deadline);
-            let mut stream = match listener.accept() {
+            let mut stream = match crate::loopback_probe::accept(&listener) {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(1));
@@ -266,7 +266,7 @@ async fn collective_start_with_drops(
         let mut probes = 0;
         while !peer_done.load(Ordering::SeqCst) {
             assert!(Instant::now() < deadline);
-            let mut stream = match listener.accept() {
+            let mut stream = match crate::loopback_probe::accept(&listener) {
                 Ok((stream, _)) => stream,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(1));

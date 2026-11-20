@@ -42,7 +42,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
         for _ in 0..2 {
             let mut stream = loop {
                 assert!(Instant::now() < deadline);
-                match listener.accept() {
+                match crate::loopback_probe::accept(&listener) {
                     Ok((stream, _)) => break stream,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(Duration::from_millis(1))

@@ -377,7 +377,9 @@ async fn two_answers(
     let server = tokio::spawn(async move {
         let mut bodies = Vec::new();
         for status in statuses {
-            let (mut stream, _) = accept_client(&listener).await.unwrap();
+            let (mut stream, _) = crate::loopback_probe::accept_async(&listener)
+                .await
+                .unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 8192];
             loop {

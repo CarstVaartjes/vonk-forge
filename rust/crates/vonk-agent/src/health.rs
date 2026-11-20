@@ -158,7 +158,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 1024];
             while request.windows(4).all(|value| value != b"\r\n\r\n") {
@@ -216,10 +216,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let peer = tokio::spawn(async move {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-            let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
-                .await
-                .unwrap()
-                .unwrap();
+            let (mut stream, _) =
+                tokio::time::timeout_at(deadline, crate::loopback_probe::accept_async(&listener))
+                    .await
+                    .unwrap()
+                    .unwrap();
             let mut bytes = [0; 1024];
             tokio::time::timeout_at(deadline, stream.read(&mut bytes))
                 .await
@@ -261,7 +262,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
             let mut request = Vec::new();
             let mut buffer = [0_u8; 1024];
             while request.windows(4).all(|value| value != b"\r\n\r\n") {

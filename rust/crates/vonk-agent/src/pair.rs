@@ -385,7 +385,7 @@ mod tests {
             for (elapsed, reply) in replies {
                 // Paused time must advance for backoff, but not race real TCP
                 // readiness. Keep the runtime runnable only during I/O.
-                let accepting = listener.accept();
+                let accepting = crate::loopback_probe::accept_async(&listener);
                 tokio::pin!(accepting);
                 let early = tokio::select! {
                     result = &mut accepting => Some(result),
@@ -592,7 +592,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let headers = headers.to_owned();
         let peer = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (mut socket, _) = crate::loopback_probe::accept_async(&listener)
+                .await
+                .unwrap();
             read_request_headers(&mut socket).await;
             socket.write_all(headers.as_bytes()).await.unwrap();
             let _ = socket.write_all(&body).await;
@@ -672,7 +674,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (closed, observed_close) = tokio::sync::oneshot::channel();
         let peer = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let (mut socket, _) = crate::loopback_probe::accept_async(&listener)
+                .await
+                .unwrap();
             read_request_headers(&mut socket).await;
             socket
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{")

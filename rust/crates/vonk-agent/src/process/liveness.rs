@@ -128,7 +128,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = crate::loopback_probe::accept(&listener).unwrap();
             // Read the whole request first: closing a socket that still holds
             // unread request bytes sends a TCP RST, which can make curl fail
             // (exit 56) before it reads the body.

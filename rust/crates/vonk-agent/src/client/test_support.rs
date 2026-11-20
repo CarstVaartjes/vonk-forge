@@ -130,10 +130,11 @@ pub(super) async fn request_capture_client(
     let deadline = tokio::time::Instant::now() + budget;
     let (stage_observer, stages) = tokio::sync::mpsc::channel(2);
     let server = tokio::spawn(async move {
-        let (mut stream, _) = tokio::time::timeout_at(deadline, accept_client(&listener))
-            .await
-            .expect("capture peer acceptance deadline")
-            .unwrap();
+        let (mut stream, _) =
+            tokio::time::timeout_at(deadline, crate::loopback_probe::accept_async(&listener))
+                .await
+                .expect("capture peer acceptance deadline")
+                .unwrap();
         let mut request = Vec::new();
         let mut buffer = [0_u8; 4096];
         let header_end = loop {
@@ -693,7 +694,7 @@ pub(super) fn accept_peer(
             std::time::Instant::now() < deadline,
             "fixture accept deadline"
         );
-        match listener.accept() {
+        match crate::loopback_probe::accept(listener) {
             Ok((stream, _)) => {
                 stream
                     .set_read_timeout(Some(
@@ -705,63 +706,12 @@ pub(super) fn accept_peer(
                         deadline.saturating_duration_since(std::time::Instant::now()),
                     ))
                     .unwrap();
-                if is_stray_sync(&stream, deadline) {
-                    continue;
-                }
                 return stream;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(5))
             }
             Err(error) => panic!("fixture acceptance failed: {error}"),
-        }
-    }
-}
-
-/// The prefix of the only request no fixture expects: an environment probe of
-/// the loopback port (seen from OrbStack as `GET /` by `Go-http-client`).
-/// No client under test requests the root path.
-const STRAY_PREFIX: &[u8] = b"GET / ";
-
-fn is_stray_prefix(peeked: &[u8]) -> Option<bool> {
-    if peeked.len() < STRAY_PREFIX.len() && STRAY_PREFIX.starts_with(peeked) {
-        return None;
-    }
-    Some(peeked.starts_with(STRAY_PREFIX))
-}
-
-fn is_stray_sync(stream: &std::net::TcpStream, deadline: std::time::Instant) -> bool {
-    let mut buffer = [0_u8; 6];
-    while std::time::Instant::now() < deadline {
-        match stream.peek(&mut buffer) {
-            Ok(0) => return true,
-            Ok(size) => match is_stray_prefix(&buffer[..size]) {
-                Some(stray) => return stray,
-                None => thread::sleep(Duration::from_millis(2)),
-            },
-            Err(_) => return false,
-        }
-    }
-    false
-}
-
-/// Accept the next connection that is a client under test; connections that
-/// only probe the port are dropped, so no fixture counts or answers them.
-pub(super) async fn accept_client(
-    listener: &tokio::net::TcpListener,
-) -> std::io::Result<(tokio::net::TcpStream, std::net::SocketAddr)> {
-    loop {
-        let (stream, address) = listener.accept().await?;
-        let mut buffer = [0_u8; 6];
-        loop {
-            match stream.peek(&mut buffer).await {
-                Ok(0) | Err(_) => break,
-                Ok(size) => match is_stray_prefix(&buffer[..size]) {
-                    Some(false) => return Ok((stream, address)),
-                    Some(true) => break,
-                    None => tokio::time::sleep(Duration::from_millis(2)).await,
-                },
-            }
         }
     }
 }
@@ -803,27 +753,5 @@ pub(super) fn spawn_async_peer<T: Send + 'static>(
                 .await
                 .expect("fixture task deadline")
         }),
-    }
-}
-
-#[cfg(test)]
-mod stray_connection_tests {
-    use super::*;
-    use tokio::io::AsyncWriteExt;
-
-    #[tokio::test]
-    async fn a_port_probe_is_ignored_and_the_client_request_is_accepted() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let mut probe = tokio::net::TcpStream::connect(address).await.unwrap();
-        probe.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
-        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
-        client
-            .write_all(b"POST /agent/heartbeat HTTP/1.1\r\n\r\n")
-            .await
-            .unwrap();
-        let (stream, peer) = accept_client(&listener).await.unwrap();
-        assert_eq!(peer, client.local_addr().unwrap());
-        drop(stream);
     }
 }

@@ -380,7 +380,9 @@ mod tests {
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
             for _ in 0..16 {
-                let (mut socket, _) = listener.accept().await.unwrap();
+                let (mut socket, _) = crate::loopback_probe::accept_async(&listener)
+                    .await
+                    .unwrap();
                 let body = body.clone();
                 tokio::spawn(async move {
                     let mut request = [0_u8; 1024];

@@ -4436,3 +4436,21 @@ def test_unknown_outcome_handlers_cannot_build_terminal_values(source, rejected)
     lines = set(range(1, len(source.splitlines()) + 1))
     hits = check_source(PATH, source, lines, modes=("waits",))
     assert bool([h for h in hits if "unknown outcome turned terminal" in h]) is rejected
+
+
+_ACCEPT_PATH = "rust/crates/vonk-agent/src/health.rs"
+_ACCEPT_SRC = (
+    "#[cfg(test)]\nmod tests {\n"
+    "    fn a() { let (s, _) = listener.accept().unwrap(); }\n"
+    "    fn b() { let (s, _) = helper.accept().unwrap(); } // unix-socket\n"
+    "    fn c() { let (s, _) = crate::loopback_probe::accept(&listener).unwrap(); }\n"
+    "}\n"
+)
+
+
+def test_a_raw_tcp_accept_in_an_agent_test_is_rejected_but_unix_and_helper_are_not():
+    hits = check_source(
+        _ACCEPT_PATH, _ACCEPT_SRC, _all_lines(_ACCEPT_SRC), modes=("loopback-accept",)
+    )
+    assert len(hits) == 1
+    assert ":3" in hits[0]

@@ -59,7 +59,7 @@ impl FakeController {
         thread::spawn(move || {
             let deadline = Instant::now() + SERVE_FOR;
             while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
-                match listener.accept() {
+                match crate::loopback_probe::accept(&listener) {
                     Ok((stream, _)) => {
                         // A slow answer must not hold up the others.
                         let shared = shared.clone();
