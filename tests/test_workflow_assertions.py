@@ -304,3 +304,45 @@ def test_every_action_is_pinned_at_one_sha() -> None:
             pins.setdefault(action, set()).add(sha)
     assert pins
     assert {a: sorted(s) for a, s in pins.items() if len(s) > 1} == {}
+
+
+def test_every_job_has_a_timeout_and_a_pinned_runner_label() -> None:
+    """No job may hang on the 6 h default or float on `ubuntu-latest`."""
+    allowed = {"ubuntu-24.04", "ubuntu-24.04-arm"}
+    bad: list[str] = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text()
+        for name, job in yaml.safe_load(text)["jobs"].items():
+            if "uses" in job:  # reusable-workflow call: the callee's jobs carry both
+                continue
+            if not isinstance(job.get("timeout-minutes"), int):
+                bad.append(f"{path.name}:{name} has no timeout-minutes")
+            runner = job.get("runs-on")
+            if runner == "${{ matrix.runner }}":
+                matrix = job.get("strategy", {}).get("matrix", {})
+                labels = {
+                    e["runner"] for e in matrix.get("include", []) if "runner" in e
+                }
+                if not labels or not labels <= allowed:
+                    bad.append(f"{path.name}:{name} matrix runners {sorted(labels)}")
+            elif runner not in allowed:
+                bad.append(f"{path.name}:{name} runs on {runner!r}")
+    assert bad == []
+
+
+def test_pre_commit_added_line_paths_match_ci() -> None:
+    """The hook checks the same pathspec as ci.yml's added-line step."""
+    import importlib.machinery
+    import importlib.util
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    match = re.search(r"--unified=0 \"\$BASE_SHA\" -- \\\n\s+([^|\n]+?)\s*\|", ci)
+    assert match
+    loader = importlib.machinery.SourceFileLoader(
+        "check_staged_code", str(ROOT / "scripts/check-staged-code")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec
+    hook = importlib.util.module_from_spec(spec)
+    loader.exec_module(hook)
+    assert hook.ADDED_LINE_PATHS == match.group(1).split()

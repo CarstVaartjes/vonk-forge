@@ -349,6 +349,7 @@ def test_non_python_check_failure_still_blocks_the_commit(
         raise subprocess.CalledProcessError(1, command)
 
     monkeypatch.setattr(module, "ensure_web", lambda root: None)
+    monkeypatch.setattr(module, "check_added_lines", lambda changed: None)
     monkeypatch.setattr(module, "run", refuse)
     monkeypatch.setattr(
         module, "run_vm_cargo", lambda command, deadline: refuse(command)
@@ -448,3 +449,53 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
         ],
         [module.sys.executable, "scripts/check-python-types", filename],
     ]
+
+
+@pytest.mark.parametrize(
+    "file,source",
+    [
+        ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n"),
+        ("packaging/systemd/new.service", "Restart=no\n"),
+    ],
+)
+def test_staged_added_line_violation_fails_the_hook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    file: str,
+    source: str,
+) -> None:
+    module = _module(ROOT / "scripts/check-staged-code")
+    # The guards read files relative to their own checkout: copy them beside the diff.
+    shutil.copytree(
+        ROOT / "control/tests",
+        tmp_path / "control/tests",
+        ignore=shutil.ignore_patterns("test_*", "__pycache__"),
+    )
+    target = tmp_path / file
+    target.parent.mkdir(parents=True)
+    target.write_text(source)
+    patch = (
+        f"diff --git a/{file} b/{file}\n--- /dev/null\n+++ b/{file}\n"
+        f"@@ -0,0 +1 @@\n+{source}"
+    ).encode()
+    unstaged: list[str] = []
+
+    def git(command: list[str], **kwargs: object) -> bytes:
+        if "--cached" in command:
+            return patch
+        return "\0".join(unstaged).encode()
+
+    monkeypatch.setattr(module.subprocess, "check_output", git)
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "ensure_control", lambda root, env: None)
+    monkeypatch.setenv(
+        "UV_PROJECT_ENVIRONMENT", str(Path(sys.executable).parent.parent)
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        module.check_added_lines([file])
+
+    # Unstaged edits on the file: skipped with its name, CI still gates.
+    unstaged.append(file)
+    module.check_added_lines([file])
+    assert file in capsys.readouterr().err

@@ -18,7 +18,7 @@ import os
 
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check_environment import ensure_web
+from check_environment import ensure_control, ensure_web
 from hook_words_generated import HookFailureCode, HookFailureKind
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -108,6 +108,75 @@ def run_vm_cargo(command: list[str], deadline: float) -> None:
         raise subprocess.CalledProcessError(result.returncode, invocation)
 
 
+# The paths CI's `lint` job feeds to scripts/check-added-lines.
+ADDED_LINE_PATHS = [
+    "control",
+    "agent_protocol",
+    "src",
+    "scripts",
+    "rust",
+    "deploy",
+    "packaging",
+    "tests",
+    ".github",
+]
+
+
+def check_added_lines(changed: list[str]) -> None:
+    """Run CI's added-line guards on the staged diff.
+
+    A path with unstaged edits is skipped for this commit (its index and disk
+    line numbers differ); CI still gates it.
+    """
+    scope = tuple(f"{path}/" for path in ADDED_LINE_PATHS)
+    staged = [file for file in changed if file.startswith(scope)]
+    if not staged:
+        return
+    unstaged = set(
+        subprocess.check_output(
+            ["git", "diff", "--name-only", "-z", "--", *ADDED_LINE_PATHS],
+            cwd=ROOT,
+            timeout=30,
+        )
+        .decode()
+        .split("\0")
+    )
+    partial = sorted(unstaged.intersection(staged))
+    if partial:
+        print(
+            "added-line guards skipped: staged files also have unstaged changes "
+            f"({', '.join(partial)}); stage them fully to check here (CI still runs them)",
+            file=sys.stderr,
+        )
+        return
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = ROOT / environment
+    ensure_control(ROOT, environment)
+    patch = subprocess.check_output(
+        [
+            "git",
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--unified=0",
+            "--",
+            *ADDED_LINE_PATHS,
+        ],
+        cwd=ROOT,
+        timeout=30,
+    )
+    subprocess.run(
+        [str(environment / "bin/python"), "-m", "control.tests.added_line_guards"],
+        cwd=ROOT,
+        input=patch,
+        check=True,
+        timeout=600,
+    )
+
+
 def main() -> None:
     changed = (
         subprocess.check_output(
@@ -141,6 +210,7 @@ def main() -> None:
         for file in changed
     )
     run(["python3", "scripts/check-staged-python"])
+    check_added_lines(changed)
     if web or web_inputs:
         directory = ROOT / "control/web"
         biome = directory / "node_modules/.bin/biome"
