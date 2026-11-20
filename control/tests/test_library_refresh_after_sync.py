@@ -126,3 +126,31 @@ def test_an_ended_default_key_observation_heals_on_the_next_full_observation(
     clock.now += 60
     api.tick()
     assert peer.keys["default"]["key"] == path.read_text().strip()
+
+
+def test_an_unexpected_refresh_failure_leaves_the_observation_running() -> None:
+    """Catches the only library owner ending on an error it did not list."""
+
+    class Library:
+        def __init__(self) -> None:
+            self.refreshes = 0
+
+        def refresh_catalog(self) -> None:
+            self.refreshes += 1
+            if self.refreshes == 1:
+                raise ValueError("unreadable catalog row")
+
+    library = Library()
+    keys = _ReadyKey()
+    clock = _Clock()
+    api = LibraryObservations(
+        library,  # type: ignore[arg-type]
+        keys.ensure_default,
+        lambda: None,
+        interval_seconds=60,
+        monotonic=clock,
+    )
+    api.tick()
+    clock.now += 60
+    api.tick()
+    assert library.refreshes == 2 and keys.checks == 1

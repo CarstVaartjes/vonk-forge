@@ -42,7 +42,7 @@ worker; the API keeps only what needs the gateway master key or its own memory.
 
 | Loop | Process | Needs | Cadence |
 | --- | --- | --- | --- |
-| Automatic catalog sync (`AutomaticCatalogSync`) | worker, a pass source and the `CATALOG_SYNC` due-wait owner | PostgreSQL; GitHub releases of the recipe repository directly over `artifact-egress` | The persisted wait (one minute, jittered backoff from 30 s after a failure); a live request-led import is left to finish |
+| Automatic catalog sync (`AutomaticCatalogSync`) | worker, a pass source and the `CATALOG_SYNC` due-wait owner; the sync itself runs on one thread of its own, so a release download never blocks the worker loop | PostgreSQL; GitHub releases of the recipe repository directly over `artifact-egress` | The persisted wait (one minute, jittered backoff from 30 s after a failure); a live request-led import is left to finish |
 | Library observation (`LibraryObservations`) | API | Its in-memory library view; the gateway master key and `/gateway-secrets` for the default key; the LiteLLM key relay `caddy:8087` on `agent-proxy` | Every 5 s it compares the newest finished sync run and re-reads the library at once when one finished; library, storage bytes and the default key every minute |
 | Route and grant reconcile (`_keep_recipe_routes`) | API | `/routes`, the gateway master key, `caddy:8087` | Every 5 s |
 | Default key startup observation (`keep_default_key`) | API | The gateway master key, `/gateway-secrets`, `caddy:8087` | Six attempts after start, then the library observation keeps it |

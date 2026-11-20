@@ -6,8 +6,8 @@ it stores no scheduler rows, leases or additional due timestamps. Two owners
 also have a second driver:
 
 - Catalog sync: the worker's own pass source `AutomaticCatalogSync.tick` is
-  the same function the backstop calls at `next_check`, in the same thread,
-  so the sync runs once. Neither runs it while a live sync run holds the slot.
+  the same function the backstop calls at `next_check`. It starts at most one
+  sync, on its own thread, and none while a live sync run holds the slot.
 - Route publication: the API's `_keep_recipe_routes` calls the same
   `maintain` every 5 s. Its `next_action_at` is due only during failure
   backoff, and the route publication owner serializes both drivers.

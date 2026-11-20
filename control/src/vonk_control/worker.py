@@ -879,6 +879,8 @@ def assemble_production_worker(
         )
         worker_background_services += (automatic_catalog.tick,)
     worker_background_closers = (*background_closers, upgrades.close)
+    if automatic_catalog is not None:
+        worker_background_closers += (automatic_catalog.close,)
     memory_sources: list[object] = [model_cache, artifact_phase_executor]
     close_artifact_executor = getattr(artifact_phase_executor, "close", None)
     if callable(close_artifact_executor):
@@ -1254,8 +1256,10 @@ if __name__ == "__main__":
     from .recipe_packages import RecipePackageClient
     from .source_bundles import DatabaseSourceBundleStore
 
-    def build_catalog_sync() -> ManagedRecipeCatalogSyncService:
-        service = ManagedRecipeCatalogSyncService(
+    catalog_sync = capabilities.guard(
+        ControllerCapability.RECIPE_LIBRARY,
+        ManagedRecipeCatalogSyncService,
+        lambda: ManagedRecipeCatalogSyncService(
             sessions,
             catalog=CatalogService(
                 sessions,
@@ -1270,15 +1274,7 @@ if __name__ == "__main__":
                 release=settings.recipe_library_release,
             ),
             clock=clock,
-        )
-        # Built on first use, by which time the worker below exists.
-        service.timed = worker._timed
-        return service
-
-    catalog_sync = capabilities.guard(
-        ControllerCapability.RECIPE_LIBRARY,
-        ManagedRecipeCatalogSyncService,
-        build_catalog_sync,
+        ),
     )
     watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
     process_instance_id = current_worker_instance_id()

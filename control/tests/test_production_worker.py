@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -426,3 +427,49 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     worker.run_once()
     assert jobs.get(fresh.id).result == {"done": True}
     worker.close()
+
+
+def test_the_production_worker_runs_the_first_catalog_sync(tmp_path) -> None:
+    """Catches the automatic catalog sync wired to no process at all."""
+    import threading
+
+    started = threading.Event()
+
+    class Catalog:
+        def automatic_wait_delay(self) -> float:
+            return 0.0  # a fresh install: no sync has recorded a wait
+
+        def held_elsewhere(self) -> bool:
+            return False
+
+        def advance_automatic(self, interval_seconds, failures):
+            started.set()
+            return SimpleNamespace(failures=0, delay_seconds=interval_seconds)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 11, 20, tzinfo=UTC)
+    worker = assemble_production_worker(
+        jobs=JobService(sessions, clock=clock),
+        sessions=sessions,
+        agent_jobs=AgentJobService(sessions, clock=clock),
+        publisher=AtomicRouteBundlePublisher(tmp_path / "routes"),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        worker_id="control-worker-test",
+        artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
+        artifact_job_storage_max_bytes=16 * 1024**3,
+        artifact_job_retention_seconds=7 * 24 * 60 * 60,
+        artifact_job_reconcile_interval_seconds=3600,
+        artifact_job_reconcile_batch_limit=1000,
+        catalog_sync=cast(Any, Catalog()),
+    )
+    try:
+        for _ in range(5):
+            worker.run_once()
+            if started.is_set():
+                break
+        assert started.wait(timeout=10)
+    finally:
+        worker.close()

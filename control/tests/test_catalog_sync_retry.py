@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import Executor, Future
+
 import pytest
 from psycopg.errors import InFailedSqlTransaction
 from sqlalchemy.exc import InternalError
@@ -85,6 +87,15 @@ class _Clock:
         return self.now
 
 
+class Inline(Executor):
+    """Run the sync in the calling thread: the next tick collects its outcome."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        done: Future = Future()
+        done.set_result(fn(*args, **kwargs))
+        return done
+
+
 def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
     tmp_path, monkeypatch
 ) -> None:
@@ -117,7 +128,9 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
 
     service = _Service()
     clock = _Clock()
-    cadence = AutomaticCatalogSync(service, interval_seconds=900, monotonic=clock)
+    cadence = AutomaticCatalogSync(
+        service, interval_seconds=900, monotonic=clock, executor=Inline()
+    )
     ran = []
     for _ in range(5):
         ran.append(cadence.tick())
@@ -160,10 +173,11 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     monkeypatch.setattr(catalog_sync, "catalog_sync_retry_delay", observe_delay)
     clock = _Clock()
     cadence = catalog_sync.AutomaticCatalogSync(
-        Service(), interval_seconds=60, monotonic=clock
+        Service(), interval_seconds=60, monotonic=clock, executor=Inline()
     )
     for _ in range(3):
         assert cadence.tick()
+        assert not cadence.tick()  # collects the outcome; the next one waits
         clock.now += 60
     assert episodes == [1, 2, 0]
     fresh = _sync(tmp_path, _Catalog(None), _item(_example("recipe-source-build.json")))
@@ -188,11 +202,15 @@ def test_worker_runs_the_first_sync_and_then_follows_the_persisted_wait(
     )
     assert service.latest() is None
     clock = _Clock()
-    assert AutomaticCatalogSync(service, interval_seconds=60, monotonic=clock).tick()
+    assert AutomaticCatalogSync(
+        service, interval_seconds=60, monotonic=clock, executor=Inline()
+    ).tick()
     first = service.latest()
     assert first is not None and first.completed_at is not None
     # A restarted worker waits out the recorded check, then syncs again.
-    restarted = AutomaticCatalogSync(service, interval_seconds=60, monotonic=clock)
+    restarted = AutomaticCatalogSync(
+        service, interval_seconds=60, monotonic=clock, executor=Inline()
+    )
     assert not restarted.tick()
     now[0] += timedelta(seconds=60)
     clock.now += 60

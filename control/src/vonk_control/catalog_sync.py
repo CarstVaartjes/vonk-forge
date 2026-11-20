@@ -10,6 +10,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
@@ -160,11 +161,6 @@ class ManagedRecipeCatalogSyncService:
         self._reader = reader
         self._clock = clock
         self._repository = repository
-        # The worker times each recorded item, so a long import keeps its
-        # watchdog and readiness heartbeat current (observation only).
-        self.timed: Callable[[str, Callable[[], bool]], bool] = lambda _name, call: (
-            call()
-        )
 
     def sync(self, request: ManagedCatalogSyncRequest) -> CatalogSyncView:
         request_key, trigger, actor = (
@@ -963,11 +959,7 @@ class ManagedRecipeCatalogSyncService:
 
     def _progress(self, run_id: str, result: ManagedCatalogSyncResult) -> bool:
         """Record one step; ``False`` when this run was replaced meanwhile."""
-        return self.timed(
-            "catalog-sync:item", lambda: self._record_progress(run_id, result)
-        )
 
-    def _record_progress(self, run_id: str, result: ManagedCatalogSyncResult) -> bool:
         with self._sessions.begin() as session:
             run = session.get(RecipeLibrarySyncRun, run_id)
             if run is None or run.state != LibrarySyncRunState.RUNNING:
@@ -1079,13 +1071,14 @@ def catalog_sync_failure_reason(error: Exception) -> str:
 class AutomaticCatalogSync:
     """The worker's automatic catalog cadence; no other process runs it.
 
-    The persisted wait is the schedule, so a restarted worker keeps the delay
-    the last attempt recorded. An attempt that recorded nothing (no run row, or
-    the database was down) still waits its delay here before the next one. A
-    sync that cannot finish (the library unreachable, another sync running, a
-    document unreadable) keeps the previously imported catalog and is asked
-    again with jittered backoff whose ceiling doubles from 30 seconds up to
-    ``interval_seconds``.
+    A new release is downloaded (hundreds of MB) and imported, so the sync runs
+    on its own thread and never blocks the worker loop. The persisted wait is
+    the schedule: a restarted worker keeps the delay the last attempt recorded,
+    and an attempt that recorded nothing (the database was down) still waits
+    its delay here. A sync that cannot finish (the library unreachable, another
+    sync running, a document unreadable) keeps the previously imported catalog
+    and is asked again with jittered backoff whose ceiling doubles from 30
+    seconds up to ``interval_seconds``.
     """
 
     def __init__(
@@ -1094,15 +1087,30 @@ class AutomaticCatalogSync:
         *,
         interval_seconds: int,
         monotonic: Callable[[], float] = time.monotonic,
+        executor: Executor | None = None,
     ) -> None:
         self._service = service
         self._interval = interval_seconds
         self._monotonic = monotonic
+        self._executor = executor or ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="library-reader"
+        )
+        self._active: Future[_AutomaticSyncStep] | None = None
         self._failures = 0
         self._not_before = monotonic()
 
+    def close(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
     def tick(self) -> bool:
-        """Run one automatic sync when it is due; ``True`` when one ran."""
+        """Start the automatic sync when it is due; ``True`` when one started."""
+        if self._active is not None:
+            if not self._active.done():
+                return False
+            finished, self._active = self._active, None
+            step = finished.result()
+            self._failures = step.failures
+            self._not_before = self._monotonic() + step.delay_seconds
         now = self._monotonic()
         if now < self._not_before:
             return False
@@ -1112,9 +1120,9 @@ class AutomaticCatalogSync:
             return False
         if self._service.held_elsewhere():
             return False  # a request-led sync is importing; never read twice
-        step = self._service.advance_automatic(self._interval, self._failures)
-        self._failures = step.failures
-        self._not_before = self._monotonic() + step.delay_seconds
+        self._active = self._executor.submit(
+            self._service.advance_automatic, self._interval, self._failures
+        )
         return True
 
 

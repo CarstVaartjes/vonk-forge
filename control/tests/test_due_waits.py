@@ -680,6 +680,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     from vonk_control.models import RecipeLibrarySyncRun
 
     from .test_catalog_sync import Reader, _fixture
+    from .test_catalog_sync_retry import Inline
 
     sessions, catalog, reader, _item = _fixture(tmp_path, engine=postgres_engine)
     available = [False]
@@ -715,7 +716,9 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     now[0] = waiting.wait.next_check
     available[0] = True
     service = construct()
-    reconstructed = AutomaticCatalogSync(service, interval_seconds=90)
+    reconstructed = AutomaticCatalogSync(
+        service, interval_seconds=90, executor=Inline()
+    )
     backstop = DueWaitBackstop(
         sessions,
         [

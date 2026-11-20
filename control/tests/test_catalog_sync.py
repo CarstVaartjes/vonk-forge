@@ -721,6 +721,8 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     """Catches an early re-read, or a second read beside a live request-led import."""
     from vonk_control.catalog_sync import AutomaticCatalogSync
 
+    from .test_catalog_sync_retry import Inline
+
     sessions, service, reader, _item_value = _fixture(tmp_path)
     now = [datetime(2026, 9, 5, tzinfo=UTC)]
     sync = ManagedRecipeCatalogSyncService(
@@ -737,14 +739,18 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
         return listed()
 
     reader.list = counted
-    cadence = AutomaticCatalogSync(sync, interval_seconds=60, monotonic=lambda: 0.0)
+    cadence = AutomaticCatalogSync(
+        sync, interval_seconds=60, monotonic=lambda: 0.0, executor=Inline()
+    )
 
     now[0] = latest.wait.next_check - timedelta(seconds=1)
     assert cadence.tick() is False
     assert reads == []
 
     now[0] = latest.wait.next_check
-    cadence = AutomaticCatalogSync(sync, interval_seconds=60, monotonic=lambda: 0.0)
+    cadence = AutomaticCatalogSync(
+        sync, interval_seconds=60, monotonic=lambda: 0.0, executor=Inline()
+    )
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
         run.state, run.active_slot = "running", "managed-recipes"

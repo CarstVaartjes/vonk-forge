@@ -66,15 +66,6 @@ from ..source_bundles import DatabaseSourceBundleStore
 from .application import create_app
 from .common import _LOGGER, SpaFiles
 
-#: Dependency failures a background observation logs and retries next tick.
-_OBSERVATION_ERRORS = (
-    CapabilityUnavailableError,
-    GatewayKeyError,
-    HTTPException,
-    OSError,
-    SQLAlchemyError,
-)
-
 
 class LibraryObservations:
     """Keep the API's library view and the default gateway client key current.
@@ -116,7 +107,7 @@ class LibraryObservations:
                 _LOGGER.warning(
                     "default gateway client key observation: %s", observed.reason
                 )
-        except _OBSERVATION_ERRORS as error:
+        except Exception as error:  # noqa: BLE001 - this loop is the only owner; it must keep running
             _LOGGER.warning(
                 "library or default gateway key observation unavailable: %s",
                 type(error).__name__,
@@ -138,7 +129,13 @@ async def _keep_recipe_routes(
             observed = gateway_keys.reconcile_route_grants()
             if isinstance(observed, UnknownError):
                 _LOGGER.warning("gateway route grants waiting: %s", observed.reason)
-        except _OBSERVATION_ERRORS:
+        except (
+            CapabilityUnavailableError,
+            GatewayKeyError,
+            HTTPException,
+            OSError,
+            SQLAlchemyError,
+        ):
             _LOGGER.exception(
                 "gateway route grants unavailable; next check in %ss", interval_seconds
             )
