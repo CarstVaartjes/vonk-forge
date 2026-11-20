@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 import type { ControlApi } from "../api/types";
@@ -7,6 +8,8 @@ import {
   filterLibraryRecipeRecords,
   EMPTY_LIBRARY_WORKCELL_FILTERS,
   libraryFiltersFromSearch,
+  countModels,
+  countVariants,
   libraryFiltersToSearch,
   LibraryWorkcell,
   recipeEngine,
@@ -607,4 +610,29 @@ test("the Models list obeys the toolbar filters, not only the search", () => {
     />,
   );
   expect(within(screen.getByLabelText("Models")).getAllByRole("listitem")).toHaveLength(1);
+});
+
+// The same file `vonkctl model library` counts Models against.
+const countVector = JSON.parse(
+  readFileSync("../../tests/fixtures/library-model-count.json", "utf8"),
+) as {
+  cases: {
+    name: string;
+    models: { id: string; lineage: { family: string; line: string; model: string } | null }[];
+    models_count: number;
+    variants_count: number;
+  }[];
+};
+
+test.each(countVector.cases)("counts Models like vonkctl: $name", (vector) => {
+  const base = libraryViewSnapshot.models[0]!;
+  const models = vector.models.map((entry) => ({
+    ...base,
+    model: { ...base.model, slug: entry.id },
+    model_display: entry.lineage
+      ? { ...base.model_display!, lineage: { ...base.model_display!.lineage!, ...entry.lineage } }
+      : null,
+  }));
+  expect(countModels(models)).toBe(vector.models_count);
+  expect(countVariants(models)).toBe(vector.variants_count);
 });
