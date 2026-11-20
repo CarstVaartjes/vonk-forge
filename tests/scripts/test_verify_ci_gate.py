@@ -50,6 +50,7 @@ def _valid(**overrides: str):
         "agent-package": "success",
         "lane-proof": "skipped",
         "supply-chain": "success",
+        "consumer-probe": "success",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
     results.update({key: value for key, value in overrides.items() if key in results})
@@ -205,3 +206,10 @@ def test_missing_scope_selection_is_refused() -> None:
     assert "full selection is None, expected 'true' or 'false'" in _module().verify(
         "success", selected, results
     )
+
+
+def test_consumer_probe_verification_is_required() -> None:
+    selected, results = _valid()
+    results["consumer-probe"] = "failure"
+    errors = _module().verify("success", selected, results)
+    assert errors == ["consumer-probe result is 'failure', expected 'success'"]

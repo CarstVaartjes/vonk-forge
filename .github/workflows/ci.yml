@@ -1282,7 +1282,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1325,6 +1325,7 @@ jobs:
           WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
           REPOSITORY_GUARDS_RESULT: ${{ needs.repository-guards.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
+          CONSUMER_PROBE_RESULT: ${{ needs.consumer-probe.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           CONTROL_IMAGE_BUILD_RESULT: ${{ needs.control-image-build.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
@@ -1355,6 +1356,7 @@ jobs:
             --result "controller-spark-wire=$WIRE_RESULT" \
             --result "repository-guards=$REPOSITORY_GUARDS_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
+            --result "consumer-probe=$CONSUMER_PROBE_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
             --result "web=$WEB_RESULT" \
