@@ -1,5 +1,5 @@
-import {useCallback, useEffect, useRef, useState} from "react";
-import type {ControlApi} from "../api/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ControlApi } from "../api/types";
 
 /**
  * Refresh every cached recipe image.
@@ -8,7 +8,13 @@ import type {ControlApi} from "../api/types";
  * refuses a request that combines or omits the scope, so this action states
  * "all" rather than leaving the scope implicit.
  */
-export function LibraryRecipeUpdateAction({api, onUpdated}: {api: ControlApi; onUpdated(): void}) {
+export function LibraryRecipeUpdateAction({
+  api,
+  onUpdated,
+}: {
+  api: ControlApi;
+  onUpdated(): void;
+}) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -28,7 +34,11 @@ export function LibraryRecipeUpdateAction({api, onUpdated}: {api: ControlApi; on
       if (controller.signal.aborted) return;
       setBusy(false);
       const count = result.children.length;
-      setMessage(count === 0 ? "No cached recipes to update" : `Refreshing ${count} cached recipe${count === 1 ? "" : "s"}. Track progress in Activity.`);
+      setMessage(
+        count === 0
+          ? "No cached recipes to update"
+          : `Refreshing ${count} cached recipe${count === 1 ? "" : "s"}. Track progress in Activity.`,
+      );
       onUpdated();
     } catch (value) {
       if (controller.signal.aborted) return;
@@ -37,11 +47,22 @@ export function LibraryRecipeUpdateAction({api, onUpdated}: {api: ControlApi; on
     }
   }, [api, onUpdated]);
 
-  return <div className="library-cache-action">
-    <button type="button" className="button secondary" disabled={busy} onClick={() => void update()}>
-      {busy ? "Updating…" : "Update cached recipes"}
-    </button>
-    {message && <span role="status">{message}</span>}
-    {error && <span className="library-cache-error" role="alert">{error}</span>}
-  </div>;
+  return (
+    <div className="library-cache-action">
+      <button
+        type="button"
+        className="button secondary"
+        disabled={busy}
+        onClick={() => void update()}
+      >
+        {busy ? "Updating…" : "Update cached recipes"}
+      </button>
+      {message && <span role="status">{message}</span>}
+      {error && (
+        <span className="library-cache-error" role="alert">
+          {error}
+        </span>
+      )}
+    </div>
+  );
 }
