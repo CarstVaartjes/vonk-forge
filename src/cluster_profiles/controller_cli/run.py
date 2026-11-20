@@ -127,7 +127,7 @@ def _run(
     except ActionDeclined as declined:
         raise ActionDeclined(
             f"Not confirmed; the fleet is unchanged. {selector} stays in profile "
-            f"{number} as a saved draft.",
+            f"{number} as a saved profile.",
         ) from declined
     application_state = operation_state(application)
     if application_state not in {"succeeded", "completed"}:

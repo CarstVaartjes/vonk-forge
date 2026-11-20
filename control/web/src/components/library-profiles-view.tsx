@@ -13,6 +13,7 @@ import {
 import type { WireNumber } from "../api/contract-numeric";
 import { validateControlParameters } from "../api/contract-json";
 import { ApiError } from "../api/client";
+import { ProfileDocumentState, ProfileSwitchChildKind } from "../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../api/types";
 import type {
   ControlApi,
@@ -237,6 +238,40 @@ async function submitProfileLoad(
 }
 
 /** A load is offered when it can be admitted now, or once the Controller has prepared what it lacks. */
+/** The profile the page opens on: the requested one, else the loaded one, else the first. */
+function openingProfile(profiles: FleetProfileRead[]) {
+  const requested = requestedProfile();
+  const readable = profiles.filter(readableProfile);
+  return (
+    readable.find((profile) => sameNumber(profile.number, requested)) ??
+    readable.find((profile) => profile.status === ProfileDocumentState.LOADED) ??
+    readable[0]
+  );
+}
+
+/** The list pins the loaded profile on top, then orders by number. */
+const loadedFirst = (left: FleetProfileRead, right: FleetProfileRead) =>
+  Number(right.status === ProfileDocumentState.LOADED) -
+    Number(left.status === ProfileDocumentState.LOADED) || compareWire(left.number, right.number);
+
+/** A saved profile that is not loaded reads saved; draft means unsaved edits. */
+const profileStateLabel = (status: string | undefined) =>
+  status === ProfileDocumentState.DRAFT
+    ? "saved"
+    : (status?.replaceAll("-", " ") ?? "Status unavailable");
+
+/** The workloads a load stops, from the reviewed effects `vonkctl run` also leads with. */
+function stoppedAliases(preview: FleetProfilePreview | undefined): string[] {
+  const effects = preview?.effects;
+  if (!effects) return [];
+  const aliases = (effects.runs ?? [])
+    .filter((run) => run.action === ProfileSwitchChildKind.STOP)
+    .map((r) => r.alias);
+  for (const adopted of effects.adopted ?? [])
+    for (const stop of adopted.stops ?? []) aliases.push(stop.effect.alias);
+  return [...new Set(aliases)].sort();
+}
+
 const loadable = (preview: FleetProfilePreview | undefined) =>
   preview?.allowed === true || preview?.waits_for_preparation === true;
 
@@ -559,20 +594,15 @@ export function LibraryProfilesView({
     async (signal?: AbortSignal) => {
       const result = await api.profiles(signal);
       if (signal?.aborted) return;
-      setProfiles(
-        [...result.profiles].sort((left, right) => compareWire(left.number, right.number)),
-      );
-      const preferred = requestedProfile();
+      setProfiles([...result.profiles].sort(loadedFirst));
+      const opening = openingProfile(result.profiles);
       setSelectedNumber((current) =>
         current !== undefined &&
         result.profiles
           .filter(readableProfile)
           .some((profile) => sameNumber(profile.number, current))
           ? current
-          : (result.profiles
-              .filter(readableProfile)
-              .find((profile) => sameNumber(profile.number, preferred))?.number ??
-            result.profiles.find(readableProfile)?.number),
+          : opening?.number,
       );
       return result;
     },
@@ -604,11 +634,7 @@ export function LibraryProfilesView({
     void refreshProfiles(controller.signal)
       .then((result) => {
         if (!result) return;
-        const first =
-          result.profiles
-            .filter(readableProfile)
-            .find((profile) => sameNumber(profile.number, requestedProfile())) ??
-          result.profiles.find(readableProfile);
+        const first = openingProfile(result.profiles);
         if (!initialCreate && first && !draft) {
           const kept = unsavedDrafts.get(formatWire(first.number));
           setDraft(kept ?? draftFromProfile(first));
@@ -687,7 +713,7 @@ export function LibraryProfilesView({
     setPreview(undefined);
     observer.reset();
     setPendingLoad(undefined);
-    setNotice("Draft profile created. Saving does not change the running fleet.");
+    setNotice("New profile started. Saving does not change the running fleet.");
   }
   function updateDraft(next: Partial<ProfileDraft>) {
     setDraft((current) => (current ? { ...current, ...next } : current));
@@ -756,7 +782,7 @@ export function LibraryProfilesView({
         [
           ...current.filter((profile) => compareWire(profile.number, result.number) !== 0),
           result,
-        ].sort((left, right) => compareWire(left.number, right.number)),
+        ].sort(loadedFirst),
       );
       unsavedDrafts.delete(savedKey);
       setSelectedNumber(result.number);
@@ -872,7 +898,7 @@ export function LibraryProfilesView({
         </div>
         <div className="library-profile-header-actions">
           <button type="button" className="button secondary" onClick={startNew}>
-            Create profile
+            New profile
           </button>
           <a
             className="button secondary"
@@ -893,7 +919,7 @@ export function LibraryProfilesView({
         <EmptyState
           title="No profiles"
           description="A profile saves which recipes run on which Sparks, so you can load them together."
-          action={{ label: "Create profile", onClick: startNew }}
+          action={{ label: "New profile", onClick: startNew }}
         />
       )}
       {selectedProfile && !editing && (
@@ -903,7 +929,7 @@ export function LibraryProfilesView({
               Profile {formatWire(selectedProfile.number)} · {selectedProfile.name}
             </strong>
             <span>
-              {selectedProfile.status?.replaceAll("-", " ") ?? "Status unavailable"} · revision{" "}
+              {profileStateLabel(selectedProfile.status)} · revision{" "}
               {formatWire(selectedProfile.revision)}
             </span>
           </div>
@@ -986,7 +1012,7 @@ export function LibraryProfilesView({
                 <small>
                   {profile.assignments.length} assignment
                   {profile.assignments.length === 1 ? "" : "s"} ·{" "}
-                  {profile.status?.replaceAll("-", " ") ?? "Status unavailable"}
+                  {profileStateLabel(profile.status)}
                 </small>
               </button>
             ),
@@ -1211,7 +1237,7 @@ export function LibraryProfilesView({
                   ? "Saving profile…"
                   : draft.number !== undefined
                     ? "Save profile"
-                    : "Create profile"}
+                    : "Save profile"}
               </button>
             </footer>
           </div>
@@ -1289,8 +1315,15 @@ export function LibraryProfilesView({
                   }
                   onClick={() => void load()}
                 >
-                  {loadingProfile ? "Applying…" : "Apply profile"}
+                  {loadingProfile ? "Loading…" : "Load profile"}
                 </button>
+                {preview && (
+                  <small className="library-profile-stops">
+                    {stoppedAliases(preview).length > 0
+                      ? `Will stop: ${stoppedAliases(preview).join(", ")}`
+                      : "Will stop: nothing"}
+                  </small>
+                )}
               </div>
             </header>
             <dl>
@@ -1367,7 +1400,7 @@ export function LibraryProfilesView({
           <div className="library-profile-empty-editor">
             <h3>Select or create a profile</h3>
             <button type="button" className="button" onClick={startNew}>
-              Create profile
+              New profile
             </button>
           </div>
         )}

@@ -21,7 +21,7 @@ from .fleet import _fleet_overview, _node
 from .library import _library
 from .metrics import _metric_list, _metric_series
 from .operations import _application, _job, _operation, _run_result
-from .profile import _gateway_keys, _profile, _profile_endpoints
+from .profile import _gateway_keys, _profile, _profile_endpoints, profile_state
 from .removal_review import _cache_removal_review, _unused_removal
 from .review import _preview
 
@@ -171,7 +171,7 @@ def render_payload(
                         (
                             row.get("number"),
                             row.get("name"),
-                            row.get("status"),
+                            profile_state(row.get("status")),
                             row.get("revision"),
                         )
                         for row in rows
