@@ -580,7 +580,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     profile_progress_selectors = profile_progress.add_mutually_exclusive_group()
     profile_progress_selectors.add_argument(
-        "--load", dest="application", type=_uuid_selector, metavar="LOAD_ID"
+        "--load", type=_uuid_selector, metavar="LOAD_ID"
     )
     profile_progress_selectors.add_argument("--request-key", type=_uuid_selector)
     _watch_controls(profile_progress)

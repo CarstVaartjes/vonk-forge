@@ -93,7 +93,7 @@ def render_payload(
             elif action == "progress":
                 _job(payload)
             elif action == "activity":
-                _activity(payload, activity_filters)
+                _activity(payload, activity_filters, wide=wide)
             elif action == "locks":
                 _locks(payload)
             elif action == "evidence":

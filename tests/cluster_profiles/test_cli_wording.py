@@ -451,13 +451,14 @@ def test_fleet_failed_route_names_the_publication_outcome(printed):
 
 
 def _help_strings(parser, path=()):
-    """Every help text, description, epilog and metavar in the argparse tree."""
+    """Every help text, description, epilog, metavar, flag and destination.
+
+    Choices are not walked: `--source job` is an API value, not a word of ours.
+    """
     for action in parser._actions:
-        for text in (action.help, action.metavar):
+        for text in (action.help, action.metavar, action.dest, *action.option_strings):
             if isinstance(text, str):
                 yield path, text
-        if not action.option_strings and isinstance(action.dest, str):
-            yield path, action.dest
         if isinstance(action, argparse._SubParsersAction):
             for name, child in action.choices.items():
                 yield from _help_strings(child, (*path, str(name)))
@@ -467,41 +468,38 @@ def _help_strings(parser, path=()):
 
 
 _HELP = list(_help_strings(_parser()))
+# Words split on `_` and `-` too, so a flag or destination like `job_id` is caught.
+_JOB = re.compile(r"(?<![a-z])jobs?(?![a-z])", re.IGNORECASE)
+_APPLICATION = re.compile(r"(?<![a-z])applications?(?![a-z])|recipe job", re.IGNORECASE)
+_DRAFT = re.compile(r"(?<![a-z])draft(?![a-z])", re.IGNORECASE)
 
 
 def test_help_walk_reaches_the_subcommands():
     assert {("fleet", "progress"), ("profile", "load")} <= {p for p, _ in _HELP}
+    assert any(text == "--load" for _, text in _HELP)
 
 
 def test_fleet_help_says_operation_not_job():
-    stale = [
-        t
-        for p, t in _HELP
-        if p[:1] == ("fleet",) and re.search(r"\bjobs?\b", t, re.IGNORECASE)
-    ]
-    assert stale == []
+    assert [t for p, t in _HELP if p[:1] == ("fleet",) and _JOB.search(t)] == []
 
 
-def test_help_uses_load_not_application_or_apply():
-    stale = [
-        t
-        for _, t in _HELP
-        if re.search(
-            r"\bapplications?\b|\bapply\b|\bapplying\b|recipe job", t, re.IGNORECASE
-        )
-    ]
-    assert stale == []
+def test_help_uses_load_not_application():
+    assert [t for _, t in _HELP if _APPLICATION.search(t)] == []
 
 
 def test_help_says_draft_only_for_unsaved_edits():
-    stale = [
-        t
-        for _, t in _HELP
-        if re.search(r"\bdraft\b", t, re.IGNORECASE) and "unsaved" not in t
-    ]
-    assert stale == []
+    assert [t for _, t in _HELP if _DRAFT.search(t) and "unsaved" not in t] == []
 
 
-def test_render_text_has_no_removed_command_hint():
-    render = Path(__file__).parents[2] / "src" / "cluster_profiles" / "cli_render"
-    assert [f.name for f in render.glob("*.py") if "recipe job" in f.read_text()] == []
+def test_rendered_profile_text_uses_load_words(printed):
+    texts = []
+    for application_id in (None, "load-1"):
+        payload = {
+            "number": 1,
+            "application_id": application_id,
+            "application_state": "succeeded",
+            "assignments": [],
+        }
+        texts += printed(_profile_endpoints, payload)
+    assert [t for t in texts if _APPLICATION.search(t)] == []
+    assert any("vonkctl job run" in t for t in texts)

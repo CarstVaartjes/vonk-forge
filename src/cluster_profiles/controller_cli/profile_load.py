@@ -172,7 +172,7 @@ def _load_profile(
     def same_application(observed: Mapping[str, object]) -> None:
         if observed.get("id") != application_id:
             raise ControlMalformedResponse(
-                "profile observation identifies another application"
+                "profile observation identifies another load"
             )
 
     return _poll_path(

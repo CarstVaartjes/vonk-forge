@@ -144,8 +144,8 @@ def _profile(
         )
     if action == "progress":
         deadline = time.monotonic() + _bounded_timeout(args)
-        if args.application:
-            path = f"/api/profile/applications/{args.application}"
+        if args.load:
+            path = f"/api/profile/applications/{args.load}"
         elif args.request_key:
             path = f"/api/profile/{number}/requests/{args.request_key}"
         else:
@@ -159,9 +159,9 @@ def _profile(
                 raise ControlMalformedResponse(
                     "profile progress identity is unreadable"
                 )
-            if args.application and identity != args.application:
+            if args.load and identity != args.load:
                 raise ControlMalformedResponse(
-                    "profile progress identifies another application"
+                    "profile progress identifies another load"
                 )
             if args.request_key and observed.get("request_key") != args.request_key:
                 raise ControlMalformedResponse(
@@ -195,7 +195,7 @@ def _profile(
             ) -> None:
                 if observed.get("id") != expected:
                     raise ControlMalformedResponse(
-                        "profile progress observation changed application identity"
+                        "profile progress observation changed load identity"
                     )
 
             current = _poll_path(

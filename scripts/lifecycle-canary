@@ -39,6 +39,7 @@ from typing import Any
 
 # The contract's words, generated for the CLI (which ships without the contract).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from cluster_profiles.cli_json_contract import Word
 from cluster_profiles.cli_states_generated import (
     CANCELLED,
     FAILED,
@@ -171,7 +172,9 @@ class Canary:
         last_state = None
         while True:
             code, document = self.controller.call(
-                *shlex.split("profile progress --load"),
+                Word.PROFILE,
+                Word.PROGRESS,
+                "--load",
                 application,
                 timeout=60,
             )

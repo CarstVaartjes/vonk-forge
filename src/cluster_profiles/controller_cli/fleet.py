@@ -283,7 +283,7 @@ def _fleet(
         def same_job(observed: Mapping[str, object]) -> None:
             if observed.get("id") != args.operation_id:
                 raise ControlMalformedResponse(
-                    "fleet progress observation identifies another job"
+                    "fleet progress observation identifies another operation"
                 )
 
         return _poll_path(
@@ -402,7 +402,7 @@ def _fleet(
         def resume_identity(observed: object) -> str:
             if not isinstance(observed, Mapping) or observed.get("id") != job_id:
                 raise ControlMalformedResponse(
-                    "resume observation identifies another job"
+                    "resume observation identifies another operation"
                 )
             return job_id
 
@@ -578,7 +578,7 @@ def _fleet(
                 or observed.get("targets") != result.get("targets")
             ):
                 raise ControlMalformedResponse(
-                    "fleet upgrade observation identifies another job"
+                    "fleet upgrade observation identifies another operation"
                 )
 
         if not result.get("targets") and _state(result) == "succeeded":

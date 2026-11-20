@@ -146,8 +146,7 @@ The CLI, the Controller and the site use one word per thing:
 
 To stop a workload, remove its alias from the active profile
 (`profile remove ALIAS`) or switch to another profile, then `profile load`.
-There is no stop command. The CLI help is checked against this list by
-`tests/cluster_profiles/test_cli_wording.py`.
+There is no stop command.
 
 ## Fleet
 
@@ -798,7 +797,7 @@ profile or review a load for those observations. A lost save response may still
 commit; reconnect through the definition read before editing again. Retrying
 identical content returns the committed revision without another edit.
 
-Today a profile load is recorded as a load; load history is not a
+Today each profile load is kept as its own history entry; that history is not a
 standing fleet policy. The target behavior keeps one durable selected-profile
 record in PostgreSQL, pointing to the immutable accepted load snapshot
 as desired state for the whole fleet. Saving another profile does not select it,
