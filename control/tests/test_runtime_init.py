@@ -144,6 +144,9 @@ def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
             "docker",
             "run",
             "--rm",
+            # As runtime-init runs in Compose; the image default is 10001.
+            "--user",
+            "0:0",
             "--entrypoint",
             "python",
             "-v",

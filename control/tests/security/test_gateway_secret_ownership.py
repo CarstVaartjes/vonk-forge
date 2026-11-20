@@ -1,4 +1,4 @@
-"""Exercise installer ownership against the real root pre-exec in Linux."""
+"""Exercise installer ownership against the real root runtime-init in Linux."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ def test_gateway_authority_survives_installer_backup_and_cleanup(
             "docker",
             "run",
             "--rm",
+            # As runtime-init runs in Compose; the image default is 10001.
+            "--user",
+            "0:0",
             "--entrypoint",
             "python",
             controller_image,
