@@ -39,21 +39,21 @@ mod linux {
         exe_ino: u64,
     }
 
-    fn is_hex(value: &str, length: usize) -> bool {
+    pub(super) fn is_hex(value: &str, length: usize) -> bool {
         value.len() == length
             && value
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     }
 
-    fn canonical_u64(value: &str) -> Option<u64> {
+    pub(super) fn canonical_u64(value: &str) -> Option<u64> {
         value
             .parse::<u64>()
             .ok()
             .filter(|number| number.to_string() == value)
     }
 
-    fn is_decimal(value: &str) -> bool {
+    pub(super) fn is_decimal(value: &str) -> bool {
         canonical_u64(value).is_some_and(|number| number > 1)
     }
 
@@ -174,7 +174,7 @@ mod linux {
         Ok(())
     }
 
-    fn status_value<'a>(status: &'a str, name: &str) -> Result<&'a str> {
+    pub(super) fn status_value<'a>(status: &'a str, name: &str) -> Result<&'a str> {
         status
             .lines()
             .find_map(|line| line.strip_prefix(name))
@@ -182,7 +182,7 @@ mod linux {
             .ok_or_else(|| format!("missing status field: {name}"))
     }
 
-    fn canonical_groups(status: &str) -> Result<String> {
+    pub(super) fn canonical_groups(status: &str) -> Result<String> {
         let groups = status_value(status, "Groups:")?
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -194,7 +194,11 @@ mod linux {
         })
     }
 
-    fn validate_self_ids(status: &str, expected_uid: &str, expected_gid: &str) -> Result<()> {
+    pub(super) fn validate_self_ids(
+        status: &str,
+        expected_uid: &str,
+        expected_gid: &str,
+    ) -> Result<()> {
         for (field, expected) in [("Uid:", expected_uid), ("Gid:", expected_gid)] {
             let values: Vec<&str> = status_value(status, field)?.split_whitespace().collect();
             if values != [expected, expected, expected, expected] {
@@ -204,7 +208,7 @@ mod linux {
         Ok(())
     }
 
-    fn validate_sandbox(status: &str) -> Result<()> {
+    pub(super) fn validate_sandbox(status: &str) -> Result<()> {
         if status_value(status, "NoNewPrivs:")? != "1"
             || status_value(status, "Seccomp:")? != "2"
             || !canonical_u64(status_value(status, "Seccomp_filters:")?)
@@ -501,6 +505,57 @@ mod linux {
             "probe-helper" => probe_helper(&rest),
             "probe-agent" => probe_agent(&rest),
             _ => Err("unsupported command".to_string()),
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::linux::*;
+
+    const SANDBOXED: &str = "NoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t1\n";
+
+    #[test]
+    fn hex_and_decimal_must_be_canonical() {
+        assert!(is_hex(&"a0".repeat(32), 64));
+        assert!(!is_hex(&"A0".repeat(32), 64));
+        assert!(!is_hex("abc", 64));
+        assert_eq!(canonical_u64("42"), Some(42));
+        assert_eq!(canonical_u64("042"), None);
+        assert_eq!(canonical_u64("+4"), None);
+        assert!(is_decimal("2"));
+        assert!(!is_decimal("1"));
+    }
+
+    #[test]
+    fn status_fields_and_groups() {
+        let status = "Uid:\t0\t0\t0\t0\nGroups:\t5 7 \n";
+        assert_eq!(status_value(status, "Uid:").unwrap(), "0\t0\t0\t0");
+        assert!(status_value(status, "Gid:").is_err());
+        assert_eq!(canonical_groups(status).unwrap(), "5,7");
+        assert_eq!(
+            canonical_groups("Groups:\t\n").unwrap(),
+            canonical_groups("Groups:\n").unwrap()
+        );
+    }
+
+    #[test]
+    fn self_ids_require_all_four_ids() {
+        let ok = "Uid:\t7\t7\t7\t7\nGid:\t8\t8\t8\t8\n";
+        assert!(validate_self_ids(ok, "7", "8").is_ok());
+        let mixed = "Uid:\t7\t7\t0\t7\nGid:\t8\t8\t8\t8\n";
+        assert!(validate_self_ids(mixed, "7", "8").is_err());
+    }
+
+    #[test]
+    fn sandbox_needs_no_new_privs_and_a_seccomp_filter() {
+        assert!(validate_sandbox(SANDBOXED).is_ok());
+        for broken in [
+            "NoNewPrivs:\t0\nSeccomp:\t2\nSeccomp_filters:\t1\n",
+            "NoNewPrivs:\t1\nSeccomp:\t0\nSeccomp_filters:\t1\n",
+            "NoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t0\n",
+        ] {
+            assert!(validate_sandbox(broken).is_err());
         }
     }
 }
