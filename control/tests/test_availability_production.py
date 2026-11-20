@@ -52,9 +52,11 @@ from vonk_control.recipe_builds import (
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
+    SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability import requests as availability_requests
@@ -612,13 +614,11 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
         recipe_operations=object(),
         clock=lambda: now,
     )
-    ended = production.service.start(
-        "policy-revision", actor="operator", request_id="p" * 36
-    )
-    assert ended.state == LifecycleState.FAILED.value and ended.artifact is None
-    assert builds.calls > 1
-    with sessions() as session:
-        assert session.get(Job, ended.id) is None
+    with pytest.raises(RecipeImageAvailabilityRefused) as refused:
+        production.service.start(
+            "policy-revision", actor="operator", request_id="p" * 36
+        )
+    assert refused.value.code == SOURCE_POLICY_REFUSED_CODE
     builds.damaged = False
     monkeypatch.setattr(
         availability_production,
@@ -632,7 +632,6 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
     fresh = production.service.start(
         "policy-revision", actor="operator", request_id=str(uuid.uuid4())
     )
-    assert fresh.id != ended.id
     assert fresh.state == LifecycleState.QUEUED.value
     assert production.service.run_pending() == 1
     assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value, (

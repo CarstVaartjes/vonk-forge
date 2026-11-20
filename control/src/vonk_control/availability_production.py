@@ -75,6 +75,7 @@ from .recipe_image_availability import (
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityService,
 )
 from .recipe_image_availability.build_observation import (
@@ -330,11 +331,8 @@ def build_recipe_image_availability(
                 except SecurityRefusalError:
                     raise
                 except RecipeSourcePolicyError as error:
-                    raise AvailabilityUnsettled(
-                        SOURCE_POLICY_REFUSED_CODE,
-                        str(error)[:512],
-                        retryable=True,
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    raise RecipeImageAvailabilityRefused(
+                        SOURCE_POLICY_REFUSED_CODE, str(error)[:512]
                     ) from error
                 except Exception as error:
                     raise AvailabilityUnsettled(
