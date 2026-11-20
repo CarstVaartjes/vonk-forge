@@ -109,4 +109,4 @@ def test_the_quick_tier_uses_standard_runners() -> None:
     """A member pull request must not consume the big or ARM runners."""
     jobs = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())["jobs"]
     for name in MEMBER_JOBS - {"lane-proof"}:
-        assert jobs[name]["runs-on"] in {"ubuntu-latest", "ubuntu-24.04"}, name
+        assert jobs[name]["runs-on"] == "ubuntu-24.04", name

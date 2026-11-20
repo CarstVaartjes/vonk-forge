@@ -223,7 +223,7 @@ jobs:
     name: Publish accepted ARM64 Spark agent package to apt dev
     needs: [agent]
     if: needs.agent.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: apt-development
     concurrency:

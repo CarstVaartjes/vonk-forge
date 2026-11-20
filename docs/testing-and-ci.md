@@ -199,6 +199,10 @@ enabled, test properties. They never fail a test or the run and never trigger
 a rerun. Workflow job-level timeouts remain the guard against hangs alongside
 pytest-timeout.
 
+Every job that runs steps sets `timeout-minutes` (typical duration plus margin) and
+runs on `ubuntu-24.04` or `ubuntu-24.04-arm`, never `ubuntu-latest`;
+`tests/test_workflow_assertions.py` enforces both for every workflow.
+
 ### Test tiers and the budget gate
 
 `VONK_TEST_TIER` selects how much of an exhaustive sweep a run performs:
