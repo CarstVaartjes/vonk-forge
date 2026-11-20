@@ -362,14 +362,6 @@ const LIVE_JOB_STATES = new Set<string>([
   "waiting",
 ]);
 
-export function activityStateLabel(state: string): string {
-  if (state === "waiting") return "Waiting to recheck";
-  if (isOperatorWait(state)) return "Waiting for operator";
-  if (state === LifecycleState.BACKOFF) return "Retrying automatically";
-  if (state === LifecycleState.OBSERVING) return "Checking the outcome";
-  return titleCase(state);
-}
-
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return (
     LIVE_JOB_STATES.has(detail.state) ||
@@ -604,7 +596,7 @@ function JobProgressDetails({
             <header className="activity-job-header">
               <div>
                 <span>Current state</span>
-                <strong>{activityStateLabel(detail.state)}</strong>
+                <strong>{detail.summary}</strong>
               </div>
               <button
                 type="button"
@@ -708,7 +700,12 @@ function JobProgressDetails({
                           }),
                         )}
                       >
-                        {activityStateLabel(operation.state)}
+                        {statusLabel(
+                          activityStatus({
+                            ...event,
+                            action: `operation.${operation.kind}.${operation.state}`,
+                          }),
+                        )}
                       </StatusPill>
                       {operation.progress && (
                         <LibraryAvailabilityProgress
@@ -1570,7 +1567,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               <option value="">All states</option>
               {OPERATION_STATES.map((value) => (
                 <option key={value} value={value}>
-                  {activityStateLabel(value)}
+                  {titleCase(value)}
                 </option>
               ))}
             </select>

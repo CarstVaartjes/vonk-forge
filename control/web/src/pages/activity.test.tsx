@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
-import { ActivityPage, activityStateLabel, activityStatus } from "./activity";
+import { ActivityPage, activityStatus } from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -73,6 +73,7 @@ function recordedOperations(): OperationDetail[] {
       id: REQUEST_ID,
       kind: "recipe.start",
       state: "succeeded",
+      summary: "Recipe start finished",
       node_ids: [TARGET_ID, TECHNICAL_TARGET_ID],
       created_at: "2026-08-15T11:59:00Z",
     }),
@@ -81,6 +82,7 @@ function recordedOperations(): OperationDetail[] {
       id: "operation-rejected",
       kind: "agent.enrollment",
       state: "failed",
+      summary: "Agent enrollment failed",
       node_ids: ["missing-object"],
       created_at: "2026-08-15T11:30:00Z",
     }),
@@ -89,6 +91,7 @@ function recordedOperations(): OperationDetail[] {
       id: "operation-review",
       kind: "agent.enrollment",
       state: "uncertain",
+      summary: "Agent enrollment uncertain",
       node_ids: [],
       created_at: "2026-08-15T11:00:00Z",
     }),
@@ -96,11 +99,18 @@ function recordedOperations(): OperationDetail[] {
 }
 
 // Standalone jobs (agent upgrades and the like) are listed as operations with a "job:" id.
-function jobActivity(id: string, kind: string, state: string, createdAt: string): OperationDetail {
+function jobActivity(
+  id: string,
+  kind: string,
+  state: string,
+  summary: string,
+  createdAt: string,
+): OperationDetail {
   return canonicalOperation({
     id: `job:${id}`,
     kind,
     state,
+    summary,
     created_at: createdAt,
     node_ids: [],
     failure: null,
@@ -132,7 +142,13 @@ function api(
   resumeJob = vi.fn().mockResolvedValue({ id: "operation-1", state: "queued" }),
   loadOperations = operationsOf(
     ...recordedOperations(),
-    jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z"),
+    jobActivity(
+      "operation-1",
+      "recipe-install",
+      "running",
+      "Recipe install running",
+      "2026-08-15T11:58:00Z",
+    ),
   ),
 ): Pick<ControlApi, "job" | "resumeJob" | "visualFleet" | "operations" | "operation"> {
   return {
@@ -157,12 +173,6 @@ test("uses honest status labels for active and operator-blocked operations", () 
   const base = { request_id: "operation", actor: "Vonk Forge", targets: [] };
   expect(activityStatus({ ...base, action: "operation.reconcile.planned" })).toBe("in_progress");
   expect(activityStatus({ ...base, action: "operation.reconcile.waiting" })).toBe("in_progress");
-  expect(activityStateLabel("waiting")).toBe("Waiting to recheck");
-  // A retired word is not a wait for a person: it reads as itself.
-  expect(activityStateLabel("waiting-for-operator")).toBe("Waiting For Operator");
-  expect(activityStateLabel("needs-operator")).toBe("Waiting for operator");
-  expect(activityStateLabel("backoff")).toBe("Retrying automatically");
-  expect(activityStateLabel("observing")).toBe("Checking the outcome");
   expect(activityStatus({ ...base, action: "operation.reconcile.waiting-for-operator" })).toBe(
     "unknown",
   );
@@ -183,7 +193,7 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   render(<ActivityPage api={api()} now={NOW} />);
 
-  expect(await screen.findByRole("heading", { name: /Recipe start completed$/ })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
   expect(screen.getByRole("heading", { name: /Recipe install running$/ })).toBeVisible();
   expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
   expect(screen.getByText(/Agent enrollment uncertain$/)).toBeVisible();
@@ -200,7 +210,7 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
   expect(hiddenId).not.toBeVisible();
   expect(screen.getByText(TECHNICAL_TARGET_ID)).not.toBeVisible();
   const firstEvent = screen
-    .getByRole("heading", { name: /Recipe start completed$/ })
+    .getByRole("heading", { name: /Recipe start finished$/ })
     .closest("article")!;
   await user.click(within(firstEvent).getByText("Technical details"));
   expect(hiddenId).toBeVisible();
@@ -216,7 +226,7 @@ test("renders friendly timeline labels, honest time metadata, and hidden copyabl
 test("keeps summaries in sync with filters and offers a recoverable empty state", async () => {
   const user = userEvent.setup();
   render(<ActivityPage api={api()} now={NOW} />);
-  await screen.findByRole("heading", { name: /Recipe start completed$/ });
+  await screen.findByRole("heading", { name: /Recipe start finished$/ });
 
   const loadedSummary = screen.getByRole("region", { name: "Loaded activity summary" });
   expect(loadedSummary).toHaveTextContent("Summary of 4 loaded events");
@@ -225,9 +235,7 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "unsuccessful");
-  expect(
-    screen.queryByRole("heading", { name: /Recipe start completed$/ }),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: /Recipe start finished$/ })).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { name: /Agent enrollment failed$/ })).toBeVisible();
   const statusSummary = screen.getByRole("region", { name: "Matching activity summary" });
   expect(statusSummary).toHaveTextContent("Summary of 1 matching event from 4 loaded");
@@ -248,10 +256,10 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
     within(screen.getByRole("region", { name: "Matching activity summary" })).getByRole("img"),
   ).toHaveAccessibleName("0 recorded, 0 in progress, 0 need review, 0 unsuccessful, 0 unknown");
   await user.click(within(emptyState).getByRole("button", { name: "Clear filters" }));
-  expect(screen.getByRole("heading", { name: /Recipe start completed$/ })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
 
   await user.type(screen.getByRole("searchbox", { name: "Search activity" }), "Mia Lab Spark");
-  expect(screen.getByRole("heading", { name: /Recipe start completed$/ })).toBeVisible();
+  expect(screen.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
   expect(
     screen.queryByRole("heading", { name: /Agent enrollment failed$/ }),
   ).not.toBeInTheDocument();
@@ -260,8 +268,20 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
 test("keeps the timeline chronological unless attention-first sorting is selected", async () => {
   const loadOperations = operationsOf(
     ...recordedOperations(),
-    jobActivity("operation-unknown", "recipe-install", "future-state", "2026-08-15T12:01:00Z"),
-    jobActivity("operation-recorded", "recipe-install", "succeeded", "2026-08-15T12:02:00Z"),
+    jobActivity(
+      "operation-unknown",
+      "recipe-install",
+      "future-state",
+      "Recipe install future state",
+      "2026-08-15T12:01:00Z",
+    ),
+    jobActivity(
+      "operation-recorded",
+      "recipe-install",
+      "succeeded",
+      "Recipe install finished",
+      "2026-08-15T12:02:00Z",
+    ),
   );
   const user = userEvent.setup();
   render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW} />);
@@ -272,7 +292,7 @@ test("keeps the timeline chronological unless attention-first sorting is selecte
       .getAllByRole("heading")
       .slice(0, 2)
       .map((heading) => heading.textContent),
-  ).toEqual(["Recipe install completed", "Recipe install future state"]);
+  ).toEqual(["Recipe install finished", "Recipe install future state"]);
   const unknownEvent = screen
     .getByRole("heading", { name: /Recipe install future state$/ })
     .closest("article")!;
@@ -290,7 +310,7 @@ test("keeps the timeline chronological unless attention-first sorting is selecte
 test("switches to the responsive table view and persists that preference", async () => {
   const user = userEvent.setup();
   const first = render(<ActivityPage api={api()} now={NOW} />);
-  await screen.findByRole("heading", { name: /Recipe start completed$/ });
+  await screen.findByRole("heading", { name: /Recipe start finished$/ });
 
   await user.click(screen.getByRole("button", { name: "Table" }));
   expect(screen.getByRole("button", { name: "Table" })).toHaveAttribute("aria-pressed", "true");
@@ -374,7 +394,13 @@ test("explains an upgrade failure without guessing its missing failure stage", a
   const nextAction =
     "Keep the rollout paused and inspect the Spark package-helper and dpkg recovery state before resuming. When ready, Resume queues the retry behind a new safety delay; it does not dispatch immediately. Do not advance to another Spark until this Spark reports the exact target identity.";
   const loadOperations = operationsOf(
-    jobActivity("upgrade-1", "agent-upgrade", "needs-operator", "2026-08-15T11:58:00Z"),
+    jobActivity(
+      "upgrade-1",
+      "agent-upgrade",
+      "needs-operator",
+      "Agent upgrade waiting for operator",
+      "2026-08-15T11:58:00Z",
+    ),
   );
   const loadJob = vi.fn().mockResolvedValue({
     id: "upgrade-1",
@@ -514,7 +540,13 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   };
   const loadJob = vi.fn().mockResolvedValue(detail);
   const loadOperations = operationsOf(
-    jobActivity("upgrade-1", "agent-upgrade", "needs-operator", "2026-08-15T11:58:00Z"),
+    jobActivity(
+      "upgrade-1",
+      "agent-upgrade",
+      "needs-operator",
+      "Agent upgrade waiting for operator",
+      "2026-08-15T11:58:00Z",
+    ),
   );
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);
@@ -568,7 +600,13 @@ test("refreshes an automatic wait at its bounded observation interval", async ()
   };
   const loadJob = vi.fn().mockResolvedValueOnce(detail).mockResolvedValue(recovered);
   const loadOperations = operationsOf(
-    jobActivity("operation-1", "recipe-run-switch", "waiting", "2026-08-15T11:59:00Z"),
+    jobActivity(
+      "operation-1",
+      "recipe-run-switch",
+      "waiting",
+      "Recipe run switch waiting",
+      "2026-08-15T11:59:00Z",
+    ),
   );
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);
@@ -650,7 +688,15 @@ test("clears dynamic filters that are no longer available after refresh", async 
   const loadOperations = vi
     .fn()
     .mockResolvedValueOnce({
-      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      operations: [
+        jobActivity(
+          "operation-1",
+          "recipe-install",
+          "running",
+          "Recipe install running",
+          "2026-08-15T11:58:00Z",
+        ),
+      ],
       next_cursor: null,
       total: 1,
     })
@@ -673,7 +719,15 @@ test("resets pagination busy state when a new activity load supersedes load-more
   const firstOperations = vi
     .fn()
     .mockResolvedValueOnce({
-      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      operations: [
+        jobActivity(
+          "operation-1",
+          "recipe-install",
+          "running",
+          "Recipe install running",
+          "2026-08-15T11:58:00Z",
+        ),
+      ],
       next_cursor: "older",
       total: 2,
     })
@@ -711,14 +765,26 @@ test("discloses bounded API windows and loads older operations when a cursor is 
     .fn()
     .mockResolvedValueOnce({
       operations: [
-        jobActivity("operation-new", "recipe-install", "running", "2026-08-15T11:58:00Z"),
+        jobActivity(
+          "operation-new",
+          "recipe-install",
+          "running",
+          "Recipe install running",
+          "2026-08-15T11:58:00Z",
+        ),
       ],
       next_cursor: "older-page",
       total: 2,
     })
     .mockResolvedValueOnce({
       operations: [
-        jobActivity("operation-old", "recipe-stop", "succeeded", "2026-08-14T11:58:00Z"),
+        jobActivity(
+          "operation-old",
+          "recipe-stop",
+          "succeeded",
+          "Recipe stop finished",
+          "2026-08-14T11:58:00Z",
+        ),
       ],
       next_cursor: null,
       total: 2,
@@ -737,7 +803,7 @@ test("discloses bounded API windows and loads older operations when a cursor is 
   expect(coverage).toHaveTextContent("Loaded 1 of 2 operations");
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
 
-  expect(await screen.findByRole("heading", { name: /Recipe stop completed$/ })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Recipe stop finished$/ })).toBeVisible();
   expect(screen.getByRole("region", { name: "Activity history coverage" })).toHaveTextContent(
     "Loaded 2 of 2 operations",
   );
@@ -745,25 +811,13 @@ test("discloses bounded API windows and loads older operations when a cursor is 
   expect(screen.queryByRole("button", { name: "Load older operations" })).not.toBeInTheDocument();
 });
 
-// The Controller words the event; the fixture only has to be plausible.
-function summaryOf(kind: string, state: string): string {
-  const words = kind.replace(/\.v\d+$/, "").replace(/[.-]/g, " ");
-  const phrase = `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
-  const word =
-    { succeeded: "completed", "needs-operator": "waiting for operator" }[state] ??
-    state.replace(/-/g, " ");
-  return `${phrase} ${word}`;
-}
-
 function canonicalOperation(overrides: Partial<OperationDetail> = {}): OperationDetail {
-  const kind = overrides.kind ?? "profile.load";
-  const state = overrides.state ?? "failed";
   return {
     id: "profile-attempt-1",
     parent_id: null,
-    kind,
-    state,
-    summary: summaryOf(kind, state),
+    kind: "profile.load",
+    state: "failed",
+    summary: "Profile load failed",
     attempt: 1,
     node_ids: [TARGET_ID],
     created_at: "2026-08-15T12:00:00Z",
@@ -864,7 +918,7 @@ test("canonical operations poll current detail while active", async () => {
   vi.mocked(client.operation).mockResolvedValue({
     ...first,
     state: "succeeded",
-    summary: "Profile load completed",
+    summary: "Profile load finished",
     progress: { phase: "final_verify", completed_bytes: 0, total_bytes_known: false },
   });
   vi.useFakeTimers();
@@ -877,7 +931,7 @@ test("canonical operations poll current detail while active", async () => {
   });
   vi.useRealTimers();
   expect(client.operation).toHaveBeenCalledWith(first.id);
-  expect(await screen.findByRole("heading", { name: /Profile load completed$/ })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: /Profile load finished$/ })).toBeVisible();
 });
 
 test("paginates operations after a partial page error", async () => {
@@ -914,7 +968,7 @@ test("server-side filters are sent to the operations API and kept in the URL", a
   const user = userEvent.setup();
   const client = api();
   render(<ActivityPage api={client} now={NOW} />);
-  await screen.findByRole("heading", { name: /Recipe start completed$/ });
+  await screen.findByRole("heading", { name: /Recipe start finished$/ });
   await user.selectOptions(screen.getByLabelText("Operation state"), "failed");
   await user.selectOptions(screen.getByLabelText("Spark"), TARGET_ID);
   await waitFor(() =>
@@ -1033,13 +1087,29 @@ test("reloads the first page when Load more is refused for an invalid cursor", a
   const loadOperations = vi
     .fn()
     .mockResolvedValueOnce({
-      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      operations: [
+        jobActivity(
+          "operation-1",
+          "recipe-install",
+          "running",
+          "Recipe install running",
+          "2026-08-15T11:58:00Z",
+        ),
+      ],
       next_cursor: "stale",
       total: 2,
     })
     .mockRejectedValueOnce(new ApiError(422, "operation cursor is invalid"))
     .mockResolvedValueOnce({
-      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      operations: [
+        jobActivity(
+          "operation-1",
+          "recipe-install",
+          "running",
+          "Recipe install running",
+          "2026-08-15T11:58:00Z",
+        ),
+      ],
       next_cursor: "fresh",
       total: 2,
     });
@@ -1058,13 +1128,13 @@ test("leads with the workload the Controller names, else with the Sparks", async
     <ActivityPage
       api={canonicalApi([
         canonicalOperation({ id: "op-w", subject: "h3video", summary: "Job running" }),
-        canonicalOperation({ id: "op-s", summary: "Recipe start completed" }),
+        canonicalOperation({ id: "op-s", summary: "Recipe start finished" }),
       ])}
       now={NOW}
     />,
   );
   expect(await screen.findByRole("heading", { name: "h3video · Job running" })).toBeVisible();
   expect(
-    screen.getByRole("heading", { name: /Mia Lab Spark.* · Recipe start completed/ }),
+    screen.getByRole("heading", { name: /Mia Lab Spark.* · Recipe start finished/ }),
   ).toBeVisible();
 });

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import Table, create_engine, event, insert
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
@@ -304,12 +306,11 @@ def test_operation_summary_is_plain_for_known_and_unknown_kinds() -> None:
     assert operation_summary("x", "") == "X recorded"
 
 
-def test_workload_aliases_resolve_runs_in_one_batch_and_skip_runless_operations() -> (
-    None
-):
+def test_workload_aliases_join_the_run_alias_in_one_select() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     run_id = "00000000-0000-4000-8000-000000000012"
+    now = datetime.now(UTC)
     with Session(engine) as session:
         session.add(
             RecipeRun(
@@ -324,15 +325,46 @@ def test_workload_aliases_resolve_runs_in_one_batch_and_skip_runless_operations(
                 state="running",
                 route_state="withdrawn",
                 actor="admin",
-                created_at=__import__("datetime").datetime.now(),
-                updated_at=__import__("datetime").datetime.now(),
+                created_at=now,
+                updated_at=now,
             )
         )
         session.flush()
-        with_run = AgentOperation(id="op-1", payload={"run_id": run_id})
-        unknown_run = AgentOperation(id="op-2", payload={"run_id": "gone"})
-        without_run = AgentOperation(id="op-3", payload={"supported_actions": []})
-        assert workload_aliases(session, [with_run, unknown_run, without_run]) == {
-            "op-1": "h3video"
-        }
-        assert workload_aliases(session, [without_run]) == {}
+        operations = [
+            AgentOperation(id="op-1", payload={"run_id": run_id}),
+            AgentOperation(id="op-2", payload={"run_id": "gone"}),
+            AgentOperation(id="op-3", payload={}),
+        ]
+        # Core inserts: the payload guard validates full ORM documents, and this
+        # test only needs the run linkage.
+        session.execute(
+            insert(cast(Table, AgentOperation.__table__)),
+            [
+                {
+                    "id": operation.id,
+                    "parent_job_id": "job",
+                    "node_id": "node",
+                    "kind": "recipe.start",
+                    "payload_digest": "0" * 64,
+                    "payload": operation.payload,
+                    "authority_revision": "r",
+                    "state": "running",
+                    "current_attempt": 0,
+                    "observe_count": 0,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for operation in operations
+            ],
+        )
+        session.flush()
+        selects: list[str] = []
+        event.listen(
+            engine,
+            "before_cursor_execute",
+            lambda *args: selects.append(args[2]),
+        )
+        aliases = workload_aliases(session, operations)
+        assert aliases == {"op-1": "h3video"}
+        assert len(selects) == 1
+        assert workload_aliases(session, []) == {}

@@ -100,6 +100,7 @@ def job_envelope(leaf: str) -> str:
         "id": JOB,
         "state": "failed",
         "kind": "recipe.stop",
+        "summary": "Recipe stop failed",
         "authority_revision": "a" * 64,
         "targets": [NODE],
         "target_total": 1,
@@ -110,6 +111,7 @@ def job_envelope(leaf: str) -> str:
                 "node_id": NODE,
                 "kind": "recipe.stop",
                 "state": "failed",
+                "summary": "Recipe stop failed",
                 "attempt": 1,
                 "failure": {
                     "status": "failed",

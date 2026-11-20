@@ -216,7 +216,7 @@ describe("producer-owned streamed response budgets", () => {
   });
   test("decodes a multibyte token split between chunks before canonical validation", async () => {
     const text =
-      '{"operations":[{"id":"operation","node_ids":[],"kind":"probe","state":"running","attempt":1,"created_at":"2026-10-07T00:00:00Z","progress":{"phase":"🧱","completed_bytes":0,"total_bytes_known":false}}],"total":1}';
+      '{"operations":[{"id":"operation","node_ids":[],"kind":"probe","state":"running","summary":"Probe running","attempt":1,"created_at":"2026-10-07T00:00:00Z","progress":{"phase":"🧱","completed_bytes":0,"total_bytes_known":false}}],"total":1}';
     const bytes = new TextEncoder().encode(text),
       split = bytes.indexOf(0xf0) + 1;
     const body = new ReadableStream<Uint8Array>({

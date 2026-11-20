@@ -1108,6 +1108,7 @@ def _job_receipt(job_id: str, state: str):
         current_attempt=1,
         id=job_id,
         kind="run",
+        summary="Run finished",
         operation_total=0,
         operations=[],
         progress=None,

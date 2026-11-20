@@ -202,7 +202,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
         parent_id: null,
         kind: "recipe.start",
         state: "succeeded",
-        summary: "Recipe start completed",
+        summary: "Recipe start finished",
         subject: "h3video",
         attempt: 1,
         node_ids: [targetId],
@@ -291,7 +291,7 @@ test("Activity shows operations and standalone jobs", async ({ page }) => {
   await page.goto("/activity");
 
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Recipe start completed$/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: /Agent upgrade waiting for operator$/ }),
   ).toBeVisible();

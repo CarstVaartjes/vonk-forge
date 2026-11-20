@@ -8,7 +8,7 @@ nothing admits, retries or gates on them.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -31,7 +31,10 @@ _KIND_PHRASES: dict[str, str] = {
     AgentOperationKind.RECIPE_RECONCILE: "Recipe check",
 }
 
-#: States whose own word is not the plain one; every other state reads as itself.
+#: Every stored operation state is a ``LifecycleState`` (jobs, agent operations,
+#: model-cache, profile applications and artifact jobs all adopt it), plus the
+#: model-cache operator word ``accepted``. A state whose own word is plain reads as
+#: itself; only the others are listed. An unknown state reads as its own words.
 _STATE_WORDS: dict[str, str] = {
     LifecycleState.OBSERVING: "being checked",
     LifecycleState.BACKOFF: "retrying",
@@ -54,8 +57,12 @@ def _words(value: str) -> str:
     return " ".join(parts)
 
 
+#: What Activity says for a row whose stored history cannot be read.
+UNREADABLE_SUMMARY = "Operation history is unreadable"
+
+
 def operation_summary(kind: str, state: str) -> str:
-    """ "Job running", "Recipe start completed"; an unknown kind or state reads as its own words."""
+    """ "Recipe job running", "Recipe start finished"; an unknown kind or state reads as its own words."""
 
     phrase = _KIND_PHRASES.get(kind) or _words(kind).capitalize() or "Operation"
     word = _STATE_WORDS.get(state) or _words(state) or "recorded"
@@ -65,26 +72,17 @@ def operation_summary(kind: str, state: str) -> str:
 def workload_aliases(
     session: Session, operations: Sequence[AgentOperation]
 ) -> dict[str, str]:
-    """Operation id to the alias of the run it acts on, in one query for the page."""
+    """Operation id to the alias of the run it acts on: one joined query for the page."""
 
-    run_ids = {
-        operation.id: run_id
-        for operation in operations
-        if isinstance(operation.payload, Mapping)
-        and isinstance(run_id := operation.payload.get("run_id"), str)
-    }
-    if not run_ids:
+    if not operations:
         return {}
-    aliases = {
-        run: alias
-        for run, alias in session.execute(
-            select(RecipeRun.id, RecipeRun.alias).where(
-                RecipeRun.id.in_(set(run_ids.values()))
-            )
-        )
-    }
     return {
-        operation_id: aliases[run_id]
-        for operation_id, run_id in run_ids.items()
-        if run_id in aliases
+        operation_id: alias
+        for operation_id, alias in session.execute(
+            select(AgentOperation.id, RecipeRun.alias)
+            .join(
+                RecipeRun, RecipeRun.id == AgentOperation.payload["run_id"].as_string()
+            )
+            .where(AgentOperation.id.in_([operation.id for operation in operations]))
+        )
     }
