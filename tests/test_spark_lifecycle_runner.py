@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import ast
 import base64
+import functools
 import importlib.util
 import json
 import os
 import subprocess
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 from vonk_agent_protocol import LifecycleState
@@ -2721,3 +2723,104 @@ def test_every_fixture_import_in_the_lane_code_is_offered_once_more() -> None:
             for w in _serves_without_admission(tree)
         ]
     assert unguarded == []
+
+
+def _blocked(code: str) -> dict[str, Any]:
+    return {
+        "allowed": False,
+        "admission_decisions": [{"allowed": False, "blockers": [{"code": code}]}],
+    }
+
+
+_SWAP = "run-switch.resource.insufficient_swap"
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@functools.cache
+def _lane():
+    return _module()
+
+
+def _await(
+    responses: list[dict[str, Any]], clock: _Clock, deadline_seconds: float = 270.0
+) -> dict[str, Any]:
+    queue = iter(responses)
+    return _lane().await_admitted_preview(
+        lambda: next(queue),
+        label="preview",
+        describe=lambda preview: json.dumps(preview, sort_keys=True),
+        clock=lambda: clock.now,
+        sleep=clock.sleep,
+        deadline_seconds=deadline_seconds,
+    )
+
+
+def test_preview_waits_on_typed_waits_then_returns_the_admitted_answer() -> None:
+    clock = _Clock()
+    admitted = {"allowed": True}
+
+    assert _await([_blocked(_SWAP), _blocked(_SWAP), admitted], clock) is admitted
+    assert clock.now == 6.0
+
+
+def test_preview_refusal_fails_at_once_without_waiting() -> None:
+    clock = _Clock()
+
+    with pytest.raises(_lane().LifecycleError, match="not admitted"):
+        _await([_blocked(_SWAP.replace("swap", "other")), {"allowed": True}], clock)
+    assert clock.now == 0.0
+    with pytest.raises(_lane().LifecycleError, match="not admitted"):
+        _await([{"allowed": False}], clock)
+    assert clock.now == 0.0
+
+
+def test_preview_wait_past_the_deadline_fails_with_the_last_reason() -> None:
+    clock = _Clock()
+
+    with pytest.raises(
+        _lane().LifecycleError, match="still waiting.*insufficient_swap"
+    ):
+        _await([_blocked(_SWAP)] * 100, clock, deadline_seconds=60.0)
+    assert clock.now <= 60.0
+
+
+def test_a_wait_beside_an_error_reason_is_a_refusal() -> None:
+    clock = _Clock()
+    preview = _blocked(_SWAP) | {"reasons": [{"severity": "error", "code": "x"}]}
+
+    with pytest.raises(_lane().LifecycleError, match="not admitted"):
+        _await([preview, {"allowed": True}], clock)
+    assert clock.now == 0.0
+
+
+def test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview() -> None:
+    """Catches a single-shot preview that fails on a wait the next cycle clears."""
+    acceptance = Path(__file__).parent / "acceptance"
+    found: list[tuple[str, str]] = []
+    for path in sorted(acceptance.glob("*.py")):
+        tree = ast.parse(path.read_text())
+        for function in ast.walk(tree):
+            if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for node in ast.walk(function):
+                if (
+                    isinstance(node, ast.Constant)
+                    and node.value == "/api/profile/1/preview"
+                ):
+                    found.append((path.name, function.name))
+        module_level = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and node.value == "/api/profile/1/preview"
+        ]
+        assert len(module_level) == len(
+            [item for item in found if item[0] == path.name]
+        ), f"{path.name}: preview path outside a function"
+    assert set(found) == {("test_spark_lifecycle.py", "_admitted_preview")}

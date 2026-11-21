@@ -8,7 +8,6 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -19,7 +18,6 @@ from tests.acceptance.runtime import (
     assert_bundle_contract,
     assert_compose_compatibility,
     assert_compose_services_healthy,
-    await_admitted_preview,
     bootstrap_command,
     https_over_command,
     run_interactive,
@@ -593,62 +591,3 @@ def test_bundle_contract_rejects_a_group_readable_secret_with_another_group(
     (bundle / "secrets" / "shared").chmod(0o660)
     with pytest.raises(AcceptanceError):
         assert_bundle_contract(bundle)
-
-
-def _blocked(code: str) -> dict[str, Any]:
-    return {
-        "allowed": False,
-        "admission_decisions": [{"allowed": False, "blockers": [{"code": code}]}],
-    }
-
-
-_SWAP = "run-switch.resource.insufficient_swap"
-
-
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def sleep(self, seconds: float) -> None:
-        self.now += seconds
-
-
-def _await(
-    responses: list[dict[str, Any]], clock: _Clock, deadline_seconds: float = 270.0
-) -> dict[str, Any]:
-    queue = iter(responses)
-    return await_admitted_preview(
-        lambda: next(queue),
-        label="preview",
-        describe=lambda preview: json.dumps(preview, sort_keys=True),
-        clock=lambda: clock.now,
-        sleep=clock.sleep,
-        deadline_seconds=deadline_seconds,
-    )
-
-
-def test_preview_waits_on_typed_waits_then_returns_the_admitted_answer() -> None:
-    clock = _Clock()
-    admitted = {"allowed": True}
-
-    assert _await([_blocked(_SWAP), _blocked(_SWAP), admitted], clock) is admitted
-    assert clock.now == 6.0
-
-
-def test_preview_refusal_fails_at_once_without_waiting() -> None:
-    clock = _Clock()
-
-    with pytest.raises(AcceptanceError, match="not admitted"):
-        _await([_blocked(_SWAP.replace("swap", "other")), {"allowed": True}], clock)
-    assert clock.now == 0.0
-    with pytest.raises(AcceptanceError, match="not admitted"):
-        _await([{"allowed": False}], clock)
-    assert clock.now == 0.0
-
-
-def test_preview_wait_past_the_deadline_fails_with_the_last_reason() -> None:
-    clock = _Clock()
-
-    with pytest.raises(AcceptanceError, match="still waiting.*insufficient_swap"):
-        _await([_blocked(_SWAP)] * 100, clock, deadline_seconds=60.0)
-    assert clock.now <= 60.0

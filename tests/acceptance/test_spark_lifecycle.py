@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import RunSwitchCode, canonical_message
 from vonk_agent_protocol.agent_state import (
     NativeRenewalAction,
     NativeRenewalEvidence,
@@ -82,7 +82,6 @@ from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
     assert_compose_services_healthy,
-    await_admitted_preview,
     bootstrap_command,
     reclaim_gateway_journal,
     run_interactive,
@@ -289,6 +288,80 @@ class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
 
     evidence: dict[str, object] | None = None
+
+
+#: Blocker codes a profile preview names for a state that clears by itself: the
+#: agent reports swap and inventory every inventory cycle, so a preview taken
+#: between two reports waits on them.  Any other blocker is a refusal.
+PREVIEW_WAIT_CODES = frozenset(
+    {
+        RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP.value,
+        RunSwitchCode.INVENTORY_STALE.value,
+        RunSwitchCode.INVENTORY_UNKNOWN.value,
+    }
+)
+#: Just over two 120 s inventory cycles.
+PREVIEW_WAIT_SECONDS = 270.0
+
+
+def _preview_blocker_codes(preview: Mapping[str, object]) -> set[str] | None:
+    """The codes of every blocking assignment decision, or ``None`` when unnamed."""
+
+    decisions = preview.get("admission_decisions")
+    if not isinstance(decisions, list):
+        return None
+    codes: set[str] = set()
+    for decision in decisions:
+        if not isinstance(decision, Mapping) or decision.get("allowed") is True:
+            continue
+        blockers = decision.get("blockers")
+        if not isinstance(blockers, list):
+            return None
+        for blocker in blockers:
+            code = blocker.get("code") if isinstance(blocker, Mapping) else None
+            if not isinstance(code, str):
+                return None
+            codes.add(code)
+    return codes or None
+
+
+def await_admitted_preview(
+    request: Callable[[], dict[str, Any]],
+    *,
+    label: str,
+    describe: Callable[[dict[str, Any]], str],
+    deadline_seconds: float = PREVIEW_WAIT_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Ask for a profile preview until it is admitted or really refused.
+
+    A preview whose only blockers are typed waits (the harness's own
+    expectation, narrower than the Controller's waitable set), and with no
+    error-severity reason, is asked again with backoff
+    until ``deadline_seconds``; any other blocker fails at once.
+    """
+
+    started = clock()
+    delay = 2.0
+    while True:
+        preview = request()
+        if preview.get("allowed") is True:
+            return preview
+        codes = _preview_blocker_codes(preview)
+        refused = any(
+            isinstance(reason, dict) and reason.get("severity") == "error"
+            for reason in preview.get("reasons") or []
+        )
+        if refused or codes is None or not codes <= PREVIEW_WAIT_CODES:
+            raise LifecycleError(f"{label} is not admitted: {describe(preview)}")
+        if clock() - started + delay > deadline_seconds:
+            raise LifecycleError(
+                f"{label} is still waiting after {deadline_seconds:.0f}s: "
+                f"{describe(preview)}"
+            )
+        sleep(delay)
+        delay = min(delay * 2, 30.0)
 
 
 class CanonicalCanaryFixture(NamedTuple):
@@ -4449,7 +4522,6 @@ class SparkLifecycle:
             ),
             label=label,
             describe=describe,
-            error=LifecycleError,
         )
 
     @staticmethod
