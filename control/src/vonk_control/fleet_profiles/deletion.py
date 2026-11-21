@@ -22,7 +22,7 @@ from ..models import (
     FleetProfileRecipe,
     FleetProfileSelection,
 )
-from .contracts import FleetProfileRevisionConflict
+from .contracts import FleetProfileInvalid, FleetProfileRevisionConflict
 
 if TYPE_CHECKING:
     from .service import FleetProfileService as _FleetProfileService
@@ -78,7 +78,7 @@ class FleetProfileService:
                     ),
                     actor=actor,
                 )
-            except (FleetProfileRevisionConflict, MissingRecord):
+            except (FleetProfileInvalid, MissingRecord):
                 # Already ended, already cancelling, or gone: nothing to cancel.
                 continue
 
