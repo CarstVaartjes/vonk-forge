@@ -82,6 +82,7 @@ from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
     assert_compose_services_healthy,
+    await_admitted_preview,
     bootstrap_command,
     reclaim_gateway_journal,
     run_interactive,
@@ -3505,15 +3506,12 @@ class SparkLifecycle:
                 profile_revision = saved.get("revision")
                 if type(profile_revision) is not int or profile_revision < 1:
                     raise LifecycleError("synthetic canary profile revision is invalid")
-                _, preview_payload = self.control.request(
-                    "POST", "/api/profile/1/preview"
-                )
-                preview = require_object(
-                    preview_payload, "synthetic canary profile preview"
+                preview = self._admitted_preview(
+                    "synthetic canary profile preview",
+                    extra_diagnostic=self._catalog_sync_diagnostic,
                 )
                 if (
-                    preview.get("allowed") is not True
-                    or not isinstance(preview.get("plan_digest"), str)
+                    not isinstance(preview.get("plan_digest"), str)
                     or SHA256.fullmatch(preview["plan_digest"]) is None
                     or not isinstance(preview.get("scope"), dict)
                     or set(preview["scope"].get("node_ids", [])) != fleet_node_ids
@@ -3726,12 +3724,7 @@ class SparkLifecycle:
                 cleanup_saved_payload, "synthetic canary cleanup save"
             )
             profile_revision = cleanup_saved.get("revision")
-            _, cleanup_preview_payload = self.control.request(
-                "POST", "/api/profile/1/preview"
-            )
-            cleanup_preview = require_object(
-                cleanup_preview_payload, "synthetic canary cleanup preview"
-            )
+            cleanup_preview = self._admitted_preview("synthetic canary cleanup preview")
             try:
                 _validate_canary_cleanup_preview(cleanup_preview, node_id=node_id)
             except LifecycleError as error:
@@ -3852,13 +3845,7 @@ class SparkLifecycle:
             )
             phase = "cleanup"
             self._save_profile(policy="exact", assignments=[])
-            _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-            preview = require_object(preview_payload, "artifact job cleanup preview")
-            if preview.get("allowed") is not True:
-                raise LifecycleError(
-                    "artifact job cleanup preview is not admitted: "
-                    + self._preview_diagnostic(preview)
-                )
+            preview = self._admitted_preview("artifact job cleanup preview")
             self._await_profile_application(
                 require_object(
                     self._load_canary_profile(
@@ -3925,13 +3912,7 @@ class SparkLifecycle:
                 }
             ],
         )
-        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-        preview = require_object(preview_payload, "artifact job profile preview")
-        if preview.get("allowed") is not True:
-            raise LifecycleError(
-                "artifact job profile preview is not admitted: "
-                + self._preview_diagnostic(preview)
-            )
+        preview = self._admitted_preview("artifact job profile preview")
         application = self._await_profile_application(
             require_object(
                 self._load_canary_profile(
@@ -4449,6 +4430,27 @@ class SparkLifecycle:
             )
             raise LifecycleError(f"{label} failed: {details}")
         return typed.model_dump(mode="json")
+
+    def _admitted_preview(
+        self, label: str, *, extra_diagnostic: Callable[[], str] | None = None
+    ) -> dict[str, Any]:
+        """The profile preview once admitted; waits only on typed waits."""
+
+        control = self.control
+        assert control is not None
+
+        def describe(preview: dict[str, Any]) -> str:
+            text = self._preview_diagnostic(preview)
+            return text if extra_diagnostic is None else f"{text}; {extra_diagnostic()}"
+
+        return await_admitted_preview(
+            lambda: require_object(
+                control.request("POST", "/api/profile/1/preview")[1], label
+            ),
+            label=label,
+            describe=describe,
+            error=LifecycleError,
+        )
 
     @staticmethod
     def _blocker_diagnostic(blockers: object) -> list[dict[str, object]]:

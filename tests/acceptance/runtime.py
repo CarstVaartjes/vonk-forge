@@ -14,8 +14,10 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import yaml
+from vonk_agent_protocol import RunSwitchCode
 
 MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
 OPTIONAL_SECRET_FILES = {"hf-token"}
@@ -23,6 +25,75 @@ OPTIONAL_SECRET_FILES = {"hf-token"}
 
 class AcceptanceError(RuntimeError):
     pass
+
+
+#: Blocker codes a profile preview names for a state that clears by itself: the
+#: agent reports swap and inventory every inventory cycle, so a preview taken
+#: between two reports waits on them.  Any other blocker is a refusal.
+PREVIEW_WAIT_CODES = frozenset(
+    {
+        RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP.value,
+        RunSwitchCode.INVENTORY_STALE.value,
+        RunSwitchCode.INVENTORY_UNKNOWN.value,
+    }
+)
+#: Just over two 120 s inventory cycles.
+PREVIEW_WAIT_SECONDS = 270.0
+
+
+def _preview_blocker_codes(preview: Mapping[str, object]) -> set[str] | None:
+    """The codes of every blocking assignment decision, or ``None`` when unnamed."""
+
+    decisions = preview.get("admission_decisions")
+    if not isinstance(decisions, list):
+        return None
+    codes: set[str] = set()
+    for decision in decisions:
+        if not isinstance(decision, Mapping) or decision.get("allowed") is True:
+            continue
+        blockers = decision.get("blockers")
+        if not isinstance(blockers, list):
+            return None
+        for blocker in blockers:
+            code = blocker.get("code") if isinstance(blocker, Mapping) else None
+            if not isinstance(code, str):
+                return None
+            codes.add(code)
+    return codes or None
+
+
+def await_admitted_preview(
+    request: Callable[[], dict[str, Any]],
+    *,
+    label: str,
+    describe: Callable[[dict[str, Any]], str],
+    error: type[Exception] = AcceptanceError,
+    deadline_seconds: float = PREVIEW_WAIT_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Ask for a profile preview until it is admitted or really refused.
+
+    A preview whose only blockers are typed waits is asked again with backoff
+    until ``deadline_seconds``; any other blocker fails at once.
+    """
+
+    started = clock()
+    delay = 2.0
+    while True:
+        preview = request()
+        if preview.get("allowed") is True:
+            return preview
+        codes = _preview_blocker_codes(preview)
+        if codes is None or not codes <= PREVIEW_WAIT_CODES:
+            raise error(f"{label} is not admitted: {describe(preview)}")
+        if clock() - started + delay > deadline_seconds:
+            raise error(
+                f"{label} is still waiting after {deadline_seconds:.0f}s: "
+                f"{describe(preview)}"
+            )
+        sleep(delay)
+        delay = min(delay * 2, 30.0)
 
 
 def reclaim_gateway_journal(bundle: Path) -> None:
