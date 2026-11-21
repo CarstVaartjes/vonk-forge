@@ -160,9 +160,16 @@ def _read_password(from_stdin: bool) -> str:
         elif sys.stdin.isatty():
             password = getpass.getpass("Admin password: ")
         else:
-            raise LoginFailed(
+            failure = LoginFailed(
                 "no terminal to ask for the password; use --password-stdin"
             )
+            failure.recovery = (
+                (
+                    "run vonkctl auth login in an interactive terminal, "
+                    "or pipe the password with --password-stdin"
+                ),
+            )
+            raise failure
     except EOFError:
         raise LoginFailed("no password was entered") from None
     except UnicodeDecodeError:
