@@ -125,7 +125,8 @@ def test_api_errors_are_classified_by_cause(
                 if path.endswith("/cancel")
                 else ModelCacheOperatorRequest(request_key=REQUEST_KEY)
             ).model_dump(mode="json")
-            if method == "POST"
+            # The profile preview reads an optional draft body; it is sent bare.
+            if method == "POST" and not path.endswith("/preview")
             else None,
         )
     getattr(service, member).assert_called_once()

@@ -16,6 +16,9 @@ operation the configured CLI supports. Documentation research is separate.
 Distinguish sandbox/network/socket denial from missing authentication before
 requesting login. Keep credentials out of output, arguments, and tracked files;
 never fall back from a scoped service account to a personal desktop session.
+The Controller login is `vonkctl auth login` (admin password at a no-echo
+prompt, never stored; token in `~/.config/vonkctl/`): agents never read those
+files or handle the password.
 Existing credentials do not authorize unrelated remote changes. A locked,
 awake user session is not proof of availability after logout, sleep, or reboot.
 
@@ -88,7 +91,9 @@ CLI and web consume the same typed decisions and receipts; do not add a client
 planner, independent refusal classifier, or second recovery implementation.
 Preview and execution share one decision: bind the reviewed effects and exact
 identities, revalidate at acceptance, and reject changed effects instead of
-silently broadening consent. Name predicate conditions once and derive both
+silently broadening consent. The review checksum binds the profile definition
+content, not row id or revision, so an unsaved draft preview equals the review
+after the same save. Name predicate conditions once and derive both
 the decision and its explanation from those same conditions.
 
 Every operation exposes its phase, measured progress, meaningful failure cause,

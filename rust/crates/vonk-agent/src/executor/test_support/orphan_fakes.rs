@@ -320,6 +320,10 @@ struct HostState {
     drop_next_stop_reply: bool,
     /// The next stop takes this long to land.
     slow_next_stop: Duration,
+    /// The next stop stays in flight until the test releases it.
+    hold_next_stop: bool,
+    /// A held stop is in flight and waiting for the release.
+    stop_held: bool,
     /// Installations a stop is in progress for: the real helper's non-blocking
     /// installation lock, which turns an overlapping stop away at once.
     stopping: std::collections::BTreeSet<Uuid>,
@@ -411,6 +415,16 @@ impl FakeHost {
 
     pub(in crate::executor) fn slow_next_stop(&self, delay: Duration) {
         self.state.lock().unwrap().slow_next_stop = delay;
+    }
+
+    /// The next stop stays in flight, with no real-time race, until
+    /// `release_stop`.
+    pub(in crate::executor) fn hold_next_stop(&self) {
+        self.state.lock().unwrap().hold_next_stop = true;
+    }
+
+    pub(in crate::executor) fn release_stop(&self) {
+        self.state.lock().unwrap().stop_held = false;
     }
 
     pub(in crate::executor) fn lose_next_stop_reply(&self) {
@@ -561,8 +575,13 @@ fn serve_helper(
         return;
     }
     let slow = std::mem::take(&mut state.slow_next_stop);
+    state.stop_held = std::mem::take(&mut state.hold_next_stop);
     drop(state);
     thread::sleep(slow);
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while host.lock().unwrap().stop_held && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
     let mut state = host.lock().unwrap();
     if let Some((replaced, labels)) = state.replace_before_stop.take() {
         state.containers.insert(

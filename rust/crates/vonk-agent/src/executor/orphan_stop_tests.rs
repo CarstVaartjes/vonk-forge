@@ -391,13 +391,13 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     let (run, installation) = world.prepared_run(2);
     world.host.run(run, Some(labels_of(run, installation, 2)));
     world.controller.say(run, FakeDisposition::Unowned);
-    // The stop outlasts the (scaled) stop window: a pass that waited for it
-    // would take 3 s, a bounded one about 0.3 s.
+    // The stop stays in flight until released: a pass that waited for it
+    // would never return, a bounded one takes about 0.3 s.
     let windows = ObservationWindows {
         orphan_stop: Duration::from_millis(300),
         ..ObservationWindows::default()
     };
-    world.host.slow_next_stop(Duration::from_secs(3));
+    world.host.hold_next_stop();
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
@@ -416,6 +416,15 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     // While the stop is still running a second cycle sees the container
     // running and asks again; the helper turns that stop away at once.
     cycle_within(&executor, windows).await;
+    // The second ask was made, and refused while the first still ran.
+    assert!(
+        world
+            .host
+            .calls()
+            .iter()
+            .any(|call| matches!(call, HelperCall::Busy { .. }))
+    );
+    world.host.release_stop();
     let deadline = Instant::now() + Duration::from_secs(30);
     while world.host.is_running(run) {
         assert!(Instant::now() < deadline, "the stop never landed");
@@ -431,12 +440,4 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
         .filter(|call| matches!(call, HelperCall::Stop { removed: true, .. }))
         .count();
     assert_eq!(landed, 1, "exactly one effect");
-    // The second ask was made, and refused while the first still ran.
-    assert!(
-        world
-            .host
-            .calls()
-            .iter()
-            .any(|call| matches!(call, HelperCall::Busy { .. }))
-    );
 }

@@ -118,6 +118,14 @@ unassigned Sparks idle. The preview binds current membership and planned
 effects. If membership changes before acceptance, reject that preview and
 require a new review.
 
+`POST /api/profile/{number}/preview` takes an optional `{definition}` body. With
+it the Controller reviews that unsaved draft through the same normalisation a
+save applies and the same resolver, answers `profile_revision: null`, and writes
+nothing; a number with no row is previewed too. Without a body it reviews the
+saved row. The review checksum (`effects_digest`) covers the definition content,
+never the row id, revision or digest, so the review of a draft equals the review
+after that definition is saved, for an existing and a new profile number.
+
 Target ongoing behavior uses one durable selected-profile record in PostgreSQL
 pointing to the immutable accepted application snapshot as whole-fleet desired
 state. Profile saves are drafts and a load application is one-shot; neither the

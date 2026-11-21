@@ -23,6 +23,7 @@ from .fleet_profile_contract import (
     FleetProfileList,
     FleetProfileLoadRequest,
     FleetProfilePreview,
+    FleetProfilePreviewRequest,
     FleetProfileReadView,
     FleetProfileView,
 )
@@ -230,10 +231,13 @@ def install_fleet_profile_routes(
     @operator_acceptance(ReceiptPolicy.OBSERVATION)
     def preview_profile(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
+        body: FleetProfilePreviewRequest | None = None,
         actor: Actor = authenticated,
     ) -> FleetProfilePreview:
         require_mutation(actor, "POST", "/api/profile/{number}/preview")
         try:
+            if body is not None:
+                return service().preview_draft(number, body.definition)
             profile = service().definition_number(number)
             if profile.id is None:
                 raise KeyError(number)

@@ -29,26 +29,46 @@ vonkctl update --apply
 
 `vonkctl` is the local, authenticated CLI for the Controller. `vonkctl --help`
 lists its command groups (platform, metrics, fleet, model, recipe, job, profile,
-key), `run`, `completion` and `update`. It uses the same current Controller
+key), `run`, `auth`, `completion` and `update`. It uses the same current Controller
 routes as the operator API. Machine-facing agent
 transport is separate and is not a CLI fallback.
 
 ## Connect
 
-The CLI accepts an HTTPS Controller origin and reads its bearer credential from
-a private regular file. It never accepts a token on the command line.
+Log in once with the admin password. `vonkctl` asks for it without echo, uses
+it only to mint the Controller's CLI token, and stores the token alone; the
+password is never stored, put in arguments or environment, or printed.
 
 ```bash
-export VONK_CONTROL_URL=https://forge.example.test
-export VONK_CONTROL_TOKEN_FILE="$PWD/.dev/admin-token"
-chmod 600 "$VONK_CONTROL_TOKEN_FILE"
-vonkctl --help
+vonkctl auth login https://forge.example.test
+vonkctl --check-connection
 ```
 
-If nothing is configured, `vonkctl` says so once and lists the steps: in the
-Controller open the operator menu and choose **Download CLI token**, set the
-two variables, then run `vonkctl --check-connection`. A SOCKS proxy in
-`ALL_PROXY` or `HTTPS_PROXY` is supported.
+The token goes to `~/.config/vonkctl/token` and the Controller address plus the
+token's expiry to `~/.config/vonkctl/connection.json` (`$XDG_CONFIG_HOME`
+applies; directory mode 0700, files 0600, written atomically). The token lasts
+30 days. From 7 days before it expires every command prints one warning on
+stderr; the stored expiry never blocks a command, the Controller decides. After
+it expires, a refused command names `vonkctl auth login`; run it again. A wrong
+password writes nothing. For unattended use `--password-stdin` reads the
+password from stdin (discouraged: the password then passes through your
+script).
+
+`vonkctl auth status` shows the Controller, where the credential comes from and
+its expiry, and checks it with a Fleet read. `vonkctl auth logout` deletes the
+two local files; the token itself stays valid until it expires because the
+Controller keeps no revocation list.
+
+`VONK_CONTROL_URL` and `VONK_CONTROL_TOKEN_FILE` still override the address and
+the token path (for example for a second Controller or a CI job). Set both
+together: the login's token belongs to the Controller that minted it, so
+`VONK_CONTROL_URL` alone, naming a different Controller, is refused (set
+`VONK_CONTROL_TOKEN_FILE` too, or run `vonkctl auth login <url>`). They take
+precedence over the login, so `auth login` warns when either is set and
+`auth status` reports an env token file's expiry as unknown. The token file is
+always a private regular file: the CLI never accepts a token on the command
+line. If nothing is configured, `vonkctl` says so and names
+`vonkctl auth login`. A SOCKS proxy in `ALL_PROXY` or `HTTPS_PROXY` is supported.
 
 For development from a source checkout, install that checkout with
 `uv tool install .` before setting these connection variables.
@@ -94,33 +114,8 @@ than terminal abbreviations. Color is not needed to understand any state;
 control characters are escaped in human text, and ASCII terminals receive
 escaped names when their encoding cannot represent them.
 
-When using the browser, sign in to the Controller and open the operator menu
-under your user name. Choose **Download CLI token** (it appears before
-Activity). The browser downloads a `vonkctl-token` file without rendering the
-credential in the page. Store that file privately, then point the CLI at it:
-
-```bash
-export VONK_CONTROL_URL=https://forge.example.test
-install -d -m 700 "$HOME/.config/vonk-forge"
-mv "$HOME/Downloads/vonkctl-token" "$HOME/.config/vonk-forge/controller-token"
-export VONK_CONTROL_TOKEN_FILE="$HOME/.config/vonk-forge/controller-token"
-chmod 600 "$VONK_CONTROL_TOKEN_FILE"
-vonkctl model library --json
-```
-
-For persistent configuration on macOS with zsh, put the two `export` lines in
-`~/.zshenv`. They will then be available in new interactive and non-interactive
-zsh sessions, independently of the current directory. Store only the token's
-file path in shell configuration; keep the credential in the private file above.
-Programs launched without a shell need the same environment variables in their
-own launch configuration. The CLI currently has no separate connection config file.
-
-The download requires the active browser session and its CSRF protection. The
-administrator bearer token expires after 30 days; download a new file from the
-operator menu when it expires.
-
 `vonkctl --check-connection --json` validates the origin and private regular
-token file, then makes one authenticated Fleet read. It reports the actual
+token file (the login's or the env override), then makes one authenticated Fleet read. It reports the actual
 failed boundary without exposing credentials. Help, version, and completion
 generation work without credentials or a network connection.
 
