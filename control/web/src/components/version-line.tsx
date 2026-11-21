@@ -7,8 +7,7 @@ import { utcTime } from "../lib/utc-time";
 
 /**
  * A quiet line of what is running: the Controller build, the recipe library version and the last
- * sync. Each fact is its own element and reads exactly as `vonkctl platform` and
- * `vonkctl recipe sync-status` print it (tests/fixtures/version-line.json). Each fact is read from
+ * sync. Each fact is its own element. Each fact is read from
  * the API on its own, so one that fails reads "Not reported" and the others still show. It reads
  * again whenever `readKey` changes (every navigation), so it is never older than the page.
  */

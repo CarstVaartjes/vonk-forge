@@ -1,8 +1,7 @@
 """Terminal presentation for `vonkctl metrics`.
 
 The words, units and measured-or-estimated basis come from the Controller's
-catalogue; this module only formats numbers. The number rules are the ones in
-`tests/fixtures/metrics-wording.json`, which the dashboard follows too.
+catalogue; this module only formats numbers.
 """
 
 from __future__ import annotations

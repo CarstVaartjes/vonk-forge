@@ -16,15 +16,6 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
-    FleetProfileEndpointsView,
-)
-from cluster_profiles.generated_control.models.job_operator_receipt import (
-    JobOperatorReceipt,
-)
-from cluster_profiles.generated_control.models.job_operator_receipt_action import (
-    check_job_operator_receipt_action,
-)
 from library_route_fixtures import _recipe_projection
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
@@ -44,6 +35,15 @@ from cluster_profiles.control_client import (
 )
 from cluster_profiles.controller_cli import profile_authoring, selection
 from cluster_profiles.controller_cli.selection import _read_concurrently
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt import (
+    JobOperatorReceipt,
+)
+from cluster_profiles.generated_control.models.job_operator_receipt_action import (
+    check_job_operator_receipt_action,
+)
 from control.tests.consumer_outcomes import not_adopted
 
 _REVIEW_DIGEST = "b" * 64
@@ -4000,6 +4000,7 @@ def test_fleet_upgrade_prompts_for_resolved_scope_in_a_terminal(monkeypatch) -> 
 
     assert status == 0
     assert client.calls[-1][0:2] == ("POST", "/api/fleet/upgrade")
+    assert terminal_input.read() == ""
 
 
 def _fleet_log_response(node_id: str, *, follow: bool) -> dict[str, object]:
@@ -5163,7 +5164,7 @@ def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
 
 def test_declined_run_exits_nonzero_and_says_the_profile_was_saved(monkeypatch) -> None:
     client = FakeClient(_run_responses())
-    _Prompt(monkeypatch, "no")
+    prompt = _Prompt(monkeypatch, "no")
 
     status = cli.main(
         ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
@@ -5174,6 +5175,7 @@ def test_declined_run_exits_nonzero_and_says_the_profile_was_saved(monkeypatch) 
     assert status == 2
     # The recipe was saved to review its plan; nothing was loaded.
     assert _effects(client) == [("PUT", "/api/profile/1")]
+    assert "control.api_error" not in prompt.transcript
 
 
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:
@@ -5236,7 +5238,7 @@ def test_declined_action_exits_nonzero_without_an_effect(
             ),
         }
     )
-    _Prompt(monkeypatch, "no")
+    prompt = _Prompt(monkeypatch, "no")
 
     status = cli.main(argv, control_client=client, request_id_factory=lambda: _RUN_KEY)
 
@@ -5246,6 +5248,7 @@ def test_declined_action_exits_nonzero_without_an_effect(
         for method, path, *_ in client.calls
         if method == "POST" and path.endswith(effect_suffix)
     ]
+    assert "control.api_error" not in prompt.transcript
 
 
 def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed(

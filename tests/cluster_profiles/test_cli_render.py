@@ -3,12 +3,6 @@ from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
-from cluster_profiles.generated_control.models.gpu_clock_observation import (
-    GpuClockObservation,
-)
-from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
-    GpuClockUnavailable,
-)
 from vonk_agent_protocol import ProjectionCode
 
 from cluster_profiles.cli_render import progress_line, render_payload
@@ -40,6 +34,12 @@ from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listin
 from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
 from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
 from cluster_profiles.control_client import ControlMalformedResponse
+from cluster_profiles.generated_control.models.gpu_clock_observation import (
+    GpuClockObservation,
+)
+from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
+    GpuClockUnavailable,
+)
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
@@ -346,6 +346,9 @@ def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys)
     render_payload(_cpu_spark(low_clock=False), "fleet", action="detail")
     output = capsys.readouterr().out
     assert "2.1 of 3.9 GHz" in output and "84" in output
+
+    render_payload(_cpu_spark(low_clock=True), "fleet", action="detail")
+    assert capsys.readouterr().out != output
 
     render_payload(_spark("atlas", 1), "fleet", action="detail")
     assert "GHz" not in capsys.readouterr().out

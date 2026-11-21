@@ -98,10 +98,7 @@ def _shell_quote(text: str) -> str:
 
 
 def connection_snippets(api_base: str, alias: str) -> dict[str, str]:
-    """The copyable client examples; the web renders the same text.
-
-    tests/fixtures/connection-examples.json is asserted by both renderers.
-    """
+    """The copyable client examples."""
     body = json.dumps(
         {"model": alias, "messages": [{"role": "user", "content": "Hello"}]},
         separators=(",", ":"),
@@ -161,8 +158,7 @@ def _connection_examples(api_base: str, alias: str, wide: bool = False) -> None:
 def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
     """One line per published alias, exactly as the dashboard's "Serving now" block shows them.
 
-    Each row is (alias, recipe title, state). The heading and lines are shared with the
-    dashboard (tests/fixtures/serving-now.json).
+    Each row is (alias, recipe title, state).
     """
     published = [
         row for row in assignments if row[2] == cli_states.PUBLISHED and row[0]

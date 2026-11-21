@@ -115,7 +115,7 @@ stay valid. Artifact-job size, count and timeout limits live only in `agent_prot
 wording assertion on captured output (`assert "<literal>" in captured.out`) in
 the rest of `tests/cluster_profiles`.
 In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet.ts`; a component never
-types the words (the `web-not-reported` added-line guard enforces it). Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
+types the words. Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
 
 Startup schema reconciliation drops every table in the Controller's schema `public`

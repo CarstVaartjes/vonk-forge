@@ -80,6 +80,14 @@ def test_fleet_detail_prints_every_host_check_after_the_warnings(printed):
     assert len([line for line in added if line.startswith("Host check: ")]) == len(
         cases
     )
+    # The commands and undo lines are what the operator copies: the Controller's order.
+    expected = [
+        command
+        for case in cases
+        for command in (*case["advice"]["commands"], *case["advice"]["undo"])
+    ]
+    copied = [line.strip() for line in added if line.strip() in set(expected)]
+    assert copied == expected
 
 
 # Library: model counts and the vocabulary-less recipe page.

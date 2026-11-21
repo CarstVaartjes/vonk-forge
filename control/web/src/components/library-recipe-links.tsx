@@ -14,7 +14,7 @@ function Address({ value, children }: { value: string | null | undefined; childr
 
 /**
  * Where the recipe comes from: the creator's page on the public site, each model's licence and the
- * recipe source. Each line reads exactly as `vonkctl recipe detail` prints it (tests/fixtures/recipe-links.json). Licences and regional limits are information for the operator; nothing here gates
+ * recipe source. Licences and regional limits are information for the operator; nothing here gates
  * a download, install or load.
  */
 export function LibraryRecipeLinks({ detail }: { detail: RecipeDetail }) {

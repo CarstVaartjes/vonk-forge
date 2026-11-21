@@ -684,17 +684,12 @@ def test_j_a_declared_load_peak_rides_on_swap_without_any_earlier_run(
 
 
 @pytest.mark.parametrize(
-    ("minimum_gib", "remedy"),
-    [
-        (48, ""),
-        # The minimum equals the 64 GiB setting.
-        (64, ""),
-        (96, "96 GiB"),
-        (128, "128 GiB"),
-    ],
+    "minimum_gib",
+    # 64 equals the Spark's swap setting.
+    [48, 64, 96, 128],
 )
 def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
-    tmp_path, postgres_engine, minimum_gib, remedy
+    tmp_path, postgres_engine, minimum_gib
 ) -> None:
     """Catches a load starting on less swap than its creator requires.
 
@@ -712,7 +707,9 @@ def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
     )
     at = now + timedelta(seconds=1)
     _inventory(sessions, at, node, swap=_swap(32, header_pages=2))
-    assert remedy in _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    if minimum_gib > 64:
+        assert f"{minimum_gib} GiB" in detail
 
     # /swap.img and the helper's area, each less its header page.
     later = at + timedelta(seconds=1)

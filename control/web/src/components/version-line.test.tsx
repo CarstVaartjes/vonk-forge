@@ -37,6 +37,7 @@ test("a failed platform read leaves the other facts showing", async () => {
 
   const shown = facts(await screen.findByLabelText("Versions"));
   expect(shown).toHaveLength(3);
+  expect(shown.every((fact) => fact?.trim())).toBe(true);
   expect(shown.some((fact) => fact?.includes("1.4.0"))).toBe(true);
 });
 

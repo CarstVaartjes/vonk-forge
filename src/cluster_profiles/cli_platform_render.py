@@ -12,7 +12,6 @@ def render_platform(observation: PlatformObservation) -> None:
     from .cli_render import _field, _reported, _table, _utc
 
     _field("Observed", _utc(observation.observed_at))
-    # Wording shared with the dashboard's version line (tests/fixtures/version-line.json).
     build = observation.api.source_sha
     _reported("Controller build", build[:12] if isinstance(build, str) else None)
     # A reused pull request build keeps its commit; the tree is the release's.

@@ -1,5 +1,4 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
-import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { OverviewPage } from "./overview";

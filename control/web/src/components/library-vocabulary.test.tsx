@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { LibraryVocabulary } from "../api/types";
-import type { ControlApi } from "../api/types";
+import type { ControlApi, LibraryVocabulary } from "../api/types";
 import { App } from "../app";
 import { libraryViewSnapshot, modelLibrary, recipeLibrary } from "../test-fixtures/library";
 import { LibraryModelsView } from "./library-models-view";

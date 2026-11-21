@@ -60,6 +60,7 @@ def test_a_command_that_changes_a_profile_tells_how_to_name_it(vonkctl_json):
 
     assert status == 2
     assert document["error"]
+    assert document["recovery_actions"]
 
 
 def test_run_without_a_profile_is_refused_like_every_profile_edit(vonkctl_json):
