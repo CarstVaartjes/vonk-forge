@@ -42,6 +42,7 @@ from vonk_agent_protocol.agent_state import (
     NativeRenewalRequest,
     RenewalHelperManifest,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
@@ -350,7 +351,8 @@ def await_admitted_preview(
             return preview
         codes = _preview_blocker_codes(preview)
         refused = any(
-            isinstance(reason, dict) and reason.get("severity") == "error"
+            isinstance(reason, dict)
+            and reason.get("severity") == ProfileReasonSeverity.ERROR.value
             for reason in preview.get("reasons") or []
         )
         if refused or codes is None or not codes <= PREVIEW_WAIT_CODES:
