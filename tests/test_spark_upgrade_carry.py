@@ -746,7 +746,7 @@ def test_release_mode_refresh_passes_with_baseline_equal_to_candidate(
     monkeypatch.setattr(
         lifecycle,
         "__init__",
-        lambda self, arguments, *, baseline, candidate: None,
+        lambda self, arguments, *, baseline, candidate, prebuilt: None,
     )
     monkeypatch.setattr(lifecycle, "__enter__", lambda self: self)
     monkeypatch.setattr(lifecycle, "__exit__", lambda self, *exc: False)
