@@ -34,6 +34,8 @@ class ProfileReasonCode(WireEnum):
     RETRY_EXECUTOR_UNAVAILABLE = "profile.retry_executor_unavailable"
     RETRY_INTENT_UNAVAILABLE = "profile.retry_intent_unavailable"
     RETRY_REVIEW_UNAVAILABLE = "profile.retry_review_unavailable"
+    #: A save named a revision other than the stored one; read again and rebuild.
+    REVISION_CONFLICT = "profile.revision_conflict"
     REVIEW_STALE = "profile.review_stale"
     RUNTIME_IMAGE_REBUILD_PENDING = "profile.runtime_image_rebuild_pending"
     SHARED_INSTALLATION_SCOPE = "profile.shared_installation_scope"
@@ -58,6 +60,7 @@ PROFILE_REFUSAL_CODES = frozenset(
         ProfileReasonCode.DEFINITION_UNAVAILABLE,
         ProfileReasonCode.REQUEST_INVALID,
         ProfileReasonCode.REVIEW_STALE,
+        ProfileReasonCode.REVISION_CONFLICT,
         ProfileReasonCode.SELECTION_LOST,
         ProfileReasonCode.STALE_PLAN,
     }

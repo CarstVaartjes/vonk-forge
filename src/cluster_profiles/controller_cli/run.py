@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import sys
 import time
 from collections.abc import Callable, Mapping
 from enum import StrEnum
@@ -11,6 +13,7 @@ from typing import Final, cast
 from ..cli_outcome import (
     operation_state,
 )
+from ..cli_render import terminal_text
 from ..cli_render.common import _text, _words
 from ..cli_select import SelectorError
 from ..control_client import (
@@ -24,16 +27,17 @@ from ..generated_control.models.fleet_profile_run_effect_action import (
 )
 from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
-from .confirmation import ActionDeclined, _require_confirmation
+from .confirmation import _require_confirmation
 from .profile import _profile
-from .profile_authoring import _profile_authoring
-from .profile_load import _load_profile
+from .profile_authoring import _profile_save, _read_saved_definition, _with_assignment
+from .profile_load import ReviewedDraft, _load_profile
 from .selection import (
     _library_pages,
     _observe_selection,
     _read_concurrently,
     _recipe_rows,
     _resolve_recipe_selector,
+    _resolve_spark_selectors,
     _selection_remaining,
     _skipped_read,
 )
@@ -46,10 +50,13 @@ def _run(
 ) -> dict[str, object]:
     """Run one exact library recipe; the Controller prepares what the load needs.
 
-    Two separate effects follow one invocation. The recipe is first saved into
-    the selected profile (the Controller can only review a saved
-    profile; the running fleet is unchanged), then the reviewed load starts it.
-    The load follows only a confirmed save; its owner decides admission.
+    The plan shown is the Controller's review of the profile with this recipe
+    added, before anything is saved. Declining sends nothing. Consent saves the
+    profile (the running fleet is unchanged), then starts the reviewed load; its
+    owner decides admission. A profile edited meanwhile, or a changed plan,
+    rebuilds the edit on the newest profile and asks again. If the command dies
+    between the save and the load, the profile is saved and the fleet unchanged;
+    running the same command again converges.
     """
     number = _profile_number(args)
     _require_confirmation(args, "run")
@@ -91,12 +98,12 @@ def _run(
     if not spark_names:
         spark_names = cast(list[str], fleet.get())
 
-    edit_args = argparse.Namespace(
-        command="profile",
+    save_args = argparse.Namespace(
         profile_number=number,
-        profile_action="add",
-        recipe_selector=selector,
-        spark=spark_names,
+        expected_revision=None,
+        timeout_seconds=max(0.01, _selection_remaining(deadline)),
+    )
+    edit_args = argparse.Namespace(
         assignment_name=args.assignment_name,
         model_variant=None,
         desired_state="running",
@@ -104,31 +111,90 @@ def _run(
         no_input=getattr(args, "no_input", False),
         global_json=getattr(args, "global_json", False),
         json=getattr(args, "json", False),
-        expected_revision=None,
-        timeout_seconds=max(0.01, _selection_remaining(deadline)),
     )
-    saved = _profile_authoring(edit_args, client)
-    if not getattr(edit_args, "profile_saved", False):
-        args.observation = getattr(edit_args, "observation", None)
-        return saved
+    # The first definition read rides with the selector resolutions.
+    recipe_outcome, spark_outcome, first_read = _read_concurrently(
+        lambda: _resolve_recipe_selector(client, selector, deadline=deadline),
+        lambda: _resolve_spark_selectors(client, spark_names, deadline=deadline),
+        lambda: _read_saved_definition(client, args),
+    )
+    recipe_selector = cast(str, recipe_outcome.get())
+    spark_ids = cast(list[str], spark_outcome.get())
+    prefetched = [first_read]
+    flags = list(edit_args.option)
+    flag_names = {flag.partition("=")[0] for flag in flags}
+    # Option answers this run was given; they outlive a rebuilt draft.
+    answered: dict[str, str] = {}
 
-    try:
-        application = _load_profile(
-            args,
-            client,
-            factory,
-            number,
-            question=f"Start {selector} on profile {number} with this reviewed plan?",
-            review_when_confirmed=True,
-            lead=lambda preview: _review_lead(
-                number, [names.get(name, name) for name in spark_names], preview
-            ),
+    def own_choices(definition) -> dict:
+        for assignment in definition["assignments"]:
+            if (
+                assignment["recipe_selector"] == recipe_selector
+                and assignment.get("assignment_name") == edit_args.assignment_name
+            ):
+                return assignment.get("option_choices") or {}
+        return {}
+
+    def draft() -> ReviewedDraft | dict:
+        """This run's edit on the newest saved profile; nothing is written yet.
+
+        A read that did not complete is returned as its observation instead.
+        """
+        current = (
+            cast(dict, prefetched.pop().get())
+            if prefetched
+            else _read_saved_definition(client, args)
         )
-    except ActionDeclined as declined:
-        raise ActionDeclined(
-            f"Not confirmed; the fleet is unchanged. {selector} stays in profile "
-            f"{number} as a saved profile.",
-        ) from declined
+        if args.observation.status != "complete":
+            return current
+        base = validate_control_document(
+            "FleetProfileDefinition", current["definition"]
+        )
+        saved_choices = own_choices(base)
+        edit_args.option = [
+            *flags,
+            *(f"{name}={value}" for name, value in answered.items()),
+        ]
+        definition = _with_assignment(
+            copy.deepcopy(base), recipe_selector, spark_ids, edit_args, client
+        )
+        # Only what this run chose is carried: an option with no saved choice
+        # was answered here; a saved choice stays the newest saved value.
+        answered.update(
+            {
+                name: value
+                for name, value in own_choices(definition).items()
+                if name not in saved_choices and name not in flag_names
+            }
+        )
+
+        def save() -> None:
+            saved = _profile_save(
+                save_args,
+                client,
+                definition,
+                current_revision=cast(int, current["revision"]),
+            )
+            if not (
+                getattr(args, "global_json", False) or getattr(args, "json", False)
+            ):
+                for note in cast(list[str], saved.get("warnings", ())):
+                    print(terminal_text(f"Note: {note}"), file=sys.stderr)
+
+        return ReviewedDraft(definition, save)
+
+    application = _load_profile(
+        args,
+        client,
+        factory,
+        number,
+        question=f"Start {selector} on profile {number} with this reviewed plan?",
+        review_when_confirmed=True,
+        lead=lambda preview: _review_lead(
+            number, [names.get(name, name) for name in spark_names], preview
+        ),
+        draft=draft,
+    )
     application_state = operation_state(application)
     if application_state not in {"succeeded", "completed"}:
         return {

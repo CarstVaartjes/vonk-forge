@@ -379,6 +379,7 @@ def _run_pty(
     answer: str | None = "yes",
     interrupt: bool = False,
     review_content: str,
+    replies: int = 1,
 ) -> tuple[int, str, str]:
     master, slave = pty.openpty()
     process = subprocess.Popen(
@@ -391,7 +392,7 @@ def _run_pty(
     )
     os.close(slave)
     transcript = bytearray()
-    answer_sent = False
+    answers_sent = 0
     deadline = time.monotonic() + 45
     try:
         while True:
@@ -407,14 +408,18 @@ def _run_pty(
                 if not chunk and process.poll() is not None:
                     break
                 transcript.extend(chunk)
-                if not answer_sent and review_content.encode() in transcript:
+                # One reply per time the review is shown (a changed plan asks again).
+                if (
+                    answers_sent < replies
+                    and transcript.count(review_content.encode()) > answers_sent
+                ):
                     if interrupt:
                         process.send_signal(signal.SIGINT)
                     elif answer is None:
                         os.write(master, b"\x04")
                     else:
                         os.write(master, f"{answer}\n".encode())
-                    answer_sent = True
+                    answers_sent += 1
             elif process.poll() is not None:
                 break
         stdout, _ = process.communicate(timeout=30)

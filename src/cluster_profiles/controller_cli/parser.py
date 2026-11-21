@@ -655,8 +655,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "run",
         help="Run a recipe in a profile",
         description="Get a recipe ready, review the plan, and start it on the fleet. "
-        "The recipe is first saved into the profile so the plan can be "
-        "reviewed; declining leaves it saved and the fleet unchanged.",
+        "The plan is reviewed before anything is saved; declining sends nothing. "
+        "Accepting saves the recipe into the profile, then starts it. If the "
+        "command stops between the save and the start, the profile is saved and "
+        "the fleet unchanged; run the same command again to finish.",
     )
     run.set_defaults(outcome_context="mutation", requires_profile=True)
     run.add_argument(

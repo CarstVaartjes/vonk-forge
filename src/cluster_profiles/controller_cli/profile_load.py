@@ -8,6 +8,7 @@ import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import redirect_stdout
+from dataclasses import dataclass, replace
 from typing import cast
 
 from ..cli_outcome import SubmissionAcceptance
@@ -15,6 +16,7 @@ from ..cli_render import render_payload
 from ..cli_states_generated import (
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
+    PROFILE_REVISION_CONFLICT,
 )
 from ..control_client import (
     ControlClientError,
@@ -22,6 +24,7 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
+from ..error_reporting import ClientCode, protocol_context
 from ..generated_control.models.fleet_profile_load_request import (
     FleetProfileLoadRequest,
 )
@@ -35,6 +38,20 @@ _REVIEW_STALE_CODE = PROFILE_REVIEW_STALE
 
 
 _MAX_REVIEW_ROUNDS = 3
+_CHANGED_QUESTION = "The plan changed since your review. Load profile {number} with the current effects?"
+
+
+@dataclass(frozen=True)
+class ReviewedDraft:
+    """An edit that exists only as a draft until the operator consents.
+
+    ``definition`` is previewed unsaved. ``save`` writes it against the revision
+    it was built on; it raises ``ControlConflict`` when the profile moved, and
+    the review is then rebuilt on the newest profile.
+    """
+
+    definition: object
+    save: Callable[[], None]
 
 
 def _reviewed_effects_digest(preview: object) -> str:
@@ -65,6 +82,7 @@ def _review_and_submit_profile_load(
     question: str,
     review_when_confirmed: bool,
     lead: Callable[[object], Sequence[str]] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -74,18 +92,37 @@ def _review_and_submit_profile_load(
     ``--yes`` skips the preview for a direct load. When
     ``review_when_confirmed`` shows a preview (``run`` does), its binding is
     still forwarded unchanged, including when confirmation was supplied.
+
+    With ``draft`` the plan shown is the unsaved edit's. Consent saves it, then
+    the load follows; a declined review sends nothing. A profile that moved
+    under the edit (save conflict) or a stale review rebuilds the draft on the
+    newest profile and asks again, so the newest request wins.
     """
 
     if args.yes and not review_when_confirmed:
         return _submit_profile_load(client, number, args, factory)
     review_attempt = 1
     while True:
+        reviewed = draft() if draft is not None else None
+        if isinstance(reviewed, dict):
+            # The profile could not be read in time; its observation ends the run.
+            return reviewed
+
         # Re-observe missing or unreadable bindings before asking for consent.
         # Review consent never authorizes an unbound current-plan submission.
-        def observe_preview(remaining: float) -> object:
+        body = (
+            None
+            if reviewed is None
+            else validate_control_document(
+                "FleetProfilePreviewRequest", {"definition": reviewed.definition}
+            )
+        )
+
+        def observe_preview(remaining: float, body=body) -> object:
             return client.request(
                 "POST",
                 f"/api/profile/{number}/preview",
+                body,
                 timeout_seconds=remaining,
                 retry=False,
             )
@@ -106,6 +143,20 @@ def _review_and_submit_profile_load(
         )
         if args.observation.status != "complete":
             return preview
+        if reviewed is not None and preview.get("profile_revision") is not None:
+            # A Controller that ignores the body previews the saved row: its
+            # plan would not show this edit, so nothing is written.
+            raise ControlMalformedResponse(
+                "This Controller cannot preview unsaved changes; update the "
+                "Controller, then run this again. Nothing was changed.",
+                context=replace(
+                    protocol_context(
+                        operation="profile preview",
+                        endpoint=f"/api/profile/{number}/preview",
+                    ),
+                    code=ClientCode.CONTRACT_MISMATCH,
+                ),
+            )
         effects_digest = _reviewed_effects_digest(preview)
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
@@ -114,6 +165,19 @@ def _review_and_submit_profile_load(
                         print(line)
                 render_payload(preview, "profile", action="preview")
         _confirm_action(args, question)
+        try:
+            if reviewed is not None:
+                reviewed.save()
+        except ControlConflict as error:
+            # Only a moved revision is a race; any other refusal ends the run.
+            if (
+                error.code != PROFILE_REVISION_CONFLICT
+                or review_attempt == _MAX_REVIEW_ROUNDS
+            ):
+                raise
+            question = _CHANGED_QUESTION.format(number=number)
+            review_attempt += 1
+            continue
         try:
             return _submit_profile_load(
                 client,
@@ -128,10 +192,7 @@ def _review_and_submit_profile_load(
             if error.code != _REVIEW_STALE_CODE or review_attempt == _MAX_REVIEW_ROUNDS:
                 raise
         review_attempt += 1
-        question = (
-            "The plan changed since your review. "
-            f"Load profile {number} with the current effects?"
-        )
+        question = _CHANGED_QUESTION.format(number=number)
 
 
 def _load_profile(
@@ -143,6 +204,7 @@ def _load_profile(
     question: str,
     review_when_confirmed: bool = False,
     lead: Callable[[object], Sequence[str]] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 
@@ -159,6 +221,7 @@ def _load_profile(
         question=question,
         review_when_confirmed=review_when_confirmed,
         lead=lead,
+        draft=draft,
     )
     if getattr(getattr(args, "observation", None), "status", None) in {
         "timed_out",

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
 from vonk_agent_protocol import DesiredAssignmentState, LifecycleState, RunSwitchCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_control.api import create_app
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
@@ -17,10 +21,14 @@ from vonk_control.fleet_profile_contract import (
     FleetProfilePreview,
     FleetProfileView,
 )
+from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.jobs import JobService
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    FleetProfileApplication,
     ModelCacheSet,
     NodeInventorySnapshot,
 )
@@ -31,6 +39,7 @@ from .test_fleet_profiles_canonical import NODE_1
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
+    _run_pty,
 )
 from .test_profile_load_submission import _profile_api
 
@@ -150,7 +159,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
     assert stale.returncode == 2
     assert stale.stdout.count("\n") == 1
     refusal = json.loads(stale.stdout)
-    assert refusal["code"] == ProfileReasonCode.REQUEST_INVALID
+    assert refusal["code"] == ProfileReasonCode.REVISION_CONFLICT
     assert "profile revision conflict" in refusal["detail"]
     assert concurrent_write_status == [200]
     assert state.calls == [
@@ -182,6 +191,128 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
     )
     assert fresh.status_code == 200
     assert fresh.json()["definition"]["name"] == "Fresh edit"
+
+
+_RUN_RECIPE = "vonk-forge/synthetic-tiny-build"
+_RUN_REVIEW = "Profile edited: 1"
+
+
+def _run_api(postgres_engine):
+    """The profile app with the recipe library, so `run` resolves its recipe."""
+    sessions, _api, codec, headers, _preview = _profile_api(postgres_engine)
+    now = datetime(2026, 9, 10, tzinfo=UTC)
+    library = LibraryProjection(
+        sessions, cursors=codec.cursor_codec(), clock=lambda: now
+    )
+    api = TestClient(
+        create_app(
+            jobs=JobService(sessions, clock=lambda: now),
+            tokens=codec,
+            now=lambda: 1,
+            fleet_profiles=FleetProfileService(sessions, clock=lambda: now),
+            library_projection=library,
+        )
+    )
+    return sessions, api, headers
+
+
+def _run_arguments() -> tuple[str, ...]:
+    # Nothing here executes the load; the follow ends at its short deadline.
+    return (
+        "--profile",
+        "1",
+        "run",
+        _RUN_RECIPE,
+        "--spark",
+        NODE_1,
+        "--timeout-seconds",
+        "5",
+    )
+
+
+def test_installed_run_declined_after_the_draft_review_changes_nothing(
+    installed_vonkctl: Path, postgres_engine, tmp_path: Path
+) -> None:
+    """Catches a run that saves the profile before the operator has consented."""
+    _sessions, api, headers = _run_api(postgres_engine)
+    before = api.get("/api/profile/1/definition", headers=headers).json()
+
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):
+        status, _stdout, transcript = _run_pty(
+            installed_vonkctl,
+            _run_arguments(),
+            _process_environment(tmp_path, url, certificate, headers),
+            tmp_path,
+            answer="no",
+            review_content=_RUN_REVIEW,
+        )
+
+    assert status == 2, transcript
+    (preview,) = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
+    draft = cast(dict, preview[2])["definition"]
+    assert draft["assignments"][0]["recipe_selector"] == _RUN_RECIPE
+    assert not [call for call in state.calls if call[0] == "PUT"]
+    assert api.get("/api/profile/1/definition", headers=headers).json() == before
+
+
+def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
+    installed_vonkctl: Path,
+    postgres_engine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a run that saves over a newer edit or loads a plan it did not show."""
+    sessions, api, headers = _run_api(postgres_engine)
+    before = api.get("/api/profile/1/definition", headers=headers).json()
+    revision = before["revision"]
+
+    with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):
+        original_request = state.api.request
+        competing: list[int] = []
+
+        def edit_after_first_preview(method: str, path: str, *args, **kwargs):
+            response = original_request(method, path, *args, **kwargs)
+            if method == "POST" and path.endswith("/preview") and not competing:
+                edited = original_request(
+                    "PUT",
+                    "/api/profile/1",
+                    headers=headers,
+                    json={
+                        **before["definition"],
+                        "description": "Edited while the plan was on screen",
+                        "expected_revision": revision,
+                    },
+                )
+                competing.append(edited.status_code)
+            return response
+
+        monkeypatch.setattr(state.api, "request", edit_after_first_preview)
+        _status, _stdout, transcript = _run_pty(
+            installed_vonkctl,
+            _run_arguments(),
+            _process_environment(tmp_path, url, certificate, headers),
+            tmp_path,
+            review_content=_RUN_REVIEW,
+            replies=2,
+        )
+
+    assert competing == [200], transcript
+    puts = [call for call in state.calls if call[0] == "PUT"]
+    assert [cast(dict, call[2])["expected_revision"] for call in puts] == [
+        revision,
+        revision + 1,
+    ]
+    saved = api.get("/api/profile/1/definition", headers=headers).json()
+    assert saved["revision"] == revision + 2
+    assert saved["definition"]["description"] == "Edited while the plan was on screen"
+    assert [a["recipe_selector"] for a in saved["definition"]["assignments"]] == [
+        _RUN_RECIPE
+    ]
+    (load,) = [call for call in state.calls if call[1] == "/api/profile/1/load"]
+    previews = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
+    assert len(previews) == 2 and cast(dict, load[2])["review"]["effects_digest"]
+    with sessions() as session:
+        assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
 
 @pytest.mark.parametrize("action", ["remove", "pin"])

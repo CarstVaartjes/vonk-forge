@@ -273,7 +273,8 @@ class FakeClient:
             assert payload == {"disposition": "resume"}
             return
         if path.endswith("/preview"):
-            assert payload is None
+            if payload is not None:
+                validate_control_document("FleetProfilePreviewRequest", payload)
             assert installation_reconcile_path is not None or profile_path is not None
         elif path.endswith("/delete"):
             assert profile_path is not None
@@ -5162,7 +5163,18 @@ def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
     assert _effects(client) == []
 
 
-def test_declined_run_exits_nonzero_and_says_the_profile_was_saved(monkeypatch) -> None:
+def _bodies(client: FakeClient, method: str, path: str) -> list[dict]:
+    """The request bodies sent to one route, in order."""
+    return [
+        cast(dict, call[2])
+        for call in client.calls
+        if call[0] == method and call[1] == path
+    ]
+
+
+def test_declined_run_sends_no_put_and_leaves_the_profile_unchanged(
+    monkeypatch,
+) -> None:
     client = FakeClient(_run_responses())
     prompt = _Prompt(monkeypatch, "no")
 
@@ -5173,9 +5185,316 @@ def test_declined_run_exits_nonzero_and_says_the_profile_was_saved(monkeypatch) 
     )
 
     assert status == 2
-    # The recipe was saved to review its plan; nothing was loaded.
-    assert _effects(client) == [("PUT", "/api/profile/1")]
+    assert _effects(client) == []
     assert "control.api_error" not in prompt.transcript
+    # The reviewed plan was the unsaved draft's, with this recipe in it.
+    (draft,) = _bodies(client, "POST", "/api/profile/1/preview")
+    assert [a["recipe_selector"] for a in draft["definition"]["assignments"]] == [
+        "vonk-forge/qwen-code"
+    ]
+
+
+def test_accepted_run_saves_the_reviewed_draft_then_loads_bound_to_its_digest(
+    monkeypatch,
+) -> None:
+    client = FakeClient(_run_responses())
+    prompt = _Prompt(monkeypatch, "yes")
+    client.responses[("PUT", "/api/profile/1")] = {
+        "number": 1,
+        "revision": 1,
+        "definition": {},
+        "warnings": ["Option x is no longer offered by the recipe"],
+    }
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0, prompt.transcript
+    sent = [(c[0], c[1]) for c in client.calls if c[0] in {"PUT", "POST"}]
+    assert sent == [
+        ("POST", "/api/profile/1/preview"),
+        ("PUT", "/api/profile/1"),
+        ("POST", "/api/profile/1/load"),
+    ]
+    (put,) = _bodies(client, "PUT", "/api/profile/1")
+    (preview,) = _bodies(client, "POST", "/api/profile/1/preview")
+    assert put["expected_revision"] == 0
+    assert {k: v for k, v in put.items() if k != "expected_revision"} == preview[
+        "definition"
+    ]
+    (load,) = _bodies(client, "POST", "/api/profile/1/load")
+    assert load["review"] == {"effects_digest": _RUN_DIGEST}
+    assert "no longer offered" in prompt.transcript
+
+
+def test_run_rebuilds_on_the_newest_profile_when_the_save_conflicts(
+    monkeypatch,
+) -> None:
+    base = _run_responses()
+    older = base[("GET", "/api/profile/1/definition")]
+    older = cast(dict, older)
+    newest = {
+        **older,
+        "revision": 5,
+        "definition": {**older["definition"], "description": "edited elsewhere"},
+    }
+    client = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [older, newest],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(
+                    409, "profile revision conflict", code="profile.revision_conflict"
+                ),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+    prompt = _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0, prompt.transcript
+    puts = [
+        put["expected_revision"] for put in _bodies(client, "PUT", "/api/profile/1")
+    ]
+    assert puts == [0, 5]
+    assert len(_bodies(client, "POST", "/api/profile/1/preview")) == 2
+
+
+def test_run_converges_when_the_profile_already_holds_the_assignment(
+    monkeypatch,
+) -> None:
+    """A rerun after a death between save and load: equal-content save, bound load."""
+    base = _run_responses()
+    first = cli.main
+    client = FakeClient(base)
+    _Prompt(monkeypatch, "yes")
+    assert (
+        first(
+            ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+            control_client=client,
+            request_id_factory=lambda: _RUN_KEY,
+        )
+        == 0
+    )
+    (saved,) = _bodies(client, "PUT", "/api/profile/1")
+    held = {k: v for k, v in saved.items() if k != "expected_revision"}
+    rerun = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): {
+                **cast(dict, base[("GET", "/api/profile/1/definition")]),
+                "revision": 1,
+                "definition": held,
+            }
+        }
+    )
+    _Prompt(monkeypatch, "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=rerun,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    (put,) = _bodies(rerun, "PUT", "/api/profile/1")
+    assert put == {**held, "expected_revision": 1}
+    (load,) = _bodies(rerun, "POST", "/api/profile/1/load")
+    assert load["review"] == {"effects_digest": _RUN_DIGEST}
+
+
+def test_run_ends_with_the_observation_when_the_profile_read_times_out(
+    vonkctl_json,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {("GET", "/api/profile/1/definition"): ControlUnavailable(503, "down")}
+    )
+
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
+        "--timeout-seconds",
+        "1",
+        "--interval-seconds",
+        "0.05",
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert document["observation"]["status"] == "timed_out"
+    assert _effects(client) == []
+
+
+_RUN_OPTIONS = [
+    {
+        "name": "verification",
+        "label": "Verification",
+        "help": "How drafted tokens are verified.",
+        "choices": [
+            {"value": "standard", "label": "Standard", "help": "h", "default": True},
+            {"value": "adaptive-k", "label": "Adaptive", "help": "h"},
+        ],
+    },
+    {
+        "name": "projections",
+        "label": "Projections",
+        "help": "Dense projection precision.",
+        "choices": [
+            {"value": "stock", "label": "Stock", "help": "h", "default": True},
+            {"value": "dense-fp8", "label": "FP8", "help": "h"},
+        ],
+    },
+]
+_ATLAS_ID = "spk_" + "a" * 32
+
+
+def _option_run(definitions: list[dict]) -> FakeClient:
+    """A run whose recipe declares options and whose first save hits a race."""
+    base = _run_responses()
+    detail = cast(dict, base[("GET", "/api/recipe/vonk-forge%2Fqwen-code")])
+    detail["projected"]["options"] = _RUN_OPTIONS
+    view = cast(dict, base[("GET", "/api/profile/1/definition")])
+    return FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [
+                {**view, "revision": number, "definition": definition}
+                for number, definition in enumerate(definitions)
+            ],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(
+                    409, "profile revision conflict", code="profile.revision_conflict"
+                ),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+
+
+def _empty_definition() -> dict:
+    return {
+        "name": "Default",
+        "description": "",
+        "favorite": False,
+        "installation_policy": "keep-cached",
+        "labels": {},
+        "assignments": [],
+    }
+
+
+def _assignment(choices: dict[str, str]) -> dict:
+    return {
+        "recipe_selector": "vonk-forge/qwen-code",
+        "spark_ids": [_ATLAS_ID],
+        "desired_state": "running",
+        "option_choices": choices,
+    }
+
+
+def _saved_choices(client: FakeClient) -> list[dict]:
+    return [
+        put["assignments"][0]["option_choices"]
+        for put in _bodies(client, "PUT", "/api/profile/1")
+    ]
+
+
+def test_run_keeps_option_answers_across_a_rebuild_without_asking_again(
+    monkeypatch,
+) -> None:
+    client = _option_run([_empty_definition(), _empty_definition()])
+    # Two answers for the options, then consent in each of the two rounds.
+    _Prompt(monkeypatch, "adaptive-k", "dense-fp8", "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    chosen = {"verification": "adaptive-k", "projections": "dense-fp8"}
+    assert _saved_choices(client) == [chosen, chosen]
+
+
+def test_run_lets_a_newer_saved_choice_win_over_one_it_never_asked(
+    monkeypatch,
+) -> None:
+    saved = _assignment({"projections": "stock"})
+    newer = _assignment({"projections": "dense-fp8"})
+    client = _option_run(
+        [
+            {**_empty_definition(), "assignments": [saved]},
+            {**_empty_definition(), "assignments": [newer]},
+        ]
+    )
+    # Only the option without a saved choice is asked, in round one.
+    _Prompt(monkeypatch, "adaptive-k", "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    assert _saved_choices(client) == [
+        {"projections": "stock", "verification": "adaptive-k"},
+        {"projections": "dense-fp8", "verification": "adaptive-k"},
+    ]
+
+
+def test_run_does_not_retry_a_refused_save_that_is_not_a_newer_profile(
+    monkeypatch,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {("PUT", "/api/profile/1"): ControlConflict(409, "recipe is not offered")}
+    )
+    _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == [("PUT", "/api/profile/1")]
+
+
+def test_run_refuses_before_writing_when_the_controller_ignores_the_draft(
+    monkeypatch,
+) -> None:
+    saved_row_preview = {**_run_preview("b" * 64, _RUN_DIGEST), "profile_revision": 3}
+    client = FakeClient(
+        _run_responses() | {("POST", "/api/profile/1/preview"): saved_row_preview}
+    )
+    _Prompt(monkeypatch, "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert _effects(client) == []
 
 
 def test_run_review_leads_with_profile_sparks_and_what_stops(monkeypatch) -> None:

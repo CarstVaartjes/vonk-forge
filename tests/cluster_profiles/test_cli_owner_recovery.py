@@ -273,6 +273,7 @@ def test_run_does_not_load_an_unconfirmed_draft_and_fresh_save_is_admitted():
                 "definition": definition,
             },
             ("PUT", "/api/profile/1"): ControlTransportError(),
+            ("POST", "/api/profile/1/preview"): {"effects_digest": "a" * 64},
         }
     )
     argv = (
@@ -293,7 +294,6 @@ def test_run_does_not_load_an_unconfirmed_draft_and_fresh_save_is_admitted():
         "revision": 4,
         "definition": definition,
     }
-    client.responses[("POST", "/api/profile/1/preview")] = {"effects_digest": "a" * 64}
     client.responses[("POST", "/api/profile/1/load")] = {
         "id": FRESH,
         "request_key": KEY,
