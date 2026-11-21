@@ -75,10 +75,8 @@ ENVIRONMENT_LOCK = ".state/commit-checks/environment.lock"
 DEFAULT_ENVIRONMENT = ".venv"
 
 
-def _fingerprint(root: Path, names: Sequence[str], source: str | None) -> str:
+def _fingerprint(root: Path, names: Sequence[str]) -> str:
     inputs = [root / name for name in names]
-    if source is not None:
-        inputs.extend(sorted((root / source).rglob("*.py")))
     return hashlib.sha256(b"".join(path.read_bytes() for path in inputs)).hexdigest()
 
 
@@ -107,7 +105,6 @@ def ensure_control(root: Path, environment: Path) -> None:
             "nas_setup/hatch_build.py",
             "agent_protocol/pyproject.toml",
         ),
-        None,
     )
     stamp = environment / ".commit-check-inputs"
 
@@ -183,7 +180,6 @@ def ensure_protocol(root: Path, environment: Path) -> None:
     fingerprint = _fingerprint(
         root,
         ("uv.lock", "pyproject.toml", "agent_protocol/pyproject.toml"),
-        None,
     )
     stamp = environment / ".protocol-inputs"
 

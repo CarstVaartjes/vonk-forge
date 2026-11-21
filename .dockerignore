@@ -16,6 +16,7 @@ src/*
 !control/pyproject.toml
 !control/packaging/
 !control/packaging/**
+control/.venv
 !control/src/
 !control/src/**
 !control/web/
