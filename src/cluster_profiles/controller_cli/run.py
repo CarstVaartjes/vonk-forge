@@ -17,7 +17,6 @@ from ..cli_render import terminal_text
 from ..cli_render.common import _text, _words
 from ..cli_select import SelectorError
 from ..control_client import (
-    ControlConflict,
     ControlMalformedResponse,
     validate_control_document,
 )
@@ -122,7 +121,19 @@ def _run(
     recipe_selector = cast(str, recipe_outcome.get())
     spark_ids = cast(list[str], spark_outcome.get())
     prefetched = [first_read]
-    refused: list[tuple[int, ControlConflict]] = []
+    flags = list(edit_args.option)
+    flag_names = {flag.partition("=")[0] for flag in flags}
+    # Option answers this run was given; they outlive a rebuilt draft.
+    answered: dict[str, str] = {}
+
+    def own_choices(definition) -> dict:
+        for assignment in definition["assignments"]:
+            if (
+                assignment["recipe_selector"] == recipe_selector
+                and assignment.get("assignment_name") == edit_args.assignment_name
+            ):
+                return assignment.get("option_choices") or {}
+        return {}
 
     def draft() -> ReviewedDraft | dict:
         """This run's edit on the newest saved profile; nothing is written yet.
@@ -136,38 +147,34 @@ def _run(
         )
         if args.observation.status != "complete":
             return current
-        saved_at = cast(int, current["revision"])
-        if refused and refused[-1][0] == saved_at:
-            # Refused over the same saved revision: not a race, so not retried.
-            raise refused[-1][1]
-        definition = _with_assignment(
-            copy.deepcopy(
-                validate_control_document(
-                    "FleetProfileDefinition", current["definition"]
-                )
-            ),
-            recipe_selector,
-            spark_ids,
-            edit_args,
-            client,
+        base = validate_control_document(
+            "FleetProfileDefinition", current["definition"]
         )
-        # Answers given in round 1 stay answers when the draft is rebuilt.
+        saved_choices = own_choices(base)
         edit_args.option = [
-            f"{name}={value}"
-            for assignment in cast(list, definition["assignments"])
-            if assignment["recipe_selector"] == recipe_selector
-            and assignment.get("assignment_name") == edit_args.assignment_name
-            for name, value in (assignment.get("option_choices") or {}).items()
+            *flags,
+            *(f"{name}={value}" for name, value in answered.items()),
         ]
+        definition = _with_assignment(
+            copy.deepcopy(base), recipe_selector, spark_ids, edit_args, client
+        )
+        # Only what this run chose is carried: an option with no saved choice
+        # was answered here; a saved choice stays the newest saved value.
+        answered.update(
+            {
+                name: value
+                for name, value in own_choices(definition).items()
+                if name not in saved_choices and name not in flag_names
+            }
+        )
 
         def save() -> None:
-            try:
-                saved = _profile_save(
-                    save_args, client, definition, current_revision=saved_at
-                )
-            except ControlConflict as conflict:
-                refused.append((saved_at, conflict))
-                raise
+            saved = _profile_save(
+                save_args,
+                client,
+                definition,
+                current_revision=cast(int, current["revision"]),
+            )
             if not (
                 getattr(args, "global_json", False) or getattr(args, "json", False)
             ):

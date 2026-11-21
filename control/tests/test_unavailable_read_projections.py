@@ -239,7 +239,7 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
         json={**replacement, "expected_revision": 0},
     )
     assert stale.status_code == 409, stale.text
-    assert stale.headers["x-vonk-error-code"] == ProfileReasonCode.REQUEST_INVALID
+    assert stale.headers["x-vonk-error-code"] == ProfileReasonCode.REVISION_CONFLICT
     assert "revision conflict" in stale.json()["detail"]
     invalid = client.put(
         "/api/profile/1", headers=headers, json={**replacement, "labels": []}

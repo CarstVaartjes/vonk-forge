@@ -61,6 +61,7 @@ def cli_words() -> str:
         "ENROLLMENT_PENDING": EnrollmentGrantState.PENDING,
         "UNKNOWN": OutcomeKind.UNKNOWN,
         "PROFILE_REVIEW_STALE": ProfileReasonCode.REVIEW_STALE,
+        "PROFILE_REVISION_CONFLICT": ProfileReasonCode.REVISION_CONFLICT,
         "NEEDS_OPERATOR": LifecycleState.NEEDS_OPERATOR,
         "QUEUED": LifecycleState.QUEUED,
         "RUNNING": LifecycleState.RUNNING,

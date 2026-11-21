@@ -22,7 +22,7 @@ from ..models import (
     FleetProfileRecipe,
     FleetProfileSelection,
 )
-from .contracts import FleetProfileInvalid
+from .contracts import FleetProfileRevisionConflict
 
 if TYPE_CHECKING:
     from .service import FleetProfileService as _FleetProfileService
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 def _stale(expected: int | None, current: int) -> None:
     if expected is not None and expected != current:
-        raise FleetProfileInvalid(
+        raise FleetProfileRevisionConflict(
             f"profile revision conflict: expected {expected}, current {current}",
             reason=InvalidRequestReason.CONFLICT,
         )
@@ -78,7 +78,7 @@ class FleetProfileService:
                     ),
                     actor=actor,
                 )
-            except (FleetProfileInvalid, MissingRecord):
+            except (FleetProfileRevisionConflict, MissingRecord):
                 # Already ended, already cancelling, or gone: nothing to cancel.
                 continue
 

@@ -13103,6 +13103,7 @@
         "profile.retry_executor_unavailable",
         "profile.retry_intent_unavailable",
         "profile.retry_review_unavailable",
+        "profile.revision_conflict",
         "profile.review_stale",
         "profile.runtime_image_rebuild_pending",
         "profile.shared_installation_scope",

@@ -870,8 +870,10 @@ unchanged. Accepting has two separate effects: the profile is saved with the
 recipe (saving does not change the running fleet), then the reviewed plan is
 loaded. Without `--yes`, a run that cannot ask (JSON, redirected input,
 `--no-input`) does nothing. If the profile was edited meanwhile, or the plan
-changed, `run` rebuilds the change on the newest profile and asks again (up to
-three rounds). If the command dies between the save and the load, the profile is
+changed (the Controller answers `profile.revision_conflict` or
+`profile.review_stale`), `run` rebuilds the change on the newest profile and asks
+again (up to three rounds). Option answers you gave stay; saved choices stay
+the newest saved value. If the command dies between the save and the load, the profile is
 saved and the fleet unchanged; run the same command again and it converges.
 The Controller must be current: one that cannot preview unsaved changes is
 refused before anything is written.

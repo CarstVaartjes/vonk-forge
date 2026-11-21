@@ -159,7 +159,7 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
     assert stale.returncode == 2
     assert stale.stdout.count("\n") == 1
     refusal = json.loads(stale.stdout)
-    assert refusal["code"] == ProfileReasonCode.REQUEST_INVALID
+    assert refusal["code"] == ProfileReasonCode.REVISION_CONFLICT
     assert "profile revision conflict" in refusal["detail"]
     assert concurrent_write_status == [200]
     assert state.calls == [

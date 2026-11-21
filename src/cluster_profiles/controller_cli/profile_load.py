@@ -16,6 +16,7 @@ from ..cli_render import render_payload
 from ..cli_states_generated import (
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
+    PROFILE_REVISION_CONFLICT,
 )
 from ..control_client import (
     ControlClientError,
@@ -167,8 +168,12 @@ def _review_and_submit_profile_load(
         try:
             if reviewed is not None:
                 reviewed.save()
-        except ControlConflict:
-            if review_attempt == _MAX_REVIEW_ROUNDS:
+        except ControlConflict as error:
+            # Only a moved revision is a race; any other refusal ends the run.
+            if (
+                error.code != PROFILE_REVISION_CONFLICT
+                or review_attempt == _MAX_REVIEW_ROUNDS
+            ):
                 raise
             question = _CHANGED_QUESTION.format(number=number)
             review_attempt += 1

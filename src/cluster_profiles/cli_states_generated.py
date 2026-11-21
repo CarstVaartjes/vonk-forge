@@ -54,6 +54,7 @@ PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"
 UNKNOWN = "unknown"
 PROFILE_REVIEW_STALE = "profile.review_stale"
+PROFILE_REVISION_CONFLICT = "profile.revision_conflict"
 NEEDS_OPERATOR = "needs-operator"
 QUEUED = "queued"
 RUNNING = "running"
@@ -105,6 +106,7 @@ PROFILE_REFUSAL_CODES = frozenset(
         "profile.definition_unavailable",
         "profile.request_invalid",
         "profile.review_stale",
+        "profile.revision_conflict",
         "profile.selection_lost",
         "profile.stale_plan",
     }
