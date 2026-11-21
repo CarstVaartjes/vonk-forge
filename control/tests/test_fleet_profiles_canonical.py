@@ -476,6 +476,46 @@ def test_a_draft_review_equals_the_review_after_the_same_save(number: int) -> No
     assert reviewed.profile_definition == after.profile_definition
 
 
+def _draft_input_as_save() -> FleetProfileInput:
+    return FleetProfileInput(**_draft_input().model_dump())
+
+
+def test_a_draft_equal_to_the_stored_definition_is_reviewed_as_the_replayed_save() -> (
+    None
+):
+    from vonk_control.catalog_entities import CatalogEntityService
+
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    saved = service.update_number(1, _draft_input_as_save(), actor="test")
+    # A catalog refresh adds options; a save of equal content still replays
+    # without normalising, so the draft review must not add them either.
+    with sessions() as session:
+        document = json.loads(
+            json.dumps(
+                session.get(CatalogDocumentRevision, RECIPE_REVISION_ID).document
+            )
+        )
+    document["options"] = RECIPE_OPTIONS
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    revision = catalog.revise(RECIPE_DOCUMENT_ID, document, actor="test")
+    catalog.resolve(revision.id, actor="test")
+
+    definition = service.definition_number(1).definition
+    assert definition is not None
+    draft = service.preview_draft(1, definition)
+    replayed = service.update_number(
+        1,
+        FleetProfileInput(**definition.model_dump(), expected_revision=saved.revision),
+        actor="test",
+    )
+    after = service.preview(replayed.id)
+
+    assert draft.profile_revision is None
+    assert draft.effects_digest == after.effects_digest
+
+
 def test_a_draft_is_refused_like_a_save() -> None:
     sessions = _sessions()
     _seed(sessions)

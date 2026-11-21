@@ -168,23 +168,32 @@ class FleetProfileService:
                 # An unsaved draft is previewed as its own content: the same
                 # normalisation a save applies, then the one resolver. It names
                 # no stored revision and writes nothing.
-                canonical, _notes = self._validated_assignments(
-                    session,
-                    draft_definition.assignments,
-                    retained_selectors=frozenset(
-                        item.recipe_selector
-                        for item in self._definition(row).assignments
+                readable = self._readable_definition(row) if row is not None else None
+                stored = (
+                    readable if isinstance(readable, FleetProfileDefinition) else None
+                )
+                if stored is not None and stored == draft_definition:
+                    # A save of equal content replays without normalising, so
+                    # the review is of the stored definition as it is.
+                    reviewed = stored
+                else:
+                    canonical, _notes = self._validated_assignments(
+                        session,
+                        draft_definition.assignments,
+                        retained_selectors=frozenset(
+                            item.recipe_selector for item in stored.assignments
+                        )
+                        if stored is not None
+                        else frozenset(),
                     )
-                    if row is not None
-                    else frozenset(),
-                )
-                resolved_definition = draft_definition.model_copy(
-                    update={"assignments": canonical}
-                )
-                choices = tuple(canonical)
+                    reviewed = draft_definition.model_copy(
+                        update={"assignments": canonical}
+                    )
+                resolved_definition = reviewed
+                choices = tuple(reviewed.assignments)
                 resolved_assignments = self._execution_assignments(session, choices)
                 resolved_name = draft_definition.name
-                resolved_digest = _digest(resolved_definition)
+                resolved_digest = _digest(reviewed)
                 installation_policy = draft_definition.installation_policy
                 resolved_revision = None
             elif row is None:
