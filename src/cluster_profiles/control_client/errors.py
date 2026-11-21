@@ -6,7 +6,7 @@ import math
 import re
 from collections.abc import Mapping
 from email.message import Message
-from typing import TYPE_CHECKING, Protocol, Self, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
 
 from jsonschema import Draft202012Validator, validators
 
@@ -139,18 +139,13 @@ class ControlNotConfigured(ControlClientError):
 
     code = ClientCode.NOT_CONFIGURED.value
     recovery = (
-        "In the Controller, open the operator menu and choose Download CLI token",
-        (
-            "Set VONK_CONTROL_URL to the Controller address and "
-            "VONK_CONTROL_TOKEN_FILE to the downloaded file"
-        ),
+        "vonkctl auth login https://<controller>",
         "vonkctl --check-connection",
     )
 
     def __init__(self) -> None:
         super().__init__(
-            "vonkctl is not connected to a Controller: set VONK_CONTROL_URL "
-            "and VONK_CONTROL_TOKEN_FILE"
+            "vonkctl is not connected to a Controller: run vonkctl auth login"
         )
 
 
@@ -384,7 +379,10 @@ class ControlHTTPError(ControlClientError):
 
 
 class ControlUnauthorized(ControlHTTPError):
-    pass
+    def __init__(
+        self, *args: Any, recovery: tuple[str, ...] = (), **kwargs: Any
+    ) -> None:
+        super().__init__(*args, recovery=recovery or ("vonkctl auth login",), **kwargs)
 
 
 class ControlForbidden(ControlHTTPError):

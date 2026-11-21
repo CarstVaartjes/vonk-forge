@@ -259,5 +259,6 @@ uv tool uninstall vonk-cluster-profiles
 ```
 
 (`uv tool list` shows the exact name.) Delete `~/.cache/vonkctl/` (or
-`$XDG_CACHE_HOME/vonkctl/`), the update-notice cache, and the token file you
-created for `VONK_CONTROL_TOKEN_FILE`.
+`$XDG_CACHE_HOME/vonkctl/`), the update-notice cache, and the login
+(`vonkctl auth logout`, or delete `~/.config/vonkctl/`; also any token file you
+created for `VONK_CONTROL_TOKEN_FILE`).

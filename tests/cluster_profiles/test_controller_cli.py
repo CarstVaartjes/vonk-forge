@@ -841,6 +841,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
         "key",
         "run",
         "update",
+        "auth",
         "completion",
     }
     for argv in (

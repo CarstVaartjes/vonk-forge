@@ -16,6 +16,9 @@ operation the configured CLI supports. Documentation research is separate.
 Distinguish sandbox/network/socket denial from missing authentication before
 requesting login. Keep credentials out of output, arguments, and tracked files;
 never fall back from a scoped service account to a personal desktop session.
+The Controller login is `vonkctl auth login` (admin password at a no-echo
+prompt, never stored; token in `~/.config/vonkctl/`): agents never read those
+files or handle the password.
 Existing credentials do not authorize unrelated remote changes. A locked,
 awake user session is not proof of availability after logout, sleep, or reboot.
 
