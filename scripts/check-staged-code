@@ -55,6 +55,10 @@ def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
         # the Mac home inherits the host ~/.cargo/config.toml rustc-wrapper, which
         # breaks clippy's env!(CARGO_BIN_EXE_*). The VM never uses a wrapper.
         "export CARGO_BUILD_RUSTC_WRAPPER= && "
+        # The checkout is shared with the Mac; build.rs prepares the protocol
+        # environment, so the VM keeps its own Linux venv, never the Mac .venv.
+        f'export UV_PROJECT_ENVIRONMENT="$HOME/venv-vonk-ci/{target_key}" && '
+        'scripts/ensure-project-venv "$UV_PROJECT_ENVIRONMENT" && '
         "export CARGO_BUILD_JOBS=2 && "
         f"exec timeout --signal=TERM --kill-after={grace:.3f}s "
         f"{remaining - grace:.3f}s "
