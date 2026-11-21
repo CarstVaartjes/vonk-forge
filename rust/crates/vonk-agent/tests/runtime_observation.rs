@@ -77,7 +77,7 @@ fn unbound_install_to_bound_start_retains_exact_inspection_arguments() {
 fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan) {
     let root = tempdir().unwrap();
     if started.runtime.placement.world_size == 1 {
-        started.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+        started.runtime.placement.endpoint_address = Some("127.0.0.2".parse().unwrap());
         started.security.network_mode = "bridge".parse().unwrap();
     }
     let mut installed = started.clone();
@@ -131,7 +131,7 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
         .argv
         .push("--different-workload".into());
     let mut changed_placement = started.clone();
-    changed_placement.runtime.placement.endpoint_address = Some("192.168.1.213".parse().unwrap());
+    changed_placement.runtime.placement.endpoint_address = Some("127.0.0.3".parse().unwrap());
     for tampered in [changed_workload, changed_placement] {
         fs::write(&retained_path, serde_json::to_vec(&tampered).unwrap()).unwrap();
         assert!(
@@ -647,7 +647,7 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
 fn native_observation_plan(root: &Path) -> CompiledExecutionPlan {
     let mut plan = schema2_single_plan();
     persist_plan(root, &plan);
-    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.runtime.placement.endpoint_address = Some("127.0.0.2".parse().unwrap());
     plan.security.network_mode = "bridge".parse().unwrap();
     plan.validate().unwrap();
     plan
