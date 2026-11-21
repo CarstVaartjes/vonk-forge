@@ -123,23 +123,6 @@ jobs:
           printf 'candidate=%s\nbaseline=%s\n' "$candidate" "$baseline" >> "$GITHUB_OUTPUT"
           printf 'Candidate %s; baseline %s\n' "$candidate" "${baseline:-none}"
 
-      - name: Resolve exact canonical recipe library source
-        id: recipe-library-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-
-      - name: Check out exact canonical recipe library
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-library-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-
       - name: Install uv and Python
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
@@ -148,8 +131,10 @@ jobs:
           enable-cache: true
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
 
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
@@ -202,6 +187,7 @@ jobs:
             --candidate-generation "$CANDIDATE" \
             --baseline-generation "$BASELINE" \
             --run-id "$GITHUB_RUN_ID" \
+            --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
             --output "$RUNNER_TEMP/upgrade-carry/report.json"
 
       - name: Upload upgrade-carry report

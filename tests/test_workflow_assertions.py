@@ -281,6 +281,38 @@ def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_r
     assert steps.index(save) > build
 
 
+def test_acceptance_jobs_use_the_cached_built_recipe_library_and_pass_it_on() -> None:
+    """Catches an acceptance job rebuilding the library by hand, taking the cached
+    one before uv exists, or a carry harness that does not receive the built root."""
+    workflows = ROOT / ".github/workflows"
+    core = yaml.safe_load((workflows / "release-acceptance-core.yml").read_text())
+    carry = yaml.safe_load((workflows / "spark-upgrade-acceptance.yml").read_text())
+    for steps in (
+        core["jobs"]["spark-acceptance"]["steps"],
+        carry["jobs"]["carry"]["steps"],
+    ):
+        assert not any("build-recipe-library" in s.get("run", "") for s in steps)
+        [provide] = [
+            i
+            for i, s in enumerate(steps)
+            if s.get("uses") == "./.github/actions/recipe-library"
+        ]
+        assert steps[provide]["with"] == {"build": "true"}
+        # The action's build needs uv, which an earlier step must have installed.
+        assert any(
+            s.get("uses", "").startswith(
+                ("astral-sh/setup-uv", "./.github/actions/python-env")
+            )
+            for s in steps[:provide]
+        )
+    [run] = [
+        s
+        for s in carry["jobs"]["carry"]["steps"]
+        if "spark_upgrade_carry.py" in s.get("run", "")
+    ]
+    assert '--library-root "$VONK_RECIPE_LIBRARY_ROOT"' in run["run"]
+
+
 def test_main_warms_the_built_recipe_library() -> None:
     """ci.yml rarely runs on main, so the warm workflow saves the built tree."""
     warm = yaml.safe_load((ROOT / ".github/workflows/ci-cache-warm.yml").read_text())

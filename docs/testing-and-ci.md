@@ -433,7 +433,12 @@ catalog index or packages: generate them once per checkout revision with
 `recipe-library` action does it with `build: "true"` and caches the built tree
 under the reviewed revision plus the hash of `scripts/build-recipe-library`
 (the build's identity); `ci-cache-warm.yml` builds and saves it on main when the revision, the build script or the action changes, and a job that finds it
-skips the build without waiting on any other job.
+skips the build without waiting on any other job. The Spark acceptance jobs
+(clean Spark in `release-acceptance-core.yml`, the refresh and carry lanes in
+`spark-upgrade-acceptance.yml`) use the same action instead of building by hand.
+The carry harness receives that root as `--library-root` and reuses it for any
+release that names the same revision and the same build script; a release that
+names another revision or script is still fetched and built by the harness.
 
 The native Rust agent and its wire contract build only for Linux. The
 `control/tests/*_wire_bridge.py` suites consume probes produced by
