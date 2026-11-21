@@ -1,8 +1,6 @@
 """One complete actual worker observation drives the stable update authority."""
 
-import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import NoReturn
 
 from fastapi.testclient import TestClient
@@ -20,8 +18,6 @@ from vonk_control.platform_observation import PlatformObservation, PlatformObser
 from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 class Jobs:
@@ -179,9 +175,7 @@ def test_cli_fingerprint_function_equals_the_servers() -> None:
     openapi = admin_openapi_schema(
         create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
     )
-    wire = json.loads(
-        (ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json").read_text()
-    )
+    wire = {"$defs": {"A": {"type": "object", "title": "é"}}, "n": [1, None]}
     for document in (openapi, wire):
         assert runtime_identity.contract_fingerprint(
             document

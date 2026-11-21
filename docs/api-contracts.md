@@ -239,14 +239,16 @@ or equality between two manually written fixtures is insufficient.
 ## Rust and generated clients
 
 The server never imports vonkctl. The Controller owns the document bound
-(`vonk_control.control_limits`) and the contract fingerprint
-(`vonk_control.build_identity`); `scripts/generate-control-clients` writes
-`generated_control/limits.py` and `fingerprint.py` for the CLI beside
-`media_types.py`. The Controller reads its own `build-identity.json` from the
-image, which `tools/stamp_build_identity.py` writes: the Dockerfile's
-`server-identity` stage and the CLI wheel hook run that one writer, so one tree
-gives the Controller and vonkctl the same `control_contract_sha256`
-(`control/tests/test_cli_update_contract.py` proves it).
+(`vonk_control.control_limits`); `scripts/generate-control-clients` writes
+`generated_control/limits.py` for the CLI beside `media_types.py`. The
+Controller reads its own `build-identity.json` from the image, which
+`tools/stamp_build_identity.py` writes; the Dockerfile's `server-identity` stage
+and the CLI wheel hook run that one writer. The CLI keeps its own stdlib
+`contract_fingerprint`; `control/tests/test_cli_update_contract.py` keeps it
+equal to the server's as a drift net. The end-to-end proof is the Release NAS
+acceptance: it reads `build-identity.json` from the signed release's CLI wheel
+and requires its `control_contract_sha256` to equal the served
+`/api/cli/contract` `api.control_contract_sha256`.
 `tests/test_package_import_direction.py` guards the direction.
 
 Rust wire structs and enums are generated from the authoritative Pydantic

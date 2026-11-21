@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import io
 import ipaddress
 import json
 import os
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -729,6 +732,32 @@ def assert_running_package_identity(role: str, identity: dict[str, object]) -> N
             raise AcceptanceError(f"running {role} package has unknown {field}")
 
 
+def candidate_cli_contract_sha256() -> str | None:
+    """What the candidate's own vonkctl stamps and compares with the Controller.
+
+    Release lanes download the signed release's CLI wheel (the workflow names it
+    in the environment); a lane with no signed release has none and proves only
+    the Controller side. The wheel is verified against the signed descriptor,
+    then its stamped build identity is read with the standard library.
+    """
+    wheel = os.environ.get("VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL")
+    if not wheel:
+        return None
+    release = json.loads(
+        Path(required_environment("VONK_ACCEPTANCE_CANDIDATE_RELEASE")).read_text()
+    )
+    content = Path(wheel).read_bytes()
+    record = release["artifacts"]["cli-wheel"]
+    if (
+        len(content) != record["size"]
+        or hashlib.sha256(content).hexdigest() != record["sha256"]
+    ):
+        raise AcceptanceError("candidate CLI wheel differs from its signed digest")
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        stamp = json.loads(archive.read("cluster_profiles/build-identity.json"))
+    return stamp["control_contract_sha256"]
+
+
 def verify_deployed_controller_identity(bundle: Path) -> None:
     source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
     if re.fullmatch(r"[0-9a-f]{40}", source) is None:
@@ -788,6 +817,16 @@ print(json.dumps({"package": asdict(identity), "contract": contract}))
                 "worker provenance is not available from a fresh completed loop"
             )
         time.sleep(min(1, remaining))
+    candidate_cli = candidate_cli_contract_sha256()
+    if (
+        candidate_cli is not None
+        and contract["api"]["control_contract_sha256"] != candidate_cli
+    ):
+        raise AcceptanceError(
+            "served control contract "
+            f"{contract['api']['control_contract_sha256']} differs from the "
+            f"candidate vonkctl stamp {candidate_cli}"
+        )
     worker_script = """
 import json
 from dataclasses import asdict

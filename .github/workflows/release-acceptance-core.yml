@@ -334,6 +334,15 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
+          # The candidate's own vonkctl: the acceptance compares its stamp with
+          # the Controller's served contract (digest checked against release.json).
+          cli_path="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["artifacts"]["cli-wheel"]["path"])' "$candidate_release")"
+          curl --fail --location --silent --show-error \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            "$INSTALLER_PUBLIC_ORIGIN/$cli_path" \
+            --output "$RUNNER_TEMP/candidate-cli.whl"
+          export VONK_ACCEPTANCE_CANDIDATE_RELEASE="$candidate_release"
+          export VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL="$RUNNER_TEMP/candidate-cli.whl"
           scripts/run-with-nas-secret-group uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
@@ -436,6 +445,15 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
+          # The candidate's own vonkctl: the acceptance compares its stamp with
+          # the Controller's served contract (digest checked against release.json).
+          cli_path="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["artifacts"]["cli-wheel"]["path"])' "$candidate_release")"
+          curl --fail --location --silent --show-error \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            "$INSTALLER_PUBLIC_ORIGIN/$cli_path" \
+            --output "$RUNNER_TEMP/candidate-cli.whl"
+          export VONK_ACCEPTANCE_CANDIDATE_RELEASE="$candidate_release"
+          export VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL="$RUNNER_TEMP/candidate-cli.whl"
           uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Write exact NAS lane evidence
