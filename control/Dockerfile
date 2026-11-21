@@ -140,9 +140,9 @@ RUN npm run build --ignore-scripts
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
 # Layers are ordered from least to most frequently changing so an ordinary
-# source change rebuilds only the last two steps: the pinned local wheels
-# first (they depend only on the lock files), then the third-party
-# dependencies (they depend only on pyproject.toml), then our own source.
+# source change rebuilds only the last two steps: the local wheels first, then
+# the third-party dependencies (they depend only on pyproject.toml), then our
+# own source.
 COPY control/pyproject.toml ./
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 # The repository image build runs scripts/build-control-wheel before invoking

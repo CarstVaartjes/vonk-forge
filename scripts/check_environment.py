@@ -107,7 +107,7 @@ def ensure_control(root: Path, environment: Path) -> None:
             "nas_setup/hatch_build.py",
             "agent_protocol/pyproject.toml",
         ),
-        "agent_protocol/src",
+        None,
     )
     stamp = environment / ".commit-check-inputs"
 
@@ -183,7 +183,7 @@ def ensure_protocol(root: Path, environment: Path) -> None:
     fingerprint = _fingerprint(
         root,
         ("uv.lock", "pyproject.toml", "agent_protocol/pyproject.toml"),
-        "agent_protocol/src",
+        None,
     )
     stamp = environment / ".protocol-inputs"
 

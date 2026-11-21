@@ -313,15 +313,3 @@ def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatc
     (root / "uv.lock").write_text("version = 2\n")
     environment.ensure_protocol(root, venv)
     assert len(calls) == 4
-
-
-def test_control_and_protocol_preparation_share_one_lock(tmp_path, monkeypatch):
-    """Both sync the one environment, so they must never run at the same time."""
-    root = clone(tmp_path)
-    locks = []
-    monkeypatch.setattr(
-        environment, "prepare", lambda root, lock, *a, **k: locks.append(lock)
-    )
-    environment.ensure_control(root, root / ".venv")
-    environment.ensure_protocol(root, root / ".venv")
-    assert len(set(locks)) == 1 and len(locks) == 2

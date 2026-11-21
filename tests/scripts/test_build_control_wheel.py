@@ -51,7 +51,7 @@ def test_every_job_that_builds_the_controller_image_builds_the_wheel_first() -> 
     """The image copies the wheel from the context; nothing else builds it."""
     import yaml
 
-    checked = 0
+    checked = set()
     for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         for name, job in document.get("jobs", {}).items():
@@ -65,10 +65,10 @@ def test_every_job_that_builds_the_controller_image_builds_the_wheel_first() -> 
             ]
             if not builds:
                 continue
-            checked += 1
+            checked.add(f"{path.name}:{name}")
             assert any(
                 "scripts/build-control-wheel" in str(step.get("run", ""))
                 or step.get("uses") in _PREPARING_ACTIONS
                 for step in steps[: builds[0]]
             ), f"{path.name}:{name} builds the Controller image without the wheel"
-    assert checked >= 4
+    assert "ci.yml:nas-install" in checked

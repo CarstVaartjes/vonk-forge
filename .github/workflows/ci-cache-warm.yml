@@ -20,7 +20,6 @@ on:
       - rust-toolchain.toml
       - .tool-versions
       - uv.lock
-      - agent_protocol/pyproject.toml
       - .github/actions/python-env/action.yml
       - .cargo/config.toml
       - tests/acceptance/recipe-library-revision.txt

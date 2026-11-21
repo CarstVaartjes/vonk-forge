@@ -168,7 +168,7 @@ jobs:
       - name: Check the workspace lock is current
         # Every other step runs --frozen, which never compares the lock with
         # the pyprojects; this one resolves, so it is the only drift check.
-        run: scripts/retry-dependency-fetch uv lock --check
+        run: uv lock --check --offline
       - name: Reject new principle violations on added lines
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:

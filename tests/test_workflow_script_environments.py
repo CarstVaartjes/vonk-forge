@@ -73,7 +73,7 @@ def test_workflows_run_project_python_scripts_through_uv() -> None:
 def test_lint_job_checks_the_one_workspace_lock_is_current() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
     commands = [step.get("run", "") for step in workflow["jobs"]["lint"]["steps"]]
-    assert "scripts/retry-dependency-fetch uv lock --check" in commands
+    assert "uv lock --check --offline" in commands
     assert not (ROOT / "control/uv.lock").exists()
     assert not (ROOT / "agent_protocol/uv.lock").exists()
 
