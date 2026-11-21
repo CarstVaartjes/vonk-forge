@@ -74,6 +74,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+      # restart: true restarts the readers only if staging completes before
+      # Compose sees unhealthy; without a grace that is 15 s, which a stalled
+      # NAS disk can exceed. A run that exits is unhealthy at once, so a
+      # crash loop never holds `up` for this period.
+      start_period: 2m
     secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
