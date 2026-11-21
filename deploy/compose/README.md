@@ -159,9 +159,8 @@ withdrawal (for example a Stop) waits only for `drained`; a publication waits fo
 `ready`. All routes stay unavailable until the new child is ready.
 The Caddy startup wrapper forwards an explicit Compose `command` after its
 native secret checks. With no command, its native
-entrypoint runs `/run/vonk-runtime-assets/caddy/Caddyfile`. Caddy and
-Prometheus read their staged files once per start; the `restart: true` edge to
-`runtime-init` restarts them on a new release.
+entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile` and watches it,
+so a restaged Caddyfile applies without a Caddy restart.
 
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
@@ -225,9 +224,11 @@ recreates `runtime-init`, Compose restarts them after the new kit is staged.
 The healthcheck's `start_period` (2 minutes) is that wait's budget: a slow
 staging run that completes within it restarts the readers once, on the new
 kit. A run that exits is unhealthy at once, so a crash loop never holds `up`;
-Compose may then start the readers on the previous kit and return. A reader
-that started on the previous kit picks up a later staging on its next restart
-(the next `up` or redeploy).
+Compose may then start the readers on the previous kit and return. When
+staging later succeeds, Caddy (`--watch`) and Prometheus (`--config.auto-reload`)
+apply it in place; that reload is the self-heal for a late recovery. LiteLLM
+and the Tailscale configurator pick it up on their next restart (the next `up`
+or redeploy).
 PostgreSQL does not restart with a release. The API keeps only the database
 half of startup (schema and administrator) in its pre-exec, because PostgreSQL
 itself starts from the staged entrypoint.

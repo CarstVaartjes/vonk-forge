@@ -97,8 +97,12 @@ export VONK_AGENT_PROXY_AUTH="$proxy_auth"
 # set -e a copy that cannot be removed stops the start (a security edge).
 rm -f /config/caddy/autosave.json
 if [ "$#" -eq 0 ]; then
-  # The Caddyfile is read once per start; Compose restarts Caddy after
-  # runtime-init has staged a new release (restart: true).
-  set -- caddy run --config /run/vonk-runtime-assets/caddy/Caddyfile --adapter caddyfile
+  # A restaged Caddyfile reaches the running Caddy without a restart: --watch
+  # rereads the file every second and applies a change in-process, with admin
+  # still off. A file that fails to load or
+  # apply is logged and the running routes keep serving; one that fails to
+  # parse also ends the watch, which the next start resumes. This script, and
+  # the variables it exports, apply from the next start.
+  set -- caddy run --config /run/vonk-runtime-assets/caddy/Caddyfile --adapter caddyfile --watch
 fi
 exec "$@"
