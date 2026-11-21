@@ -60,7 +60,10 @@ two local files; the token itself stays valid until it expires because the
 Controller keeps no revocation list.
 
 `VONK_CONTROL_URL` and `VONK_CONTROL_TOKEN_FILE` still override the address and
-the token path (for example for a second Controller or a CI job). They take
+the token path (for example for a second Controller or a CI job). Set both
+together: the login's token belongs to the Controller that minted it, so
+`VONK_CONTROL_URL` alone, naming a different Controller, is refused (set
+`VONK_CONTROL_TOKEN_FILE` too, or run `vonkctl auth login <url>`). They take
 precedence over the login, so `auth login` warns when either is set and
 `auth status` reports an env token file's expiry as unknown. The token file is
 always a private regular file: the CLI never accepts a token on the command

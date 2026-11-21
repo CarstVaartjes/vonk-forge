@@ -76,6 +76,16 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
             now=lambda: int(time.time()),
         )
     )
+    minted: list[str] = []
+    forward = api.request
+
+    def spy(method, url, *args, **kwargs):
+        response = forward(method, url, *args, **kwargs)
+        if str(url).endswith("/api/auth/cli-token"):
+            minted.append(response.headers["X-Vonk-Token-Expires-At"])
+        return response
+
+    api.request = spy  # type: ignore[method-assign]
     with _https_api_peer(tmp_path, api, {}) as (url, certificate, _peer):
         environment = _process_environment(
             tmp_path, url, certificate, {"Authorization": "Bearer unused"}
@@ -94,6 +104,9 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
         assert not config.exists()
         assert "not the password" not in wrong.stdout + wrong.stderr
 
+        # A corrupt stored connection never blocks the login that rewrites it.
+        config.mkdir(mode=0o700, parents=True)
+        (config / "connection.json").write_text("{not json")
         login = _run(
             installed_vonkctl,
             ("auth", "login", url, "--password-stdin"),
@@ -102,6 +115,9 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
         )
         connected = _run(installed_vonkctl, ("--check-connection",), environment, "")
         status = _run(installed_vonkctl, ("auth", "status"), environment, "")
+        status_json = _run(
+            installed_vonkctl, ("auth", "status", "--json"), environment, ""
+        )
 
     assert login.returncode == 0, login.stdout + login.stderr
     token = (config / "token").read_text().strip()
@@ -112,7 +128,11 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
     assert stored["controller_url"] == url
     assert connected.returncode == 0, connected.stdout + connected.stderr
     assert status.returncode == 0, status.stdout + status.stderr
-    assert stored["token_expires_at"] in status.stdout
+    assert len(minted) == 1
+    assert stored["token_expires_at"] == minted[0]
+    assert minted[0] in status.stdout
+    assert json.loads(status_json.stdout)["token_expires_at"] == minted[0]
+    assert "in 30 days" in login.stdout
     for output in (login, connected, status):
         assert token not in output.stdout + output.stderr
         assert _PASSWORD not in output.stdout + output.stderr

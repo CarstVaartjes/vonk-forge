@@ -10,6 +10,7 @@ stored expiry is a local copy for warnings only: it never refuses a command.
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 import urllib.parse
@@ -17,7 +18,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .errors import ControlClientError, ControlNotConfigured, LocalFilesystemError
+from .errors import (
+    ControlClientError,
+    ControlCredentialScope,
+    ControlNotConfigured,
+    LocalFilesystemError,
+    LocalInputError,
+)
 
 SCHEMA_VERSION = 1
 WARN_DAYS = 7
@@ -165,10 +172,32 @@ class Credential:
         return not self.token_from_environment
 
 
+def read_connection_or_none() -> StoredConnection | None:
+    """The stored connection, or None when absent or unreadable (login rewrites it)."""
+
+    try:
+        return read_connection()
+    except LocalInputError:
+        return None
+
+
+def days_until(moment: datetime, now: datetime) -> int:
+    """Whole days left, rounded up: a fresh 30-day token reads 30."""
+
+    return max(0, math.ceil((moment - now).total_seconds() / 86400))
+
+
 def resolve_credential() -> Credential:
     url = os.environ.get(URL_ENV, "")
     token = os.environ.get(TOKEN_FILE_ENV, "")
-    stored = None if url and token else read_connection()
+    stored: StoredConnection | None = None
+    if not token:
+        stored = read_connection_or_none() if url else read_connection()
+        if url and stored is not None and url.rstrip("/") != stored.controller_url:
+            # The login's bearer is for the Controller it was minted by.
+            raise ControlCredentialScope
+    elif not url:
+        stored = read_connection()
     if not url and stored is not None:
         url = stored.controller_url
     token_file = Path(token) if token else login_token_path()
@@ -179,11 +208,7 @@ def resolve_credential() -> Credential:
         token_file=token_file,
         url_from_environment=bool(os.environ.get(URL_ENV)),
         token_from_environment=bool(token),
-        expires_at=(
-            stored.token_expires_at
-            if stored and not token and url.rstrip("/") == stored.controller_url
-            else None
-        ),
+        expires_at=stored.token_expires_at if stored and not token else None,
     )
 
 
@@ -200,7 +225,7 @@ def expiry_warning(credential: Credential, now: datetime) -> str | None:
             "run vonkctl auth login"
         )
     if left <= timedelta(days=WARN_DAYS):
-        days = max(1, left.days)
+        days = days_until(credential.expires_at, now)
         return (
             f"Controller token expires in {days} "
             f"day{'s' if days != 1 else ''} ({when}); run vonkctl auth login"

@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import io
 import stat
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from cluster_profiles import cli_auth
 from cluster_profiles.control_client import client as client_module
 from cluster_profiles.control_client.client import ControlClient
 from cluster_profiles.control_client.connection import (
     StoredConnection,
     connection_path,
+    days_until,
     expiry_warning,
     login_token_path,
     resolve_credential,
     write_private,
 )
+from cluster_profiles.control_client.errors import ControlCredentialScope
 
 _NOW = datetime(2026, 11, 21, 12, 0, tzinfo=UTC)
 
@@ -57,7 +62,7 @@ def test_login_files_are_private_and_resolve_without_env(login) -> None:
 def test_warning_starts_seven_days_before_expiry(
     login, days_left: int, expected: str | None
 ) -> None:
-    login(_NOW + timedelta(days=days_left, minutes=1))
+    login(_NOW + timedelta(days=days_left))
 
     warning = expiry_warning(resolve_credential(), _NOW)
 
@@ -93,3 +98,42 @@ def test_an_env_token_file_has_unknown_expiry_and_no_warning(
 
     assert credential.token_file == token and credential.expires_at is None
     assert expiry_warning(credential, _NOW) is None
+
+
+def test_the_login_token_is_not_sent_to_another_controller(
+    login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(_NOW + timedelta(days=30))
+    monkeypatch.setenv("VONK_CONTROL_URL", "https://other.example.test")
+
+    with pytest.raises(ControlCredentialScope):
+        resolve_credential()
+
+
+def test_a_corrupt_connection_file_only_costs_the_expiry_when_the_url_is_env(
+    login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    login(_NOW + timedelta(days=30))
+    connection_path().write_text("{not json")
+    monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
+
+    assert resolve_credential().expires_at is None
+    assert cli_auth.read_connection_or_none() is None
+
+
+def test_a_fresh_token_reads_thirty_days() -> None:
+    assert days_until(_NOW + timedelta(days=30), _NOW + timedelta(seconds=2)) == 30
+
+
+@pytest.mark.parametrize("raw", [b"", b"\xff\xfesecret\n"])
+def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
+    monkeypatch: pytest.MonkeyPatch, raw: bytes
+) -> None:
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")
+    )
+
+    with pytest.raises(cli_auth.LoginFailed) as failure:
+        cli_auth._read_password(True)
+
+    assert "secret" not in str(failure.value) and "\xff" not in str(failure.value)

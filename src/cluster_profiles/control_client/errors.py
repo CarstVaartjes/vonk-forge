@@ -149,6 +149,19 @@ class ControlNotConfigured(ControlClientError):
         )
 
 
+class ControlCredentialScope(ControlNotConfigured):
+    """The login belongs to another Controller than the one VONK_CONTROL_URL names."""
+
+    recovery = ("set VONK_CONTROL_TOKEN_FILE too, or run vonkctl auth login <url>",)
+
+    def __init__(self) -> None:
+        ControlClientError.__init__(
+            self,
+            "the stored login is for a different Controller than VONK_CONTROL_URL: "
+            "set VONK_CONTROL_TOKEN_FILE too, or run vonkctl auth login <url>",
+        )
+
+
 class LocalInputError(ValueError):
     """A cause the CLI concludes itself, without a Controller answer."""
 

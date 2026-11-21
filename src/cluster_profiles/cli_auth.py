@@ -26,10 +26,11 @@ from .control_client.connection import (
     URL_ENV,
     StoredConnection,
     connection_path,
+    days_until,
     format_expiry,
     login_token_path,
     parse_expiry,
-    read_connection,
+    read_connection_or_none,
     resolve_credential,
     validated_origin,
     write_private,
@@ -82,6 +83,7 @@ class StatusResult:
     credential_source: str
     token_expires_at: str | None
     days_left: int | None
+    check: str
 
     @property
     def expiry_text(self) -> str:
@@ -95,6 +97,7 @@ class StatusResult:
         found = {
             "controller_url": self.controller_url,
             "credential_source": self.credential_source,
+            "check": self.check,
         }
         if self.token_expires_at:
             found["token_expires_at"] = self.token_expires_at
@@ -146,12 +149,19 @@ def _session_cookies(headers: Message) -> dict[str, str]:
 
 
 def _read_password(from_stdin: bool) -> str:
-    if from_stdin:
-        password = sys.stdin.readline().rstrip("\r\n")
-    elif sys.stdin.isatty():
-        password = getpass.getpass("Admin password: ")
-    else:
-        raise LoginFailed("no terminal to ask for the password; use --password-stdin")
+    try:
+        if from_stdin:
+            password = sys.stdin.readline().rstrip("\r\n")
+        elif sys.stdin.isatty():
+            password = getpass.getpass("Admin password: ")
+        else:
+            raise LoginFailed(
+                "no terminal to ask for the password; use --password-stdin"
+            )
+    except EOFError:
+        raise LoginFailed("no password was entered") from None
+    except UnicodeDecodeError:
+        raise LoginFailed("the password is not valid UTF-8") from None
     if not password:
         raise LoginFailed("the admin password is empty")
     return password
@@ -219,7 +229,7 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
 
 
 def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
-    stored = read_connection()
+    stored = None if url_argument else read_connection_or_none()
     chosen = (
         url_argument
         or (stored.controller_url if stored else None)
@@ -234,12 +244,17 @@ def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
     write_private(login_token_path(), f"{token}\n".encode())
     write_private(connection_path(), StoredConnection(url, expires_at).document())
     # Prove the stored credential the way every other command will use it.
-    ControlClient(url, login_token_path()).request("GET", "/api/fleet")
+    try:
+        ControlClient(url, login_token_path()).request("GET", "/api/fleet")
+    except ControlClientError as error:
+        raise LoginFailed(
+            f"the login was stored, but the Fleet check failed: {error}"
+        ) from None
     shadowed = [name for name in (URL_ENV, TOKEN_FILE_ENV) if os.environ.get(name)]
     return LoginResult(
         controller_url=url,
         token_expires_at=format_expiry(expires_at),
-        days_left=(expires_at - datetime.now(UTC)).days,
+        days_left=days_until(expires_at, datetime.now(UTC)),
         shadowed_by=" and ".join(shadowed) or None,
     )
 
@@ -247,7 +262,13 @@ def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
 def _status() -> StatusResult:
     credential = resolve_credential()
     expires = credential.expires_at
-    ControlClient(credential.url, credential.token_file).request("GET", "/api/fleet")
+    try:
+        ControlClient(credential.url, credential.token_file).request(
+            "GET", "/api/fleet"
+        )
+        check = "ok"
+    except (ControlClientError, LocalInputError, OSError) as error:
+        check = f"failed: {error}"
     if credential.token_from_environment:
         source = f"{TOKEN_FILE_ENV} ({credential.token_file})"
     else:
@@ -256,7 +277,8 @@ def _status() -> StatusResult:
         controller_url=credential.url,
         credential_source=source,
         token_expires_at=format_expiry(expires) if expires else None,
-        days_left=(expires - datetime.now(UTC)).days if expires else None,
+        days_left=days_until(expires, datetime.now(UTC)) if expires else None,
+        check=check,
     )
 
 
@@ -273,7 +295,9 @@ def run_auth(
         return _login(url, password_stdin=password_stdin)
     if action == AuthAction.STATUS:
         return _status()
-    return _logout()
+    if action == AuthAction.LOGOUT:
+        return _logout()
+    raise ValueError(f"unknown auth action {action!r}")
 
 
 def render(result: LoginResult | StatusResult | LogoutResult) -> str:
@@ -294,7 +318,7 @@ def render(result: LoginResult | StatusResult | LogoutResult) -> str:
                 f"Controller: {result.controller_url}",
                 f"Credential: {result.credential_source}",
                 f"Expires: {result.expiry_text}",
-                "Check: GET /api/fleet ok",
+                f"Check: GET /api/fleet {result.check}",
             )
         )
     return (

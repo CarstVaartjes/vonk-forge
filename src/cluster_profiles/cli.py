@@ -189,14 +189,21 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read the password from stdin instead of asking (discouraged)",
     )
-    auth_actions.add_parser(
+    status = auth_actions.add_parser(
         AuthAction.STATUS.value,
         help="Show the Controller, where the token comes from, its expiry",
     )
-    auth_actions.add_parser(
+    logout = auth_actions.add_parser(
         AuthAction.LOGOUT.value,
         help="Delete the local login (tokens stay valid until they expire)",
     )
+    for auth_command in (login, status, logout):
+        auth_command.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Print one JSON document instead of text",
+        )
     update = commands.add_parser("update", help="Check for or install a newer vonkctl")
     update.add_argument(
         "--apply",
@@ -845,10 +852,10 @@ def _main(
             )
             print(
                 _json_text(auth_result.document())
-                if args.global_json
+                if args.global_json or getattr(args, "json", False)
                 else render_auth(auth_result)
             )
-            return 0
+            return 2 if getattr(auth_result, "check", "ok") != "ok" else 0
         client = (
             cast(ControllerClient, control_client)
             if control_client is not None
