@@ -30,8 +30,8 @@ from vonk_control.models.fleet import LocalCertificateRevocation
 from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.step_ca import StepCAError, StepCAUnavailable
 
+from .ca_material import NODE_ID, NOW, _csr
 from .test_local_ca import local_ca as local_ca  # noqa: PLC0414 -- fixture
-from .test_step_ca import NODE_ID, NOW, _csr
 
 BATCH = 64
 EVENT = "enrollment.revocation_unconfirmed"

@@ -12,7 +12,6 @@ dependencies = [
   "httpx2>=2.13.1",
   "jsonschema>=4.26.0",
   "psycopg[binary]>=3.3.6",
-  "PyJWT>=2.15.0",
   "PyYAML>=6.0.3",
   "sigstore==4.5.1",
   "certifi==2026.10.19",
