@@ -40,6 +40,10 @@ runs:
     - name: Sync the locked control environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
+    - name: Sync the locked protocol environment
+      # The wire exporter (Cargo, the CLI wheel hook, generators) runs in it.
+      shell: bash
+      run: scripts/retry-dependency-fetch uv sync --project agent_protocol --frozen --no-dev --no-install-project
     - name: Record the prepared control environment
       # Generators and Cargo build scripts call scripts/check_environment.py,
       # which rebuilds the wheel and resyncs unless its stamp matches. Leave
@@ -54,11 +58,12 @@ runs:
         from pathlib import Path
 
         sys.path.insert(0, "scripts")
-        from check_environment import ensure_control
+        from check_environment import ensure_control, ensure_protocol
 
         root = Path.cwd().resolve()
         environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
         ensure_control(root, environment if environment.is_absolute() else root / environment)
+        ensure_protocol(root, root / "agent_protocol/.venv")
         PY
     - name: Generate and stamp every contract consumer
       if: inputs.contracts == 'full'

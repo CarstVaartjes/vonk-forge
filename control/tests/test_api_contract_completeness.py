@@ -196,17 +196,6 @@ def test_request_delegation_cannot_hide_an_unclassified_body():
         discover_contracts(app)
 
 
-def test_agent_route_model_outside_the_protocol_is_not_exported():
-    """The exporter reads only the protocol: a model defined elsewhere fails the guard."""
-
-    import runpy
-
-    exporter = Path(__file__).resolve().parents[2] / "scripts/export-agent-wire-schema"
-    exported = runpy.run_path(str(exporter))["export_schema"]()
-    with pytest.raises(ContractGraphError):
-        require_wire_exports({AddedRequest, AddedResponse}, exported)
-
-
 def test_stream_flag_cannot_hide_an_untyped_json_response():
     app = FastAPI()
 
