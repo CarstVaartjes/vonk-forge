@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -15,22 +12,6 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version: str, build_data: dict[str, object]) -> None:
-        source_sha = os.environ.get("VONK_BUILD_SOURCE_SHA") or None
-        release_version = os.environ.get("VONK_BUILD_RELEASE_VERSION")
-        if source_sha is not None and re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
-            raise ValueError("VONK_BUILD_SOURCE_SHA must be a 40-character source SHA")
-        source_tree = os.environ.get("VONK_BUILD_SOURCE_TREE") or None
-        if (
-            source_tree is not None
-            and re.fullmatch(r"[0-9a-f]{40}", source_tree) is None
-        ):
-            raise ValueError("VONK_BUILD_SOURCE_TREE must be a 40-character tree SHA")
-        if (
-            release_version is not None
-            and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+:~-]{0,127}", release_version)
-            is None
-        ):
-            raise ValueError("VONK_BUILD_RELEASE_VERSION is invalid")
         root = Path(self.root)
         if self.target_name != "wheel" or version == "editable":
             return
@@ -66,35 +47,21 @@ class CustomBuildHook(BuildHookInterface):
             "cluster_profiles/generated_control"
         )
 
-        def fingerprint(path: Path) -> str:
-            document = json.loads(path.read_text())
-            return hashlib.sha256(
-                json.dumps(
-                    document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-                ).encode()
-            ).hexdigest()
-
-        control_fingerprint = fingerprint(
-            directory / "src/cluster_profiles/schemas/control-openapi.json"
-        )
-        worker_fingerprint = fingerprint(directory / "wire.json")
         identity = directory / "build-identity.json"
-        identity.write_text(
-            json.dumps(
-                {
-                    "schema_version": 2,
-                    "control_contract_sha256": control_fingerprint,
-                    "worker_contract_sha256": worker_fingerprint,
-                    "source_sha": source_sha,
-                    "source_tree": source_tree,
-                    "release_version": release_version,
-                },
-                sort_keys=True,
-            )
-            + "\n"
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / "tools/stamp_build_identity.py"),
+                "--control-openapi",
+                str(directory / "src/cluster_profiles/schemas/control-openapi.json"),
+                "--wire",
+                str(directory / "wire.json"),
+                "--output",
+                str(identity),
+            ],
+            check=True,
+            timeout=60,
         )
-        include = build_data.setdefault("force_include", {})
-        assert isinstance(include, dict)
         include[str(identity)] = "cluster_profiles/build-identity.json"
 
     def finalize(

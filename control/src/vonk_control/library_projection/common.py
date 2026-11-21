@@ -24,7 +24,7 @@ from vonk_forge_contracts.api_checks import (
     accepted_modalities,
 )
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..catalog_revision_contract import (
     ModelRevisionProjection,

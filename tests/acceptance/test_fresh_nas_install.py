@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import io
 import ipaddress
 import json
 import os
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -729,38 +732,52 @@ def assert_running_package_identity(role: str, identity: dict[str, object]) -> N
             raise AcceptanceError(f"running {role} package has unknown {field}")
 
 
+def candidate_cli_contract_sha256() -> str | None:
+    """What the candidate's own vonkctl stamps and compares with the Controller.
+
+    Release lanes download the signed release's CLI wheel (the workflow names it
+    in the environment); a lane with no signed release has none and proves only
+    the Controller side. The wheel is verified against the signed descriptor,
+    then its stamped build identity is read with the standard library.
+    """
+    wheel = os.environ.get("VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL")
+    if not wheel:
+        return None
+    release = json.loads(
+        Path(required_environment("VONK_ACCEPTANCE_CANDIDATE_RELEASE")).read_text()
+    )
+    content = Path(wheel).read_bytes()
+    record = release["artifacts"]["cli-wheel"]
+    if (
+        len(content) != record["size"]
+        or hashlib.sha256(content).hexdigest() != record["sha256"]
+    ):
+        raise AcceptanceError("candidate CLI wheel differs from its signed digest")
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        stamp = json.loads(archive.read("cluster_profiles/build-identity.json"))
+    return stamp["control_contract_sha256"]
+
+
 def verify_deployed_controller_identity(bundle: Path) -> None:
     source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
     if re.fullmatch(r"[0-9a-f]{40}", source) is None:
         raise AcceptanceError("candidate Controller source is invalid")
+    # The Controller image carries no CLI: read the server's own stamp and the
+    # contract vonkctl compares against (GET /api/cli/contract).
     script = """
-import json, time, urllib.error, urllib.request
+import json, time, urllib.request
 from dataclasses import asdict
-from cluster_profiles.runtime_identity import packaged_runtime_identity
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from cluster_profiles.control_transport import open_https
-from cluster_profiles.observation_transfer_reader import receive_observation
-from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE, ObservationTransferRecord
-from vonk_control.platform_observation import PlatformObservation
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.build_identity import packaged_runtime_identity
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
 token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
-request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token, "Accept": OBSERVATION_MEDIA_TYPE})
-def validate_record(value):
-    ObservationTransferRecord.model_validate(value)
-def validate_payload(value):
-    return PlatformObservation.model_validate_json(json.dumps(value)).model_dump(mode="json")
-deadline = time.monotonic() + 10
-try:
-    response = open_https(request, timeout=deadline - time.monotonic(), trust_env=False)
-except urllib.error.HTTPError as error:
-    response = error
-with response:
-    assert (response.code if isinstance(response, urllib.error.HTTPError) else response.status) == 200
-    assert response.headers.get_content_type() == OBSERVATION_MEDIA_TYPE
-    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, deadline=deadline, validate_record=validate_record, validate_payload=validate_payload)
-print(json.dumps({"package": asdict(identity), "observation": observation}))
+request = urllib.request.Request("http://127.0.0.1:8000/api/cli/contract", headers={"Authorization": "Bearer " + token})
+with urllib.request.urlopen(request, timeout=10) as response:
+    assert response.status == 200
+    contract = json.loads(response.read(MAX_CONTROL_DOCUMENT_BYTES))
+print(json.dumps({"package": asdict(identity), "contract": contract}))
 """
     # Compose health can precede the worker's first completed loop, especially
     # after restart. Re-observe within the existing capture subprocess budget;
@@ -779,20 +796,20 @@ print(json.dumps({"package": asdict(identity), "observation": observation}))
         )
         document = json.loads(result.stdout)
         package = document["package"]
-        observation = document["observation"]
+        contract = document["contract"]
         assert_running_package_identity("API", package)
-        if observation["api"]["source_sha"] != package["source_sha"]:
+        if contract["api"]["source_sha"] != package["source_sha"]:
             raise AcceptanceError(
-                "running API observation differs from its installed package source"
+                "running API contract differs from its installed package source"
             )
         if (
-            observation["api"]["control_contract_sha256"]
+            contract["api"]["control_contract_sha256"]
             != package["control_contract_sha256"]
         ):
             raise AcceptanceError(
                 "running API contract differs from its installed package"
             )
-        if observation["worker_issue"] != "worker-observation-unavailable":
+        if contract["worker_issue"] != "worker-observation-unavailable":
             break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -800,10 +817,20 @@ print(json.dumps({"package": asdict(identity), "observation": observation}))
                 "worker provenance is not available from a fresh completed loop"
             )
         time.sleep(min(1, remaining))
+    candidate_cli = candidate_cli_contract_sha256()
+    if (
+        candidate_cli is not None
+        and contract["api"]["control_contract_sha256"] != candidate_cli
+    ):
+        raise AcceptanceError(
+            "served control contract "
+            f"{contract['api']['control_contract_sha256']} differs from the "
+            f"candidate vonkctl stamp {candidate_cli}"
+        )
     worker_script = """
 import json
 from dataclasses import asdict
-from cluster_profiles.runtime_identity import packaged_runtime_identity
+from vonk_control.build_identity import packaged_runtime_identity
 print(json.dumps(asdict(packaged_runtime_identity())))
 """
     worker_result = run(
@@ -821,15 +848,14 @@ print(json.dumps(asdict(packaged_runtime_identity())))
     )
     worker_package = json.loads(worker_result.stdout)
     assert_running_package_identity("worker", worker_package)
-    workers = observation["workers"]
-    if not workers or observation["worker_issue"] is not None:
+    if contract["worker_count"] < 1 or contract["worker_issue"] is not None:
         raise AcceptanceError(
             "worker provenance is not available from a fresh completed loop"
         )
-    if any(
-        worker["source_sha"] != worker_package["source_sha"]
-        or worker["worker_contract_sha256"] != worker_package["worker_contract_sha256"]
-        for worker in workers
+    if (
+        contract["worker_source_sha"] != worker_package["source_sha"]
+        or contract["worker_contract_sha256"]
+        != worker_package["worker_contract_sha256"]
     ):
         raise AcceptanceError(
             "fresh worker observations differ from their own installed package"
@@ -842,7 +868,7 @@ print(json.dumps(asdict(packaged_runtime_identity())))
                 "accepted_source_sha": source,
                 "api_package": package,
                 "worker_package": worker_package,
-                "platform": observation,
+                "contract": contract,
             }
         )
     )

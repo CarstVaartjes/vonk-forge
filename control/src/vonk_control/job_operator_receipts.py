@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .categorized_errors import InvalidValue
 from .models import Job

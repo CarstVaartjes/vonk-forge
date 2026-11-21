@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.jobs import JobService
 from vonk_control.models import (
     AgentNode,
@@ -37,8 +38,6 @@ from vonk_control.operation_api import (
 )
 from vonk_control.operation_item_contract import operation_item
 from vonk_control.operation_progress import aggregate_progress
-
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 

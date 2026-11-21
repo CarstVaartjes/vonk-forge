@@ -220,7 +220,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/vonkctl_json_contract.py",
+      "module": "tools/vonkctl_json_contract.py",
       "kind": "controller-contract",
       "reason": "The documents only vonkctl prints (connection, download, observation, error); every other vonkctl --json document is a Controller response model plus its schema_version."
     },

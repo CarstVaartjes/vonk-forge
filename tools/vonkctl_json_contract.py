@@ -12,7 +12,9 @@ when empty and are not ``required`` in the schema; required nullable fields are
 an explicit ``null`` and are ``required``. Clients treat absent and ``null``
 alike for the former.
 
-Regenerate the files with ``python -m vonk_control.vonkctl_json_contract
+This is a repository tool, not Controller code: it needs both the CLI vocabulary
+and the server models, so the server image never imports it. Regenerate the files
+with ``uv run --project control --frozen python tools/vonkctl_json_contract.py
 schemas/vonkctl``; a test fails when they drift.
 """
 
@@ -24,6 +26,18 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Optional, Union, cast, get_args
 
 from pydantic import BaseModel, Field, TypeAdapter, create_model
+from vonk_control.artifact_jobs import ArtifactJobResponse
+from vonk_control.artifact_jobs.contracts import ArtifactJobState
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
+    FleetProfileEndpointsView,
+    FleetProfileList,
+    FleetProfilePreview,
+    FleetProfileReadView,
+)
+from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.library_contract import RecipeDetailResponse, RecipeLibraryResponse
+from vonk_control.strict_json import StrictModel
 
 from cluster_profiles.cli_json_contract import (
     DOCUMENT_VERSIONS,
@@ -39,19 +53,6 @@ from cluster_profiles.error_reporting import (
     ErrorSource,
     TransportKind,
 )
-
-from .artifact_jobs import ArtifactJobResponse
-from .artifact_jobs.contracts import ArtifactJobState
-from .fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileEndpointsView,
-    FleetProfileList,
-    FleetProfilePreview,
-    FleetProfileReadView,
-)
-from .fleet_projection import FleetSnapshot
-from .library_contract import RecipeDetailResponse, RecipeLibraryResponse
-from .strict_json import StrictModel
 
 #: The shared code grammar as a JSON Schema pattern (``\\Z`` is Python-only).
 _SCHEMA_CODE_PATTERN = "^" + CODE_PATTERN.replace("\\Z", "$")

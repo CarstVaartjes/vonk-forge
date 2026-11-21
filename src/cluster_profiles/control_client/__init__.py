@@ -1,6 +1,8 @@
 """Public imports for control client."""
 
-from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES
+from ..generated_control.limits import (
+    MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES,
+)
 from .common import _MAX_ARTIFACT_INPUT as _MAX_ARTIFACT_INPUT
 from .common import observation_delay as observation_delay
 from .common import observation_unknown as observation_unknown

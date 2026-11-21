@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol.reason_codes import ProjectionCode
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
 from .fleet_events import (

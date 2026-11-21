@@ -13,6 +13,8 @@ INPUTS = (
     ".tool-versions",
     "pyproject.toml",
     "src/cluster_profiles",
+    "tools/hatch_build.py",
+    "tools/stamp_build_identity.py",
     "control/Dockerfile",
     "control/pyproject.toml",
     "control/src",

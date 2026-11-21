@@ -32,6 +32,7 @@ schemas/*
 !tools/
 tools/*
 !tools/hatch_build.py
+!tools/stamp_build_identity.py
 !rust/
 rust/*
 !rust/crates/

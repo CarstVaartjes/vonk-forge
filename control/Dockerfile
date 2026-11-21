@@ -68,7 +68,7 @@ RUN dnf upgrade --assumeyes ca-certificates \
 
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS node-tools
 
-# Generated JSON/TypeScript and the pure-Python CLI wheel are platform-neutral.
+# Generated JSON/TypeScript and the build identity are platform-neutral.
 # Generate once natively instead of repeating Python/Node work under QEMU.
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS contracts
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
@@ -96,12 +96,15 @@ COPY inventory/wheels/vonk_agent_protocol-*.whl ./inventory/wheels/
 RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
 COPY tools/openapi-client/ ./tools/openapi-client/
 RUN npm ci --prefix tools/openapi-client --ignore-scripts
-# The schema application imports the Controller and CLI contract graph. Web
+# The schema application imports the Controller contract graph. Web
 # source and Compose assets are not generation inputs.
 COPY control/src/ ./control/src/
 COPY control/alembic.ini ./control/alembic.ini
 COPY control/migrations/ ./control/migrations/
 COPY agent_protocol/src/ ./agent_protocol/src/
+# The locked dev environment installs the editable CLI project (a test client),
+# so its sources and build hook are build-only inputs; nothing from this stage
+# except the generated documents reaches the runtime image.
 COPY src/cluster_profiles/ ./src/cluster_profiles/
 COPY tools/hatch_build.py ./tools/hatch_build.py
 COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
@@ -111,13 +114,19 @@ RUN scripts/generate-control-clients \
     && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
 
 # Only packaging embeds the commit identity; it must not invalidate generators.
-FROM contracts AS cli
+# The same writer stamps the CLI wheel, so one tree gives the Controller and
+# vonkctl the same control_contract_sha256.
+FROM contracts AS server-identity
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
 # The Git tree: identical for a pull request build that main reuses.
 ARG VONK_BUILD_SOURCE_TREE
 ENV VONK_BUILD_SOURCE_TREE=${VONK_BUILD_SOURCE_TREE}
-RUN uv build --wheel --out-dir /cli-wheels
+COPY tools/stamp_build_identity.py ./tools/stamp_build_identity.py
+RUN python tools/stamp_build_identity.py \
+    --control-openapi src/cluster_profiles/schemas/control-openapi.json \
+    --wire rust/crates/vonk-agent-protocol/schema/wire.json \
+    --output /build-identity.json
 
 FROM node-tools AS web
 WORKDIR /repo/control/web
@@ -162,26 +171,25 @@ RUN apt-get update \
 # markers that -r adds are removed to keep the layer identical to a one-step
 # install. Ignore build-interpreter packages: only /install reaches runtime.
 ARG DEPENDENCY_DAY=undated
-COPY pyproject.toml /vonk-cluster-profiles/
 RUN echo "dependency day: ${DEPENDENCY_DAY}" \
-    && python -c 'import pathlib, tomllib; print("\n".join(d for path in ("pyproject.toml", "/vonk-cluster-profiles/pyproject.toml") for d in tomllib.loads(pathlib.Path(path).read_text())["project"]["dependencies"] if not d.lower().startswith("vonk-")))' > /tmp/third-party.txt \
+    && python -c 'import pathlib, tomllib; print("\n".join(d for d in tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["dependencies"] if not d.lower().startswith("vonk-")))' > /tmp/third-party.txt \
     && python -m pip install --no-cache-dir --ignore-installed --prefix=/install -r /tmp/third-party.txt \
     && find /install -name REQUESTED -delete \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
-COPY --from=cli /cli-wheels /cli-wheels
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
 COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
 COPY --from=web /repo/control/web/dist ./src/vonk_control/web
+COPY --from=server-identity /build-identity.json ./src/vonk_control/build-identity.json
 # pip only sees packages already in /install when that directory is on the
 # path, so the dependency layer above is reused instead of downloaded again.
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
     "/wheels/$(scripts/protocol-wheel-name)" \
     /wheels/vonk_forge_public_contracts-5.2.0-py3-none-any.whl \
-    /cli-wheels/*.whl .
+    .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 ARG TARGETARCH

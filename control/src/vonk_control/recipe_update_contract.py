@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .integer_domains import MAX_DATABASE_INTEGER
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult

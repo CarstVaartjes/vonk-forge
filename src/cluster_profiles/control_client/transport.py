@@ -16,7 +16,6 @@ from pathlib import Path
 
 import httpx2
 
-from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..error_reporting import (
     local_io_context,
     protocol_context,
@@ -24,6 +23,7 @@ from ..error_reporting import (
     safe_request_id,
     transport_context,
 )
+from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 from .errors import (
     _MAX_TOKEN,
     _STATUS_ERRORS,

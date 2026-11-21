@@ -1149,7 +1149,7 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
                 200, _job_receipt("22345678-1234-4123-8123-123456789abc", SUCCEEDED)
             )
         if fault == "oversized":
-            from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+            from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
             return _Response(200, {"padding": "x" * MAX_CONTROL_DOCUMENT_BYTES})
         return _Response(503 if fault == "unavailable" else 200, {"broken": True})

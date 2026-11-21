@@ -4,7 +4,7 @@ Every published ``--json`` document carries ``schema_version``. The version
 belongs to the document kind, never to the vonkctl release: it changes only when
 a field is removed, renamed or changes type (an additive field keeps it). The
 kinds that third-party clients consume are the ``DocumentKind`` members; each is
-defined by one Pydantic model in ``vonk_control.vonkctl_json_contract`` whose
+defined by one Pydantic model in ``tools/vonkctl_json_contract.py`` whose
 JSON Schema is published under ``schemas/vonkctl/``. Any other document is not
 part of the client contract: it carries no ``schema_version`` and no promise.
 

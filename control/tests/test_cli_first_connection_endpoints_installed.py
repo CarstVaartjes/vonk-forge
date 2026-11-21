@@ -57,10 +57,10 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.vonkctl_json_contract import DOCUMENTS
 
 from cluster_profiles.cli_json_contract import DocumentKind
 
+from .conftest import load_tools_module
 from .test_fleet_profiles import _installed_pair_plan
 from .test_profile_load_installed_cli import (
     _https_api_peer,
@@ -73,7 +73,9 @@ from .test_recipe_routes import setup as setup_routes
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 _TOKEN_KEY = b"first-connection-and-profile-endpoints-key"
-_CLI_ENDPOINTS = DOCUMENTS[DocumentKind.PROFILE_ENDPOINTS]
+_CLI_ENDPOINTS = load_tools_module("vonkctl_json_contract").DOCUMENTS[
+    DocumentKind.PROFILE_ENDPOINTS
+]
 
 
 def _api(

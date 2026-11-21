@@ -259,8 +259,7 @@ class WorkerHeartbeatRecorder:
         self._register_process_start()
 
     def _register_process_start(self) -> None:
-        from cluster_profiles.runtime_identity import packaged_runtime_identity
-
+        from .build_identity import packaged_runtime_identity
         from .identity_insert import insert_identity
         from .models import ControlProcessHeartbeat
 

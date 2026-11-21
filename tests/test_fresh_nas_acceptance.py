@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -8,6 +9,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 from typing import TypedDict, Unpack
 
@@ -474,9 +476,13 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             output = json.dumps(
                 {
                     "package": package_identity,
-                    "observation": {
+                    "contract": {
                         "api": package_identity,
-                        "workers": [package_identity],
+                        "worker_count": 1,
+                        "worker_source_sha": source,
+                        "worker_contract_sha256": package_identity[
+                            "worker_contract_sha256"
+                        ],
                         "worker_issue": None,
                     },
                 }
@@ -1261,6 +1267,7 @@ def test_compose_bundle_is_read_from_what_the_running_controller_reported(
     ("outcome", "expected_error", "expected_reads"),
     [
         ("recovers", None, 2),
+        ("cli-stamp-differs", "differs from the candidate vonkctl stamp", 2),
         ("never-completes", "fresh completed loop", 20),
         ("api-mismatch", "differs from its installed package source", 1),
         ("worker-mismatch", "differ from their own installed package", 2),
@@ -1279,6 +1286,10 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
     }
     monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
+    candidate_stamp = "d" * 64 if outcome == "cli-stamp-differs" else "b" * 64
+    monkeypatch.setattr(
+        acceptance, "candidate_cli_contract_sha256", lambda: candidate_stamp
+    )
     elapsed = [0.0]
     monkeypatch.setattr(acceptance.time, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(
@@ -1295,16 +1306,21 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
             api = dict(package)
             if outcome == "api-mismatch":
                 api["source_sha"] = "d" * 40
-            workers = None if missing else [dict(package)]
+            worker = dict(package)
             issue = "worker-observation-unavailable" if missing else None
             if outcome == "unknown-provenance":
-                workers = [dict(package, source_sha=None)]
                 issue = "worker-provenance-unavailable"
-            if outcome == "worker-mismatch" and workers:
-                workers[0]["source_sha"] = "e" * 40
+            if outcome == "worker-mismatch":
+                worker["source_sha"] = "e" * 40
             document = {
                 "package": package,
-                "observation": {"api": api, "workers": workers, "worker_issue": issue},
+                "contract": {
+                    "api": api,
+                    "worker_count": 0 if missing else 1,
+                    "worker_source_sha": worker["source_sha"],
+                    "worker_contract_sha256": worker["worker_contract_sha256"],
+                    "worker_issue": issue,
+                },
             }
         else:
             document = package
@@ -1354,3 +1370,29 @@ def test_reference_acceptance_accepts_the_installer_service_topology(
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
     expected = acceptance.DEFAULT_SERVICES
     assert acceptance.compose_services(tmp_path) == expected
+
+
+def test_candidate_cli_stamp_is_read_from_the_digest_verified_wheel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    acceptance = _acceptance_module()
+    monkeypatch.delenv("VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL", raising=False)
+    assert acceptance.candidate_cli_contract_sha256() is None
+    wheel = tmp_path / "cli.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "cluster_profiles/build-identity.json",
+            json.dumps({"control_contract_sha256": "e" * 64}),
+        )
+    content = wheel.read_bytes()
+    release = tmp_path / "release.json"
+    record = {"sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+    release.write_text(json.dumps({"artifacts": {"cli-wheel": record}}))
+    monkeypatch.setenv("VONK_ACCEPTANCE_CANDIDATE_CLI_WHEEL", str(wheel))
+    monkeypatch.setenv("VONK_ACCEPTANCE_CANDIDATE_RELEASE", str(release))
+    assert acceptance.candidate_cli_contract_sha256() == "e" * 64
+    release.write_text(
+        json.dumps({"artifacts": {"cli-wheel": {**record, "sha256": "0" * 64}}})
+    )
+    with pytest.raises(AcceptanceError, match="signed digest"):
+        acceptance.candidate_cli_contract_sha256()

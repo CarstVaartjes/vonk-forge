@@ -68,7 +68,7 @@ from vonk_agent_protocol import (
     canonical_message as canonical_message,
 )
 
-from cluster_profiles.control_limits import (
+from vonk_control.control_limits import (
     MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES,
 )
 

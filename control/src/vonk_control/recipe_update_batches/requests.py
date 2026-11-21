@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import MUTATION_ROLES

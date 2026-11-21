@@ -17,7 +17,6 @@ dependencies = [
   "sigstore==4.5.1",
   "certifi==2026.10.19",
   "sqlalchemy>=2.1.1",
-  "vonk-cluster-profiles>=0.1.1",
   "tomli-w>=1.2.0",
   "uvicorn>=0.54.0",
 ]
@@ -41,6 +40,9 @@ find-links = ["../inventory/wheels"]
 # or `uvx`.
 [dependency-groups]
 dev = [
+    # vonkctl is a test client of the Controller (the CLI contract and installed-CLI
+    # suites), never a runtime dependency; tests/test_package_import_direction.py.
+    "vonk-cluster-profiles",
     "vonk-nas-setup",
     "hatchling>=1.32.4",
     # The official OpenAI SDK is the client the gateway audio proof speaks with.
@@ -60,7 +62,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vonk_control"]
-artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**"]
+artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**", "src/vonk_control/build-identity.json"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "alembic.ini" = "vonk_control/alembic.ini"

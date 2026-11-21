@@ -8,15 +8,16 @@ from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
-from vonk_control import platform_observation
+from vonk_control import build_identity, platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.operation_api import admin_openapi_schema
 from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
-from cluster_profiles.runtime_identity import RuntimeBuildIdentity
 
 
 class Jobs:
@@ -53,7 +54,7 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         platform_observation, "packaged_runtime_identity", read_api_identity
     )
     monkeypatch.setattr(
-        runtime_identity, "packaged_runtime_identity", lambda: worker_identity[0]
+        build_identity, "packaged_runtime_identity", lambda: worker_identity[0]
     )
     observer = PlatformObserver(sessions, clock=lambda: clock[0])
     codec = TokenCodec(b"k" * 32)
@@ -163,3 +164,19 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     expired = read()
     assert expired["worker_compatibility"] == "unknown"
     assert expired["worker_count"] == 0
+
+
+def test_cli_fingerprint_function_equals_the_servers() -> None:
+    """Catches drift between the CLI's stdlib fingerprint and the Controller's.
+
+    vonkctl compares its stamped control_contract_sha256 with the one the
+    Controller serves; both are this function over the same document.
+    """
+    openapi = admin_openapi_schema(
+        create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
+    )
+    wire = {"$defs": {"A": {"type": "object", "title": "é"}}, "n": [1, None]}
+    for document in (openapi, wire):
+        assert runtime_identity.contract_fingerprint(
+            document
+        ) == build_identity.contract_fingerprint(document)

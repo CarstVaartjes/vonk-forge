@@ -1041,7 +1041,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     from sqlalchemy.exc import SQLAlchemyError
     from sqlalchemy.orm import sessionmaker
     from vonk_control import api as api_module
-    from vonk_control import platform_observation
+    from vonk_control import build_identity, platform_observation
     from vonk_control import worker as worker_module
     from vonk_control.auth import Actor, TokenCodec
     from vonk_control.models import Base
@@ -1098,7 +1098,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         platform_observation, "packaged_runtime_identity", lambda: candidate_identity
     )
     monkeypatch.setattr(
-        runtime_identity, "packaged_runtime_identity", lambda: candidate_identity
+        build_identity, "packaged_runtime_identity", lambda: candidate_identity
     )
     engine = create_engine(f"sqlite:///{workspace / 'controller.sqlite'}")
     Base.metadata.create_all(engine)

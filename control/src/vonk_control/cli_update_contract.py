@@ -11,8 +11,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, Response
 from pydantic import Field
 
-from cluster_profiles.runtime_identity import contract_fingerprint
-
+from .build_identity import contract_fingerprint
 from .operation_api import bounded_error_responses
 from .platform_observation import (
     ApiRuntimeObservation,
