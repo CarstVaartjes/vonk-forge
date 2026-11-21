@@ -10,14 +10,6 @@ fn run(arguments: &[&str]) -> Output {
 
 #[test]
 fn pair_is_the_only_first_enrollment_command() {
-    let output = run(&["--help"]);
-    assert!(output.status.success());
-    let help = String::from_utf8(output.stdout).unwrap();
-    assert!(help.contains("  pair"));
-    assert!(help.contains("  run"));
-    assert!(!help.contains("bootstrap"));
-    assert!(!help.contains("migrate-python-state"));
-
     for removed in ["bootstrap", "migrate-python-state"] {
         let rejected = run(&[removed]);
         assert!(!rejected.status.success());

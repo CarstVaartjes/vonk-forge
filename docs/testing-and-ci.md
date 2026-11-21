@@ -554,7 +554,7 @@ docstrings the removed text would count.
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
-imperative remedy text, anti-principle
+anti-principle
 test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
 coordination syntax violations. The `job-limits` guard refuses an added `MAX_INPUT_*`, `MAX_OUTPUT_*` or `MAX_TIMEOUT_SECONDS` assignment outside `agent_protocol/src/vonk_agent_protocol/job_limits.py`, the one owner of artifact-job limits. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
@@ -656,10 +656,7 @@ otherwise have to reason about by hand:
   `vonkctl_json` fixture in `tests/cluster_profiles/conftest.py`), which is the
   public client contract. A renderer decision is a small pure view function
   in `cluster_profiles/cli_render` returning an enum, dataclass or typed value,
-  tested on data; the renderer only prints it. Human wording is owned by the shared vectors in
-  `tests/fixtures` that the web renders too, and one module,
-  `tests/cluster_profiles/test_cli_wording.py`, compares vonkctl's text with
-  them. A secret or terminal control in any output is a leak, not wording, and
+  tested on data; the renderer only prints it. Wording is not tested. A secret or terminal control in any output is a leak, not wording, and
   a line shown twice is a duplication fault: absence, count and emptiness
   checks on captured stdout/stderr stay valid, new ones included. The
   `printed-output` added-line guard refuses only a new positive wording

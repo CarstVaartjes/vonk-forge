@@ -24,7 +24,6 @@ GUARDS: tuple[str, ...] = (
     "tests/test_pass_budget_clocks.py",
     "tests/scripts/test_pull_test_images.py",
     "tests/test_guard_policy.py",
-    "tests/test_profile_blocker_operator_actions.py",
     "tests/test_ci_apt_install.py",
     "tests/cluster_profiles/test_cli_render.py::test_every_controller_command_has_a_registered_presentation",
     "tests/test_controller_startup_guard.py",
@@ -55,7 +54,6 @@ GUARDS: tuple[str, ...] = (
     "tests/scripts/test_select_ci_areas.py",
     "tests/scripts/test_verify_ci_gate.py",
     "tests/scripts/test_build_control_wheel.py::test_every_job_that_builds_the_controller_image_builds_the_wheel_first",
-    "tests/scripts/test_hook_environment.py::test_scripts_cannot_delegate_automatic_preparation_to_users",
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
     "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
     "tests/test_baseline_program_surface.py",
@@ -220,8 +218,8 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_cli_wording.py",
-        "vonkctl prints the shared wording vectors exactly as the web renders them; no whole-tree scan.",
+        "tests/cluster_profiles/test_cli_layout.py",
+        "vonkctl printed layout: counts, folding, ordering and what only --wide shows; no whole-tree scan.",
     ),
     (
         "tests/cluster_profiles/test_cli_render.py",

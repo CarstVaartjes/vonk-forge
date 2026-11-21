@@ -1,5 +1,5 @@
 {
-  "comment": "A Spark's host checks as both clients show them: the Controller web Spark page and `vonkctl fleet detail`. The Controller owns every word (note, finding, explanation, commands, undo). The note is shown once above the checks. Each client shows a check's finding and explanation as one line, then each command on its own line, then, when there is undo, the line `Undo:` and each undo command, in order. The web test calls `hostCheckLines` and the vonkctl test calls `host_check_lines` for each case; both must equal `lines` exactly.",
+  "comment": "A Spark's host checks: note, finding, explanation, commands and undo, all owned by the Controller. The vonkctl layout test checks the commands and undo lines appear in this order.",
   "note": "Run these on Alpha itself, in a terminal or over SSH, as a user with sudo; the Controller never changes a Spark. A check clears on the Spark's next report (about 2-3 minutes) once its change has taken effect: boot splash after a reboot; memory fragmentation is a reading and stays. Reasons and undo steps: https://github.com/CarstVaartjes/vonk-forge/blob/main/docs/operations/spark-host-checks.md",
   "cases": [
     {

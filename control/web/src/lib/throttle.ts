@@ -16,8 +16,7 @@ const REASONS = [
 const KNOWN = REASONS.reduce((all, reason) => all | reason.bit, 0n);
 
 /**
- * The driver's clock event (throttle) bitmask in words, shared with `vonkctl` through
- * `tests/fixtures/fleet-wording-throttle.json`: zero says none active, known bits in bit order, and any bit
+ * The driver's clock event (throttle) bitmask in words: zero says none active, known bits in bit order, and any bit
  * outside the table adds "state unknown". `mood` says whether anything is actually throttling the clock.
  */
 export function throttleReasons(reasons: WireNumber): {

@@ -250,7 +250,7 @@ def _recipe_links(detail: object) -> None:
     """Where the recipe comes from, in the dashboard's words. Licences are information only.
 
     Only the model displays are parsed into the generated model; the rest is read as plain
-    fields. The lines are shared with the dashboard (tests/fixtures/recipe-links.json).
+    fields.
     """
     payload = _object(detail, "recipe detail")
     identity = _object(payload.get("identity"), "identity")

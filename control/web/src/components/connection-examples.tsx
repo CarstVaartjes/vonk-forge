@@ -1,7 +1,5 @@
 import { CopyButton } from "./copy-button";
 
-// The CLI renders the same text (src/cluster_profiles/cli_render/profile.py);
-// tests/fixtures/connection-examples.json is asserted by both renderers.
 const PER_REQUEST_NOTE =
   "Thinking and sampling are usually set per request (for example chat_template_kwargs and temperature), not in the recipe.";
 

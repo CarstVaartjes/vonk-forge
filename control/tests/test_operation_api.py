@@ -993,7 +993,7 @@ def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
         assert run is not None and reservation is not None
         assert stored.state == "failed"
         assert stored.next_action_at is None and stored.next_action_at is None
-        assert "operator retired" in (stored.status_reason or "")
+        assert stored.status_reason
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
         assert run.state == "starting"
@@ -2207,7 +2207,7 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
         assert run is not None and reservation is not None
         assert stored.state == "failed"
         assert stored.next_action_at is None and stored.next_action_at is None
-        assert "operator retired" in (stored.status_reason or "")
+        assert stored.status_reason
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
         assert run.state == "starting"

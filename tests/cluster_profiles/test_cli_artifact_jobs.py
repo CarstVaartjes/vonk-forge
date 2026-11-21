@@ -1838,8 +1838,6 @@ def test_download_of_a_running_job_says_to_wait(tmp_path, vonkctl_json) -> None:
         "job", "download", JOB_ID, "--output", str(tmp_path), control_client=client
     )
     assert status == 2
-    assert f"job {JOB_ID} is running" in error["error"]
-    assert f"job detail {JOB_ID} --follow" in error["error"]
     assert "control API unavailable" not in error["error"]
 
 

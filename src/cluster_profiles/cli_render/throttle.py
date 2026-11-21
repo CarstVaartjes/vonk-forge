@@ -1,7 +1,4 @@
-"""The NVIDIA clock event (throttle) reasons in words, one table shared with the Controller web.
-
-The vectors are ``tests/fixtures/fleet-wording-throttle.json``; the web renders the same words.
-"""
+"""The NVIDIA clock event (throttle) reasons in words, one table shared with the Controller web."""
 
 from __future__ import annotations
 
