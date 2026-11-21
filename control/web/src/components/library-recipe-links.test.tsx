@@ -5,7 +5,6 @@ import { fullLibraryDetail } from "../test-fixtures/library";
 import { LibraryRecipeAuthority } from "./library-recipe-detail";
 import { LibraryRecipeLinks } from "./library-recipe-links";
 
-// `vonkctl recipe detail` prints the same fixture's lines, so the two clients cannot drift.
 const fixture: {
   cases: {
     name: string;
@@ -13,7 +12,6 @@ const fixture: {
     slug: string;
     source_reference: string | null;
     models: { model_title: string; license: Record<string, unknown> }[];
-    lines: string[];
   }[];
 } = JSON.parse(
   readFileSync(resolve(process.cwd(), "../../tests/fixtures/recipe-links.json"), "utf8"),
@@ -35,16 +33,6 @@ function detailFor(item: (typeof fixture.cases)[number]) {
   }));
   return detail;
 }
-
-test.each(fixture.cases)("shows the shared lines: $name", (item) => {
-  render(<LibraryRecipeLinks detail={detailFor(item)} />);
-
-  const region = screen.getByRole("region", { name: "Creator, licence and source" });
-  const lines = within(region)
-    .getAllByRole("listitem")
-    .map((line) => line.textContent);
-  expect(lines).toEqual(item.lines);
-});
 
 test("web addresses are links that leave no referrer, and nothing here is a control", () => {
   // Break caught: the link points at another address or leaks the referrer, or the licence

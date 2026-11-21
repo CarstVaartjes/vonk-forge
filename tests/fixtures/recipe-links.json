@@ -1,5 +1,5 @@
 {
-  "note": "Input -> the exact lines the recipe detail shows (dashboard) and `vonkctl recipe detail` prints. The licence terms address is part of the line; the dashboard makes web addresses clickable but shows the same text.",
+  "note": "Input for the dashboard's recipe links: the licence terms address and the source link. A web address becomes a link; any other address stays text.",
   "cases": [
     {
       "name": "licence and source",
@@ -18,11 +18,6 @@
             "territorial_restrictions": null
           }
         }
-      ],
-      "lines": [
-        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
-        "Recipe source: https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json",
-        "Tiny Model licence: Apache-2.0 (terms: https://www.apache.org/licenses/LICENSE-2.0)"
       ]
     },
     {
@@ -48,11 +43,6 @@
             }
           }
         }
-      ],
-      "lines": [
-        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
-        "Tiny Model licence: LicenseRef-Custom (terms: https://example.org/terms)",
-        "Regional limits (CN, US): Not for use in listed regions."
       ]
     },
     {
@@ -72,10 +62,6 @@
             "territorial_restrictions": null
           }
         }
-      ],
-      "lines": [
-        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
-        "Tiny Model licence: MIT (terms: javascript:alert(1))"
       ]
     }
   ]

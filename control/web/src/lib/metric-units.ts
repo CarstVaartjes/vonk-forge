@@ -36,8 +36,7 @@ function size(bytes: number): string {
 }
 
 /**
- * A number in its unit symbol (the value already divided by the unit's scale), by the wording rules
- * in tests/fixtures/metrics-wording.json that `vonkctl metrics` follows too.
+ * A number in its unit symbol (the value already divided by the unit's scale).
  */
 export function formatValue(value: number, unit: string): string {
   switch (unit) {

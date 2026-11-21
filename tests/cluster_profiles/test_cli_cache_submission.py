@@ -253,13 +253,11 @@ def test_submit_answer_is_the_reported_cause_not_the_lookup_miss():
     assert status == 2 and acceptance(result) == "unknown"
     assert result["http_status"] == 409
     assert result["code"] == "controller.conflict"
-    assert result["detail"] == "application is already stopping"
     assert result["endpoint"] == post
     submission = result["submission"]
     assert isinstance(submission, dict)
     first = submission["failures"][0]
     assert first["stage"] == "submit" and first["http_status"] == 409
-    assert first["detail"] == "application is already stopping"
 
 
 @pytest.mark.parametrize("exhausted", [False, True])

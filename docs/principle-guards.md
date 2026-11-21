@@ -7,7 +7,7 @@ fixture tests consume source and patch text without reading Git or history.
 
 New contract string literals, untyped mappings, provenance comparisons and
 security refusals outside authentication, authorization and byte-verification
-ingress owners fail. Existing wait, read, remedy, retention, test-principle and
+ingress owners fail. Existing wait, read, retention, test-principle and
 coordination detectors also inspect added lines. Bounded waits remain valid.
 The `plan-validation` guard refuses an added `.validate()` on a compiled
 plan (also the rustfmt split-line shape) in `rust/crates/vonk-agent/src` and

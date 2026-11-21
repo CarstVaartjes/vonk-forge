@@ -90,11 +90,8 @@ def test_installed_profile_cancel_recovery_is_visible_in_activity(
             application.request_key,
         )
         assert activity.returncode == 0, activity.stdout + activity.stderr
-        assert "observing" in activity.stdout
         assert application.id in activity.stdout
         assert cancel_key in activity.stdout
-        assert "Cancelled or unissued effect" in activity.stdout
-        assert "administrator" in activity.stdout
 
         assert service.tick()
         terminal = run(

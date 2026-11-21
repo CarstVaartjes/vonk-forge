@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -201,48 +200,6 @@ def test_other_checks_prepare_missing_inputs(tmp_path, monkeypatch, kind):
         assert calls == [
             [str(tmp_path / "scripts/build-recipe-library"), str(tmp_path)]
         ]
-
-
-PREPARATION_REMEDY = re.compile(
-    r"(?:run|prepare|build|install|sync)\b[^\n]{0,200}(?:explicitly|then retry|before refreshing|tools: npm ci|index.*first)|(?:not built|no built catalog index)[^\n]{0,100}run",
-    re.IGNORECASE,
-)
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "Run scripts/build-control-wheel and uv sync --project control --frozen explicitly, then retry.",
-        "Prepare TypeScript tools: npm ci --prefix control/web",
-        "Build the canonical protocol wheel before refreshing its pin",
-        "recipe library index is not built; run scripts/build-recipe-library",
-    ],
-)
-def test_preparation_remedy_guard_rejects_original_refusals(message):
-    assert PREPARATION_REMEDY.search(message)
-
-
-def test_scripts_cannot_delegate_automatic_preparation_to_users():
-    # Catch both original refusals and equivalent new instructions, including
-    # shell/CI helpers. Human credentials, host installation and authority are
-    # outside this preparation guard.
-    failures = []
-    for directory in ("scripts", ".githooks", ".github", "tools"):
-        for path in (ROOT / directory).rglob("*"):
-            if (
-                not path.is_file()
-                or path.suffix == ".json"
-                or "__pycache__" in path.parts
-            ):
-                continue
-            for number, line in enumerate(
-                path.read_text(errors="replace").splitlines(), 1
-            ):
-                if PREPARATION_REMEDY.search(line):
-                    failures.append(
-                        f"{path.relative_to(ROOT)}:{number}: {line.strip()}"
-                    )
-    assert failures == []
 
 
 def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch):

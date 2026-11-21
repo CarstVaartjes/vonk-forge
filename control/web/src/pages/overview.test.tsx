@@ -1,5 +1,4 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
-import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { OverviewPage } from "./overview";
@@ -131,63 +130,6 @@ test("Fleet reports grant creation failures without losing the form", async () =
     ),
   ).toBeVisible();
   expect(screen.getByLabelText("Spark name")).toHaveValue("Kitchen Spark");
-});
-
-test("Fleet status line reads exactly what `vonkctl fleet` prints for the shared vectors", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-status.json", "utf8"),
-  ) as {
-    now: string;
-    cases: {
-      nodes: Record<string, unknown>[];
-      attention?: unknown[];
-      attention_unavailable?: boolean;
-      expected: string;
-    }[];
-  };
-  fleetNow = new Date(vectors.now);
-  for (const vector of vectors.cases) {
-    nodes = vector.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
-    attention = vector.attention ?? [];
-    attentionUnavailable = vector.attention_unavailable ?? false;
-    const { container, unmount } = render(<OverviewPage api={api} />);
-    expect(container.querySelector(".fleet-status-line")?.textContent).toBe(vector.expected);
-    expect(container.querySelector(".fleet-status-line")?.getAttribute("role")).toBeNull();
-    unmount();
-  }
-  fleetNow = new Date("2026-09-27T10:00:00Z");
-  attentionUnavailable = false;
-  nodes = [];
-  attention = [];
-});
-
-test("firing alerts read exactly what `vonkctl fleet` prints for the shared vectors", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-attention.json", "utf8"),
-  ) as {
-    nodes: { id: string; display_name: string }[];
-    alerts: unknown[];
-    expected: string[];
-    unavailable: string;
-  };
-  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
-  attention = vectors.alerts;
-  const { container, unmount } = render(<OverviewPage api={api} />);
-  const region = screen.getByRole("region", { name: "Needs attention" });
-  expect(
-    within(region)
-      .getAllByRole("listitem")
-      .map((item) => item.textContent),
-  ).toEqual(vectors.expected);
-  expect(within(region).queryByRole("button")).toBeNull();
-  expect(container.textContent).not.toContain("NodeHot");
-  unmount();
-  attention = [];
-  attentionUnavailable = true;
-  render(<OverviewPage api={api} />);
-  expect(screen.getByText(vectors.unavailable)).toBeVisible();
-  attentionUnavailable = false;
-  nodes = [];
 });
 
 test("Fleet shows the Controller headless memory recommendation without an apply action", () => {

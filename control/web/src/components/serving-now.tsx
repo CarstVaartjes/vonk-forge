@@ -21,8 +21,7 @@ export function servingKey(nodes: readonly VisualFleetNode[]): string {
 /**
  * What the loaded profile serves right now, one line per published alias, with the connection
  * example for each. Everything comes from the Controller's profile and endpoint views; the browser
- * never calls the inference gateway. The lines read exactly as `vonkctl profile endpoint` prints
- * them (tests/fixtures/serving-now.json).
+ * never calls the inference gateway.
  *
  * It reads again when `refreshKey` changes (the fleet's workloads changed). While the last read
  * failed or found nothing published, it also reads again on the next fleet poll (`pollKey`), so a

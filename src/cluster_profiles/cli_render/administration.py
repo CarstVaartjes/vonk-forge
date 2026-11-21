@@ -47,7 +47,6 @@ def last_sync_at(completed_at: object, created_at: object) -> object:
 
 
 def _catalog_sync(payload: Mapping[str, object]) -> None:
-    # Wording shared with the dashboard's version line (tests/fixtures/version-line.json).
     if payload.get("state") == "never-run":
         _reported("Library version", None)
         _field("Last sync", "none yet")
