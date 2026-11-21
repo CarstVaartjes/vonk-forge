@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_model_removal_contract import FleetModelRemovalEffects
 from .strict_json import StrictJSONModel

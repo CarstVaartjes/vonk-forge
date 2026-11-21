@@ -20,10 +20,9 @@ from vonk_control.artifact_job_api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.gateway_route_grants import GatewayInferenceRoute
 from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
-
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"

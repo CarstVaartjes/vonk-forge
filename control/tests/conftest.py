@@ -69,8 +69,8 @@ _POSTGRES_PORT_TEMPLATE = (
 )
 
 
-def _load_tools_plugin(name: str):
-    """Load a shared tools/ pytest plugin without exposing the repository root.
+def load_tools_module(name: str):
+    """Load a shared tools/ module without exposing the repository root.
 
     The repository root also has a ``tests`` package, so it cannot go on this
     suite's import path.
@@ -97,15 +97,15 @@ def damaged_json_rows() -> Iterator[None]:
         yield
 
 
-_load_tools_plugin("generated_contracts").prepare_generated_contracts()
+load_tools_module("generated_contracts").prepare_generated_contracts()
 
 
 def pytest_addoption(
     parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
 ) -> None:
     _api_response_addoption(parser)
-    _load_tools_plugin("pytest_budget").register(pluginmanager)
-    _load_tools_plugin("pytest_prereqs").register(pluginmanager)
+    load_tools_module("pytest_budget").register(pluginmanager)
+    load_tools_module("pytest_prereqs").register(pluginmanager)
 
 
 def pytest_configure(config: pytest.Config) -> None:

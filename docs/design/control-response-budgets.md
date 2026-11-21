@@ -1,6 +1,7 @@
 # Controller observation response budgets
 
-The standalone CLI allocates at most `MAX_CONTROL_DOCUMENT_BYTES + 1` response
+The Controller owns the bound (`vonk_control.control_limits`); the CLI gets a
+generated copy (`scripts/generate-control-clients`). The standalone CLI allocates at most `MAX_CONTROL_DOCUMENT_BYTES + 1` response
 bytes before refusing an ordinary JSON response. Its 1 MiB bound is a reader
 allocation backstop, not an admission rule or a promise every Controller route
 has already satisfied. Request body limits do not establish response limits.

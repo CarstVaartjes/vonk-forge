@@ -6,10 +6,6 @@
 !agent_protocol/src/vonk_agent_protocol/
 !agent_protocol/src/vonk_agent_protocol/route_activation.py
 !agent_protocol/src/vonk_agent_protocol/route_activation_words.py
-!src/
-src/*
-!src/cluster_profiles/
-!src/cluster_profiles/**
 !control/
 !control/Dockerfile
 !control/pyproject.toml
@@ -31,7 +27,7 @@ schemas/*
 !schemas/install-release-manifest.schema.json
 !tools/
 tools/*
-!tools/hatch_build.py
+!tools/stamp_build_identity.py
 !rust/
 rust/*
 !rust/crates/

@@ -23,13 +23,6 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.jobs import JobService
 from vonk_control.library_api import install_library_routes
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.vonkctl_json_contract import (
-    DOCUMENTS,
-    incompatibilities,
-    schema_filename,
-    schema_text,
-    schema_version,
-)
 
 from cluster_profiles import cli
 from cluster_profiles.cli_json_contract import (
@@ -39,9 +32,17 @@ from cluster_profiles.cli_json_contract import (
 )
 from cluster_profiles.control_client import ControlClient
 
+from .conftest import load_tools_module
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_head_reads import _library, _publish, catalog  # noqa: F401
 from .test_fleet_profile_api import _client as _profile_api
+
+_contract = load_tools_module("vonkctl_json_contract")
+DOCUMENTS = _contract.DOCUMENTS
+incompatibilities = _contract.incompatibilities
+schema_filename = _contract.schema_filename
+schema_text = _contract.schema_text
+schema_version = _contract.schema_version
 
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "vonkctl"
 
@@ -406,7 +407,7 @@ def test_published_schema_files_are_the_models_current_export() -> None:
     }
     for kind in DOCUMENTS:
         assert (SCHEMAS / schema_filename(kind)).read_text() == schema_text(kind), (
-            f"{kind}: run python -m vonk_control.vonkctl_json_contract schemas/vonkctl"
+            f"{kind}: run python tools/vonkctl_json_contract.py schemas/vonkctl"
         )
         jsonschema.Draft202012Validator.check_schema(json.loads(schema_text(kind)))
 

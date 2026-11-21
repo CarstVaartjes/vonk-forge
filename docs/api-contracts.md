@@ -238,6 +238,17 @@ or equality between two manually written fixtures is insufficient.
 
 ## Rust and generated clients
 
+The server never imports vonkctl. The Controller owns the document bound
+(`vonk_control.control_limits`) and the contract fingerprint
+(`vonk_control.build_identity`); `scripts/generate-control-clients` writes
+`generated_control/limits.py` and `fingerprint.py` for the CLI beside
+`media_types.py`. The Controller reads its own `build-identity.json` from the
+image, which `tools/stamp_build_identity.py` writes: the Dockerfile's
+`server-identity` stage and the CLI wheel hook run that one writer, so one tree
+gives the Controller and vonkctl the same `control_contract_sha256`
+(`control/tests/test_cli_update_contract.py` proves it).
+`tests/test_package_import_direction.py` guards the direction.
+
 Rust wire structs and enums are generated from the authoritative Pydantic
 models by the `vonk-wire-codegen` renderer, using pinned typify 0.8.0. Cargo's
 `build.rs` exports the validation schema and generates declarations into

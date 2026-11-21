@@ -12,11 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from cluster_profiles.runtime_identity import (
+from .build_identity import (
     RuntimeBuildIdentity,
     packaged_runtime_identity,
 )
-
 from .capabilities import CapabilityRegistry
 from .capability_contract import CapabilityStatus
 from .coordinator_contract import CoordinatorFailureView

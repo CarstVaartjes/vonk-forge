@@ -305,8 +305,7 @@ def test_large_inventory_and_damaged_history_do_not_block_exact_ingress(
     headers = agent_headers(NODE_A, "serial-a")
     body = _inventory(clock)
     from vonk_agent_protocol import canonical_message
-
-    from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     item_bytes = len(canonical_message({"sha256": "f" * 64, "bytes": 1024**2})) + 1
     # Exercise most of the shared transport budget; the Rust producer drops

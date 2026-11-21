@@ -95,7 +95,7 @@ values and are always preserved.
 Edit the model (or the table), then regenerate the schema files:
 
 ```sh
-python -m vonk_control.vonkctl_json_contract schemas/vonkctl
+uv run --project control --frozen python tools/vonkctl_json_contract.py schemas/vonkctl
 ```
 
 `control/tests/test_vonkctl_json_contract.py` fails when a file drifts from its

@@ -307,6 +307,21 @@ def main() -> None:
             + inspect.getsource(canonical_media_types),
             encoding="utf-8",
         )
+        # The Controller owns the document bound and the contract fingerprint;
+        # the CLI reads generated copies, never the server package.
+        from vonk_control import build_identity, control_limits
+
+        (python_output / "limits.py").write_text(
+            '"""Generated from vonk_control.control_limits. Do not edit."""\n\n'
+            f"MAX_CONTROL_DOCUMENT_BYTES = {control_limits.MAX_CONTROL_DOCUMENT_BYTES}\n",
+            encoding="utf-8",
+        )
+        (python_output / "fingerprint.py").write_text(
+            '"""Generated from vonk_control.build_identity. Do not edit."""\n\n'
+            "import hashlib\nimport json\n\n\n"
+            + inspect.getsource(build_identity.contract_fingerprint),
+            encoding="utf-8",
+        )
         _use_httpx2(python_output)
         _normalize_generated_text(python_output)
 

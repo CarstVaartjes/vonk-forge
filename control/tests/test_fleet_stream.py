@@ -1220,7 +1220,7 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
     None
 ):
     """A malformed stored payload is repairable within normal SQL constraints."""
-    from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     engine, sessions, repository = _production_stream_store()
     try:
@@ -1281,7 +1281,7 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
 
 
 def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
-    from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+    from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     fields = JobPayload(
         entity_kind="job",

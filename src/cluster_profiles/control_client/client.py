@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, Never, Self
 import httpx2
 
 from ..cli_states import FAILED_JOB_STATES, NEEDS_OPERATOR, SUCCEEDED
-from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..control_transport import open_https
 from ..error_reporting import (
     ClientCode,
@@ -30,6 +29,7 @@ from ..error_reporting import (
     safe_request_id,
     transport_context,
 )
+from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..observation_transfer_reader import (
     ObservationTransferInvalid,
     ObservationTransferUnavailable,

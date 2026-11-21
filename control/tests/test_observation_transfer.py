@@ -21,6 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.fleet_projection import (
     FleetProjection,
     FleetSnapshot,
@@ -42,7 +43,6 @@ from cluster_profiles.control_client import (
     ControlClientError,
     source_schema_validator,
 )
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .observation_transfer_peer import (
     ObservationHTTPPeer,

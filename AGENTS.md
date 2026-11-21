@@ -56,6 +56,13 @@ old workaround nor a status snapshot authorizes a new operational action. Keep
 one current action list and verify changing claims against their actual owner.
 Keep commands in their linked runbooks so this guide stays focused on decisions.
 
+Package direction is one way: the Controller (`vonk_control`) and `nas_setup`
+may import `vonk_agent_protocol`; nothing else imports a sibling package, and
+the server never imports vonkctl (`cluster_profiles`). Facts reach the CLI only
+through the generated client (`scripts/generate-control-clients`);
+`tests/test_package_import_direction.py` enforces it, function-level imports
+included.
+
 NAS/project setup and administration use Python, including the standalone
 `nas_setup` wheel and the existing `vonkctl` CLI. Rust owns the resident Spark
 agent, privileged Spark helpers and native Spark installer, where bounded memory

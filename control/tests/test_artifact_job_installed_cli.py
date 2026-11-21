@@ -25,10 +25,10 @@ from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.auth import Actor
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.strict_json import ControllerAPIRoute
-from vonk_control.vonkctl_json_contract import DOCUMENTS
 
 from cluster_profiles.cli_json_contract import DocumentKind
 
+from .conftest import load_tools_module
 from .test_artifact_jobs import _configure_artifact_recipe
 from .test_profile_load_installed_cli import (
     _https_api_peer,
@@ -46,6 +46,8 @@ OUTPUT_LIMITS: dict[str, object] = {
     "max_total_bytes": 4096,
     "allowed_media_types": ["image/png"],
 }
+
+DOCUMENTS = load_tools_module("vonkctl_json_contract").DOCUMENTS
 
 # vonkctl prints the Controller job plus its schema_version.
 _CLI_JOB = DOCUMENTS[DocumentKind.ARTIFACT_JOB]

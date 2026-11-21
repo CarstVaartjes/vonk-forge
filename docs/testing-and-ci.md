@@ -326,7 +326,8 @@ point the VM at the host checkout, and never delete other agents' directories.
 
 Every Python suite, lint and type check runs in one locked environment: the
 `control` project with its `dev` dependency group (`control/uv.lock`). It
-contains the root `vonk-cluster-profiles` package (editable), the Controller,
+contains the Controller and, as a test client only, the root
+`vonk-cluster-profiles` package (editable; the Controller image does not install it),
 the locked recipe contracts, pytest and its plugins, the build backend and
 pyright and ruff. Nothing is added with `uv run --with` or `uvx`: a new test or
 tool dependency goes into a dependency group and the lock.

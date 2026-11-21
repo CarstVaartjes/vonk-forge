@@ -1562,7 +1562,6 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uvicorn" },
     { name = "vonk-agent-protocol" },
-    { name = "vonk-cluster-profiles" },
     { name = "vonk-forge-public-contracts" },
 ]
 
@@ -1576,6 +1575,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "vonk-cluster-profiles" },
     { name = "vonk-nas-setup" },
 ]
 
@@ -1596,7 +1596,6 @@ requires-dist = [
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "vonk-agent-protocol" },
-    { name = "vonk-cluster-profiles", editable = "../" },
     { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=14c67a1636514bd2a61d26372d4d754f26a07959" },
 ]
 
@@ -1610,6 +1609,7 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.9" },
+    { name = "vonk-cluster-profiles", editable = "../" },
     { name = "vonk-nas-setup", editable = "../nas_setup" },
 ]
 

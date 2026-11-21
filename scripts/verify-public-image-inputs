@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 INPUTS = (
     ".tool-versions",
     "pyproject.toml",
-    "src/cluster_profiles",
+    "tools/stamp_build_identity.py",
     "control/Dockerfile",
     "control/pyproject.toml",
     "control/src",

@@ -19,13 +19,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TypedDict
 
-from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..error_reporting import (
     local_io_context,
     protocol_context,
     safe_request_id,
     transport_context,
 )
+from ..generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 from .client import ControlClient as HTTPControlClient
 from .common import _MAX_ARTIFACT_INPUT
 from .errors import (

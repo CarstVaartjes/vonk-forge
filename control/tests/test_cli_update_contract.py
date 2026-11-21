@@ -1,6 +1,8 @@
 """One complete actual worker observation drives the stable update authority."""
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import NoReturn
 
 from fastapi.testclient import TestClient
@@ -8,15 +10,20 @@ from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
-from vonk_control import platform_observation
+from vonk_control import build_identity, platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.operation_api import admin_openapi_schema
 from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
-from cluster_profiles.runtime_identity import RuntimeBuildIdentity
+
+from .conftest import load_tools_module
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class Jobs:
@@ -53,7 +60,7 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         platform_observation, "packaged_runtime_identity", read_api_identity
     )
     monkeypatch.setattr(
-        runtime_identity, "packaged_runtime_identity", lambda: worker_identity[0]
+        build_identity, "packaged_runtime_identity", lambda: worker_identity[0]
     )
     observer = PlatformObserver(sessions, clock=lambda: clock[0])
     codec = TokenCodec(b"k" * 32)
@@ -163,3 +170,46 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     expired = read()
     assert expired["worker_compatibility"] == "unknown"
     assert expired["worker_count"] == 0
+
+
+def test_server_and_cli_read_equal_identity_from_one_stamp(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches a Controller image whose served contract differs from vonkctl's.
+
+    vonkctl compares its stamped control_contract_sha256 with the one the
+    Controller serves on /api/cli/contract; both come from the one stamp writer.
+    """
+    openapi = admin_openapi_schema(
+        create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
+    )
+    wire = json.loads(
+        (ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json").read_text()
+    )
+    (tmp_path / "schemas").mkdir()
+    (tmp_path / "schemas/control-openapi.json").write_text(json.dumps(openapi))
+    (tmp_path / "wire.json").write_text(json.dumps(wire))
+    monkeypatch.setenv("VONK_BUILD_SOURCE_SHA", "a" * 40)
+    monkeypatch.setenv("VONK_BUILD_SOURCE_TREE", "1" * 40)
+    load_tools_module("stamp_build_identity").write_build_identity(
+        control_openapi=tmp_path / "schemas/control-openapi.json",
+        wire=tmp_path / "wire.json",
+        output=tmp_path / "build-identity.json",
+    )
+    monkeypatch.setattr(build_identity, "files", lambda _package: tmp_path)
+    monkeypatch.setattr(runtime_identity, "files", lambda _package: tmp_path)
+
+    server = build_identity.packaged_runtime_identity()
+    client = runtime_identity.stamped_runtime_identity()
+
+    assert server.control_contract_sha256 == client.control_contract_sha256
+    assert server.worker_contract_sha256 == client.worker_contract_sha256
+    assert server.control_contract_sha256 == build_identity.contract_fingerprint(
+        openapi
+    )
+    # The CLI's generated fingerprint is the Controller's function.
+    assert runtime_identity.contract_fingerprint(openapi) == (
+        server.control_contract_sha256
+    )
+    assert runtime_identity.packaged_runtime_identity() == client
+    assert server.source_sha == "a" * 40

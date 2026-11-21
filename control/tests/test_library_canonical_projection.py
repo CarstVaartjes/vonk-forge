@@ -19,6 +19,7 @@ from vonk_control.catalog_revision_contract import (
     RecipeRevisionProjection,
 )
 from vonk_control.catalog_service import CatalogService
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection import LibraryProjection
@@ -48,7 +49,6 @@ from vonk_forge_contracts import (
     read_recipe_display,
 )
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.recipe_library_source import recipe_library_root
 
 from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword

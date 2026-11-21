@@ -474,9 +474,13 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             output = json.dumps(
                 {
                     "package": package_identity,
-                    "observation": {
+                    "contract": {
                         "api": package_identity,
-                        "workers": [package_identity],
+                        "worker_count": 1,
+                        "worker_source_sha": source,
+                        "worker_contract_sha256": package_identity[
+                            "worker_contract_sha256"
+                        ],
                         "worker_issue": None,
                     },
                 }
@@ -496,6 +500,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
 
     monkeypatch.setattr(acceptance, "reclaim_gateway_journal", reclaim)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: compose)
+    monkeypatch.setattr(acceptance, "tree_cli_contract_sha256", lambda: "b" * 64)
     monkeypatch.setattr(
         acceptance,
         "compose_services",
@@ -1279,6 +1284,7 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
     }
     monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
+    monkeypatch.setattr(acceptance, "tree_cli_contract_sha256", lambda: "b" * 64)
     elapsed = [0.0]
     monkeypatch.setattr(acceptance.time, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(
@@ -1295,16 +1301,21 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
             api = dict(package)
             if outcome == "api-mismatch":
                 api["source_sha"] = "d" * 40
-            workers = None if missing else [dict(package)]
+            worker = dict(package)
             issue = "worker-observation-unavailable" if missing else None
             if outcome == "unknown-provenance":
-                workers = [dict(package, source_sha=None)]
                 issue = "worker-provenance-unavailable"
-            if outcome == "worker-mismatch" and workers:
-                workers[0]["source_sha"] = "e" * 40
+            if outcome == "worker-mismatch":
+                worker["source_sha"] = "e" * 40
             document = {
                 "package": package,
-                "observation": {"api": api, "workers": workers, "worker_issue": issue},
+                "contract": {
+                    "api": api,
+                    "worker_count": 0 if missing else 1,
+                    "worker_source_sha": worker["source_sha"],
+                    "worker_contract_sha256": worker["worker_contract_sha256"],
+                    "worker_issue": issue,
+                },
             }
         else:
             document = package

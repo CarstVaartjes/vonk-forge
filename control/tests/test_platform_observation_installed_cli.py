@@ -11,15 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control import platform_observation
+from vonk_control import build_identity, platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base
 from vonk_control.platform_observation import PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
-from cluster_profiles import runtime_identity
-from cluster_profiles.runtime_identity import RuntimeBuildIdentity
 from tests.test_platform_observation import Jobs
 from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
 
@@ -40,7 +39,7 @@ def test_installed_platform_preserves_separate_sources_and_worker_recovery(
         platform_observation, "packaged_runtime_identity", lambda: api_identity
     )
     monkeypatch.setattr(
-        runtime_identity, "packaged_runtime_identity", lambda: worker_identity
+        build_identity, "packaged_runtime_identity", lambda: worker_identity
     )
     recorder = WorkerHeartbeatRecorder(
         sessions, process_instance_id="f" * 64, clock=lambda: clock[0]

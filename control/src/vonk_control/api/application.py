@@ -41,7 +41,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import AgentClientDecision
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..agent_api import (
     MAX_RECIPE_IMAGE_BYTES,

@@ -23,6 +23,7 @@ from test_control_client_requests import (
     _StreamResponse,
     _token,
 )
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.control_client import (
@@ -31,7 +32,6 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     ControlTransportError,
 )
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 JOB_ID = "00000000-0000-4000-8000-000000000001"

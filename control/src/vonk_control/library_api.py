@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Query
 from vonk_forge_contracts import CatalogVocabulary
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .api_availability import AVAILABILITY_ERRORS
 from .auth import CursorError

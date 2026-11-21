@@ -12,16 +12,16 @@ from typing import NoReturn, Self
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control import platform_observation
+from vonk_control import build_identity, platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.platform_observation import PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
-from cluster_profiles import cli, runtime_identity
+from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
-from cluster_profiles.runtime_identity import RuntimeBuildIdentity
 
 
 class Jobs:
@@ -62,7 +62,7 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
         platform_observation, "packaged_runtime_identity", lambda: api_identity
     )
     monkeypatch.setattr(
-        runtime_identity, "packaged_runtime_identity", lambda: worker_identity
+        build_identity, "packaged_runtime_identity", lambda: worker_identity
     )
     recorder = WorkerHeartbeatRecorder(
         sessions, process_instance_id="f" * 64, clock=lambda: clock[0]
@@ -152,7 +152,7 @@ def test_platform_names_the_slow_step_while_the_heartbeat_is_stale(
     monkeypatch.setattr(
         platform_observation, "packaged_runtime_identity", lambda: identity
     )
-    monkeypatch.setattr(runtime_identity, "packaged_runtime_identity", lambda: identity)
+    monkeypatch.setattr(build_identity, "packaged_runtime_identity", lambda: identity)
     recorder = WorkerHeartbeatRecorder(
         sessions, process_instance_id="f" * 64, clock=lambda: clock[0]
     )

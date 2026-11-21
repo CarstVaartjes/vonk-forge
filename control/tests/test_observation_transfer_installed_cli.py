@@ -12,11 +12,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.observation_transfer_peer import fleet_authority
 from tests.test_observation_transfer import NOW, Projection, _large_snapshot
 from tests.test_platform_observation import Jobs
