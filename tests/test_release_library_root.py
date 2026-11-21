@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.acceptance.spark_upgrade_carry import release_library_root
+from tests.acceptance.spark_upgrade_carry import (
+    PrebuiltLibrary,
+    release_library_root,
+)
 from tests.acceptance.test_spark_lifecycle import LifecycleError
 
 REVISION = "0123456789abcdef0123456789abcdef01234567"
@@ -55,3 +58,32 @@ def test_a_release_library_is_fetched_and_built_from_the_revision_it_names(
 def test_a_release_that_names_no_exact_revision_is_refused(tmp_path: Path) -> None:
     with pytest.raises(LifecycleError):
         release_library_root("a" * 40, tmp_path, read_revision=lambda _sha: "main\n")
+
+
+def test_a_library_the_job_built_is_reused_only_for_its_revision_and_script(
+    tmp_path: Path,
+) -> None:
+    built = tmp_path / ".recipe-library"
+    built.mkdir()
+    (built / "catalog-index.json").write_text("{}")
+    prebuilt = PrebuiltLibrary(built, REVISION, SCRIPT)
+
+    def fetch(revision: str, destination: Path) -> None:
+        tool = destination / "tools/build-catalog-index"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("")
+
+    def root(revision: str, script: str) -> Path:
+        return release_library_root(
+            "a" * 40,
+            tmp_path,
+            prebuilt=prebuilt,
+            read_revision=lambda _sha: revision,
+            read_build_script=lambda _sha: script,
+            fetch_library=fetch,
+        )
+
+    assert root(REVISION, SCRIPT) == built
+    other = "f" * 40
+    assert root(other, SCRIPT).name == f"recipe-library-{other}"
+    assert root(REVISION, SCRIPT + "# changed\n").name == f"recipe-library-{REVISION}"

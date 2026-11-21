@@ -41,6 +41,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 
@@ -543,10 +544,28 @@ def _file_through_api(path: str, source_sha: str) -> str:
     return _retry_transient(f"the release's {path}", attempt)
 
 
+class PrebuiltLibrary(NamedTuple):
+    """A library the job already built, with what its build depended on."""
+
+    root: Path
+    revision: str
+    build_script: str
+
+
+def prebuilt_library(root: Path, workspace: Path) -> PrebuiltLibrary:
+    """The job's own built library: the revision file and script it was built from."""
+    return PrebuiltLibrary(
+        root,
+        (workspace / LIBRARY_REVISION_FILE).read_text().strip(),
+        (workspace / LIBRARY_BUILD_SCRIPT).read_text(),
+    )
+
+
 def release_library_root(
     source_sha: str,
     workspace: Path,
     *,
+    prebuilt: PrebuiltLibrary | None = None,
     read_revision: Callable[[str], str] = _revision_through_api,
     read_build_script: Callable[[str], str] = _build_script_through_api,
     fetch_library: Callable[[str, Path], None] = _download_library,
@@ -561,6 +580,14 @@ def release_library_root(
     revision = read_revision(source_sha).strip()
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise LifecycleError("the release names no exact recipe library revision")
+    if (
+        prebuilt is not None
+        and prebuilt.revision == revision
+        and (prebuilt.root / "catalog-index.json").is_file()
+        and prebuilt.build_script == read_build_script(source_sha)
+    ):
+        # The same revision built by the same script: build it once per job.
+        return prebuilt.root
     root = workspace / f"recipe-library-{revision}"
     if not (root / "catalog-index.json").is_file():
         root.mkdir(parents=True, exist_ok=True)
@@ -587,8 +614,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         *,
         baseline: ReleaseInput,
         candidate: ReleaseInput,
+        prebuilt: PrebuiltLibrary | None = None,
     ) -> None:
         super().__init__(arguments, {})
+        self._prebuilt = prebuilt
         self.baseline = baseline
         self.candidate = candidate
         self.controller_generation = baseline.generation
@@ -875,7 +904,11 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
     def _canary_library_root(self) -> Path:
         """The baseline Controller imports the canary of its own release's library."""
-        return release_library_root(self.baseline.source_sha, self._library_workspace)
+        return release_library_root(
+            self.baseline.source_sha,
+            self._library_workspace,
+            prebuilt=self._prebuilt,
+        )
 
     def _import_candidate_library(self) -> None:
         """The candidate Controller imports the canary of the library it was accepted with.
@@ -885,7 +918,11 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         route withdrawal), which the settle and route phases that follow prove.
         """
         self.synthetic_canary_fixture = fixture = _canonical_canary_fixture(
-            release_library_root(self.candidate.source_sha, self._library_workspace)
+            release_library_root(
+                self.candidate.source_sha,
+                self._library_workspace,
+                prebuilt=self._prebuilt,
+            )
         )
         sync = self._import_canary_catalog(
             fixture,
@@ -1555,6 +1592,12 @@ def main() -> int:
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--platform", default="linux-arm64")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--library-root",
+        type=Path,
+        help="the recipe library the job already built; reused for a release "
+        "that names the same revision and build script",
+    )
     arguments = parser.parse_args()
     if CHANNEL.fullmatch(arguments.channel) is None:
         print("upgrade-carry inputs are invalid", file=sys.stderr)
@@ -1609,7 +1652,16 @@ def main() -> int:
             output=arguments.output,
         )
         lane_class = RecipeRefreshLifecycle if refresh else UpgradeCarryLifecycle
-        lifecycle_run = lane_class(lane, baseline=baseline, candidate=candidate)
+        lifecycle_run = lane_class(
+            lane,
+            baseline=baseline,
+            candidate=candidate,
+            prebuilt=(
+                prebuilt_library(arguments.library_root, workspace)
+                if arguments.library_root
+                else None
+            ),
+        )
         with lifecycle_run as lifecycle:
             proof = lifecycle.observe()
     except LifecycleError as error:
