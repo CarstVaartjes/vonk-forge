@@ -23,10 +23,10 @@ from test_control_client_requests import (
     _StreamResponse,
     _token,
 )
-from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.control_client import (
+    MAX_CONTROL_DOCUMENT_BYTES,
     ControlClient,
     ControlHTTPError,
     ControlNotFound,
