@@ -16,10 +16,10 @@ from vonk_agent_protocol import (
     EndpointState,
     ProfileReasonCode,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts import EndpointAlias
 
 from ..endpoint_contract import EndpointResponse
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..strict_json import StrictModel
 from .vocabulary import (
     DesiredAssignmentStateField,

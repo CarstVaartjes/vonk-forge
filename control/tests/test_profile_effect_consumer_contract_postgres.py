@@ -64,7 +64,11 @@ def installed_vonkctl(tmp_path_factory):
     assert len(source) == 40 and all(c in "0123456789abcdef" for c in source)
     environment = isolated_environment(
         workspace / "build-home",
-        extra={"VONK_BUILD_SOURCE_SHA": source, "VONK_BUILD_RELEASE_VERSION": "0.1.1"},
+        extra={
+            "VONK_BUILD_SOURCE_SHA": source,
+            "VONK_BUILD_RELEASE_VERSION": "0.1.1",
+            "VONK_PROTOCOL_ENVIRONMENT": str(root / "agent_protocol/.venv"),
+        },
     )
     wheels = workspace / "wheel"
     built = subprocess.run(

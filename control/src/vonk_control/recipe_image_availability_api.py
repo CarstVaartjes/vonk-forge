@@ -20,11 +20,11 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
-from .integer_domains import MAX_DATABASE_INTEGER
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses

@@ -14,12 +14,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Route
+from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog_api import CatalogProblem
 from vonk_control.models import Base, Job, User
-from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"

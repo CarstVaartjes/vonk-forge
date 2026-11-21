@@ -74,11 +74,6 @@ class EnrollmentRotationRecoveryClaim(StrictJSONModel):
     retiring_serial: str
 
 
-class EnrollmentObservationReply(StrictJSONModel):
-    detail: UnknownError
-    state: LifecycleState
-
-
 class EnrollmentObservationOutcome(UnknownError):
     state: LifecycleState
 

@@ -17,6 +17,10 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
+from vonk_agent_protocol.error_response import (
+    BoundedErrorResponse,
+    RequestValidationProblem,
+)
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_control.catalog_sync import _empty_result
 from vonk_control.catalog_sync_contract import ManagedCatalogSyncResult
@@ -24,11 +28,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileDefinitionView,
     FleetProfileInput,
 )
-from vonk_control.operation_api import (
-    BoundedErrorResponse,
-    JobDetailResponse,
-    RequestValidationProblem,
-)
+from vonk_control.operation_api import JobDetailResponse
 from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
 
 NODE = "spk_" + "1" * 32

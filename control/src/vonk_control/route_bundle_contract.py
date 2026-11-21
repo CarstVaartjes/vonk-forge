@@ -13,10 +13,10 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, field_validator
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_forge_contracts import EndpointAlias
 
-from .integer_domains import MAX_DATABASE_BIGINT
 from .litellm import LiteLlmModelInfo
 from .strict_json import StrictModel
 

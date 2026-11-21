@@ -85,7 +85,7 @@ RUN apt-get update \
 WORKDIR /repo
 COPY pyproject.toml ./
 COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
-COPY agent_protocol/pyproject.toml ./agent_protocol/
+COPY agent_protocol/pyproject.toml agent_protocol/uv.lock ./agent_protocol/
 # The locked development environment includes the portable NAS helper for its
 # Python behavior tests. Generators may resync that environment, so retain the
 # complete local editable project in this build stage; it never reaches runtime.
@@ -107,7 +107,7 @@ COPY agent_protocol/src/ ./agent_protocol/src/
 # except the generated documents reaches the runtime image.
 COPY src/cluster_profiles/ ./src/cluster_profiles/
 COPY tools/hatch_build.py ./tools/hatch_build.py
-COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
+COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/ensure-project-venv scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
 COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem ./install/installer-release-public.pem
 RUN scripts/generate-control-clients \

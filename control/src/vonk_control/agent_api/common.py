@@ -17,10 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any, NamedTuple, NoReturn
+from typing import Any, NoReturn
 
 from fastapi import HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -33,17 +33,11 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import PAYLOAD_MODELS
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.host_helper import (
-    ContainerRuntimeAction,
-    ContainerRuntimeActionName,
-    RecipeReconciliationIdentity,
-)
+from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
-from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     EnrollmentPurpose,
@@ -69,7 +63,6 @@ from ..enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from ..enrollment_contract import EnrollmentId
 from ..host_helper_authority import HostRuntimeAuthorityService
 from ..http_errors import SecurityHTTPError, temporary_http_answer
-from ..integer_domains import MAX_DATABASE_BIGINT
 from ..logging import log_event
 from ..models import AgentCertificate, AgentNode, AgentOperation
 from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
@@ -89,9 +82,6 @@ RECIPE_RUN_UNOWNED = RecipeRunDispositionValue.UNOWNED.value
 
 
 RECIPE_RUN_GENERATION_HEADER = "x-vonk-recipe-run-generation"
-
-
-_UUID4_TEXT = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 
 
 _CANONICAL_UUID = re.compile(
@@ -304,138 +294,6 @@ class EnrollmentGrantResponse(StrictJSONModel):
     controller_address: str | None = None
     service_hostnames: list[str] = Field(default_factory=list, max_length=16)
     installer_url: InstallerUrl
-
-
-class AgentGrantRequest(StrictJSONModel):
-    """A helper grant for the attempt the fence names; mTLS names the node."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    fence: str = Field(pattern=_UUID4_TEXT)
-    expires_in_seconds: int = Field(ge=1, le=300)
-
-
-class HostRuntimeGrantRequest(AgentGrantRequest):
-    installation_intent_nonce: str | None = Field(
-        default=None, pattern=r"^[0-9a-f]{64}$"
-    )
-    action: ContainerRuntimeActionName
-    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    stop_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    run_generation: (
-        Annotated[int, Field(ge=1, le=MAX_DATABASE_BIGINT, strict=True)] | None
-    ) = None
-    runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
-    runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
-    runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
-    installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
-    reconciliation_identity: RecipeReconciliationIdentity | None = None
-
-    @model_validator(mode="after")
-    def runtime_binding(self) -> HostRuntimeGrantRequest:
-        if (self.installation_id is not None) != (
-            self.action == "installation-cleanup"
-        ):
-            raise ValueError("host runtime installation binding is invalid")
-        has_runtime_binding = any(
-            value is not None
-            for value in (
-                self.start_plan_sha256,
-                self.stop_plan_sha256,
-                # An inspection may ask to be bound to its run's generation.
-                None
-                if self.action == ContainerRuntimeAction.RUN_INSPECT
-                else self.run_generation,
-                self.runtime_run_id,
-                self.runtime_target_id,
-                self.runtime_installation_id,
-            )
-        )
-        if self.action in {"start", "stop"}:
-            expected_plan = (
-                self.start_plan_sha256
-                if self.action == "start"
-                else self.stop_plan_sha256
-            )
-            unexpected_plan = (
-                self.stop_plan_sha256
-                if self.action == "start"
-                else self.start_plan_sha256
-            )
-            if (
-                expected_plan is None
-                or unexpected_plan is not None
-                or self.run_generation is None
-                or self.runtime_run_id is None
-                or self.runtime_target_id is None
-                or self.runtime_installation_id is None
-            ):
-                raise ValueError("host runtime plan binding is invalid")
-        elif has_runtime_binding:
-            raise ValueError("host runtime plan binding does not match the action")
-        if self.reconciliation_identity is not None and (
-            self.action != "installation-cleanup"
-            or self.reconciliation_identity.installation_id != self.installation_id
-        ):
-            raise ValueError("host runtime reconciliation binding is invalid")
-        return self
-
-
-class OrphanStopBinding(NamedTuple):
-    stop_plan_sha256: str
-    run_generation: int
-    run_id: str
-    target_id: str
-    installation_id: str
-
-
-class OrphanStopGrantRequest(HostRuntimeGrantRequest):
-    """The stop of a serving container named by its own labels, nothing else."""
-
-    @model_validator(mode="after")
-    def orphan_stop_binding(self) -> OrphanStopGrantRequest:
-        # The serving container only: its target is the run itself, so a job
-        # container carrying this run's label is never named.
-        if (
-            self.action != ContainerRuntimeAction.STOP
-            or self.runtime_target_id != self.runtime_run_id
-            or self.stop_plan_sha256 is None
-            or self.run_generation is None
-            or self.runtime_installation_id is None
-        ):
-            raise ValueError("orphan stop binding is invalid")
-        return self
-
-    def binding(self) -> OrphanStopBinding:
-        """The validated identity, typed without the optional forms."""
-
-        assert self.stop_plan_sha256 is not None
-        assert self.run_generation is not None
-        assert self.runtime_run_id is not None
-        assert self.runtime_target_id is not None
-        assert self.runtime_installation_id is not None
-        return OrphanStopBinding(
-            self.stop_plan_sha256,
-            self.run_generation,
-            self.runtime_run_id,
-            self.runtime_target_id,
-            self.runtime_installation_id,
-        )
-
-
-class PackageActivationGrantRequest(StrictJSONModel):
-    receipt: PackageActivationReceipt
-    runtime_identity: AgentRuntimeIdentity
-
-
-class AgentUpgradeGrantRequest(AgentGrantRequest):
-    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
-
-
-class HostHelperGrantResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    grant: SignedHostHelperGrant
 
 
 def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:

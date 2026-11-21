@@ -23,12 +23,15 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.enrollment import NodeId
+from vonk_agent_protocol.integer_domains import (
+    MAX_DATABASE_BIGINT,
+    MAX_DATABASE_INTEGER,
+)
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 from . import job_states
 from .categorized_errors import BookkeepingUnknown
-from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .lifecycle.job_ranks import fan_in_cancellation_key
 from .models import (
     AgentNode,

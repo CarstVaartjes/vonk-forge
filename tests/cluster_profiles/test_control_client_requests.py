@@ -1690,7 +1690,10 @@ def test_typed_internal_error_is_not_retried(tmp_path, generated):
     """A typed deterministic 500 must not be replayed until the request deadline."""
     from vonk_agent_protocol import ControllerErrorCode
     from vonk_agent_protocol.agent_words import AgentClientDecision
-    from vonk_control.operation_api import BoundedErrorResponse, ErrorContextResponse
+    from vonk_agent_protocol.error_response import (
+        BoundedErrorResponse,
+        ErrorContextResponse,
+    )
 
     calls = []
     request_id = "47057540-fc9b-494e-ad37-152c0fb154cb"

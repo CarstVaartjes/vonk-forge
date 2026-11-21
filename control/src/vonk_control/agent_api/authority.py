@@ -29,9 +29,17 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
+    EnrollmentObservationReply,
     ExpiredRenewRequest,
     IssuedCertificateResponse,
     RenewRequest,
+)
+from vonk_agent_protocol.grant_requests import (
+    AgentUpgradeGrantRequest,
+    HostHelperGrantResponse,
+    HostRuntimeGrantRequest,
+    OrphanStopGrantRequest,
+    PackageActivationGrantRequest,
 )
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 
@@ -46,7 +54,6 @@ from ..enrollment import (
 )
 from ..enrollment.responses import unknown_response
 from ..enrollment_body import _bounded_enrollment_body
-from ..enrollment_contract import EnrollmentObservationReply
 from ..evidence_repeats import note_repeat, note_success
 from ..host_helper_authority import (
     HostHelperAuthorityError,
@@ -63,12 +70,7 @@ from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_sub
 from ..strict_json import ControllerAPIRoute
 from .common import (
     AgentApiServices,
-    AgentUpgradeGrantRequest,
     EnrollmentRateLimiter,
-    HostHelperGrantResponse,
-    HostRuntimeGrantRequest,
-    OrphanStopGrantRequest,
-    PackageActivationGrantRequest,
     _authenticated_identity,
     _body_node_matches,
     _host_grant_response,

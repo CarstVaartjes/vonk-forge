@@ -40,6 +40,12 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import AgentClientDecision
+from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_agent_protocol.error_response import (
+    ErrorContextResponse,
+    RequestValidationIssue,
+    RequestValidationProblem,
+)
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -71,7 +77,6 @@ from ..auth import (
 from ..bounded_json import BoundedJSONError
 from ..browser_auth import BrowserAuthenticationError, BrowserAuthService
 from ..capabilities import CapabilityUnavailableError
-from ..capability_contract import ControllerCapability
 from ..catalog_api import CatalogProblem, install_catalog_routes
 from ..catalog_service import CatalogService
 from ..cursor_contract import MAX_CURSOR_LENGTH
@@ -101,7 +106,6 @@ from ..observation_transfer import (
     observation_response,
 )
 from ..operation_api import (
-    ErrorContextResponse,
     HealthzResponse,
     JobDetailResponse,
     JobResumeRequest,
@@ -111,8 +115,6 @@ from ..operation_api import (
     OperationOwnerReference,
     OperationsResponse,
     ReadyzResponse,
-    RequestValidationIssue,
-    RequestValidationProblem,
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,

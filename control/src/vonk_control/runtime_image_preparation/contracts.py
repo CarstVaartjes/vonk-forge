@@ -24,10 +24,10 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.wire_model import Digest, WireModel
 
 from ..categorized_faults import security_reason
-from ..integer_domains import MAX_DATABASE_INTEGER
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 

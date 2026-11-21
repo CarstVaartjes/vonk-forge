@@ -29,9 +29,9 @@ from vonk_agent_protocol import (
     SignedHostHelperGrant,
     canonical_message,
 )
+from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
-from vonk_control.agent_api import HostRuntimeGrantRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,

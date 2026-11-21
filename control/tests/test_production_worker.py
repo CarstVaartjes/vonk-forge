@@ -113,8 +113,8 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     request,
     monkeypatch,
 ) -> None:
+    from vonk_agent_protocol.capability_reply import ControllerCapability
     from vonk_control.capabilities import CapabilityRegistry
-    from vonk_control.capability_contract import ControllerCapability
 
     registry = CapabilityRegistry()
     guard = registry.guard
@@ -345,12 +345,12 @@ def test_unusable_image_cache_root_leaves_the_other_lanes_running_and_heals(
     tmp_path, monkeypatch
 ) -> None:
     """Catches an optional image store, built eagerly at assembly, ending the process."""
-    from vonk_control.capabilities import CapabilityRegistry
-    from vonk_control.capability_contract import (
-        CapabilityAvailability,
+    from vonk_agent_protocol.capability_reply import (
         CapabilityReason,
         ControllerCapability,
     )
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import CapabilityAvailability
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     now = [datetime(2026, 8, 6, tzinfo=UTC)]

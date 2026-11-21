@@ -9,13 +9,13 @@ from pathlib import Path
 import httpx2
 import pytest
 from sqlalchemy import create_engine
-from vonk_control.api.production import LibraryObservations, observe_default_key
-from vonk_control.capabilities import CapabilityUnavailableError
-from vonk_control.capability_contract import (
+from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
     CapabilityUnavailableReply,
     ControllerCapability,
 )
+from vonk_control.api.production import LibraryObservations, observe_default_key
+from vonk_control.capabilities import CapabilityUnavailableError
 from vonk_control.gateway_keys import GatewayKeyService, keep_default_key
 
 from .signed_recipe_release import signed_recipe_releases

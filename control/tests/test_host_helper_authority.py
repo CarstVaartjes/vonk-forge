@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     canonical_message,
     host_helper_grant_signing_bytes,
 )
+from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
     ConfirmPackageActivationOperation,
@@ -35,7 +36,6 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
     RecipeUninstallPayload,
 )
-from vonk_control.agent_api import HostRuntimeGrantRequest
 from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.host_helper_authority import (

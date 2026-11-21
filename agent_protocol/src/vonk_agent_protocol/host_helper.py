@@ -46,12 +46,8 @@ MAX_ARGV_BYTES = MAX_HOST_RUNTIME_ARGUMENT_BYTES
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Signature = Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
 NodeId = Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
-Uuid4Text = Annotated[
-    str,
-    Field(
-        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-    ),
-]
+UUID4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+Uuid4Text = Annotated[str, Field(pattern=UUID4_PATTERN)]
 ContainerRuntimeActionName = Literal[
     "runtime-preflight",
     "image-pull",

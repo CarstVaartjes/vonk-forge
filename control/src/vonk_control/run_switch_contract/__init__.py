@@ -24,7 +24,6 @@ from vonk_forge_contracts.recipe import Scalar as Scalar
 from ..distribution_assignment import (
     NodeDistributionAssignment as NodeDistributionAssignment,
 )
-from ..integer_domains import MAX_DATABASE_INTEGER as MAX_DATABASE_INTEGER
 from ..lifecycle_preflight import (
     LifecyclePreflightCheckpoint as LifecyclePreflightCheckpoint,
 )

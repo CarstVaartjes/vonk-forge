@@ -7,11 +7,18 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from types import UnionType
-from typing import Annotated, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import Field, model_serializer
 from vonk_agent_protocol import OperationProgress, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.capability_reply import CapabilityUnavailableReply
+from vonk_agent_protocol.error_response import (
+    BoundedErrorResponse,
+    RequestValidationProblem,
+)
 from vonk_agent_protocol.http_failure import HttpTransient
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.wire_model import StrictJSONModel
 
 from ..auth import CursorCodec
 from ..cursor_contract import MAX_CURSOR_LENGTH
@@ -19,7 +26,6 @@ from ..fleet_profile_contract import (
     FleetProfileApplicationCancellationView,
     FleetProfileEndpointsView,
 )
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..job_operator_receipts import JobOperatorReceipt
 from ..model_cache_contract import ModelCacheCancellation
 from ..operation_blockers import OperationBlocker
@@ -42,54 +48,6 @@ class EmptyBody(StrictModel):
     """A body type used only where an explicit empty JSON object is allowed."""
 
 
-class ErrorContextResponse(StrictModel):
-    """Safe context shared by public errors and generated clients."""
-
-    operation: str = Field(min_length=1, max_length=160)
-    endpoint: str | None = Field(
-        default=None,
-        pattern=r"^/[^?#\x00\r\n]{0,511}$",
-        max_length=512,
-    )
-    http_status: int | None = Field(default=None, ge=100, le=599)
-    code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
-    request_id: str | None = Field(
-        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-    )
-    source: Literal["remote_rejection", "transport", "local_io", "protocol", "unknown"]
-    decision: Literal["retry", "defer", "exit"]
-    retryable: bool = False
-
-
-class BoundedErrorResponse(StrictModel):
-    detail: str = Field(min_length=1, max_length=256)
-    context: ErrorContextResponse | None = None
-
-
-class RequestValidationIssue(StrictModel):
-    """A structural input error without the submitted input or validator context."""
-
-    type: str
-    loc: list[str | int]
-    msg: str
-
-
-class RequestValidationProblem(BoundedErrorResponse):
-    issues: list[RequestValidationIssue]
-    candidates: (
-        list[
-            Annotated[
-                str,
-                Field(
-                    pattern=r"^(?:[0-9a-f]{64}|spk_[0-9a-f]{32}|[a-z0-9][a-z0-9._-]{0,62}/[a-z0-9][a-z0-9._-]{0,62})$",
-                    max_length=127,
-                ),
-            ]
-        ]
-        | None
-    ) = None
-
-
 class HealthzResponse(StrictModel):
     status: Literal["ok"]
 
@@ -109,11 +67,9 @@ def bounded_error_responses(
     int | str,
     dict[
         str,
-        type[StrictModel | HttpTransient] | UnionType | dict[str, dict[str, str]],
+        type[StrictJSONModel | HttpTransient] | UnionType | dict[str, dict[str, str]],
     ],
 ]:
-    from ..capability_contract import CapabilityUnavailableReply
-
     return {
         status_code: {
             "model": RequestValidationProblem

@@ -1,0 +1,37 @@
+name: Locked protocol environment
+description: >-
+  Install uv and sync only the protocol project's environment (pydantic and
+  jsonschema). The wire exporter that Cargo build scripts run reads nothing
+  else, so Rust jobs need no Controller environment. Jobs that also run Python
+  suites use the python-env action instead.
+runs:
+  using: composite
+  steps:
+    - name: Install uv and Python with a lockfile-keyed cache
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        version-file: .tool-versions
+        python-version: "3.14"
+        enable-cache: true
+        cache-python: true
+        cache-dependency-glob: agent_protocol/uv.lock
+        # Pull requests restore the cache main last saved; only main writes it.
+        save-cache: ${{ github.ref == 'refs/heads/main' }}
+    - name: Sync the locked protocol environment
+      shell: bash
+      run: scripts/retry-dependency-fetch uv sync --project agent_protocol --frozen --no-dev --no-install-project
+    - name: Record the prepared protocol environment
+      # The exporter calls scripts/check_environment.py, which resyncs unless
+      # its stamp matches the lock.
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, "scripts")
+        from check_environment import ensure_protocol
+
+        root = Path.cwd().resolve()
+        ensure_protocol(root, root / "agent_protocol/.venv")
+        PY

@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol import UnknownError
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
+    EnrollmentObservationReply,
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
 )
@@ -26,7 +27,6 @@ from ..enrollment_body import (
     _bounded_enrollment_body,
     _scan_enrollment_grants,
 )
-from ..enrollment_contract import EnrollmentObservationReply
 from ..operation_api import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from .common import (

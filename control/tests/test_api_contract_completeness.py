@@ -196,22 +196,6 @@ def test_request_delegation_cannot_hide_an_unclassified_body():
         discover_contracts(app)
 
 
-def test_exporter_discovers_new_api_models_without_a_curated_name_entry(monkeypatch):
-    import runpy
-
-    from vonk_control import contract_graph
-
-    def application(**_kwargs):
-        app = FastAPI()
-        app.add_api_route("/agent/new", added, methods=["POST"])
-        return app
-
-    monkeypatch.setattr(contract_graph, "schema_application", application)
-    exporter = Path(__file__).resolve().parents[2] / "scripts/export-agent-wire-schema"
-    exported = runpy.run_path(str(exporter))["export_schema"]()
-    require_wire_exports({AddedRequest, AddedResponse}, exported)
-
-
 def test_stream_flag_cannot_hide_an_untyped_json_response():
     app = FastAPI()
 

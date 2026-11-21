@@ -16,8 +16,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..operation_blockers import OperationBlocker, ProgressStall
 from ..run_switch_contract import (
     RunSwitchProgress,

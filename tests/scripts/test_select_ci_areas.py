@@ -529,6 +529,8 @@ def test_every_rust_build_input_selects_the_rust_check() -> None:
     """Catches a hand-kept second list: build.rs owns the inputs."""
     module = _module()
     inputs = module.rust_build_inputs()
-    assert inputs and "control/src" in inputs
+    # The wire export reads only the protocol: no Controller path is an input.
+    assert "agent_protocol/src" in inputs
+    assert not [path for path in inputs if path.startswith("control/")]
     for path in inputs:
         assert module.rust_changed([path], "pull_request"), path

@@ -26,7 +26,10 @@ def observation_capture_unavailable_response(
 ) -> Response:
     """Use the existing canonical bounded error model before streaming begins."""
     # Observers import the exception without importing public operation routes.
-    from .operation_api import BoundedErrorResponse, ErrorContextResponse
+    from vonk_agent_protocol.error_response import (
+        BoundedErrorResponse,
+        ErrorContextResponse,
+    )
 
     problem = BoundedErrorResponse(
         detail=str(error),

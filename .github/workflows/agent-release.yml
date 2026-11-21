@@ -296,11 +296,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
+      - name: Prepare the protocol environment for Cargo builds
+        uses: ./.github/actions/protocol-env
       - name: Revalidate main ARM64 acceptance source
         shell: bash
         run: |

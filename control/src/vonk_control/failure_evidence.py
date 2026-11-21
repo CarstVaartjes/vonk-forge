@@ -37,11 +37,11 @@ from vonk_agent_protocol.failure_evidence import (
     FailureLogTail,
     add_known_dropped_bytes,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from . import agent_operation_states
 from . import artifact_job_states as ajs
 from .bounded_json import BoundedJSONError, require_integer, sequence
-from .integer_domains import MAX_DATABASE_INTEGER
 from .logging import redact_text
 from .models import (
     AgentOperation,

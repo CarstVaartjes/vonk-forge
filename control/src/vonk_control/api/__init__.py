@@ -1,9 +1,6 @@
 """Api: public imports."""
 
 from ..agent_services import build_agent_services as build_agent_services
-from ..capability_contract import (
-    CapabilityUnavailableReply as CapabilityUnavailableReply,
-)
 from .application import FLEET_SSE_EVENTS as FLEET_SSE_EVENTS
 from .application import MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES
 from .application import MAX_RECIPE_IMAGE_BYTES as MAX_RECIPE_IMAGE_BYTES
@@ -25,13 +22,11 @@ from .application import CatalogCode as CatalogCode
 from .application import CatalogProblem as CatalogProblem
 from .application import CatalogService as CatalogService
 from .application import ControllerAPIRoute as ControllerAPIRoute
-from .application import ControllerCapability as ControllerCapability
 from .application import ControllerErrorCode as ControllerErrorCode
 from .application import CursorCodec as CursorCodec
 from .application import CursorError as CursorError
 from .application import Depends as Depends
 from .application import EnrollmentRateLimiter as EnrollmentRateLimiter
-from .application import ErrorContextResponse as ErrorContextResponse
 from .application import FailureEvidenceService as FailureEvidenceService
 from .application import FastAPI as FastAPI
 from .application import FleetOperatorServices as FleetOperatorServices
@@ -61,8 +56,6 @@ from .application import ReadyzResponse as ReadyzResponse
 from .application import RecipeOperationService as RecipeOperationService
 from .application import Request as Request
 from .application import RequestValidationError as RequestValidationError
-from .application import RequestValidationIssue as RequestValidationIssue
-from .application import RequestValidationProblem as RequestValidationProblem
 from .application import Response as Response
 from .application import RunSwitchOperationService as RunSwitchOperationService
 from .application import StarletteHTTPException as StarletteHTTPException
@@ -135,7 +128,6 @@ from .common import _MAX_TELEMETRY_BODY_BYTES as _MAX_TELEMETRY_BODY_BYTES
 from .common import _RECIPE_IMAGE_UPLOAD as _RECIPE_IMAGE_UPLOAD
 from .common import _TELEMETRY_PATH as _TELEMETRY_PATH
 from .common import MAX_TELEMETRY_REPORT_BYTES as MAX_TELEMETRY_REPORT_BYTES
-from .common import BoundedErrorResponse as BoundedErrorResponse
 from .common import FileResponse as FileResponse
 from .common import JobQueue as JobQueue
 from .common import Path as Path

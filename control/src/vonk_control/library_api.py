@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
+from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_forge_contracts import CatalogVocabulary
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -21,7 +22,7 @@ from .library_contract import (
 )
 from .library_projection import LibrarySelectorAmbiguous
 from .model_cache.errors import ModelCacheError
-from .operation_api import RequestValidationProblem, bounded_error_responses
+from .operation_api import bounded_error_responses
 from .request_fault import RequestFault
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control

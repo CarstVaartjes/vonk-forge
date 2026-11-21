@@ -6,8 +6,8 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field
 from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
-from .integer_domains import MAX_DATABASE_INTEGER
 from .job_documents import AvailabilityJobResult, AvailabilityModelChild
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure

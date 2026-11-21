@@ -29,9 +29,9 @@ from vonk_agent_protocol import (
     adopt_reason_code,
 )
 from vonk_agent_protocol.contracts import DigestText
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 
 from .child_phases import FleetProfileChildPhase
-from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16

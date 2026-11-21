@@ -964,7 +964,7 @@ def test_production_agent_service_builder_defers_step_ca(
 
 
 def _assert_unavailable_enrollment(client, request) -> None:
-    from vonk_control.capability_contract import (
+    from vonk_agent_protocol.capability_reply import (
         CapabilityUnavailableReply,
         ControllerCapability,
     )

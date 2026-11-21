@@ -49,6 +49,8 @@ from vonk_agent_protocol.agent_words import (
     RecipeRunDispositionValue,
 )
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.enrollment import EnrollmentObservationReply
+from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
@@ -74,7 +76,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.enrollment_contract import EnrollmentGrant, EnrollmentObservationReply
+from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -97,7 +99,6 @@ from vonk_control.models import (
     RecipeSourceBundle,
     RunNode,
 )
-from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle

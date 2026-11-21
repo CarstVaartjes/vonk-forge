@@ -63,6 +63,16 @@ through the generated client (`scripts/generate-control-clients`);
 `tests/test_package_import_direction.py` enforces it, function-level imports
 included.
 
+Every model an `/agent/` route takes or returns (grant requests and replies, the
+bounded error envelope, the capability-unavailable reply, the enrollment
+observation reply) lives in `vonk_agent_protocol`, never in `vonk_control`. The
+wire exporter (`scripts/export-agent-wire-schema`) walks only the protocol and
+runs in the protocol project's own environment (`scripts/check_environment.py`
+`run_in_protocol`, default `agent_protocol/.venv`, override
+`VONK_PROTOCOL_ENVIRONMENT`), so Cargo's `build.rs` and the Rust jobs need no
+Controller environment. A route model defined outside the protocol fails
+`require_wire_exports` in `control/tests/test_api_contract_completeness.py`.
+
 NAS/project setup and administration use Python, including the standalone
 `nas_setup` wheel and the existing `vonkctl` CLI. Rust owns the resident Spark
 agent, privileged Spark helpers and native Spark installer, where bounded memory

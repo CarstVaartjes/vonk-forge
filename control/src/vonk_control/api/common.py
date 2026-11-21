@@ -19,15 +19,15 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     canonical_message,
 )
-from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
-
-from ..catalog_api import CatalogProblem
-from ..operation_api import (
+from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     ErrorContextResponse,
     RequestValidationIssue,
     RequestValidationProblem,
 )
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
+from ..catalog_api import CatalogProblem
 
 """Versioned authenticated control API."""
 

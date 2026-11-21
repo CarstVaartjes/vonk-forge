@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import CertificateCode, ErrorCategory, UnknownError, WaitReason
+from vonk_agent_protocol.capability_reply import CapabilityReason
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRequestMode,
@@ -32,7 +33,6 @@ from vonk_agent_protocol.state_machines import (
 
 from .ca_issuance_contract import CertificateIssuanceBinding
 from .capabilities import CapabilityConfigurationError
-from .capability_contract import CapabilityReason
 from .models.fleet import (
     AgentCertificate,
     LocalCertificateIssuance,

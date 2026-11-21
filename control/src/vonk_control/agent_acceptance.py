@@ -277,7 +277,7 @@ def resolve_agent_receipt(
         elif policy == ReceiptPolicy.AGENT_GRANT:
             # Grants read an already accepted authority and mint a signed,
             # short-lived capability. No new execution intent is accepted.
-            from .agent_api.common import HostHelperGrantResponse
+            from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
 
             _require(isinstance(result, Response))
             grant = HostHelperGrantResponse.model_validate_json(
@@ -287,7 +287,9 @@ def resolve_agent_receipt(
             # Package activation is bound by its existing upgrade payload nonce.
             fence = getattr(body, "fence", None)
             if fence is None:
-                from .agent_api.common import PackageActivationGrantRequest
+                from vonk_agent_protocol.grant_requests import (
+                    PackageActivationGrantRequest,
+                )
 
                 _require(isinstance(body, PackageActivationGrantRequest))
                 assert isinstance(body, PackageActivationGrantRequest)

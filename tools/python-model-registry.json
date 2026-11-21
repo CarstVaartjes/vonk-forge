@@ -11,6 +11,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/capability_reply.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/claims.py",
       "kind": "agent-protocol"
     },
@@ -35,11 +39,19 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/error_response.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/failure_evidence.py",
       "kind": "agent-protocol"
     },
     {
       "module": "agent_protocol/src/vonk_agent_protocol/gpu_clock.py",
+      "kind": "agent-protocol"
+    },
+    {
+      "module": "agent_protocol/src/vonk_agent_protocol/grant_requests.py",
       "kind": "agent-protocol"
     },
     {

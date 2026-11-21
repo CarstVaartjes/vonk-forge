@@ -1498,14 +1498,14 @@ wheels = [
 
 [[package]]
 name = "vonk-agent-protocol"
-version = "4.9.0"
+version = "4.10.0"
 source = { registry = "../inventory/wheels" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "vonk_agent_protocol-4.9.0-py3-none-any.whl", hash = "sha256:0db5542fd08b03b40b1afd71a536526b5e013bfc285ad3414115faad132564e5" },
+    { path = "vonk_agent_protocol-4.10.0-py3-none-any.whl", hash = "sha256:be4453f11ab22c1308e27682a4cb1d03da0f2fb7097f37fd0ba4406a8d74f5a0" },
 ]
 
 [[package]]

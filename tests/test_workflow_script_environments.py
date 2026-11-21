@@ -111,6 +111,7 @@ helper = types.ModuleType("check_environment")
 def prepare(root):
     raise SystemExit(73)
 helper.run_in_control = prepare
+helper.run_in_protocol = prepare
 sys.modules["check_environment"] = helper
 runpy.run_path(script, run_name="__main__")
 """

@@ -13,11 +13,11 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.recipe import Scalar
 
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..mapping_parameters import MappingParameters
 from ..operation_blockers import SwapShortfallEvidence
 from ..run_switch_identity_contract import NodeId, UuidId
