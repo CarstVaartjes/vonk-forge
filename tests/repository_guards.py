@@ -236,6 +236,14 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
+        "tests/cluster_profiles/test_cli_auth.py",
+        "Stored-login expiry warns from seven days out, never refuses locally, and env token files stay unknown-expiry.",
+    ),
+    (
+        "control/tests/test_cli_auth_login_installed.py",
+        "Installed vonkctl auth login against the real app: password in, private token files out, wrong password writes nothing.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_update.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),

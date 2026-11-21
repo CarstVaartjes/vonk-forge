@@ -6,13 +6,14 @@ import binascii
 import http.client
 import json
 import math
-import os
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from email.message import Message
 from functools import partial
 from pathlib import Path
@@ -52,13 +53,13 @@ if TYPE_CHECKING:
 
 
 from .common import observation_delay, observation_unknown
+from .connection import expiry_warning, resolve_credential, validated_origin
 from .errors import (
     _STATUS_ERRORS,
     ControlClientError,
     ControlContractMismatch,
     ControlHTTPError,
     ControlMalformedResponse,
-    ControlNotConfigured,
     ControlObservationUnavailable,
     ControlResponseTooLarge,
     ControlSchemaRejected,
@@ -87,6 +88,9 @@ from .transport import (
     _RecordingTransport,
 )
 
+#: Expiry warnings already printed by this process: one line per message.
+_WARNED: set[str] = set()
+
 #: Compatibility reads one client may make while none has answered.
 _CONTRACT_READS = 3
 
@@ -101,19 +105,7 @@ class ControlClient:
         timeout_seconds: float = 15,
         artifact_transfer_timeout_seconds: float = 3_600,
     ) -> None:
-        parsed = urllib.parse.urlsplit(base_url)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ControlClientError(
-                "control URL must be an HTTPS origin without credentials"
-            )
+        validated_origin(base_url)
         token = _read_token_file(token_file)
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise ControlClientError("request timeout must be finite and positive")
@@ -422,13 +414,15 @@ class ControlClient:
         raise ControlMalformedResponse("control API returned no canonical receipt")
 
     @classmethod
-    def from_environment(cls) -> Self:
-
-        url = os.environ.get("VONK_CONTROL_URL", "")
-        token = os.environ.get("VONK_CONTROL_TOKEN_FILE", "")
-        if not url or not token:
-            raise ControlNotConfigured
-        return cls(url, Path(token))
+    def from_environment(
+        cls, *, now: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> Self:
+        credential = resolve_credential()
+        warning = expiry_warning(credential, now())
+        if warning and warning not in _WARNED:
+            _WARNED.add(warning)
+            print(warning, file=sys.stderr)
+        return cls(credential.url, credential.token_file)
 
     def request(
         self,

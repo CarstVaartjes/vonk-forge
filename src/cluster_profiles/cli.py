@@ -17,6 +17,8 @@ from typing import Any, NoReturn, cast, overload
 
 from .build_identity import current_build
 from .cli_artifact_jobs import _may_have_completed
+from .cli_auth import AuthAction, run_auth
+from .cli_auth import render as render_auth
 from .cli_completion import completion_script
 from .cli_help import (
     GROUP_VIEWS,
@@ -57,6 +59,7 @@ from .control_client import (
     ControlTransportUnsupported,
     ControlUnavailable,
 )
+from .control_client.connection import resolve_credential
 from .control_client.errors import CommandInterrupted, LocalInputError
 from .controller_cli import (
     ActionDeclined,
@@ -121,8 +124,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="vonkctl",
         description="Run models on your Spark fleet: see what runs where, "
         "prepare recipes, and load whole-fleet profiles.",
-        epilog="Connection: set VONK_CONTROL_URL and VONK_CONTROL_TOKEN_FILE "
-        "(a private file), then check it with vonkctl --check-connection.",
+        epilog="Connection: run vonkctl auth login https://<controller>, "
+        "then check it with vonkctl --check-connection.",
     )
     parser.add_argument(
         "--json",
@@ -161,6 +164,46 @@ def _parser() -> argparse.ArgumentParser:
     completion.add_argument(
         "shell", nargs="?", choices=("bash", "zsh"), metavar="SHELL", help="bash or zsh"
     )
+    auth = commands.add_parser(
+        "auth",
+        help="Log in to the Controller, check the login, or forget it",
+        description="The Controller login vonkctl keeps in ~/.config/vonkctl.",
+    )
+    auth_actions = auth.add_subparsers(dest="auth_action", parser_class=type(auth))
+    login = auth_actions.add_parser(
+        AuthAction.LOGIN.value,
+        help="Ask for the admin password once and keep a 30-day token",
+        description=(
+            "Asks for the admin password (no echo), mints the Controller's CLI "
+            "token, and stores only the token. The password is never stored."
+        ),
+    )
+    login.add_argument(
+        "url",
+        nargs="?",
+        metavar="URL",
+        help="Controller address (default: the last login)",
+    )
+    login.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="Read the password from stdin instead of asking (discouraged)",
+    )
+    status = auth_actions.add_parser(
+        AuthAction.STATUS.value,
+        help="Show the Controller, where the token comes from, its expiry",
+    )
+    logout = auth_actions.add_parser(
+        AuthAction.LOGOUT.value,
+        help="Delete the local login (tokens stay valid until they expire)",
+    )
+    for auth_command in (login, status, logout):
+        auth_command.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Print one JSON document instead of text",
+        )
     update = commands.add_parser("update", help="Check for or install a newer vonkctl")
     update.add_argument(
         "--apply",
@@ -217,6 +260,13 @@ def _sanitize(value: object, *, terminal: bool = True) -> object:
     if isinstance(value, (tuple, list)):
         return [_sanitize(item, terminal=terminal) for item in value]
     return value
+
+
+def _connected_origin() -> str | None:
+    try:
+        return resolve_credential().url
+    except ControlClientError:
+        return os.environ.get("VONK_CONTROL_URL")
 
 
 def _arguments_may_contain_secrets(argv: Sequence[str]) -> bool:
@@ -591,7 +641,10 @@ def _emit(
                 },
                 noun,
             )
-        PRESENTATIONS[(noun, getattr(args, f"{noun}_action", None))](
+        # ``auth`` is local: it has no Controller response presentation.
+        PRESENTATIONS.get(
+            (noun, getattr(args, f"{noun}_action", None)), render_payload
+        )(
             safe,
             getattr(args, "command", None) or "profile",
             wide=getattr(args, "wide", False),
@@ -791,6 +844,18 @@ def _main(
             )
         if args.check_connection and args.command is not None:
             raise ValueError("--check-connection cannot be combined with a command")
+        if args.command == "auth":
+            auth_result = run_auth(
+                args.auth_action,
+                url=getattr(args, "url", None),
+                password_stdin=getattr(args, "password_stdin", False),
+            )
+            print(
+                _json_text(auth_result.document())
+                if args.global_json or getattr(args, "json", False)
+                else render_auth(auth_result)
+            )
+            return 2 if getattr(auth_result, "check_error", None) else 0
         client = (
             cast(ControllerClient, control_client)
             if control_client is not None
@@ -803,7 +868,7 @@ def _main(
                     "connected": True,
                     "client": current_build(),
                     "authorized_read": "/api/fleet",
-                    "origin": os.environ.get("VONK_CONTROL_URL"),
+                    "origin": _connected_origin(),
                 },
                 args,
             )

@@ -131,9 +131,15 @@ def _https_api_peer(
                     "Content-Type",
                     "X-Request-ID",
                     "X-Content-SHA256",
+                    "Origin",
+                    "Cookie",
+                    "X-CSRF-Token",
                 )
                 if (value := self.headers.get(name)) is not None
             }
+            if "Origin" in request_headers:
+                # Only the login origin check compares Origin with the Host.
+                request_headers["Host"] = self.headers["Host"]
             response = state.api.request(
                 self.command,
                 self.path,
@@ -199,10 +205,13 @@ def _https_api_peer(
                 "X-Request-ID",
                 "X-Content-SHA256",
                 "X-Vonk-Error-Code",
+                "X-Vonk-Token-Expires-At",
             ):
                 value = response.headers.get(name)
                 if value is not None:
                     self.send_header(name, value)
+            for cookie in response.headers.get_list("set-cookie"):
+                self.send_header("Set-Cookie", cookie)
             self.send_header("Content-Length", str(len(response_body)))
             self.send_header("Connection", "close")
             self.end_headers()
