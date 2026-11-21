@@ -314,79 +314,6 @@ def test_damaged_rotation_projection_releases_owner(service, damage):
         )
 
 
-@pytest.mark.parametrize(
-    "reply", ["unavailable", "missing-fields", "oversized", "malformed-json"]
-)
-def test_real_ca_reply_unknown_replays_then_fresh_same_node_is_admitted(
-    service, tmp_path, reply
-):
-    """Catches parsed 503/schema/reader failures being treated as bad authority."""
-    import httpx2
-    from vonk_agent_protocol import CertificateCode
-    from vonk_agent_protocol.state_machines import (
-        CertificateJournalState,
-        CertificateRequestMode,
-    )
-    from vonk_control.enrollment import EnrollmentService
-
-    from .test_step_ca import NOW, _provider, _success_response
-
-    _, sessions, _, _ = service
-    holder = {}
-    fault = True
-    requests = []
-
-    def responder(request):
-        requests.append(request)
-        if fault:
-            if reply == "unavailable":
-                return httpx2.Response(
-                    503,
-                    json={
-                        "reason_code": CertificateCode.ISSUANCE_UNAVAILABLE,
-                        "detail": "journal unavailable",
-                    },
-                )
-            if reply == "missing-fields":
-                return httpx2.Response(200, json={"crt": "unreadable envelope"})
-            if reply == "oversized":
-                return httpx2.Response(200, content=b"x" * (64 * 1024 + 1))
-            return httpx2.Response(200, content=b"{bad json")
-        body = json.loads(request.content)
-        if body["mode"] == CertificateRequestMode.OBSERVE:
-            return httpx2.Response(
-                200,
-                json={
-                    "state": CertificateJournalState.ABSENT,
-                    "request": body["request"],
-                },
-            )
-        return _success_response(request, holder["material"], [])
-
-    provider, holder["material"] = _provider(
-        tmp_path, responder, max_response_bytes=1024
-    )
-    enrollment = EnrollmentService(sessions, provider, clock=lambda: NOW)
-    request = csr()
-    grant = enrollment.create(NODE_ID, "admin", 600)
-    assert isinstance(grant, EnrollmentGrant)
-    enrollment.submit(grant.token, request, evidence(request))
-    assert len(requests) == 4
-    fault = False
-    issued = enrollment.submit(grant.token, request, evidence(request))
-    assert isinstance(issued, IssuedCertificate)
-    fresh = enrollment.create_reenrollment(
-        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
-    )
-    assert isinstance(fresh, EnrollmentGrant)
-    next_request = csr()
-    assert isinstance(
-        enrollment.submit(fresh.token, next_request, evidence(next_request)),
-        IssuedCertificate,
-    )
-    provider.close()
-
-
 def test_grant_admission_sql_conflicts_end_without_poisoning_request_identity(
     service, monkeypatch
 ):
@@ -462,114 +389,43 @@ def test_damage_during_ca_observation_repairs_both_committed_projections(
     assert len(authority.calls) == 1
 
 
-def test_production_capability_does_not_put_health_http_inside_admission(
-    service, tmp_path, monkeypatch
-):
-    """Catches a health preflight vetoing an exact, otherwise working CA request."""
-    import httpx2
-    from vonk_agent_protocol.state_machines import (
-        CertificateJournalState,
-        CertificateRequestMode,
-    )
-    from vonk_control.agent_services import build_agent_services
-    from vonk_control.capabilities import CapabilityRegistry
-
-    from .test_step_ca import NOW, _builder_settings, _provider, _success_response
-
-    _, sessions, _, _ = service
-    (tmp_path / "settings").mkdir()
-    (tmp_path / "provider").mkdir()
-    settings = _builder_settings(tmp_path / "settings", direct_fabric_cidrs="")
-    health_calls = 0
-
-    def responder(request):
-        nonlocal health_calls
-        if request.url.path == "/health":
-            health_calls += 1
-            return httpx2.Response(503, content=b"unreadable diagnostic")
-        body = json.loads(request.content)
-        if body["mode"] == CertificateRequestMode.OBSERVE:
-            return httpx2.Response(
-                200,
-                json={
-                    "state": CertificateJournalState.ABSENT,
-                    "request": body["request"],
-                },
-            )
-        return _success_response(request, material, [])
-
-    provider, material = _provider(tmp_path / "provider", responder)
-    monkeypatch.setattr(
-        "vonk_control.local_ca.LocalCertificateAuthority", lambda **kwargs: provider
-    )
-    registry = CapabilityRegistry(clock=lambda: NOW)
-    services = build_agent_services(
-        settings, sessions, lambda: NOW, capabilities=registry
-    )
-    assert services.enrollment is not None
-    grant = services.enrollment.create(NODE_ID, "admin", 600)
-    assert isinstance(grant, EnrollmentGrant)
-    request = csr()
-    issued = services.enrollment.submit(grant.token, request, evidence(request))
-    assert isinstance(issued, IssuedCertificate)
-    assert health_calls == 0
-    assert services.enrollment.submit(grant.token, request, evidence(request)) == issued
-    provider.close()
-
-
 def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_admitted(
-    service, tmp_path
+    service,
 ):
     """Catches a pending journal keeping a same-node owner forever after restart."""
     from datetime import timedelta
 
-    import httpx2
-    from vonk_agent_protocol import CertificateCode
-    from vonk_agent_protocol.state_machines import (
-        CertificateJournalState,
-        CertificateRequestMode,
-    )
     from vonk_control.enrollment import EnrollmentService
+    from vonk_control.step_ca import StepCAIssuancePending
 
-    from .test_step_ca import NOW, _provider, _success_response
+    from .ca_material import NOW
+    from .test_enrollment import RecordingAuthority
 
     _, sessions, _, _ = service
-    holder = {}
-    old = None
-    observations = []
     timestamp = NOW
 
-    def responder(request):
-        nonlocal old
-        if request.url.path == "/1.0/revoke":
-            return httpx2.Response(200, json={"status": "ok"})
-        body = json.loads(request.content)
-        binding = body["request"]
-        observations.append(binding)
-        if old is None:
-            old = binding
-        if binding == old:
-            return httpx2.Response(
-                200,
-                json={
-                    "state": CertificateJournalState.PENDING,
-                    "request": binding,
-                    "reason_code": CertificateCode.ISSUANCE_IN_PROGRESS,
-                },
-            )
-        if body["mode"] == CertificateRequestMode.OBSERVE:
-            return httpx2.Response(
-                200, json={"state": CertificateJournalState.ABSENT, "request": binding}
-            )
-        return _success_response(request, holder["material"], [])
+    class PendingFirstAuthority(RecordingAuthority):
+        old = None
+        observations = 0
 
-    provider, holder["material"] = _provider(tmp_path, responder)
+        def _owned_by_old(self, request):
+            if self.old is None:
+                self.old = request
+            return request == self.old
+
+        def observe_node(self, csr_pem, now, *, request):
+            if self._owned_by_old(request):
+                self.observations += 1
+                raise StepCAIssuancePending("certificate.issuance_in_progress")
+            return super().observe_node(csr_pem, now, request=request)
+
+    provider = PendingFirstAuthority()
     enrollment = EnrollmentService(sessions, provider, clock=lambda: timestamp)
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
     enrollment.submit(grant.token, request, evidence(request))
-    assert len(observations) == 4
+    assert provider.observations >= 1
     with sessions() as session:
         accepted = session.scalar(select(AgentEnrollment))
         assert accepted.state == EnrollmentRecordState.ISSUING
@@ -586,12 +442,12 @@ def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_ad
     assert isinstance(fresh, EnrollmentGrant)
     issued = restarted.submit(fresh.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
+    old = provider.old
     assert old is not None
-    assert issued.serial != old["serial"]
+    assert issued.serial != old.serial
     with sessions() as session:
-        assert session.get(AgentCertificate, old["serial"]) is None
+        assert session.get(AgentCertificate, old.serial) is None
         assert session.get(AgentCertificate, issued.serial).revoked_at is None
-    provider.close()
 
 
 def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(

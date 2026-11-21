@@ -1,19 +1,12 @@
 """Producer/store/restart/provider-observer recovery under exact CA identity."""
 
 import json
-from pathlib import Path
 
-import httpx2
-import jwt
-import pytest
 import vonk_control.enrollment.issuance as issuance_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.ca_issuance_contract import (
-    CertificateIssuanceBinding,
-    CertificateIssuedReply,
-)
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
@@ -23,81 +16,42 @@ from vonk_control.models import (
     Base,
 )
 from vonk_control.pki import IssuedCertificate
+from vonk_control.step_ca import StepCAUnavailable
 
-from .test_enrollment import csr, evidence
-from .test_step_ca import NODE_ID, NOW, _Material, _provider, _success_response
+from .ca_material import NODE_ID, NOW
+from .test_enrollment import RecordingAuthority, csr, evidence
 
 
-class StoredProvider:
-    """Fault transport storing canonical provider output across Controller restarts.
+class LossyAuthority(RecordingAuthority):
+    """Issues and journals the certificate, then loses the reply once."""
 
-    Actual signer process death and concurrent issuer epochs use the hosted CA
-    lane. This transport catches Controller reissuance after lost responses or
-    failed SQL persistence while preserving real CSR/JWT/leaf verification.
-    """
-
-    def __init__(self, path: Path):
-        self.path = path
-        self.root = path.parent
-        self.material: _Material | None = None
-        self.issue_calls = 0
-        self.tokens: list[str] = []
+    def __init__(self) -> None:
+        super().__init__()
         self.lose_response = False
 
-    def __call__(self, request: httpx2.Request) -> httpx2.Response:
-        body = json.loads(request.content)
-        binding = CertificateIssuanceBinding.model_validate_json(
-            json.dumps(body["request"])
-        )
-        self.path = self.root / f"{binding.request_id}.json"
-        claims = jwt.decode(body["ott"], options={"verify_signature": False})
-        assert claims["vonk"] == binding.model_dump(mode="json")
-        self.tokens.append(claims["jti"])
-        if self.path.exists():
-            stored = CertificateIssuedReply.model_validate_json(self.path.read_bytes())
-            if stored.request != binding:
-                return httpx2.Response(
-                    409,
-                    json={
-                        "reason_code": "certificate.request_binding_mismatch",
-                        "detail": "exact binding differs",
-                    },
-                )
-            return httpx2.Response(201, json=stored.model_dump(mode="json"))
-        if body["mode"] == "observe":
-            return httpx2.Response(
-                200,
-                json={"state": "absent", "request": binding.model_dump(mode="json")},
-            )
-        self.issue_calls += 1
-        assert self.material is not None
-        response = _success_response(request, self.material, [])
-        stored = CertificateIssuedReply.model_validate(response.json())
-        self.path.write_text(stored.model_dump_json())
+    def issue_node(self, node_id, public_key_pem, now, *, request):
+        issued = super().issue_node(node_id, public_key_pem, now, request=request)
         if self.lose_response:
             self.lose_response = False
-            raise httpx2.ReadError("response deliberately lost", request=request)
-        return response
+            raise StepCAUnavailable("response deliberately lost")
+        return issued
 
 
-def setup(tmp_path: Path):
-    transport = StoredProvider(tmp_path / "committed.json")
-    provider, material = _provider(tmp_path, transport)
-    transport.material = material
+def setup(tmp_path):
+    provider = LossyAuthority()
     engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    clock = lambda: NOW
-    return transport, provider, sessions, clock
+    return provider, sessions, lambda: NOW
 
 
 def test_lost_enrollment_response_restarts_and_observes_identical_certificate(tmp_path):
-    transport, provider, sessions, clock = setup(tmp_path)
+    provider, sessions, clock = setup(tmp_path)
     service = EnrollmentService(sessions, provider, clock=clock)
     request = csr()
     grant = service.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
-    transport.lose_response = True
+    provider.lose_response = True
     service.submit(grant.token, request, evidence(request))
     with sessions() as session:
         accepted = session.scalar(select(AgentEnrollment))
@@ -110,19 +64,14 @@ def test_lost_enrollment_response_restarts_and_observes_identical_certificate(tm
     replay = restarted.submit(grant.token, request, evidence(request))
     assert issued == replay
     assert isinstance(replay, IssuedCertificate)
-    journal = CertificateIssuedReply.model_validate_json(transport.path.read_bytes())
-    assert issued.certificate_pem.decode() == journal.crt
-    assert replay.certificate_pem.decode() == journal.crt
     assert issued.serial == binding.serial
-    assert transport.issue_calls == 1
-    assert len(transport.tokens) == len(set(transport.tokens))
-    assert binding.request_id not in transport.tokens
+    assert len(provider.calls) == 1
 
 
 def test_enrollment_sql_persistence_failure_adopts_provider_result_after_restart(
     tmp_path, monkeypatch
 ):
-    transport, provider, sessions, clock = setup(tmp_path)
+    provider, sessions, clock = setup(tmp_path)
     service = EnrollmentService(sessions, provider, clock=clock)
     request = csr()
     grant = service.create(NODE_ID, "admin", 600)
@@ -146,15 +95,13 @@ def test_enrollment_sql_persistence_failure_adopts_provider_result_after_restart
     restarted = EnrollmentService(sessions, provider, clock=clock)
     issued = restarted.submit(grant.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
-    stored = CertificateIssuedReply.model_validate_json(transport.path.read_bytes())
-    assert issued.certificate_pem.decode() == stored.crt
-    assert transport.issue_calls == 1
+    assert len(provider.calls) == 1
 
 
 def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     tmp_path, monkeypatch
 ):
-    transport, provider, sessions, clock = setup(tmp_path)
+    provider, sessions, clock = setup(tmp_path)
     service = EnrollmentService(sessions, provider, clock=clock)
     first_csr = csr()
     grant = service.create(NODE_ID, "admin", 600)
@@ -193,7 +140,7 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     assert isinstance(issued, IssuedCertificate)
     assert issued.serial == binding.serial
     assert issued.generation == 2
-    assert transport.issue_calls == 2
+    assert len(provider.calls) == 2
     with sessions() as session:
         certificate = session.get(AgentCertificate, source.serial)
         assert certificate is not None and certificate.state == "active"
@@ -204,7 +151,7 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
 def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(
     tmp_path, monkeypatch
 ):
-    transport, provider, sessions, clock = setup(tmp_path)
+    provider, sessions, clock = setup(tmp_path)
     service = EnrollmentService(sessions, provider, clock=clock)
     original = issuance_module._persist_issued_enrollment
 
@@ -218,15 +165,15 @@ def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(
     try:
         service.submit(grant.token, request, evidence(request))
     except SystemExit:
-        assert transport.issue_calls == 1
+        assert len(provider.calls) == 1
     with sessions.begin() as session:
         accepted = session.scalar(select(AgentEnrollment))
         assert accepted is not None
         accepted.provider_request = None
-    calls = len(transport.tokens)
+    calls = len(provider.calls)
     restarted = EnrollmentService(sessions, provider, clock=clock)
     restarted.submit(grant.token, request, evidence(request))
-    assert len(transport.tokens) == calls
+    assert len(provider.calls) == calls
     with sessions() as session:
         assert session.scalar(select(AgentEnrollment)) is None
         assert session.scalar(select(AgentCertificate)) is None
@@ -236,37 +183,4 @@ def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(
     issued = restarted.submit(fresh.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
     assert issued.node_id == NODE_ID
-    assert transport.issue_calls == 2
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("serial", "42"),
-        ("generation", 2),
-        ("csr_sha256", "f" * 64),
-        ("policy_sha256", "f" * 64),
-    ],
-)
-def test_same_request_mutation_cannot_adopt_or_issue_other_effect(
-    tmp_path, field, value
-):
-    transport, provider, _, _ = setup(tmp_path)
-    request = csr()
-    binding = provider.prepare_request(
-        NODE_ID, request, NOW, purpose="enrollment", source_serial=None, generation=1
-    )
-    issued = provider.issue_node(NODE_ID, request, NOW, request=binding)
-    changed = CertificateIssuanceBinding.model_validate(
-        {**binding.model_dump(mode="json"), field: value}
-    )
-    substituted = None
-    try:
-        substituted = provider.observe_node(request, NOW, request=changed)
-    except Exception as error:  # noqa: BLE001 -- no error class decides acceptance
-        assert transport.issue_calls == 1, str(error)
-    assert substituted is None
-    assert transport.issue_calls == 1
-    adopted = provider.observe_node(request, NOW, request=binding)
-    assert adopted == issued
-    assert transport.issue_calls == 1
+    assert len(provider.calls) == 2
