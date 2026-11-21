@@ -1,8 +1,10 @@
 name: Locked Python environment
 description: >-
-  Install uv, build the locked protocol wheel, and sync the control
-  environment once. Every Python suite, lint and type check then runs in it
-  with `uv run --project control --frozen`, which fetches nothing.
+  Install uv and sync the workspace environment (the root .venv, the control
+  member with its dev group) once. Every Python suite, lint and type check then
+  runs in it with `uv run --project control --frozen`, which fetches nothing.
+  Jobs that build the Controller image or release the protocol wheel build it
+  themselves with scripts/build-control-wheel.
 inputs:
   contracts:
     description: >-
@@ -29,27 +31,17 @@ runs:
         enable-cache: true
         cache-python: true
         cache-dependency-glob: |
-          control/uv.lock
           uv.lock
-          agent_protocol/pyproject.toml
         # Pull requests restore the cache main last saved; only main writes it.
         save-cache: ${{ github.ref == 'refs/heads/main' }}
-    - name: Build and verify the Controller protocol wheel
-      shell: bash
-      run: scripts/build-control-wheel
-    - name: Sync the locked control environment
+    - name: Sync the locked workspace environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
-    - name: Sync the locked protocol environment
-      # The wire exporter (Cargo, the CLI wheel hook, generators) runs in it.
-      shell: bash
-      run: scripts/retry-dependency-fetch uv sync --project agent_protocol --frozen --no-dev --no-install-project
-    - name: Record the prepared control environment
+    - name: Record the prepared workspace environment
       # Generators and Cargo build scripts call scripts/check_environment.py,
-      # which rebuilds the wheel and resyncs unless its stamp matches. Leave
-      # the stamp here so a later caller under another environment (for
-      # example SOURCE_DATE_EPOCH during a package build) never rebuilds the
-      # wheel with a different hash.
+      # which resyncs unless its stamps match. Leave them here so a later
+      # caller under another environment (for example SOURCE_DATE_EPOCH during
+      # a package build, or the offline signed-update lane) never syncs.
       shell: bash
       run: |
         python3 - <<'PY'
@@ -58,12 +50,13 @@ runs:
         from pathlib import Path
 
         sys.path.insert(0, "scripts")
-        from check_environment import ensure_control, ensure_protocol
+        from check_environment import DEFAULT_ENVIRONMENT, ensure_control, ensure_protocol
 
         root = Path.cwd().resolve()
-        environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
-        ensure_control(root, environment if environment.is_absolute() else root / environment)
-        ensure_protocol(root, root / "agent_protocol/.venv")
+        environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", DEFAULT_ENVIRONMENT))
+        environment = environment if environment.is_absolute() else root / environment
+        ensure_control(root, environment)
+        ensure_protocol(root, environment)
         PY
     - name: Generate and stamp every contract consumer
       if: inputs.contracts == 'full'

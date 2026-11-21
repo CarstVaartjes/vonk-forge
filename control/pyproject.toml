@@ -24,8 +24,9 @@ dependencies = [
 [tool.uv.sources]
 # Editable, so the repository and Compose suites that run in this environment
 # exercise the working tree rather than a snapshot built at sync time.
-vonk-cluster-profiles = { path = "..", editable = true }
-vonk-nas-setup = { path = "../nas_setup", editable = true }
+vonk-agent-protocol = { workspace = true }
+vonk-cluster-profiles = { workspace = true }
+vonk-nas-setup = { workspace = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
@@ -33,7 +34,6 @@ vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-for
 
 [tool.uv]
 required-version = ">=0.13.5"
-find-links = ["../inventory/wheels"]
 
 # The one locked tool environment for every suite, lint and type check, local
 # and CI alike (docs/testing-and-ci.md). Nothing is added with `uv run --with`

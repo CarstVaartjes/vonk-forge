@@ -28,7 +28,7 @@ def test_acceptance_recipe_library_is_the_reviewed_contract_revision() -> None:
     """Every suite and the Spark acceptance use the locked contracts.
 
     They all run in the control environment, whose ``vonk_forge_contracts`` is
-    the revision ``control/uv.lock`` pins, while they read models and recipes
+    the revision ``uv.lock`` pins, while they read models and recipes
     from the checked-out library. A library revision other than the reviewed
     contracts revision would validate the catalog with different contract
     code than the one that produced it, so the three must name one commit.
@@ -37,7 +37,7 @@ def test_acceptance_recipe_library_is_the_reviewed_contract_revision() -> None:
     revision = RECEIPT.read_text(encoding="utf-8").strip()
     lock = tomllib.loads(CONTRACTS_LOCK.read_text(encoding="utf-8"))
     assert revision == lock["revision"]
-    control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text(encoding="utf-8"))
+    control_lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     [contracts] = [
         package
         for package in control_lock["package"]

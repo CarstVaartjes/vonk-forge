@@ -26,7 +26,6 @@ test("generated-only commit checks skip formatting and still reject invalid type
       "check-staged-code",
       "check-staged-python",
       "check_environment.py",
-      "protocol_wheel.py",
       "hook_words_generated.py",
     ]) {
       copyFileSync(join(workspace, "scripts", script), join(root, "scripts", script));
@@ -67,7 +66,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
         cwd: root,
         env: {
           ...process.env,
-          UV_PROJECT_ENVIRONMENT: join(workspace, "control/.venv"),
+          UV_PROJECT_ENVIRONMENT: join(workspace, ".venv"),
         },
         encoding: "utf8",
         timeout: 30_000,

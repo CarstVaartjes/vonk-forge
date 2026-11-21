@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import tomllib
 import uuid
-import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from textwrap import dedent
@@ -43,14 +42,6 @@ NODE_B = "spk_" + "b" * 32
 COMMIT = "a" * 64
 STOP_PAYLOAD = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
 STOP_RESULT = RecipeStopResult()
-PROTOCOL_WHEEL = (
-    ROOT
-    / "inventory/wheels"
-    / subprocess.check_output(
-        [str(ROOT / "scripts/protocol-wheel-name")], text=True
-    ).strip()
-)
-PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
     ROOT
     / tomllib.loads((ROOT / "control/packaging/public-contracts.lock").read_text())[
@@ -261,16 +252,9 @@ def test_protocol_has_no_arbitrary_operation_member() -> None:
         AgentOperation("arbitrary.command")
 
 
-def test_control_environment_installs_the_verified_protocol_wheel() -> None:
-    # The suite runs in the synced control environment, so its installed
-    # distribution is the one under test.
+def test_control_environment_installs_the_workspace_protocol() -> None:
+    # The workspace member is installed editable: the suite tests the tree.
     installed = importlib.metadata.distribution("vonk-agent-protocol")
-    control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
-    package = next(
-        package
-        for package in control_lock["package"]
-        if package["name"] == "vonk-agent-protocol"
-    )
 
     assert (
         installed.version
@@ -278,19 +262,11 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
             "project"
         ]["version"]
     )
-    # A flat local index has no PEP 610 direct_url.json. Prove the installed
-    # contents came from the verified wheel, including packaged contract data.
-    with zipfile.ZipFile(PROTOCOL_WHEEL) as wheel:
-        for name in wheel.namelist():
-            if not name.endswith("/RECORD"):
-                assert installed.locate_file(name).read_bytes() == wheel.read(name)
-    assert package["source"] == {"registry": "../inventory/wheels"}
-    assert package["wheels"] == [
-        {
-            "path": PROTOCOL_WHEEL.name,
-            "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
-        }
-    ]
+    import vonk_agent_protocol
+
+    assert Path(vonk_agent_protocol.__file__).is_relative_to(
+        ROOT / "agent_protocol/src"
+    )
 
 
 def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:

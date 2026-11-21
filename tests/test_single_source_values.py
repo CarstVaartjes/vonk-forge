@@ -1,4 +1,4 @@
-"""Wrong implementations: handwritten/stale selections and unverified projections."""
+"""Wrong implementations: handwritten and stale selections."""
 
 from pathlib import Path
 
@@ -99,10 +99,8 @@ def registered_tree(tmp_path: Path) -> Path:
             "scripts/protocol_wheel.py",
             "scripts/image_policy.py",
             "agent_protocol/pyproject.toml",
-            "agent_protocol/uv.lock",
             "deploy/compose/images.lock.json",
             "control/pyproject.toml",
-            "control/uv.lock",
             ".dockerignore",
             "tests/test_single_source_values.py",
         ):
@@ -148,54 +146,6 @@ def test_guard_rejects_old_and_future_wheel_filenames(
     assert any(
         f"{consumer}:" in error and "agent_protocol.wheel" in error for error in errors
     ), errors
-
-
-@pytest.mark.parametrize(
-    "fault", ("owner_bump", "stale_projection", "extra_copy", "copied_projection")
-)
-def test_projections_are_reproduced_and_exempt_only_exact_sites(
-    registered_tree: Path, fault: str
-) -> None:
-    import tomllib
-
-    from scripts.protocol_wheel import protocol_wheel_name
-    from tools.single_source_values import project_protocol_lock
-
-    root = registered_tree
-    owner = root / "agent_protocol/pyproject.toml"
-    projection = root / "control/uv.lock"
-    version = tomllib.loads(owner.read_text())["project"]["version"]
-    if fault == "owner_bump":
-        owner.write_text(owner.read_text().replace(version, "99.2.7"))
-    elif fault == "stale_projection":
-        projection.write_text(
-            projection.read_text().replace(
-                protocol_wheel_name(root),
-                protocol_wheel_name(root).replace(version, "99.2.7"),
-            )
-        )
-    elif fault == "extra_copy":
-        projection.write_text(
-            projection.read_text()
-            + f"\n# copied filename: {protocol_wheel_name(root)}\n"
-        )
-    else:
-        pin = next(
-            line
-            for line in projection.read_text().splitlines()
-            if protocol_wheel_name(root) in line
-        )
-        projection.write_text(projection.read_text() + "\n" + pin + "\n")
-    errors = violations(root, fixture_files(root))
-    assert any(
-        "agent_protocol.wheel" in error and "control/uv.lock:" in error
-        for error in errors
-    ), errors
-    if fault in {"owner_bump", "stale_projection"}:
-        for file in ("control/uv.lock", "agent_protocol/uv.lock"):
-            path = root / file
-            path.write_text(project_protocol_lock(root, file, path.read_text()))
-        assert violations(root, fixture_files(root)) == []
 
 
 def test_unrelated_domains_are_not_floating_tag_policy(registered_tree: Path) -> None:

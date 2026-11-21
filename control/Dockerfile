@@ -83,17 +83,17 @@ RUN apt-get update \
         python -m pip install --no-cache-dir --require-hashes \
         -r /tmp/python-bootstrap.lock -r /tmp/uv-bootstrap.lock
 WORKDIR /repo
-COPY pyproject.toml ./
-COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
-COPY agent_protocol/pyproject.toml agent_protocol/uv.lock ./agent_protocol/
+# One workspace lock covers every member; the members' pyprojects declare them.
+COPY pyproject.toml uv.lock ./
+COPY control/pyproject.toml control/openapi-python-client.yaml ./control/
+COPY agent_protocol/pyproject.toml ./agent_protocol/
 # The locked development environment includes the portable NAS helper for its
 # Python behavior tests. Generators may resync that environment, so retain the
 # complete local editable project in this build stage; it never reaches runtime.
 COPY nas_setup/pyproject.toml nas_setup/hatch_build.py ./nas_setup/
 COPY nas_setup/src/ ./nas_setup/src/
-COPY inventory/wheels/vonk_agent_protocol-*.whl ./inventory/wheels/
 # Install the locked generator dependencies before any application source.
-RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
+RUN uv sync --project control --frozen --no-install-workspace
 COPY tools/openapi-client/ ./tools/openapi-client/
 RUN npm ci --prefix tools/openapi-client --ignore-scripts
 # The schema application imports the Controller contract graph. Web
@@ -107,7 +107,7 @@ COPY agent_protocol/src/ ./agent_protocol/src/
 # except the generated documents reaches the runtime image.
 COPY src/cluster_profiles/ ./src/cluster_profiles/
 COPY tools/hatch_build.py ./tools/hatch_build.py
-COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/ensure-project-venv scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
+COPY scripts/check_environment.py scripts/ensure-project-venv scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
 COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem ./install/installer-release-public.pem
 RUN scripts/generate-control-clients \
@@ -140,14 +140,13 @@ RUN npm run build --ignore-scripts
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
 # Layers are ordered from least to most frequently changing so an ordinary
-# source change rebuilds only the last two steps: the pinned local wheels
-# first (they depend only on the lock files), then the third-party
-# dependencies (they depend only on pyproject.toml), then our own source.
+# source change rebuilds only the last two steps: the local wheels first, then
+# the third-party dependencies (they depend only on pyproject.toml), then our
+# own source.
 COPY control/pyproject.toml ./
-COPY control/uv.lock ./uv.lock
 COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 # The repository image build runs scripts/build-control-wheel before invoking
-# Docker so this local dependency exists and has the digest pinned in uv.lock.
+# Docker so this local dependency exists; release and image carry the same bytes.
 COPY inventory/wheels/vonk_agent_protocol-*.whl /wheels/
 # The reviewed public-contracts wheel is installed by its locked digest, never
 # rebuilt: a rebuild resolves a build backend at build time and its bytes follow
@@ -159,8 +158,6 @@ COPY deploy/compose/python-bootstrap.lock /tmp/python-bootstrap.lock
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && python -m pip install --no-cache-dir --require-hashes -r /tmp/python-bootstrap.lock \
-    && protocol_wheel="$(scripts/protocol-wheel-name)" \
-    && python -c 'import hashlib, pathlib, sys, tomllib; [package] = [p for p in tomllib.loads(pathlib.Path("uv.lock").read_text())["package"] if p["name"] == "vonk-agent-protocol"]; [wheel] = package["wheels"]; assert wheel["hash"] == "sha256:" + hashlib.sha256(pathlib.Path("/wheels", sys.argv[1]).read_bytes()).hexdigest()' "$protocol_wheel" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-5.2.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /var/lib/apt/lists/*
 # Third-party dependencies resolve to the newest allowed release, so this layer

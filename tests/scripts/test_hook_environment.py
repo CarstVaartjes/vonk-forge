@@ -23,6 +23,7 @@ def clone(tmp_path: Path) -> Path:
     (tmp_path / "nas_setup").mkdir()
     (tmp_path / "scripts").mkdir()
     for name in (
+        "pyproject.toml",
         "control/pyproject.toml",
         "agent_protocol/pyproject.toml",
         "nas_setup/pyproject.toml",
@@ -32,7 +33,7 @@ def clone(tmp_path: Path) -> Path:
     (tmp_path / "agent_protocol/pyproject.toml").write_bytes(
         (ROOT / "agent_protocol/pyproject.toml").read_bytes()
     )
-    (tmp_path / "control/uv.lock").write_text("package = []\n")
+    (tmp_path / "uv.lock").write_text("package = []\n")
     (tmp_path / "example.py").touch()
     return tmp_path
 
@@ -48,9 +49,7 @@ def hook():
     return module
 
 
-def test_fresh_hook_builds_then_syncs_instead_of_refusing(
-    tmp_path, monkeypatch, capsys
-):
+def test_fresh_hook_syncs_instead_of_refusing(tmp_path, monkeypatch, capsys):
     root = clone(tmp_path)
     module = hook()
     monkeypatch.setattr(module, "ROOT", root)
@@ -65,7 +64,7 @@ def test_fresh_hook_builds_then_syncs_instead_of_refusing(
         assert cwd == root
         assert deadline > environment.time.monotonic()
         if command[0] == "uv":
-            python = root / "control/.venv/bin/python"
+            python = root / ".venv/bin/python"
             python.parent.mkdir(parents=True)
             python.touch()
 
@@ -74,26 +73,16 @@ def test_fresh_hook_builds_then_syncs_instead_of_refusing(
         module.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
     )
     assert module.main() == 0
-    assert calls == [
-        [str(root / "scripts/build-control-wheel")],
-        ["uv", "sync", "--project", "control", "--frozen"],
-    ]
+    assert calls == [["uv", "sync", "--project", "control", "--frozen"]]
     assert capsys.readouterr().err.count("Preparing control environment") == 1
 
 
 @pytest.mark.parametrize(
-    "fault", ["absent", "lock", "wheel", "tools", "nas-project", "nas-build-hook"]
+    "fault", ["absent", "lock", "tools", "nas-project", "nas-build-hook"]
 )
 def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
     root = clone(tmp_path)
-    wheel = root / "inventory/wheels" / environment.protocol_wheel_name(root)
-    wheel.parent.mkdir(parents=True)
-    wheel.write_bytes(b"wheel")
-    digest = environment.hashlib.sha256(wheel.read_bytes()).hexdigest()
-    (root / "control/uv.lock").write_text(
-        f'[[package]]\nname = "vonk-agent-protocol"\nsource = {{registry = "../inventory/wheels"}}\nwheels = [{{hash = "sha256:{digest}"}}]\n'
-    )
-    venv = root / "control/.venv"
+    venv = root / ".venv"
     calls = []
 
     def run(command, cwd, deadline):
@@ -114,10 +103,8 @@ def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
     if fault == "absent":
         (venv / "bin/python").unlink()
     elif fault == "lock":
-        with (root / "control/uv.lock").open("a") as stream:
+        with (root / "uv.lock").open("a") as stream:
             stream.write("# updated lock\n")
-    elif fault == "wheel":
-        wheel.write_bytes(b"corrupt")
     elif fault in ("nas-project", "nas-build-hook"):
         name = "pyproject.toml" if fault == "nas-project" else "hatch_build.py"
         (root / "nas_setup" / name).write_text("# changed build input\n")
@@ -128,7 +115,7 @@ def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
             lambda *a, **k: subprocess.CompletedProcess(a[0], 1),
         )
     environment.ensure_control(root, venv)
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 def test_concurrent_preparation_builds_once(tmp_path):
@@ -258,48 +245,6 @@ def test_scripts_cannot_delegate_automatic_preparation_to_users():
     assert failures == []
 
 
-def test_protocol_pin_refresh_builds_missing_wheel(tmp_path, monkeypatch):
-    loader = importlib.machinery.SourceFileLoader(
-        "refresh_probe", str(ROOT / "scripts/refresh-protocol-wheel-lock")
-    )
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    root = clone(tmp_path)
-    monkeypatch.setattr(module, "ROOT", root)
-    wheel = root / "inventory/wheels" / environment.protocol_wheel_name(root)
-    (root / "control/uv.lock").write_text(
-        '[[package]]\nname = "vonk-agent-protocol"\n'
-        'source = {registry = "../inventory/wheels"}\nwheels = [\n'
-        f'    {{ path = "{wheel.name}", hash = "sha256:old" }},\n]\n'
-    )
-    calls = []
-
-    def build(command, cwd, deadline):
-        calls.append(command)
-        wheel.parent.mkdir(parents=True)
-        wheel.write_bytes(b"built")
-
-    monkeypatch.setattr(environment, "run_preparation", build)
-    module.main()
-    assert calls == [
-        [
-            "uv",
-            "build",
-            "--project",
-            "agent_protocol",
-            "--wheel",
-            "--out-dir",
-            "inventory/wheels",
-        ]
-    ]
-    assert (
-        environment.hashlib.sha256(b"built").hexdigest()
-        in (root / "control/uv.lock").read_text()
-    )
-
-
 def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch):
     loader = importlib.machinery.SourceFileLoader(
         "lane_probe", str(ROOT / "scripts/dev_agent_wire_linux.py")
@@ -330,11 +275,10 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
     assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
 
 
-def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypatch):
+def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatch):
     """The wire exporter needs pydantic and jsonschema, never the Controller."""
     root = clone(tmp_path)
-    (root / "agent_protocol/uv.lock").write_text("version = 1\n")
-    venv = root / "agent_protocol/.venv"
+    venv = root / ".venv"
     calls = []
 
     def run(command, cwd, deadline):
@@ -349,6 +293,7 @@ def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypa
         lambda *a, **k: subprocess.CompletedProcess(a[0], 0),
     )
     environment.ensure_protocol(root, venv)
+    # Inexact: a bare `uv sync --package` would uninstall the other members.
     assert calls == [
         [str(root / "scripts/ensure-project-venv"), str(venv.resolve())],
         [
@@ -356,15 +301,15 @@ def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypa
             f"UV_PROJECT_ENVIRONMENT={venv}",
             "uv",
             "sync",
-            "--project",
-            "agent_protocol",
+            "--inexact",
+            "--package",
+            "vonk-agent-protocol",
             "--frozen",
             "--no-dev",
-            "--no-install-project",
         ],
     ]
     environment.ensure_protocol(root, venv)
     assert len(calls) == 2  # the stamp matches the lock: nothing to do
-    (root / "agent_protocol/uv.lock").write_text("version = 2\n")
+    (root / "uv.lock").write_text("version = 2\n")
     environment.ensure_protocol(root, venv)
     assert len(calls) == 4

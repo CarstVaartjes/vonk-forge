@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
-import tomllib
 from pathlib import Path
 from types import ModuleType
 
@@ -37,21 +36,6 @@ def test_agent_wire_schema_is_current() -> None:
     assert not _stale(wire, rendered), (
         "stale wire.json; run scripts/generate-agent-wire"
     )
-
-
-def test_both_locks_give_the_wire_exporter_the_same_schema_libraries() -> None:
-    """The exporter runs in the protocol environment, the in-process tests in the
-    control one: one tree must give one wire.json in either."""
-
-    def versions(project: str) -> dict[str, str]:
-        packages = tomllib.loads((ROOT / project / "uv.lock").read_text())["package"]
-        return {
-            package["name"]: package["version"]
-            for package in packages
-            if package["name"] in {"pydantic", "pydantic-core", "jsonschema"}
-        }
-
-    assert versions("agent_protocol") == versions("control")
 
 
 def test_installer_release_schema_is_current() -> None:

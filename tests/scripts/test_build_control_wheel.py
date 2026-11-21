@@ -1,49 +1,25 @@
 from __future__ import annotations
 
-import hashlib
 import os
-import re
 import subprocess
 from pathlib import Path
-
-import pytest
 
 from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"
 WHEEL_NAME = protocol_wheel_name(ROOT)
-# A command that runs in the control environment: uv against the control
-# project, or scripts/test, which always does.
-CONTROL_UV_COMMAND = re.compile(
-    r"uv\s+(?:sync|run).*--project\s+(?:control|\.vonk-forge/control)|\bscripts/test\s"
-)
-PROTOCOL_WHEEL_BUILD = re.compile(
-    r"(?m)^[ \t]*uv build --project agent_protocol --wheel --out-dir inventory/wheels[ \t]*$"
-)
-PROTOCOL_WHEEL_LOCK_REFRESH = re.compile(
-    r"(?m)^[ \t]*python3 scripts/refresh-protocol-wheel-lock[ \t]*$"
-)
+_PREPARING_ACTIONS = {
+    "./.github/actions/prepare-control-wheel",
+    "./.vonk-forge/.github/actions/prepare-control-wheel",
+}
 
 
-def _repository(tmp_path: Path, *, wheel_bytes: bytes) -> tuple[Path, Path]:
+def test_build_script_only_builds_the_protocol_wheel(tmp_path: Path) -> None:
     root = tmp_path / "repository"
-    (root / "control").mkdir(parents=True)
-    (root / "agent_protocol").mkdir()
+    (root / "agent_protocol").mkdir(parents=True)
     (root / "agent_protocol/pyproject.toml").write_bytes(
         (ROOT / "agent_protocol/pyproject.toml").read_bytes()
-    )
-    wheel_path = root / "inventory/wheels" / WHEEL_NAME
-    wheel_path.parent.mkdir(parents=True)
-    wheel_path.write_bytes(wheel_bytes)
-    expected_hash = hashlib.sha256(wheel_bytes).hexdigest()
-    (root / "control/uv.lock").write_text(
-        "[[package]]\n"
-        'name = "vonk-agent-protocol"\n'
-        "wheels = [\n"
-        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{expected_hash}" }},\n'
-        "]\n",
-        encoding="utf-8",
     )
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -54,15 +30,12 @@ def _repository(tmp_path: Path, *, wheel_bytes: bytes) -> tuple[Path, Path]:
         "assert sys.argv[1:6] == ['build', '--project', 'agent_protocol', '--wheel', '--out-dir']\n"
         "output = pathlib.Path(sys.argv[6])\n"
         "output.mkdir(parents=True, exist_ok=True)\n"
-        f"(output / '{WHEEL_NAME}').write_bytes({wheel_bytes!r})\n",
+        f"(output / '{WHEEL_NAME}').write_bytes(b'wheel')\n",
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
-    return root, fake_bin
 
-
-def _run(root: Path, fake_bin: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         [str(SCRIPT), "--root", str(root)],
         capture_output=True,
         text=True,
@@ -70,155 +43,32 @@ def _run(root: Path, fake_bin: Path) -> subprocess.CompletedProcess[str]:
         env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
     )
 
-
-def _collect_steps(value: object, ordered_steps: list[dict[str, object]]) -> None:
-    if isinstance(value, list):
-        for item in value:
-            _collect_steps(item, ordered_steps)
-    elif isinstance(value, dict):
-        if "run" in value or "uses" in value:
-            ordered_steps.append(value)
-        if "parallel" in value:
-            _collect_steps(value["parallel"], ordered_steps)
-
-
-def _is_control_uv_step(step: dict[str, object]) -> bool:
-    run = step.get("run")
-    return isinstance(run, str) and CONTROL_UV_COMMAND.search(run) is not None
-
-
-_PREPARING_ACTIONS = {
-    "./.github/actions/prepare-control-wheel",
-    "./.github/actions/python-env",
-    "./.vonk-forge/.github/actions/prepare-control-wheel",
-}
-
-
-def _prepares_protocol_wheel(step: dict[str, object], same_step: bool) -> bool:
-    """The step builds the wheel, before its own control command if it has one."""
-
-    if step.get("uses") in _PREPARING_ACTIONS:
-        return True
-    run = step.get("run")
-    if not isinstance(run, str):
-        return False
-    if same_step:
-        control = CONTROL_UV_COMMAND.search(run)
-        if control is None:
-            return False
-        run = run[: control.start()]
-    if "scripts/build-control-wheel" in run:
-        return True
-    # Artifact producers intentionally refresh the candidate pin. Recognize
-    # their exact build plus lock-refresh sequence, never an unverified build.
-    build = PROTOCOL_WHEEL_BUILD.search(run)
-    refresh = PROTOCOL_WHEEL_LOCK_REFRESH.search(run)
-    return build is not None and refresh is not None and build.end() <= refresh.start()
-
-
-@pytest.mark.parametrize(
-    ("run", "same_step", "expected"),
-    [
-        (
-            (
-                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
-                "python3 scripts/refresh-protocol-wheel-lock\n"
-            ),
-            False,
-            True,
-        ),
-        (
-            (
-                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
-                "python3 scripts/refresh-protocol-wheel-lock\n"
-                "uv sync --project control --frozen\n"
-            ),
-            True,
-            True,
-        ),
-        (
-            "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n",
-            False,
-            False,
-        ),
-        (
-            (
-                "python3 scripts/refresh-protocol-wheel-lock\n"
-                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
-            ),
-            False,
-            False,
-        ),
-        (
-            (
-                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
-                "uv sync --project control --frozen\n"
-                "python3 scripts/refresh-protocol-wheel-lock\n"
-            ),
-            True,
-            False,
-        ),
-    ],
-)
-def test_artifact_wheel_preparation_requires_build_then_pin_before_control(
-    run: str, same_step: bool, expected: bool
-) -> None:
-    assert _prepares_protocol_wheel({"run": run}, same_step) is expected
-
-
-def test_build_script_verifies_the_frozen_wheel_digest(tmp_path: Path) -> None:
-    expected_bytes = b"reproducible protocol wheel"
-    root, fake_bin = _repository(tmp_path, wheel_bytes=expected_bytes)
-    (root / "inventory/wheels" / WHEEL_NAME).unlink()
-
-    result = _run(root, fake_bin)
-
     assert result.returncode == 0, result.stderr
-    assert (root / "inventory/wheels" / WHEEL_NAME).read_bytes() == expected_bytes
-    assert f"Verified {WHEEL_NAME} against control/uv.lock" in result.stdout
+    assert (root / "inventory/wheels" / WHEEL_NAME).read_bytes() == b"wheel"
 
 
-def test_build_script_refuses_a_wheel_with_a_stale_lock_hash(tmp_path: Path) -> None:
-    root, fake_bin = _repository(tmp_path, wheel_bytes=b"expected locked wheel")
-    (root / "control/uv.lock").write_text(
-        "[[package]]\n"
-        'name = "vonk-agent-protocol"\n'
-        "wheels = [\n"
-        f'  {{ path = "{WHEEL_NAME}", hash = "sha256:{"0" * 64}" }},\n'
-        "]\n",
-        encoding="utf-8",
-    )
-
-    result = _run(root, fake_bin)
-
-    assert result.returncode != 0
-    assert "refresh the locked wheel hash" in result.stderr
-
-
-def test_every_control_workflow_builds_the_wheel_before_uv() -> None:
+def test_every_job_that_builds_the_controller_image_builds_the_wheel_first() -> None:
+    """The image copies the wheel from the context; nothing else builds it."""
     import yaml
 
-    workflow_paths = sorted((ROOT / ".github/workflows").glob("*.y*ml"))
-    checked_jobs = 0
-    for path in workflow_paths:
+    checked = set()
+    for path in sorted((ROOT / ".github/workflows").glob("*.y*ml")):
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for job in document.get("jobs", {}).values():
-            ordered_steps: list[dict[str, object]] = []
-            _collect_steps(job.get("steps", []), ordered_steps)
-            if not any(_is_control_uv_step(step) for step in ordered_steps):
+        for name, job in document.get("jobs", {}).items():
+            steps = job.get("steps", [])
+            if "control/Dockerfile" not in yaml.safe_dump(job):
                 continue
-            checked_jobs += 1
-            first_control_run = next(
+            builds = [
                 index
-                for index, step in enumerate(ordered_steps)
-                if _is_control_uv_step(step)
-            )
-            prepared = [
-                index
-                for index, step in enumerate(ordered_steps[: first_control_run + 1])
-                if _prepares_protocol_wheel(step, index == first_control_run)
+                for index, step in enumerate(steps)
+                if str(step.get("uses", "")).startswith("docker/build-push-action")
             ]
-            assert prepared, (
-                f"{path}: Controller command runs before the protocol wheel is prepared"
-            )
-    assert checked_jobs >= 8
+            if not builds:
+                continue
+            checked.add(f"{path.name}:{name}")
+            assert any(
+                "scripts/build-control-wheel" in str(step.get("run", ""))
+                or step.get("uses") in _PREPARING_ACTIONS
+                for step in steps[: builds[0]]
+            ), f"{path.name}:{name} builds the Controller image without the wheel"
+    assert "ci.yml:nas-install" in checked

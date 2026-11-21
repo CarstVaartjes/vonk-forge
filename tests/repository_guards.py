@@ -54,7 +54,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_serving_request_guard.py",
     "tests/scripts/test_select_ci_areas.py",
     "tests/scripts/test_verify_ci_gate.py",
-    "tests/scripts/test_build_control_wheel.py::test_every_control_workflow_builds_the_wheel_before_uv",
+    "tests/scripts/test_build_control_wheel.py::test_every_job_that_builds_the_controller_image_builds_the_wheel_first",
     "tests/scripts/test_hook_environment.py::test_scripts_cannot_delegate_automatic_preparation_to_users",
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
     "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",

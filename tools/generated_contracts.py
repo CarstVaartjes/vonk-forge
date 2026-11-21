@@ -34,7 +34,7 @@ INPUTS: tuple[str, ...] = (
     "install/installer-release-public.pem",
     "control/openapi-python-client.yaml",
     "control/pyproject.toml",
-    "control/uv.lock",
+    "uv.lock",
     "pyproject.toml",
     "scripts/check_environment.py",
     "scripts/export-agent-wire-schema",

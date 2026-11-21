@@ -149,7 +149,7 @@ def check_added_lines(changed: list[str]) -> None:
             file=sys.stderr,
         )
         return
-    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv"))
     if not environment.is_absolute():
         environment = ROOT / environment
     ensure_control(ROOT, environment)

@@ -258,9 +258,9 @@ models by the `vonk-wire-codegen` renderer, using pinned typify 0.8.0. Cargo's
 contract checks. The exporter reads only `vonk_agent_protocol`: the models of
 the `/agent/` routes (grant requests, the bounded error envelope, the
 capability-unavailable and enrollment-observation replies) are defined there, and
-it runs in the protocol project's own environment (pydantic and jsonschema from
-`agent_protocol/uv.lock`), so `build.rs` reruns on `agent_protocol/` and the
-exporter alone and a Controller-only change never touches the Rust workspace.
+it runs with only the protocol member installed in the workspace environment
+(pydantic and jsonschema from the root `uv.lock`), so `build.rs` reruns on
+`agent_protocol/`, `uv.lock` and the exporter alone and a Controller-only change never touches the Rust workspace.
 A route model defined in `vonk_control` is absent from the export and fails
 `require_wire_exports` (`control/tests/test_api_contract_completeness.py`). Generated schemas and declarations are ignored, while
 production protocol and HTTP consumers compile against the generated types. Handwritten code retains semantic,

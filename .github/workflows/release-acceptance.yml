@@ -157,6 +157,8 @@ jobs:
         if: matrix.platform == 'amd64'
         uses: ./.github/actions/free-runner-disk
       - uses: ./.github/actions/python-env
+      - name: Build the protocol wheel the Controller image carries
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

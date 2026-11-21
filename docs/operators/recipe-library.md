@@ -188,7 +188,7 @@ export VONK_PLATFORM_ROOT="$PWD"
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 
 scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
-"$VONK_PLATFORM_ROOT/control/.venv/bin/python" \
+"$VONK_PLATFORM_ROOT/.venv/bin/python" \
   "$VONK_PLATFORM_ROOT/scripts/validate-recipe-library" \
   --library-root "$VONK_RECIPE_LIBRARY_ROOT" \
   --platform-root "$VONK_PLATFORM_ROOT" \

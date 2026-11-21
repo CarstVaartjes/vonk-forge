@@ -14,10 +14,11 @@ merged into the repository.
 
 Run `scripts/test-local` from your worktree for the repository and Controller
 pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
-VM when available; the script builds the local agent protocol wheel and checks
-it against `control/uv.lock` before running Controller commands. For direct
-Controller commands or tests in a fresh clone, run `scripts/build-control-wheel`
-once first: the protocol wheel is built locally, not kept in git. See
+VM when available. The Python packages are one uv workspace with one root
+`uv.lock` and one root `.venv`; the protocol is an editable member, so a fresh
+clone runs Controller commands and tests with `uv run --project control --frozen`
+and no wheel step (`scripts/build-control-wheel` is only for image builds and
+releases). See
 [Testing and CI](docs/testing-and-ci.md) for focused commands and the other
 acceptance lanes.
 

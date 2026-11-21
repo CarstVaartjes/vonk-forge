@@ -446,7 +446,6 @@ def container_command(docker: str, root: Path, library: Path, cache: Path) -> li
         str(cache / "cargo-target"): "/cache/cargo-target",
         str(cache / "uv"): "/cache/uv",
         str(cache / "venv"): "/cache/venv",
-        str(cache / "protocol-venv"): "/cache/protocol-venv",
         str(cache / "home"): "/cache/home",
     }
     command = [
@@ -465,8 +464,6 @@ def container_command(docker: str, root: Path, library: Path, cache: Path) -> li
         "UV_CACHE_DIR=/cache/uv",
         "--env",
         "UV_PROJECT_ENVIRONMENT=/cache/venv",
-        "--env",
-        "VONK_PROTOCOL_ENVIRONMENT=/cache/protocol-venv",
         "--env",
         f"VONK_RECIPE_LIBRARY_ROOT={CONTAINER_RECIPE_LIBRARY}",
         "--workdir",
@@ -585,7 +582,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"lane: recipe library {library} at {revision}")
 
     populated = not cache_is_empty(cache)
-    for name in ("cargo", "cargo-target", "uv", "venv", "protocol-venv", "home"):
+    for name in ("cargo", "cargo-target", "uv", "venv", "home"):
         (cache / name).mkdir(parents=True, exist_ok=True)
     print(
         f"lane: caches at {cache}"

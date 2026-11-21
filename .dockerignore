@@ -1,6 +1,7 @@
 *
 !.tool-versions
 !pyproject.toml
+!uv.lock
 !agent_protocol/
 !agent_protocol/src/
 !agent_protocol/src/vonk_agent_protocol/
@@ -93,13 +94,10 @@ deploy/compose/step-ca/**
 !nas_setup/src/
 !nas_setup/src/**
 !agent_protocol/pyproject.toml
-!agent_protocol/uv.lock
 !agent_protocol/src/**
-!control/uv.lock
 !control/openapi-python-client.yaml
 !scripts/
 !scripts/image_policy.py
-!scripts/build-control-wheel
 !scripts/protocol-wheel-name
 !scripts/protocol_wheel.py
 !scripts/check_environment.py
