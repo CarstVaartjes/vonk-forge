@@ -99,6 +99,12 @@ class FleetProfileLoadReview(StrictModel):
     effects_digest: Digest
 
 
+class FleetProfilePreviewRequest(StrictModel):
+    """An unsaved definition to review as the profile a save would make."""
+
+    definition: FleetProfileDefinition
+
+
 class FleetProfileLoadRequest(StrictModel):
     request_key: UuidId
     #: Omission authorizes the current plan; a review always requires a binding.

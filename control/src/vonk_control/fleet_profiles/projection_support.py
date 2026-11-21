@@ -250,8 +250,9 @@ def _digest(value: object) -> str:
 def _review_effects_digest(decision: FleetProfileReviewedDecision) -> str:
     """Digest what an operator consents to, never what the Controller observes.
 
-    The effects are the saved intent it applies (profile revision and digest,
-    the resolved placements and options), the workloads it keeps, stops,
+    The effects are the profile content it applies (the definition itself, never
+    the row id, revision or digest, so an unsaved draft and the profile saved
+    from it are one review; the resolved placements and options), the workloads it keeps, stops,
     replaces and installs, and the switch and preparation steps. Free capacity,
     readiness and reuse of already-prepared assets, blockers, reasons and
     timestamps are observations: a review stays valid across them, and the
@@ -260,9 +261,11 @@ def _review_effects_digest(decision: FleetProfileReviewedDecision) -> str:
 
     return _digest(
         {
-            "profile_id": decision.profile_id,
-            "profile_digest": decision.profile_digest,
-            "profile_revision": decision.profile_revision,
+            "profile_definition": (
+                decision.profile_definition.model_dump(mode="json")
+                if decision.profile_definition is not None
+                else None
+            ),
             "scope": decision.scope.node_ids,
             "assignments": [
                 {
