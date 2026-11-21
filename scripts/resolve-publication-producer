@@ -177,6 +177,7 @@ PRODUCERS = {
             "scripts/build-control-wheel",
             *PROTOCOL_WHEEL_INPUTS,
             "scripts/check_environment.py",
+            "scripts/ensure-project-venv",
             "scripts/ci-apt-install",
             "scripts/dev-image-acceptance-receipt",
             "scripts/dev-image-inputs",

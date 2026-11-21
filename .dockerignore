@@ -103,6 +103,7 @@ deploy/compose/step-ca/**
 !scripts/protocol-wheel-name
 !scripts/protocol_wheel.py
 !scripts/check_environment.py
+!scripts/ensure-project-venv
 !scripts/generate-control-clients
 !scripts/export-agent-wire-schema
 !scripts/render-dev-compose
