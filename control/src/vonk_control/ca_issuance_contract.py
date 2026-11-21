@@ -1,15 +1,13 @@
 """Exact, authenticated CA journal request and observation contracts."""
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import StringConstraints, model_validator
 from vonk_agent_protocol import CertificateCode
 from vonk_agent_protocol.enrollment import CertificateGeneration
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
-    CertificateJournalState,
-    CertificateRequestMode,
 )
 
 from .strict_json import StrictJSONModel
@@ -62,46 +60,4 @@ class CertificateIssuanceBinding(StrictJSONModel):
         return self
 
 
-class CertificateSignRequest(StrictJSONModel):
-    csr: str
-    ott: str
-    request: CertificateIssuanceBinding
-    mode: CertificateRequestMode
-
-
-class CertificateIssuedReply(StrictJSONModel):
-    state: Literal[CertificateJournalState.ISSUED]
-    request: CertificateIssuanceBinding
-    crt: str
-    ca: str
-    certChain: list[str]
-
-
-class CertificatePendingReply(StrictJSONModel):
-    state: Literal[CertificateJournalState.PENDING]
-    request: CertificateIssuanceBinding
-    reason_code: Literal[CertificateCode.ISSUANCE_IN_PROGRESS]
-
-
-class CertificateAbsentReply(StrictJSONModel):
-    state: Literal[CertificateJournalState.ABSENT]
-    request: CertificateIssuanceBinding
-
-
 CertificateRefusalReason = CertificateCode
-
-
-class CertificateRefusalReply(StrictJSONModel):
-    reason_code: CertificateRefusalReason
-    detail: str = Field(max_length=512)
-
-
-class CertificateIssuanceContract(StrictJSONModel):
-    """Schema export roots for the same-process CA and hosted proof consumers."""
-
-    sign: CertificateSignRequest
-    refusal: CertificateRefusalReply
-    reply: Annotated[
-        CertificateIssuedReply | CertificatePendingReply | CertificateAbsentReply,
-        Field(discriminator="state"),
-    ]

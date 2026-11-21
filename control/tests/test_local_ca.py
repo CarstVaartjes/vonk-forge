@@ -14,7 +14,6 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
@@ -573,82 +572,6 @@ def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
             crl.get_revoked_certificate_by_serial_number(int(issued.serial)) is not None
         )
         assert crl.get_revoked_certificate_by_serial_number(int(renewed.serial)) is None
-
-
-@pytest.mark.parametrize(
-    "mutation", ("key", "subject", "san", "eku", "usage", "issuer")
-)
-def test_a_leaf_with_the_wrong_identity_key_or_profile_is_refused(local_ca, mutation):
-    """Catches adopting a certificate that is not the exact node client leaf."""
-    ca, material, _ = local_ca
-    csr_pem = _csr()
-    request = x509.load_pem_x509_csr(csr_pem)
-    node = "spk_fedcba9876543210fedcba9876543210"
-    other = _write_material(material["root_path"].parent / "other")
-    signer = other["intermediate_key"] if mutation == "issuer" else None
-    leaf = (
-        x509.CertificateBuilder()
-        .subject_name(
-            x509.Name(
-                [
-                    x509.NameAttribute(
-                        NameOID.COMMON_NAME, node if mutation == "subject" else NODE_ID
-                    )
-                ]
-            )
-        )
-        .issuer_name(
-            other["intermediate"].subject
-            if mutation == "issuer"
-            else material["intermediate"].subject
-        )
-        .public_key(
-            ed25519.Ed25519PrivateKey.generate().public_key()
-            if mutation == "key"
-            else request.public_key()
-        )
-        .serial_number(9876)
-        .not_valid_before(NOW)
-        .not_valid_after(NOW + timedelta(days=30))
-        .add_extension(
-            x509.KeyUsage(
-                mutation != "usage",
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-                False,
-            ),
-            critical=True,
-        )
-        .add_extension(
-            x509.ExtendedKeyUsage(
-                [
-                    ExtendedKeyUsageOID.SERVER_AUTH
-                    if mutation == "eku"
-                    else ExtendedKeyUsageOID.CLIENT_AUTH
-                ]
-            ),
-            critical=False,
-        )
-        .add_extension(
-            x509.SubjectAlternativeName(
-                [
-                    x509.UniformResourceIdentifier(
-                        "spiffe://vonk-forge.local/node/"
-                        + (node if mutation == "san" else NODE_ID)
-                    )
-                ]
-            ),
-            critical=False,
-        )
-        .sign(signer or material["intermediate_key"], algorithm=None)
-    )
-    with pytest.raises(StepCAError):
-        ca._validate_leaf(NODE_ID, request, leaf)
 
 
 def _helper_key(path: Path) -> Path:

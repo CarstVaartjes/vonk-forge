@@ -34,9 +34,7 @@ class _Material(TypedDict):
     intermediate: x509.Certificate
     intermediate_key: ed25519.Ed25519PrivateKey
     intermediate_path: Path
-    credential_path: Path
     public_jwk_path: Path
-    public_jwk: dict[str, str]
     kid: str
 
 
@@ -87,7 +85,6 @@ def _write_material(tmp_path: Path) -> _Material:
     provisioner_key = ec.generate_private_key(ec.SECP256R1())
     root_path = tmp_path / "root.pem"
     intermediate_path = tmp_path / "intermediate.pem"
-    credential_path = tmp_path / "provisioner.pem"
     public_jwk_path = tmp_path / "provisioner-public.jwk"
     root_path.write_bytes(root.public_bytes(serialization.Encoding.PEM))
     intermediate_path.write_bytes(intermediate.public_bytes(serialization.Encoding.PEM))
@@ -111,21 +108,14 @@ def _write_material(tmp_path: Path) -> _Material:
         .decode()
     )
     public_jwk["kid"] = kid
-    private_jwk = public_jwk | {
-        "d": _b64(provisioner_key.private_numbers().private_value)
-    }
-    credential_path.write_text(json.dumps(private_jwk))
     public_jwk_path.write_text(json.dumps(public_jwk))
-    credential_path.chmod(0o600)
     return {
         "root": root,
         "root_path": root_path,
         "intermediate": intermediate,
         "intermediate_key": intermediate_key,
         "intermediate_path": intermediate_path,
-        "credential_path": credential_path,
         "public_jwk_path": public_jwk_path,
-        "public_jwk": public_jwk,
         "kid": kid,
     }
 
