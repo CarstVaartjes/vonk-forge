@@ -1155,13 +1155,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
         if download.get("state") != "succeeded":
             raise LifecycleError("the editorial successor download did not succeed")
-        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-        preview = require_object(preview_payload, "editorial successor preview")
-        if preview.get("allowed") is not True:
-            raise LifecycleError(
-                "editorial successor profile preview is not admitted: "
-                + self._preview_diagnostic(preview)
-            )
+        preview = self._admitted_preview("editorial successor profile preview")
         application = self._await_profile_application(
             require_object(
                 self._load_canary_profile(
@@ -1279,13 +1273,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 }
             ],
         )
-        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-        preview = require_object(preview_payload, "sibling profile preview")
-        if preview.get("allowed") is not True:
-            raise LifecycleError(
-                f"the profile preview for {selector} is not admitted: "
-                + self._preview_diagnostic(preview)
-            )
+        preview = self._admitted_preview(f"the profile preview for {selector}")
         application = self._await_profile_application(
             require_object(
                 self._load_canary_profile(
@@ -1330,8 +1318,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
         assert self.control is not None
         self._save_profile(policy="exact", assignments=[])
-        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-        preview = require_object(preview_payload, "sibling cleanup preview")
+        preview = self._admitted_preview("sibling cleanup preview")
         try:
             _validate_canary_cleanup_preview(preview, node_id=node_id)
         except LifecycleError as error:

@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from pydantic import ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import RunSwitchCode, canonical_message
 from vonk_agent_protocol.agent_state import (
     NativeRenewalAction,
     NativeRenewalEvidence,
@@ -42,6 +42,7 @@ from vonk_agent_protocol.agent_state import (
     NativeRenewalRequest,
     RenewalHelperManifest,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
@@ -288,6 +289,81 @@ class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
 
     evidence: dict[str, object] | None = None
+
+
+#: Blocker codes a profile preview names for a state that clears by itself: the
+#: agent reports swap and inventory every inventory cycle, so a preview taken
+#: between two reports waits on them.  Any other blocker is a refusal.
+PREVIEW_WAIT_CODES = frozenset(
+    {
+        RunSwitchCode.RESOURCE_INSUFFICIENT_SWAP.value,
+        RunSwitchCode.INVENTORY_STALE.value,
+        RunSwitchCode.INVENTORY_UNKNOWN.value,
+    }
+)
+#: Just over two 120 s inventory cycles.
+PREVIEW_WAIT_SECONDS = 270.0
+
+
+def _preview_blocker_codes(preview: Mapping[str, object]) -> set[str] | None:
+    """The codes of every blocking assignment decision, or ``None`` when unnamed."""
+
+    decisions = preview.get("admission_decisions")
+    if not isinstance(decisions, list):
+        return None
+    codes: set[str] = set()
+    for decision in decisions:
+        if not isinstance(decision, Mapping) or decision.get("allowed") is True:
+            continue
+        blockers = decision.get("blockers")
+        if not isinstance(blockers, list):
+            return None
+        for blocker in blockers:
+            code = blocker.get("code") if isinstance(blocker, Mapping) else None
+            if not isinstance(code, str):
+                return None
+            codes.add(code)
+    return codes or None
+
+
+def await_admitted_preview(
+    request: Callable[[], dict[str, Any]],
+    *,
+    label: str,
+    describe: Callable[[dict[str, Any]], str],
+    deadline_seconds: float = PREVIEW_WAIT_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any]:
+    """Ask for a profile preview until it is admitted or really refused.
+
+    A preview whose only blockers are typed waits (the harness's own
+    expectation, narrower than the Controller's waitable set), and with no
+    error-severity reason, is asked again with backoff
+    until ``deadline_seconds``; any other blocker fails at once.
+    """
+
+    started = clock()
+    delay = 2.0
+    while True:
+        preview = request()
+        if preview.get("allowed") is True:
+            return preview
+        codes = _preview_blocker_codes(preview)
+        refused = any(
+            isinstance(reason, dict)
+            and reason.get("severity") == ProfileReasonSeverity.ERROR.value
+            for reason in preview.get("reasons") or []
+        )
+        if refused or codes is None or not codes <= PREVIEW_WAIT_CODES:
+            raise LifecycleError(f"{label} is not admitted: {describe(preview)}")
+        if clock() - started + delay > deadline_seconds:
+            raise LifecycleError(
+                f"{label} is still waiting after {deadline_seconds:.0f}s: "
+                f"{describe(preview)}"
+            )
+        sleep(delay)
+        delay = min(delay * 2, 30.0)
 
 
 class CanonicalCanaryFixture(NamedTuple):
@@ -3505,15 +3581,12 @@ class SparkLifecycle:
                 profile_revision = saved.get("revision")
                 if type(profile_revision) is not int or profile_revision < 1:
                     raise LifecycleError("synthetic canary profile revision is invalid")
-                _, preview_payload = self.control.request(
-                    "POST", "/api/profile/1/preview"
-                )
-                preview = require_object(
-                    preview_payload, "synthetic canary profile preview"
+                preview = self._admitted_preview(
+                    "synthetic canary profile preview",
+                    extra_diagnostic=self._catalog_sync_diagnostic,
                 )
                 if (
-                    preview.get("allowed") is not True
-                    or not isinstance(preview.get("plan_digest"), str)
+                    not isinstance(preview.get("plan_digest"), str)
                     or SHA256.fullmatch(preview["plan_digest"]) is None
                     or not isinstance(preview.get("scope"), dict)
                     or set(preview["scope"].get("node_ids", [])) != fleet_node_ids
@@ -3726,12 +3799,7 @@ class SparkLifecycle:
                 cleanup_saved_payload, "synthetic canary cleanup save"
             )
             profile_revision = cleanup_saved.get("revision")
-            _, cleanup_preview_payload = self.control.request(
-                "POST", "/api/profile/1/preview"
-            )
-            cleanup_preview = require_object(
-                cleanup_preview_payload, "synthetic canary cleanup preview"
-            )
+            cleanup_preview = self._admitted_preview("synthetic canary cleanup preview")
             try:
                 _validate_canary_cleanup_preview(cleanup_preview, node_id=node_id)
             except LifecycleError as error:
@@ -3852,13 +3920,7 @@ class SparkLifecycle:
             )
             phase = "cleanup"
             self._save_profile(policy="exact", assignments=[])
-            _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-            preview = require_object(preview_payload, "artifact job cleanup preview")
-            if preview.get("allowed") is not True:
-                raise LifecycleError(
-                    "artifact job cleanup preview is not admitted: "
-                    + self._preview_diagnostic(preview)
-                )
+            preview = self._admitted_preview("artifact job cleanup preview")
             self._await_profile_application(
                 require_object(
                     self._load_canary_profile(
@@ -3925,13 +3987,7 @@ class SparkLifecycle:
                 }
             ],
         )
-        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-        preview = require_object(preview_payload, "artifact job profile preview")
-        if preview.get("allowed") is not True:
-            raise LifecycleError(
-                "artifact job profile preview is not admitted: "
-                + self._preview_diagnostic(preview)
-            )
+        preview = self._admitted_preview("artifact job profile preview")
         application = self._await_profile_application(
             require_object(
                 self._load_canary_profile(
@@ -4449,6 +4505,26 @@ class SparkLifecycle:
             )
             raise LifecycleError(f"{label} failed: {details}")
         return typed.model_dump(mode="json")
+
+    def _admitted_preview(
+        self, label: str, *, extra_diagnostic: Callable[[], str] | None = None
+    ) -> dict[str, Any]:
+        """The profile preview once admitted; waits only on typed waits."""
+
+        control = self.control
+        assert control is not None
+
+        def describe(preview: dict[str, Any]) -> str:
+            text = self._preview_diagnostic(preview)
+            return text if extra_diagnostic is None else f"{text}; {extra_diagnostic()}"
+
+        return await_admitted_preview(
+            lambda: require_object(
+                control.request("POST", "/api/profile/1/preview")[1], label
+            ),
+            label=label,
+            describe=describe,
+        )
 
     @staticmethod
     def _blocker_diagnostic(blockers: object) -> list[dict[str, object]]:

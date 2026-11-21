@@ -58,6 +58,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
     "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
     "tests/test_baseline_program_surface.py",
+    "tests/test_spark_lifecycle_runner.py::test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview",
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
