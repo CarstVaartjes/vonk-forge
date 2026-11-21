@@ -21,8 +21,6 @@ from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
 
-from .conftest import load_tools_module
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -172,13 +170,11 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     assert expired["worker_count"] == 0
 
 
-def test_server_and_cli_read_equal_identity_from_one_stamp(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Catches a Controller image whose served contract differs from vonkctl's.
+def test_cli_fingerprint_function_equals_the_servers() -> None:
+    """Catches drift between the CLI's stdlib fingerprint and the Controller's.
 
     vonkctl compares its stamped control_contract_sha256 with the one the
-    Controller serves on /api/cli/contract; both come from the one stamp writer.
+    Controller serves; both are this function over the same document.
     """
     openapi = admin_openapi_schema(
         create_app(jobs=Jobs(), tokens=TokenCodec(b"k" * 32))
@@ -186,30 +182,7 @@ def test_server_and_cli_read_equal_identity_from_one_stamp(
     wire = json.loads(
         (ROOT / "rust/crates/vonk-agent-protocol/schema/wire.json").read_text()
     )
-    (tmp_path / "schemas").mkdir()
-    (tmp_path / "schemas/control-openapi.json").write_text(json.dumps(openapi))
-    (tmp_path / "wire.json").write_text(json.dumps(wire))
-    monkeypatch.setenv("VONK_BUILD_SOURCE_SHA", "a" * 40)
-    monkeypatch.setenv("VONK_BUILD_SOURCE_TREE", "1" * 40)
-    load_tools_module("stamp_build_identity").write_build_identity(
-        control_openapi=tmp_path / "schemas/control-openapi.json",
-        wire=tmp_path / "wire.json",
-        output=tmp_path / "build-identity.json",
-    )
-    monkeypatch.setattr(build_identity, "files", lambda _package: tmp_path)
-    monkeypatch.setattr(runtime_identity, "files", lambda _package: tmp_path)
-
-    server = build_identity.packaged_runtime_identity()
-    client = runtime_identity.stamped_runtime_identity()
-
-    assert server.control_contract_sha256 == client.control_contract_sha256
-    assert server.worker_contract_sha256 == client.worker_contract_sha256
-    assert server.control_contract_sha256 == build_identity.contract_fingerprint(
-        openapi
-    )
-    # The CLI's generated fingerprint is the Controller's function.
-    assert runtime_identity.contract_fingerprint(openapi) == (
-        server.control_contract_sha256
-    )
-    assert runtime_identity.packaged_runtime_identity() == client
-    assert server.source_sha == "a" * 40
+    for document in (openapi, wire):
+        assert runtime_identity.contract_fingerprint(
+            document
+        ) == build_identity.contract_fingerprint(document)

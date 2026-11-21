@@ -10,8 +10,13 @@ from dataclasses import dataclass
 from importlib.resources import files
 from zipfile import ZipFile
 
-# Generated from the Controller's own fingerprint (scripts/generate-control-clients).
-from .generated_control.fingerprint import contract_fingerprint
+
+def contract_fingerprint(document: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+    ).hexdigest()
 
 
 @dataclass(frozen=True)

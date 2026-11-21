@@ -500,7 +500,6 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
 
     monkeypatch.setattr(acceptance, "reclaim_gateway_journal", reclaim)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: compose)
-    monkeypatch.setattr(acceptance, "tree_cli_contract_sha256", lambda: "b" * 64)
     monkeypatch.setattr(
         acceptance,
         "compose_services",
@@ -1284,7 +1283,6 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
     }
     monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
-    monkeypatch.setattr(acceptance, "tree_cli_contract_sha256", lambda: "b" * 64)
     elapsed = [0.0]
     monkeypatch.setattr(acceptance.time, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(

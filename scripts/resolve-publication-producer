@@ -194,6 +194,8 @@ PRODUCERS = {
             "scripts/verify-multiarch-image-manifest",
             "scripts/verify-public-image-inputs",
             "scripts/verify-published-image",
+            "src/cluster_profiles/**",
+            "tools/hatch_build.py",
             "tools/stamp_build_identity.py",
             "tools/openapi-client/**",
         ),

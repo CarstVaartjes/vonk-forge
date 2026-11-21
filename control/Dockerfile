@@ -68,7 +68,7 @@ RUN dnf upgrade --assumeyes ca-certificates \
 
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS node-tools
 
-# Generated JSON/TypeScript and the pure-Python CLI wheel are platform-neutral.
+# Generated JSON/TypeScript and the build identity are platform-neutral.
 # Generate once natively instead of repeating Python/Node work under QEMU.
 FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS contracts
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
@@ -96,19 +96,21 @@ COPY inventory/wheels/vonk_agent_protocol-*.whl ./inventory/wheels/
 RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
 COPY tools/openapi-client/ ./tools/openapi-client/
 RUN npm ci --prefix tools/openapi-client --ignore-scripts
-# The schema application imports the Controller and CLI contract graph. Web
+# The schema application imports the Controller contract graph. Web
 # source and Compose assets are not generation inputs.
 COPY control/src/ ./control/src/
 COPY control/alembic.ini ./control/alembic.ini
 COPY control/migrations/ ./control/migrations/
 COPY agent_protocol/src/ ./agent_protocol/src/
+# The locked dev environment installs the editable CLI project (a test client),
+# so its sources and build hook are build-only inputs; nothing from this stage
+# except the generated documents reaches the runtime image.
+COPY src/cluster_profiles/ ./src/cluster_profiles/
+COPY tools/hatch_build.py ./tools/hatch_build.py
 COPY scripts/build-control-wheel scripts/protocol-wheel-name scripts/protocol_wheel.py scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
 COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
 COPY install/installer-release-public.pem ./install/installer-release-public.pem
-# The Python client generator writes the CLI's resources here; the Controller
-# image ships none of the CLI.
-RUN mkdir -p src/cluster_profiles \
-    && scripts/generate-control-clients \
+RUN scripts/generate-control-clients \
     && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
 
 # Only packaging embeds the commit identity; it must not invalidate generators.

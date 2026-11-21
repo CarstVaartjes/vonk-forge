@@ -61,6 +61,7 @@ def test_private_key_header_is_rejected_without_echoing_content(tmp_path: Path) 
     "relative",
     (
         "pyproject.toml",
+        "src/cluster_profiles/leak.py",
         "tools/stamp_build_identity.py",
         "control/web/vite.config.ts",
     ),

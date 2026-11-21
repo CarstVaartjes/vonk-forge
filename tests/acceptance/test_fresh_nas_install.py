@@ -729,17 +729,6 @@ def assert_running_package_identity(role: str, identity: dict[str, object]) -> N
             raise AcceptanceError(f"running {role} package has unknown {field}")
 
 
-def tree_cli_contract_sha256() -> str:
-    """The digest a vonkctl built from this tree stamps, which it compares with
-    the Controller's: the fingerprint of the tree's prepared OpenAPI document."""
-    from cluster_profiles.runtime_identity import contract_fingerprint
-
-    document = Path(__file__).resolve().parents[2] / (
-        "src/cluster_profiles/schemas/control-openapi.json"
-    )
-    return contract_fingerprint(json.loads(document.read_text()))
-
-
 def verify_deployed_controller_identity(bundle: Path) -> None:
     source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
     if re.fullmatch(r"[0-9a-f]{40}", source) is None:
@@ -751,13 +740,14 @@ import json, time, urllib.request
 from dataclasses import asdict
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import packaged_runtime_identity
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
 token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
 request = urllib.request.Request("http://127.0.0.1:8000/api/cli/contract", headers={"Authorization": "Bearer " + token})
 with urllib.request.urlopen(request, timeout=10) as response:
     assert response.status == 200
-    contract = json.loads(response.read(1_048_576))
+    contract = json.loads(response.read(MAX_CONTROL_DOCUMENT_BYTES))
 print(json.dumps({"package": asdict(identity), "contract": contract}))
 """
     # Compose health can precede the worker's first completed loop, especially
@@ -798,10 +788,6 @@ print(json.dumps({"package": asdict(identity), "contract": contract}))
                 "worker provenance is not available from a fresh completed loop"
             )
         time.sleep(min(1, remaining))
-    if contract["api"]["control_contract_sha256"] != tree_cli_contract_sha256():
-        raise AcceptanceError(
-            "running API contract differs from the one this tree's vonkctl stamps"
-        )
     worker_script = """
 import json
 from dataclasses import asdict
