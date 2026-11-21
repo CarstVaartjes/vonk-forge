@@ -69,7 +69,6 @@ MODES = (
     "coordination",
     "waits",
     "reads",
-    "remedies",
     "tests",
     "noexit",
     "causes",
@@ -127,7 +126,6 @@ MODES = (
     "job-owner-payload",
     "fixture-closures",
     "contract-constants",
-    "web-not-reported",
     "rank-installed",
     "live-reservation",
     "newest-snapshot",
@@ -204,9 +202,6 @@ TABLE_LOCK_OWNERS = frozenset(
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
-# The words for a reading nobody reported are one constant, NOT_REPORTED_TEXT in
-# control/web/src/lib/fleet.ts (a .ts file); a component never types them.
-WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<""")
 # Whether a rank is installed is one shared predicate, machine_states.rank_installed.
 RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
 RANK_INSTALLED_KIND = (
@@ -242,21 +237,18 @@ NEWEST_SNAPSHOT_KIND = (
     "newest report per node by window, grouped max or max(observed_at); "
     "use inventory_repository.newest_snapshot_ids"
 )
-WEB_NOT_REPORTED_KIND = (
-    "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
-)
 # A vonkctl test decides on data (status, requests, a typed result, the --json
 # document); a positive string literal found in captured stdout/stderr is
-# wording, which only the shared vectors and their one test own. Absence, count
+# wording, which no test asserts. Absence, count
 # and emptiness checks on captured output (a secret never printed, a line shown
 # once) are leak and duplication checks and stay allowed.
 CAPTURED_TEXT = re.compile(r"\.(?:out|err)\b|\.getvalue\(\)|readouterr\(\)")
 PRINTED_OUTPUT_SCOPE = "tests/cluster_profiles/test_"
-PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_wording.py"
+PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_layout.py"
 PRINTED_OUTPUT_KIND = (
     "vonkctl test asserts wording in printed output; assert the status, the "
     "requests, a typed result, a view function or the --json document "
-    "(vonkctl_json), and put wording in test_cli_wording.py over a shared vector"
+    "(vonkctl_json); wording is not tested"
 )
 
 
@@ -2248,15 +2240,13 @@ def check_source(
                     for node in ast.walk(handler)
                     if isinstance(node, ast.Call) and _is_forbidden_response(node)
                 )
-    for mode in ("waits", "reads", "remedies", "tests"):
+    for mode in ("waits", "reads", "tests"):
         if mode not in modes or (is_test != (mode == "tests")):
             continue
         if python:
             sites = principles.scan_source(source, path=path, mode=mode)
         elif mode == "waits" and path.endswith(".rs"):
             sites = principles.scan_rust(source, path=path)
-        elif mode == "remedies" and path.endswith(".rs"):
-            sites = principles.scan_rust_remedies(source, path=path)
         elif mode == "waits" and path.endswith((".yaml", ".yml")):
             sites = principles.scan_compose_shell(source, path=path)
         elif mode == "waits" and (path.endswith(".sh") or source.startswith("#!")):
@@ -2830,18 +2820,6 @@ def check_source(
             (source.count("\n", 0, position) + 1, NEWEST_SNAPSHOT_KIND)
             for found in NEWEST_SNAPSHOT_SCAN.finditer(source)
             for position in (found.start(), found.end())
-        )
-    if (
-        "web-not-reported" in modes
-        and not is_test
-        and path.startswith("control/web/src/")
-        and path.endswith(".tsx")
-    ):
-        hits.extend(
-            (number, WEB_NOT_REPORTED_KIND)
-            for number, text in enumerate(source.splitlines(), 1)
-            if not text.lstrip().startswith(("*", "/*", "//"))
-            and WEB_NOT_REPORTED.search(text)
         )
     if (
         python

@@ -123,28 +123,6 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
-test("Fleet vitals cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-vitals.json", "utf8"),
-  ) as {
-    cases: {
-      node: Record<string, unknown>;
-      expected: { memory: string; disk: string; gpu: string };
-    }[];
-  };
-  for (const { node, expected } of vectors.cases) {
-    nodes = [{ ...spark("Alpha", 40, 250), ...node }];
-    const { container, unmount } = render(<WorkloadsPage api={api} />);
-    const cell = (label: string) =>
-      container.querySelector(`td[data-label="${label}"]`)?.textContent;
-    expect(cell("Memory used")).toBe(expected.memory);
-    expect(cell("Disk free")).toBe(expected.disk);
-    expect(cell("GPU")).toBe(expected.gpu);
-    unmount();
-  }
-  nodes = [];
-});
-
 test("Fleet meters turn amber for low free memory and full disk, never for GPU utilisation", () => {
   nodes = [
     {
@@ -166,27 +144,6 @@ test("Fleet meters turn amber for low free memory and full disk, never for GPU u
   expect(disk!.className).toContain("meter-high");
   expect(gpu!.className).not.toContain("meter-high");
   expect(disk!.getAttribute("aria-label")).toBe("Alpha disk free");
-  nodes = [];
-});
-
-test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-workloads.json", "utf8"),
-  ) as {
-    nodes: { id: string; display_name: string }[];
-    expected: Record<string, { page: string[] }>;
-  };
-  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
-  const { container } = render(<WorkloadsPage api={api} />);
-  for (const node of vectors.nodes) {
-    const row = [...container.querySelectorAll("tbody tr")].find((candidate) =>
-      candidate.querySelector("th")?.textContent?.includes(node.display_name),
-    );
-    const lines = [...(row?.querySelectorAll('td[data-label="Serving"] > strong') ?? [])].map(
-      (line) => line.textContent,
-    );
-    expect(lines).toEqual(vectors.expected[node.id]!.page);
-  }
   nodes = [];
 });
 

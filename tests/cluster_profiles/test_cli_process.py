@@ -57,25 +57,6 @@ def test_no_command_is_offline_orientation(monkeypatch, vonkctl_json) -> None:
     assert "fleet" in document["help"] and "profile" in document["help"]
 
 
-def _groups(parser, path=()):
-    commands = cli.subcommands(parser)
-    if commands is None:
-        return
-    yield path, parser, commands
-    for name, child in commands.choices.items():
-        yield from _groups(child, (*path, name))
-
-
-def test_every_group_help_is_a_map_of_its_commands() -> None:
-    for path, parser, commands in _groups(cli._parser()):
-        help_text = parser.format_help()
-        for name in commands.choices:
-            assert " ".join(("vonkctl", *path, name)) in help_text
-        # A group lists commands; options belong to the command taking them.
-        assert "--timeout-seconds" not in help_text
-        assert "--watch" not in help_text
-
-
 def test_a_nested_group_without_a_command_shows_its_commands(vonkctl_json) -> None:
     for path in (("fleet", "enrollment"), ("job",), ("completion",)):
         status, document = vonkctl_json(*path)

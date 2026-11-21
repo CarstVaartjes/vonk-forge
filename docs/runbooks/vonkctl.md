@@ -301,8 +301,7 @@ eight-cell trend; an estimated metric says `(estimate)` beside its numbers and
 in its heading. `--range` takes the Controller's range names (default `24h`); the Controller refuses an unknown one.
 `--spark` takes a friendly name or exact Spark ID and, for a model metric, shows
 the models that Spark serves. A series with no data in the range says
-`No data in this range`; it is never printed as zero. Number wording follows
-`tests/fixtures/metrics-wording.json`. `--json` prints the Controller's series
+`No data in this range`; it is never printed as zero. `--json` prints the Controller's series
 document (its catalogue entry is under `spec`) plus a `names` map of Spark IDs to the friendly names the table uses; unlike `fleet`, the
 metrics documents are not part of the versioned `--json` contract.
 
@@ -1293,9 +1292,7 @@ that policy limit.
 
 `fleet detail` and the Spark overview show current graphics/SM clocks next to
 CPU clocks, desired and last applied ranges, reported maxima, and the NVIDIA
-throttle (clock event) reasons in words. The bitmask-to-words table is shared
-with the Controller web through `tests/fixtures/fleet-wording-throttle.json`;
-a bit outside the table reads `state unknown`. A last applied range is a helper command receipt for
+throttle (clock event) reasons in words. A bit outside the table reads `state unknown`. A last applied range is a helper command receipt for
 this boot, not a hardware readback: NVIDIA exposes no graphics-lock getter.
 Unknown readings stay unknown. A desired/applied mismatch remains a warning.
 
@@ -1304,7 +1301,6 @@ its warnings: one line says where to run them, then each check is the
 Controller's finding (with the measured value) and explanation on one line, each
 command on its own line, then `Undo:` and the commands that put it back. They are advice,
 never attention; see [Spark host checks](../operations/spark-host-checks.md).
-Both clients follow `tests/fixtures/fleet-wording-host-checks.json`.
 
 The helper is the single clock writer at boot and during operation. Signed
 start and inventory responses carry the active selected-profile generation;

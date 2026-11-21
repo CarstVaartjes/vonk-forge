@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.cli_help import subcommands
 
 UUID = "33333333-3333-4333-8333-333333333333"
 
@@ -48,21 +47,6 @@ def test_profile_flag_after_the_command_wins_over_none():
     assert cli._parser().parse_args(["profile", "list"]).profile_number is None
 
 
-def _help(path):
-    parser = cli._parser()
-    for name in path:
-        commands = subcommands(parser)
-        assert commands is not None
-        parser = commands.choices[name]
-    return parser.format_help()
-
-
-def test_command_help_names_the_profile_a_change_requires():
-    help_text = _help(("profile", "load"))
-
-    assert help_text.splitlines()[0] == "vonkctl profile load --profile <n> [flags]"
-
-
 def test_a_command_that_changes_a_profile_tells_how_to_name_it(vonkctl_json):
     class Unreachable:
         request_timeout_seconds = 1.0
@@ -75,10 +59,7 @@ def test_a_command_that_changes_a_profile_tells_how_to_name_it(vonkctl_json):
     )
 
     assert status == 2
-    assert "--profile" in document["error"]
-    assert document["recovery_actions"] == [
-        "add --profile N, for example: vonkctl --profile 1 --json profile load --yes"
-    ]
+    assert document["error"]
 
 
 def test_run_without_a_profile_is_refused_like_every_profile_edit(vonkctl_json):

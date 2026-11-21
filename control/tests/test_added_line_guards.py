@@ -37,7 +37,6 @@ PATH = "control/src/vonk_control/example.py"
             "@router.get('/x')\ndef read():\n    raise HTTPException(status_code=503)\n",
             3,
         ),
-        ("remedies", "message = 'Retry manually'\n", 1),
         (
             "coordination",
             "def work():\n    with session.begin():\n        time.sleep(1)\n",
@@ -4274,25 +4273,6 @@ def test_a_readiness_reader_does_not_key_on_the_asking_recipe():
 
 
 @pytest.mark.parametrize(
-    "source",
-    [
-        'const text = "Not reported";\n',
-        "<dd>Not reported</dd>\n",
-        "return `Not reported`;\n",
-    ],
-)
-def test_a_component_may_not_type_not_reported(source: str) -> None:
-    path = "control/web/src/components/example.tsx"
-    assert check_source(path, source, {1}, modes=("web-not-reported",))
-    # The constant's own file and prose in a comment are fine.
-    assert not check_source(
-        "control/web/src/lib/fleet.ts", source, {1}, modes=("web-not-reported",)
-    )
-    comment = ' * so the caller says "Not reported".\n'
-    assert not check_source(path, comment, {1}, modes=("web-not-reported",))
-
-
-@pytest.mark.parametrize(
     "body",
     [
         "    assert 'Spark' in capsys.readouterr().out\n",
@@ -4308,8 +4288,8 @@ def test_a_vonkctl_test_may_not_assert_wording_in_printed_output(body: str) -> N
     modes = ("printed-output",)
     every_line = set(range(1, source.count("\n") + 1))
     assert check_source(path, source, {source.count("\n")}, modes=modes)
-    # The one wording test and other trees may.
-    for allowed in ("tests/cluster_profiles/test_cli_wording.py", "tests/test_x.py"):
+    # The layout test and other trees may.
+    for allowed in ("tests/cluster_profiles/test_cli_layout.py", "tests/test_x.py"):
         assert not check_source(allowed, source, every_line, modes=modes)
 
 

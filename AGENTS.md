@@ -103,16 +103,9 @@ helper, agent, Controller, and clients under the
 [error policy](docs/error-reporting.md). Do not truncate away the cause or invent
 an ETA, percentage, missing value, or success when evidence is unknown.
 
-The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons, host checks with their note and undo commands)
-are shown identically by the web Fleet page and `vonkctl fleet`. A change to one
-changes the other in the same PR. Each screen has one fixture,
-`tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the
-exact text: the page's DOM text and the string `vonkctl` prints. Missing values read
-"Not reported" on both sides, and .5 rounds up on both.
-On the vonkctl side every shared vector is compared in one module,
-`tests/cluster_profiles/test_cli_wording.py`. Every other vonkctl test decides on
+The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons, host checks) are derived from the same Controller data by the web Fleet page and `vonkctl fleet`. Wording is not tested: no test compares printed or rendered text, and the two clients may word things differently. A secret or terminal control in output, counts, ordering and the `--json` document stay tested. Every vonkctl test decides on
 data: the exit status, the requests sent, a typed result or the `--json` document
-(the `vonkctl_json` fixture). Decisions are tested as data through view functions; wording only through the shared vectors.
+(the `vonkctl_json` fixture). Decisions are tested as data through view functions.
 A renderer decision (empty versus unreadable, which state or command applies)
 lives in a small pure function in `cluster_profiles/cli_render` that returns an
 enum, a dataclass or a typed value the renderer prints. A secret or terminal
@@ -492,10 +485,7 @@ release's own words: the Controller stores them at sync and serves
 `GET /api/library/vocabulary`, and the Library page and `vonkctl model|recipe
 library|detail` render them from there. Never type one in a client; a name the
 release does not list shows as the name, and a missing value is `Not reported`
-in both clients. Any change to this wording updates
-`tests/fixtures/library-vocabulary-wording.json`, which the web test
-(`library-vocabulary.test.tsx`) and the vonkctl wording test
-(`test_cli_wording.py`) both compare exactly.
+in both clients.
 
 ## Deployment and fleet safety
 

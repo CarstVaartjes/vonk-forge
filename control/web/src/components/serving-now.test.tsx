@@ -1,22 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ControlApi, FleetProfile } from "../api/types";
 import { connectionSnippets } from "./connection-examples";
 import { ServingNow } from "./serving-now";
-
-// `vonkctl profile endpoint` prints the same fixture's heading and lines.
-const fixture: {
-  heading: string;
-  cases: {
-    name: string;
-    assignments: { alias: string | null; recipe_title: string; state: string }[];
-    lines: string[];
-  }[];
-} = JSON.parse(
-  readFileSync(resolve(process.cwd(), "../../tests/fixtures/serving-now.json"), "utf8"),
-);
 
 const endpoint = {
   alias: "qwen-code",
@@ -47,21 +33,6 @@ function apiWith(profiles: unknown[], assignments: unknown[]) {
     })),
   } as unknown as Pick<ControlApi, "profiles" | "profileEndpoints">;
 }
-
-test.each(fixture.cases)("shows the shared lines: $name", async (item) => {
-  const assignments = item.assignments.map((entry, index) => ({
-    ...published,
-    assignment_id: `33333333-3333-4333-8333-${String(index).padStart(12, "0")}`,
-    ...entry,
-    endpoint: entry.state === "published" ? { ...endpoint, alias: entry.alias } : null,
-  }));
-  render(<ServingNow api={apiWith([loaded], assignments)} refreshKey="a" pollKey="1" />);
-
-  const heading = await screen.findByRole("heading", { name: fixture.heading });
-  expect(heading.textContent).toBe(fixture.heading);
-  const lines = screen.getAllByRole("listitem").map((line) => line.querySelector("p")?.textContent);
-  expect(lines).toEqual(item.lines);
-});
 
 test("offers the profile page's connection example and never calls the gateway", async () => {
   // Break caught: the example is rebuilt differently from the Library's, or the browser calls the

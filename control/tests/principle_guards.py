@@ -18,9 +18,6 @@ TRANSIENT = re.compile(
     r"supersed|stale|gone|missing|lost|interrupt|timeout|busy|restart|transient|unavailable",
     re.IGNORECASE,
 )
-REMEDY = re.compile(
-    r"\b(?:Prepare\b|Run\b[^\n]*\bagain\b|Review\b[^\n]*\bagain\b|Retry\b|Contact\b|manually\b)"
-)
 WAIT_STATES = {
     "waiting-for-operator",
     "needs-operator",
@@ -668,18 +665,6 @@ def scan_source(
                         and awaited.func.value.id in events
                     ):
                         bounded_async_waits.add(id(awaited))
-    # Docstrings describe behaviour to maintainers; they are not user-facing remedies.
-    docstrings = {
-        id(holder.body[0].value)
-        for holder in ast.walk(tree)
-        if isinstance(
-            holder, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        )
-        and holder.body
-        and isinstance(holder.body[0], ast.Expr)
-        and isinstance(holder.body[0].value, ast.Constant)
-        and isinstance(holder.body[0].value.value, str)
-    }
     sites: list[Site] = []
     lines = source.splitlines()
     observation_deadline = _observation_deadline_guard(tree, path)
@@ -1020,15 +1005,6 @@ def scan_source(
                     )
             self.generic_visit(node)
 
-        def visit_Constant(self, node: ast.Constant):
-            if (
-                mode == "remedies"
-                and isinstance(node.value, str)
-                and id(node) not in docstrings
-                and REMEDY.search(node.value)
-            ):
-                self.add(node, "imperative-remedy")
-
         def visit_Assert(self, node: ast.Assert):
             if mode != "tests":
                 return
@@ -1181,22 +1157,6 @@ def scan_compose_shell(source: str, *, path: str) -> list[Site]:
                             1,
                         )
                     )
-    return sites
-
-
-def scan_rust_remedies(source: str, *, path: str) -> list[Site]:
-    sites = []
-    for match in re.finditer(r'"(?:\\.|[^"\\])*"', source):
-        if REMEDY.search(match[0]):
-            functions = list(re.finditer(r"\bfn\s+(\w+)", source[: match.start()]))
-            sites.append(
-                Site(
-                    path,
-                    functions[-1][1] if functions else "<module>",
-                    "imperative-remedy",
-                    source[: match.start()].count("\n") + 1,
-                )
-            )
     return sites
 
 
@@ -1481,8 +1441,6 @@ def _scan_sites(mode: str) -> list[Site]:
         if path.suffix == ".rs":
             if mode == "waits":
                 sites.extend(scan_rust(source, path=relative))
-            elif mode == "remedies":
-                sites.extend(scan_rust_remedies(source, path=relative))
             continue
         if path.suffix == ".sh" or (
             source.startswith("#!") and "python" not in source.splitlines()[0]

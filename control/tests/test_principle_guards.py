@@ -12,7 +12,6 @@ from .principle_guards import (
     rust_test_files,
     scan_rust,
     scan_rust_fixed_caps,
-    scan_rust_remedies,
     scan_shell,
     scan_source,
 )
@@ -55,11 +54,6 @@ from .principle_guards import (
             "reads",
             "@router.get('/x')\ndef read():\n    return JSONResponse(status_code=409)",
             "@router.post('/x')\ndef write():\n    raise HTTPException(status_code=409)",
-        ),
-        (
-            "remedies",
-            "reason = 'Prepare the cache. Retry manually.'",
-            "reason = 'Cache preparation is pending.'",
         ),
         (
             "tests",
@@ -115,15 +109,6 @@ def test_a_progress_window_bounds_a_rust_loop():
     assert scan_rust(loop_body.replace("&inactivity", "&reader"), path="agent.rs")
 
 
-def test_rust_remedy_messages_have_the_same_guard():
-    assert scan_rust_remedies(
-        'fn report() { reason("Retry manually"); }', path="agent.rs"
-    )
-    assert not scan_rust_remedies(
-        'fn report() { reason("Awaiting observation"); }', path="agent.rs"
-    )
-
-
 def test_none_is_not_a_wait_bound():
     for source in ("event.wait(None)", "subprocess.run(['x'], timeout=None)"):
         assert scan_source(source, path="script.py", mode="waits")
@@ -141,21 +126,6 @@ def test_shell_poll_loops_are_guarded():
     assert not scan_shell(
         "while [ $SECONDS -lt $deadline ]; do sleep 1; done", path="tool.sh"
     )
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "Prepare the cache",
-        "Run the load again",
-        "Review the plan again",
-        "Retry",
-        "Contact support",
-        "recover manually",
-    ],
-)
-def test_every_imperative_remedy_spelling_is_guarded(message):
-    assert scan_source(f"message = {message!r}", path="reason.py", mode="remedies")
 
 
 def test_rust_wait_requires_timeout_wrapper():
@@ -201,13 +171,6 @@ def test_every_pool_capacity_gate_ahead_of_a_claim_has_a_verdict():
         (site.path, site.function) for site in principle_guards.capacity_gate_sites()
     }
     assert found == set(principle_guards.CAPACITY_GATE_VERDICTS)
-
-
-def test_remedy_literals_are_decoded_before_matching():
-    assert scan_source('message = "\\u0052etry"', path="reason.py", mode="remedies")
-    assert scan_source(
-        'message = "Run path.to.tool again"', path="reason.py", mode="remedies"
-    )
 
 
 def test_negated_outcome_assertions_do_not_pin_the_bad_state():

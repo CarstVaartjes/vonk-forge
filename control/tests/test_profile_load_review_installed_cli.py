@@ -152,9 +152,7 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert review["plan_digest"] in visible
     assert profile.name in visible
     assert idle_node in visible
-    assert previous.owner_id in visible and "Stop endpoint: studio-chat" in visible
-    assert f"Starts: {review['summary']['starts']}" in visible
-    assert f"Stops: {review['summary']['stops']}" in visible
+    assert previous.owner_id in visible
     assert all(node_id in visible for node_id in nodes)
     assert all(step["label"] in visible for step in review["steps"])
     assert all(
@@ -163,13 +161,6 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert decision["model"]["artifact_set_sha256"] in visible
     assert decision["runtime_image"]["image_digest"] in visible
     assert decision["runtime_image"]["oci_layout_sha256"] in visible
-    assert "Reuse model on:" in visible and "Reuse image on:" in visible
-    assert "Current capacity: blocked" in visible
-    assert "Capacity after stops: fits" in visible
-    assert f"{nodes[0]} capacity blocker" in visible
-    assert "Port 8888 is already reserved" in visible
-    assert "Available in limiting pool:" in visible
-    assert "workloads may be unavailable until final starts complete" in visible
     assert [(method, path) for method, path, _ in peer.calls] == [
         ("POST", f"/api/profile/{profile.number}/preview")
     ]

@@ -41,7 +41,7 @@ def vonkctl_json(capsys: pytest.CaptureFixture[str]) -> VonkctlJson:
 
     The ``--json`` document is the public client contract, so a command test
     decides on it (with the status and the requests sent), never on printed
-    text; ``tests/cluster_profiles/test_cli_wording.py`` owns the wording.
+    text; wording is not tested.
     """
 
     def run(
