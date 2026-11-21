@@ -30,7 +30,7 @@ vonk-nas-setup = { workspace = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "14c67a1636514bd2a61d26372d4d754f26a07959", subdirectory = "contracts" }
+vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "f6fcfc9abda6b803a0d0c9af8abf4350b7bc0f2f", subdirectory = "contracts" }
 
 [tool.uv]
 required-version = ">=0.13.5"
