@@ -248,7 +248,9 @@ def _model_rows(case):
                 "slug": model["id"],
                 "content_sha256": "0" * 64,
             },
-            "model_display": None
+            # Real responses always carry model_display and omit lineage when
+            # the model has none (helpers, drafters, encoders).
+            "model_display": {}
             if model["lineage"] is None
             else {"lineage": model["lineage"]},
         }

@@ -395,7 +395,8 @@ def _model_counts(rows: Sequence[Any]) -> tuple[int, int]:
     variants: set[tuple[str, str, str]] = set()
     for row in rows:
         display = row["model_display"]
-        lineage = display["lineage"] if display is not None else None
+        # lineage is optional and omitted from the response when absent.
+        lineage = display.get("lineage") if display is not None else None
         if lineage is None:
             continue
         models.add((lineage["family"], lineage["line"], lineage["model"]))
