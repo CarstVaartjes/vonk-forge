@@ -141,3 +141,16 @@ def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
         cli_auth._read_password(True)
 
     assert "secret" not in str(failure.value) and "\xff" not in str(failure.value)
+
+
+def test_no_terminal_recovery_names_a_terminal_or_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    with pytest.raises(cli_auth.LoginFailed) as failure:
+        cli_auth._read_password(False)
+
+    (step,) = failure.value.recovery
+    assert "interactive terminal" in step and "--password-stdin" in step
+    assert step != "vonkctl auth login"
