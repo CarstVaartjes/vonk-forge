@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from ..fleet_profile_contract import (
     FleetProfileAdmissionDecision,
     FleetProfileAssignment,
     FleetProfileAssignmentAssessment,
+    FleetProfileAssignmentInput,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
     FleetProfileDefinition,
@@ -80,6 +82,24 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
+    def preview_draft(
+        self, number: int, definition: FleetProfileDefinition
+    ) -> FleetProfilePreview:
+        """Review unsaved content as the profile a save would make; writes nothing.
+
+        A number with no row gets a provisional id that names no stored profile.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        with self._sessions() as session:
+            stored = session.scalar(
+                select(FleetProfile.id).where(FleetProfile.number == number)
+            )
+        return self.preview(
+            stored
+            or str(uuid5(NAMESPACE_URL, f"vonk-forge:fleet-profile-draft:{number}")),
+            draft_definition=definition,
+        )
+
     @profile_read
     def preview(
         self,
@@ -91,6 +111,7 @@ class FleetProfileService:
         accepted_intent: FleetProfileIntendedConfiguration | None = None,
         accepted_profile_revision: int | None = None,
         accepted_profile_definition: FleetProfileDefinition | None = None,
+        draft_definition: FleetProfileDefinition | None = None,
         allow_pending_cache_rebuild: bool = False,
         profile_application_id: str | None = None,
         excluded_application_id: str | None = None,
@@ -118,6 +139,7 @@ class FleetProfileService:
                     }
                 )
             row = session.get(FleetProfile, profile_id)
+            choices: tuple[FleetProfileAssignmentInput, ...] = ()
             resolved_assignments: tuple[FleetProfileAssignment, ...]
             if accepted_intent is not None:
                 # The accepted intent is the evidence of its own snapshot: whatever
@@ -142,6 +164,29 @@ class FleetProfileService:
                     else None
                 )
                 resolved_definition = accepted_profile_definition
+            elif draft_definition is not None:
+                # An unsaved draft is previewed as its own content: the same
+                # normalisation a save applies, then the one resolver. It names
+                # no stored revision and writes nothing.
+                canonical, _notes = self._validated_assignments(
+                    session,
+                    draft_definition.assignments,
+                    retained_selectors=frozenset(
+                        item.recipe_selector
+                        for item in self._definition(row).assignments
+                    )
+                    if row is not None
+                    else frozenset(),
+                )
+                resolved_definition = draft_definition.model_copy(
+                    update={"assignments": canonical}
+                )
+                choices = tuple(canonical)
+                resolved_assignments = self._execution_assignments(session, choices)
+                resolved_name = draft_definition.name
+                resolved_digest = _digest(resolved_definition)
+                installation_policy = draft_definition.installation_policy
+                resolved_revision = None
             elif row is None:
                 if execution_assignments is None:
                     raise MissingRecord(
@@ -163,7 +208,8 @@ class FleetProfileService:
                 resolved_definition = None
             else:
                 resolved_definition = self._required_definition(row)
-                resolved_assignments = self._execution_assignments(session, row)
+                choices = self._choices(row)
+                resolved_assignments = self._execution_assignments(session, choices)
                 resolved_name = row.name
                 resolved_digest = _digest(_profile_document(row))
                 installation_policy = row.installation_policy
@@ -172,9 +218,9 @@ class FleetProfileService:
             assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             assignment_assessments: list[FleetProfileAssignmentAssessment] = []
             reasons: list[FleetProfileReason] = []
-            if accepted_intent is None and row is not None:
+            if accepted_intent is None:
                 resolved_ids = {item.id for item in resolved_assignments}
-                for choice in self._choices(row):
+                for choice in choices:
                     if _choice_id(choice) in resolved_ids:
                         continue
                     reasons.append(

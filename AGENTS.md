@@ -89,7 +89,9 @@ CLI and web consume the same typed decisions and receipts; do not add a client
 planner, independent refusal classifier, or second recovery implementation.
 Preview and execution share one decision: bind the reviewed effects and exact
 identities, revalidate at acceptance, and reject changed effects instead of
-silently broadening consent. Name predicate conditions once and derive both
+silently broadening consent. The review checksum binds the profile definition
+content, not row id or revision, so an unsaved draft preview equals the review
+after the same save. Name predicate conditions once and derive both
 the decision and its explanation from those same conditions.
 
 Every operation exposes its phase, measured progress, meaningful failure cause,

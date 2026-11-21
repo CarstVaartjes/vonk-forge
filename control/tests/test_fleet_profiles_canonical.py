@@ -416,6 +416,87 @@ def test_all_idle_canonical_profile_previews_without_assignments() -> None:
     assert preview.scope.idle_node_ids == [NODE_1, NODE_2]
 
 
+def _draft_input(name: str = "Draft") -> FleetProfileDefinition:
+    return FleetProfileDefinition.model_validate(
+        {
+            "name": name,
+            "assignments": [
+                {
+                    "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                    "spark_ids": [NODE_1],
+                    "desired_state": "running",
+                    "assignment_name": "canonical",
+                }
+            ],
+        }
+    )
+
+
+def _stored_state(sessions: sessionmaker) -> list[tuple]:
+    with sessions() as session:
+        return [
+            (row.id, row.number, row.revision, row.name)
+            for row in session.scalars(select(FleetProfile))
+        ]
+
+
+def test_a_draft_preview_writes_nothing_and_names_no_revision() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    before = _stored_state(sessions)
+
+    preview = service.preview_draft(7, _draft_input())
+
+    assert preview.profile_revision is None
+    assert preview.profile_name == "Draft"
+    assert preview.assignments[0].recipe_revision_id == RECIPE_REVISION_ID
+    assert _stored_state(sessions) == before == []
+
+
+@pytest.mark.parametrize("number", [1, 7])
+def test_a_draft_review_equals_the_review_after_the_same_save(number: int) -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    if number == 1:
+        service.update_number(1, FleetProfileInput(name="Old"), actor="test")
+    draft = _draft_input()
+    reviewed = service.preview_draft(number, draft)
+
+    saved = service.update_number(
+        number,
+        FleetProfileInput(**draft.model_dump(), expected_revision=int(number == 1)),
+        actor="test",
+    )
+    after = service.preview(saved.id)
+
+    assert after.profile_revision == saved.revision
+    assert reviewed.effects_digest == after.effects_digest
+    assert reviewed.profile_definition == after.profile_definition
+
+
+def test_a_draft_is_refused_like_a_save() -> None:
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    bad = FleetProfileInput.model_validate(
+        {
+            "name": "Bad",
+            "assignments": [
+                {"recipe_selector": "vonk-forge/no-such", "spark_ids": [NODE_1]}
+            ],
+        }
+    )
+    with pytest.raises(Exception) as save_error:
+        service.update_number(3, bad, actor="test")
+    with pytest.raises(type(save_error.value)) as draft_error:
+        service.preview_draft(
+            3, FleetProfileDefinition(**bad.model_dump(exclude={"expected_revision"}))
+        )
+    assert str(draft_error.value) == str(save_error.value)
+
+
 def test_profile_authoring_accepts_incomplete_group_without_revision_or_scope() -> None:
     value = FleetProfileInput.model_validate(
         {
@@ -1101,7 +1182,7 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
     with sessions.begin() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None
-        [assignment] = service._execution_assignments(session, row)
+        [assignment] = service._execution_assignments(session, service._choices(row))
         node = assignment.nodes[0]
         mapping = ClusterMapping(
             recipe_revision_id=RECIPE_REVISION_ID,

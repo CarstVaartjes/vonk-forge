@@ -154,6 +154,7 @@ from .review import FleetProfileApplicationView as FleetProfileApplicationView
 from .review import FleetProfileLoadRequest as FleetProfileLoadRequest
 from .review import FleetProfileLoadReview as FleetProfileLoadReview
 from .review import FleetProfilePreview as FleetProfilePreview
+from .review import FleetProfilePreviewRequest as FleetProfilePreviewRequest
 from .review import FleetProfileReviewedDecision as FleetProfileReviewedDecision
 from .switch_state import FleetProfileAssignmentFailure as FleetProfileAssignmentFailure
 from .switch_state import FleetProfileChildResult as FleetProfileChildResult
@@ -239,6 +240,7 @@ __all__ = [
     "FleetProfilePlanSummary",
     "FleetProfilePreparationDecision",
     "FleetProfilePreview",
+    "FleetProfilePreviewRequest",
     "FleetProfileReason",
     "FleetProfileReviewedDecision",
     "FleetProfileRunEffect",

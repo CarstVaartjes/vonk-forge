@@ -14,7 +14,7 @@ from urllib.error import URLError
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import event, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -148,6 +148,40 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
             accepted.json()["id"],
             latest.json()["id"],
         }
+
+
+def test_draft_preview_over_http_is_the_review_of_the_save(postgres_engine):
+    sessions, api, _codec, headers, saved = _profile_api(postgres_engine)
+    path = "/api/profile/{}/preview"
+    assert (
+        api.post(path.format(1), headers=headers).json()["effects_digest"]
+        == (saved["effects_digest"])
+    )
+    same = api.post(
+        path.format(1),
+        headers=headers,
+        json={"definition": {"name": "Reviewed idle"}},
+    )
+    assert same.status_code == 200, same.text
+    assert same.json()["effects_digest"] == saved["effects_digest"]
+    assert same.json()["profile_revision"] is None
+    # A profile that does not exist yet is previewed, never created.
+    draft = api.post(
+        path.format(2), headers=headers, json={"definition": {"name": "Second"}}
+    )
+    assert draft.status_code == 200, draft.text
+    with sessions() as session:
+        assert session.scalar(select(func.count(FleetProfile.id))) == 1
+    assert api.post(path.format(2), headers=headers).status_code == 404
+    api.put(
+        "/api/profile/2",
+        headers=headers,
+        json={"name": "Second", "expected_revision": 0},
+    )
+    after = api.post(path.format(2), headers=headers)
+    assert after.json()["effects_digest"] == draft.json()["effects_digest"]
+    for bad in ({"definition": {"name": ""}}, {"definition": {"nope": 1}}, {}):
+        assert api.post(path.format(2), headers=headers, json=bad).status_code == 422
 
 
 def test_revoked_actor_cannot_submit_new_load(postgres_engine):

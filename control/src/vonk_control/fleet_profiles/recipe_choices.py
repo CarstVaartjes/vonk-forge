@@ -412,7 +412,7 @@ class FleetProfileService:
                 )
 
     def _execution_assignments(
-        self, session: Session, row: FleetProfile
+        self, session: Session, choices: tuple[FleetProfileAssignmentInput, ...]
     ) -> tuple[FleetProfileAssignment, ...]:
         """Resolve logical choices into strict, load-bound assignments.
 
@@ -424,7 +424,6 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         result: list[FleetProfileAssignment] = []
-        choices = self._choices(row)
         self._prefetch_recipe_documents(session, choices, include_documents=True)
         titles = self._model_titles(session, choices)
         for choice in choices:

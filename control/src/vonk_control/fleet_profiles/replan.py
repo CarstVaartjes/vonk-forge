@@ -330,7 +330,7 @@ class FleetProfileService:
                     or _digest(_profile_document(profile)) != intended.profile_digest
                 ):
                     return False
-                newest = self._execution_assignments(session, profile)
+                newest = self._execution_assignments(session, self._choices(profile))
                 accepted = {item.id: item for item in intended.assignments}
                 if set(accepted) != {item.id for item in newest}:
                     return False
@@ -451,7 +451,8 @@ class FleetProfileService:
             return None
         try:
             newest = {
-                item.id: item for item in self._execution_assignments(session, profile)
+                item.id: item
+                for item in self._execution_assignments(session, self._choices(profile))
             }
         except (FleetProfileConflict, ValidationError):
             return None
