@@ -504,6 +504,33 @@ def test_profile_load_applies_the_current_saved_profile() -> None:
     assert loaded.json()["profile_id"] == changed.json()["id"]
 
 
+def test_stale_expected_revision_is_refused_with_the_revision_conflict_code() -> None:
+    client, codec = _client()
+    headers = _headers(codec, "administrator")
+    saved = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={"name": "First", "expected_revision": 0},
+    )
+    stale = client.put(
+        "/api/profile/1",
+        headers=headers,
+        json={
+            "name": "Second",
+            "expected_revision": saved.json()["revision"] + 1,
+        },
+    )
+
+    assert stale.status_code == 409
+    assert stale.headers["x-vonk-error-code"] == "profile.revision_conflict"
+    other = client.put(
+        "/api/profile/2",
+        headers=headers,
+        json={"name": "Never created", "expected_revision": 4},
+    )
+    assert other.headers["x-vonk-error-code"] == "profile.revision_conflict"
+
+
 def test_profile_load_bound_to_a_review_refuses_a_plan_that_changed() -> None:
     client, codec = _client(with_idle_spark=True)
     headers = _headers(codec, "administrator")

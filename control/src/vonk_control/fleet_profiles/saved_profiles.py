@@ -38,6 +38,7 @@ from ..profile_read_observation import profile_read
 from .contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
+    FleetProfileRevisionConflict,
 )
 from .projection_support import (
     _aware,
@@ -361,7 +362,7 @@ class FleetProfileService:
                 # it makes no edit and reconnects to the committed revision.
                 return self._view(session, row, observe=False)
             if row.revision != value.expected_revision:
-                raise FleetProfileInvalid(
+                raise FleetProfileRevisionConflict(
                     f"profile revision conflict: expected {value.expected_revision}, current {row.revision}",
                     reason=InvalidRequestReason.CONFLICT,
                 )
@@ -409,7 +410,7 @@ class FleetProfileService:
             if type(number) is not int or number < 1:
                 raise MissingRecord(number, reason=InvalidRequestReason.NOT_FOUND)
             if value.expected_revision != 0:
-                raise FleetProfileInvalid(
+                raise FleetProfileRevisionConflict(
                     "profile revision conflict: profile has not been created",
                     reason=InvalidRequestReason.CONFLICT,
                 )

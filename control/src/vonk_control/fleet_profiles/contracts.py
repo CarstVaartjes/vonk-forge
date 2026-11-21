@@ -166,6 +166,12 @@ class FleetProfileInvalid(InvalidRequestError, FleetProfileConflict):
     code = ProfileReasonCode.REQUEST_INVALID
 
 
+class FleetProfileRevisionConflict(FleetProfileInvalid):
+    """A save named a revision other than the stored one; nothing was written."""
+
+    code = ProfileReasonCode.REVISION_CONFLICT
+
+
 class FleetProfileDefinitionUnavailable(FleetProfileInvalid):
     """A damaged draft must be replaced before it can authorize new effects."""
 

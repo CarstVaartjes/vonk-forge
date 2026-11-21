@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import cast
 
 from ..cli_files import read_json_document, write_private_document
@@ -31,6 +31,81 @@ from .submission import _known_http_refusal_status
 def _spark_id_list(value: object) -> list[str]:
     """The definition's bounded canonical decode already validated this field."""
     return cast(list[str], value)
+
+
+def _with_assignment(
+    definition,
+    recipe_selector: str,
+    spark_ids: list[str],
+    args: argparse.Namespace,
+    client: ControllerClient,
+):
+    """The definition with one recipe assignment added or widened.
+
+    ``profile add`` saves the result; ``run`` reviews it first and saves it only
+    after consent, so both build the same definition here.
+    """
+    assignments = definition.get("assignments", [])
+    matching = [
+        assignment
+        for assignment in assignments
+        if assignment["recipe_selector"] == recipe_selector
+        and assignment.get("assignment_name") == args.assignment_name
+    ]
+    if len(matching) > 1:
+        raise SelectorError("ambiguous assignment; select a unique assignment name")
+    if matching:
+        assignment = matching[0]
+        assignment["spark_ids"] = sorted(
+            set(_spark_id_list(assignment["spark_ids"])) | set(spark_ids)
+        )
+    else:
+        assignment = {"recipe_selector": recipe_selector, "spark_ids": spark_ids}
+        if args.assignment_name is not None:
+            assignment["assignment_name"] = args.assignment_name
+        assignments.append(assignment)
+    _apply_option_choices(client, assignment, args)
+    if args.model_variant is not None:
+        assignment["model_variant"] = args.model_variant
+    if args.desired_state is not None:
+        assignment["desired_state"] = args.desired_state
+    definition["assignments"] = assignments
+    return definition
+
+
+def _read_saved_definition(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    *,
+    deadline: float | None = None,
+    check: Callable[..., None] | None = None,
+):
+    """The saved definition view (revision and definition), readable or retried."""
+    from .observation import _poll_path
+
+    def readable_definition(observed: object) -> None:
+        try:
+            document = validate_control_document("FleetProfileDefinitionView", observed)
+            definition = validate_control_document(
+                "FleetProfileDefinition", document["definition"]
+            )
+            if check is not None:
+                check(definition)
+        except (ControlClientError, KeyError, TypeError, ValueError):
+            raise ControlMalformedResponse(
+                "saved profile definition is unavailable"
+            ) from None
+
+    return _poll_path(
+        client,
+        f"/api/profile/{_profile_number(args)}/definition",
+        {},
+        args,
+        fetch_initial=True,
+        terminal=lambda _: True,
+        validate=readable_definition,
+        deadline=deadline,
+    )
 
 
 def _profile_save(
@@ -104,36 +179,18 @@ def _profile_authoring(
         return _profile_save(
             args, client, definition, current_revision=args.expected_revision
         )
-    from .observation import _bounded_timeout, _poll_path
+    from .observation import _bounded_timeout
 
     deadline = selection_deadline or (time.monotonic() + _bounded_timeout(args))
 
-    def readable_definition(observed: object) -> None:
-        try:
-            document = validate_control_document("FleetProfileDefinitionView", observed)
-            definition = validate_control_document(
-                "FleetProfileDefinition", document["definition"]
+    def check(definition) -> None:
+        if action == "configure" and args.option:
+            _configure_option_target(
+                cast(list, definition["assignments"]), args.assignment
             )
-            if action == "configure" and args.option:
-                _configure_option_target(
-                    cast(list, definition["assignments"]), args.assignment
-                )
-        except (ControlClientError, KeyError, TypeError, ValueError):
-            raise ControlMalformedResponse(
-                "saved profile definition is unavailable"
-            ) from None
 
     def read_definition():
-        return _poll_path(
-            client,
-            f"/api/profile/{_profile_number(args)}/definition",
-            {},
-            args,
-            fetch_initial=True,
-            terminal=lambda _: True,
-            validate=readable_definition,
-            deadline=deadline,
-        )
+        return _read_saved_definition(client, args, deadline=deadline, check=check)
 
     # The definition read and the selector resolutions only need `args`, so
     # they run at once, each with its own deadline and outcome. `remove` keeps
@@ -238,32 +295,13 @@ def _profile_authoring(
         labels.update(edits)
         definition["labels"] = labels
     elif action == "add":
-        recipe_selector = cast(str, recipe_outcome.get())
-        spark_ids = cast(list[str], spark_outcome.get())
-        matching = [
-            assignment
-            for assignment in assignments
-            if assignment["recipe_selector"] == recipe_selector
-            and assignment.get("assignment_name") == args.assignment_name
-        ]
-        if len(matching) > 1:
-            raise SelectorError("ambiguous assignment; select a unique assignment name")
-        if matching:
-            assignment = matching[0]
-            assignment["spark_ids"] = sorted(
-                set(_spark_id_list(assignment["spark_ids"])) | set(spark_ids)
-            )
-        else:
-            assignment = {"recipe_selector": recipe_selector, "spark_ids": spark_ids}
-            if args.assignment_name is not None:
-                assignment["assignment_name"] = args.assignment_name
-            assignments.append(assignment)
-        _apply_option_choices(client, assignment, args)
-        if args.model_variant is not None:
-            assignment["model_variant"] = args.model_variant
-        if args.desired_state is not None:
-            assignment["desired_state"] = args.desired_state
-        definition["assignments"] = assignments
+        definition = _with_assignment(
+            definition,
+            cast(str, recipe_outcome.get()),
+            cast(list[str], spark_outcome.get()),
+            args,
+            client,
+        )
     elif action == "remove":
         target = args.assignment.casefold()
         matching = [

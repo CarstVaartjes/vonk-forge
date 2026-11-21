@@ -859,17 +859,23 @@ effects changed during admission: review and load again.
 three lines: the profile edited, the Sparks selected, and what will stop.
 
 `run` accepts one unambiguous recipe or model from the active library. It
-prepares the recipe and its model, adds the assignment to the selected saved
-profile (`--profile N` is required, like every profile edit), previews the complete profile change, asks for
-confirmation, follows the load, and prints the current endpoints. Use
+prepares the recipe and its model, builds the selected profile with the assignment added
+(`--profile N` is required, like every profile edit), previews that complete
+change before anything is saved, asks for confirmation, follows the load, and
+prints the current endpoints. Use
 `--spark` more than once to choose the target group; without it, every enrolled
-Spark is included. `run` has two separate effects: the recipe is saved into
-the profile (the Controller can only review a saved profile, and
-saving does not change the running fleet), then the reviewed plan is loaded.
-Everything that can be refused is refused before the first effect: without
-`--yes`, a run that cannot ask (JSON, redirected input, `--no-input`) saves
-nothing. If you decline the confirmation, or the review is blocked, the saved
-profile remains, the fleet is unchanged, and the command exits non-zero.
+Spark is included. Declining sends nothing: the saved profile and the fleet are
+unchanged. Accepting has two separate effects: the profile is saved with the
+recipe (saving does not change the running fleet), then the reviewed plan is
+loaded. Without `--yes`, a run that cannot ask (JSON, redirected input,
+`--no-input`) does nothing. If the profile was edited meanwhile, or the plan
+changed (the Controller answers `profile.revision_conflict` or
+`profile.review_stale`), `run` rebuilds the change on the newest profile and asks
+again (up to three rounds). Option answers you gave stay; saved choices stay
+the newest saved value. If the command dies between the save and the load, the profile is
+saved and the fleet unchanged; run the same command again and it converges.
+The Controller must be current: one that cannot preview unsaved changes is
+refused before anything is written.
 Interactively, the load is bound to the effects you reviewed exactly as
 `profile load` is (see below) and asks again if they changed.
 
