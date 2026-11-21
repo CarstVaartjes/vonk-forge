@@ -80,6 +80,10 @@ def test_runtime_init_is_the_one_staging_writer_and_healthy_per_run() -> None:
     # The marker is on a tmpfs, so every start begins unhealthy.
     assert init["tmpfs"] == ["/tmp"]
     assert init["healthcheck"]["test"] == ["CMD", "cat", str(STAGED_MARKER)]
+    # Without a grace Compose gives up after three probes (15 s) and starts
+    # the readers on the previous kit; restart: true then never fires. A longer
+    # grace multiplies how long slowly failing runs hold `up`.
+    assert init["healthcheck"]["start_period"] == "45s"
     assert init["cap_add"] == ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
     writers = {
         name

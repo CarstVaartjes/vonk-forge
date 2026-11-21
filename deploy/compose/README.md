@@ -221,6 +221,18 @@ Compose starts them anyway on the previous staging kept in the volumes, while
 the restart policy keeps running `runtime-init`. Caddy, LiteLLM, Prometheus and
 the Tailscale configurator also declare `restart: true`: when a new image
 recreates `runtime-init`, Compose restarts them after the new kit is staged.
+The healthcheck's `start_period` (45 s, about twice the 23 s the NAS took from
+container start to healthy) is that wait's budget: a slow staging run that
+completes within it restarts the readers once, on the new kit. A crash loop
+whose runs exit quickly releases `up` within seconds, and Compose starts the
+readers on the previous kit. Every restart resets the health to `starting` and
+starts the grace again, so runs that fail after 10 s or more can hold `up` and
+its dependants (PostgreSQL, the API and the worker included) for several runs,
+each at most the grace plus 15 s. When staging later succeeds, Caddy
+(`--watch`) and Prometheus (`--config.auto-reload`) apply it in place; that
+reload is the self-heal for a late recovery. LiteLLM and the Tailscale
+configurator pick it up only when they are next restarted or recreated; an
+`up` that changes nothing restarts nothing.
 PostgreSQL does not restart with a release. The API keeps only the database
 half of startup (schema and administrator) in its pre-exec, because PostgreSQL
 itself starts from the staged entrypoint.
