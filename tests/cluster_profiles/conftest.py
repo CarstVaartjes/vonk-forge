@@ -14,9 +14,16 @@ from cluster_profiles.control_client import common
 
 @pytest.fixture(autouse=True)
 def no_update_notice_network(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Update notices are on by default; keep them off the network and home cache."""
+    """Keep CLI tests off the network, the home cache and the real vonkctl login.
+
+    A developer's stored login (~/.config/vonkctl) or VONK_CONTROL_* would
+    otherwise make a test reach the real Controller with a real credential.
+    """
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "update-notice-cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("VONK_CONTROL_URL", raising=False)
+    monkeypatch.delenv("VONK_CONTROL_TOKEN_FILE", raising=False)
     monkeypatch.setattr(cli, "begin_interactive_update_check", lambda: None)
 
 
