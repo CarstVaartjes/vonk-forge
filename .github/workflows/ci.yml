@@ -265,11 +265,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
+      - name: Prepare the protocol environment for Cargo builds
+        uses: ./.github/actions/protocol-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -298,11 +295,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
+      - name: Prepare the protocol environment for Cargo builds
+        uses: ./.github/actions/protocol-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -748,11 +742,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
+      - name: Prepare the protocol environment for Cargo builds
+        uses: ./.github/actions/protocol-env
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -1287,11 +1278,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
+      - name: Prepare the protocol environment for Cargo builds
+        uses: ./.github/actions/protocol-env
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:

@@ -146,7 +146,10 @@ def github(monkeypatch):
         ("setups", "scripts/resolve-publication-producer", True),
         ("agent", "tests/nodes/test_agent_package_native_lifecycle.sh", True),
         ("agent", "rust/crates/vonk-spark-setup/src/lib.rs", True),
-        ("agent", "control/src/vonk_control/contract_graph.py", True),
+        ("agent", "agent_protocol/src/vonk_agent_protocol/error_response.py", True),
+        ("agent", "agent_protocol/uv.lock", True),
+        ("agent", "control/src/vonk_control/contract_graph.py", False),
+        ("agent", "control/uv.lock", False),
         ("agent", "control/tests/fixtures/compiled_workload_v2.json", True),
         ("agent", "control/tests/test_x.py", False),
         ("agent", "docs/x.md", False),
@@ -610,8 +613,10 @@ def audit(event, args):
         raise AssertionError(f"undeclared Cargo schema input: {relative}")
 sys.addaudithook(audit)
 sys.path.insert(0, str(root / "scripts"))
-sys.argv = ["scripts/export-agent-wire-schema", "--output", sys.argv[1]]
-runpy.run_path("scripts/export-agent-wire-schema", run_name="__main__")
+# The exporter reads only the protocol: the Controller package never loads.
+sys.modules["vonk_control"] = None
+exporter = runpy.run_path("scripts/export-agent-wire-schema")
+Path(sys.argv[1]).write_text(exporter["rendered"]())
 """
     subprocess.run(
         [sys.executable, "-c", program, str(tmp_path / "wire.json")],

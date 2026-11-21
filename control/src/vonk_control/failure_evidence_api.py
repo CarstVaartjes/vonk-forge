@@ -3,10 +3,10 @@
 import re
 
 from fastapi import HTTPException, Query, Response
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from .api_availability import AVAILABILITY_ERRORS
 from .failure_evidence import FailureEvidenceBundle, FailureEvidenceService
-from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_api import bounded_error_responses
 
 

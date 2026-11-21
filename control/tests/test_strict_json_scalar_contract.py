@@ -9,7 +9,7 @@ import pytest
 from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
-from vonk_control.agent_api import HostHelperGrantResponse
+from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
 from vonk_control.library_contract import (
     FreshnessPolicy,
     LibraryFacetValues,

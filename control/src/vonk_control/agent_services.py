@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.capability_reply import ControllerCapability
 
 from .agent_api import AgentApiServices
 from .capabilities import CapabilityRegistry
-from .capability_contract import ControllerCapability
 from .enrollment import EnrollmentService
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,

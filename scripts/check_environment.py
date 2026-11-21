@@ -176,13 +176,55 @@ def ensure_catalog(root: Path, library: Path) -> None:
     )
 
 
-def run_in_control(root: Path) -> None:
-    """The locked environment is ready before generator imports execute."""
+def ensure_protocol(root: Path, environment: Path) -> None:
+    """The protocol's own two dependencies: all the wire exporter imports."""
 
-    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
-    if not environment.is_absolute():
-        environment = root / environment
-    ensure_control(root, environment)
+    inputs = [root / "agent_protocol/uv.lock", root / "agent_protocol/pyproject.toml"]
+    fingerprint = hashlib.sha256(
+        b"".join(path.read_bytes() for path in inputs)
+    ).hexdigest()
+    stamp = environment / ".commit-check-inputs"
+
+    def ready() -> bool:
+        if not (environment / "bin/python").is_file() or not stamp.is_file():
+            return False
+        if stamp.read_text() != fingerprint:
+            return False
+        return (
+            subprocess.run(
+                [str(environment / "bin/python"), "-c", "import jsonschema, pydantic"],
+                cwd=root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=30,
+            ).returncode
+            == 0
+        )
+
+    prepare(
+        root,
+        root / ".state/commit-checks/protocol.lock",
+        "protocol environment",
+        ready,
+        [
+            [
+                "env",
+                f"UV_PROJECT_ENVIRONMENT={environment}",
+                "uv",
+                "sync",
+                "--project",
+                "agent_protocol",
+                "--frozen",
+                "--no-dev",
+                "--no-install-project",
+            ]
+        ],
+        completed=lambda: stamp.write_text(fingerprint),
+    )
+
+
+def _reexec_in(environment: Path) -> None:
     if Path(sys.prefix).resolve() != environment.resolve():
         # Like ``uv run``: the environment's console scripts (code generators)
         # resolve before any system copy.
@@ -205,3 +247,29 @@ def run_in_control(root: Path) -> None:
                 ),
             },
         )
+
+
+def run_in_control(root: Path) -> None:
+    """The locked environment is ready before generator imports execute."""
+
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = root / environment
+    ensure_control(root, environment)
+    _reexec_in(environment)
+
+
+def run_in_protocol(root: Path) -> None:
+    """The wire exporters read only the protocol, so they run in its environment.
+
+    ``UV_PROJECT_ENVIRONMENT`` names the control environment; the protocol one is
+    never synced into it.
+    """
+
+    environment = Path(
+        os.environ.get("VONK_PROTOCOL_ENVIRONMENT", "agent_protocol/.venv")
+    )
+    if not environment.is_absolute():
+        environment = root / environment
+    ensure_protocol(root, environment)
+    _reexec_in(environment)

@@ -14,13 +14,13 @@ from sqlalchemy.exc import (
 )
 from vonk_agent_protocol import ControllerErrorCode
 from vonk_agent_protocol.agent_words import AgentClientDecision
+from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.model_cache_contract import (
     ModelCacheCancellationRequest,
     ModelCacheOperatorRequest,
 )
-from vonk_control.operation_api import BoundedErrorResponse
 
 REQUEST_KEY = "00000000-0000-4000-8000-000000000002"
 

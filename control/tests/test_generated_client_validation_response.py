@@ -5,8 +5,10 @@ def test_generated_python_list_operations_keeps_cursor_and_recovers_after_reject
     None
 ):
     import httpx2
+    from vonk_agent_protocol.error_response import (
+        RequestValidationProblem as ProblemProducer,
+    )
     from vonk_control.operation_api import OperationsResponse
-    from vonk_control.operation_api import RequestValidationProblem as ProblemProducer
 
     from cluster_profiles.generated_control.api.default import list_operations
     from cluster_profiles.generated_control.client import AuthenticatedClient

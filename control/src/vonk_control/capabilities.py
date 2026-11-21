@@ -14,14 +14,13 @@ from threading import Event, Lock, Thread
 from typing import Any, cast
 
 from vonk_agent_protocol import Disposition, WaitReason
-
-from .capability_contract import (
-    CapabilityAvailability,
+from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
-    CapabilityStatus,
     CapabilityUnavailableReply,
     ControllerCapability,
 )
+
+from .capability_contract import CapabilityAvailability, CapabilityStatus
 
 
 class CapabilityUnavailableError(Exception):

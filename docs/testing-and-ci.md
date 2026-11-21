@@ -160,7 +160,10 @@ Python contract tests, and checks the Rust workspace. Generated clients and wire
 schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
-`OUT_DIR`. Pytest prepares missing or outdated inputs before collecting
+`OUT_DIR`, from the protocol alone: it reruns on `agent_protocol/src`,
+`agent_protocol/pyproject.toml`, `agent_protocol/uv.lock` and the exporter, and the
+Rust jobs (`rust-quality`, `rust-tests`, the agent package jobs) prepare only the
+protocol environment (`.github/actions/protocol-env`), not `python-env`. Pytest prepares missing or outdated inputs before collecting
 consumers: `tools/generated_contracts.py` stamps the fingerprint of the
 generator inputs and outputs under `.state/`, so a tree is generated once per
 change and every later pytest start, web hook (`prebuild`, `pretest`) and CI

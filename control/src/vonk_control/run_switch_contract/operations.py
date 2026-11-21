@@ -16,8 +16,8 @@ from vonk_agent_protocol import (
     OperationProgress,
     canonical_message,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..lifecycle_preflight import LifecyclePreflightCheckpoint
 from ..operation_blockers import OperationBlocker
 from ..run_switch_identity_contract import NodeId, RunSwitchCancellation, UuidId

@@ -85,7 +85,7 @@ RUN apt-get update \
 WORKDIR /repo
 COPY pyproject.toml ./
 COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
-COPY agent_protocol/pyproject.toml ./agent_protocol/
+COPY agent_protocol/pyproject.toml agent_protocol/uv.lock ./agent_protocol/
 # The locked development environment includes the portable NAS helper for its
 # Python behavior tests. Generators may resync that environment, so retain the
 # complete local editable project in this build stage; it never reaches runtime.

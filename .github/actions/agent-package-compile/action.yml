@@ -30,11 +30,8 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Prepare Pydantic contracts for Cargo builds
-      uses: ./.github/actions/python-env
-      with:
-        contracts: none
-        cli-dependencies: "false"
+    - name: Prepare the protocol environment for Cargo builds
+      uses: ./.github/actions/protocol-env
     - name: Validate architecture compilation authority
       id: target
       shell: bash

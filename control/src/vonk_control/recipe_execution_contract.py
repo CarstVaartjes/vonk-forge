@@ -21,10 +21,13 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
+from vonk_agent_protocol.integer_domains import (
+    MAX_DATABASE_BIGINT,
+    MAX_DATABASE_INTEGER,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .content_identity import ImageContent, same_image
-from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .operation_blockers import SwapShortfallEvidence
 from .platform_ports import serving_port

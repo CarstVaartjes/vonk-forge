@@ -12,8 +12,7 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     canonical_message,
 )
-
-from .integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 
 class NodeDistributionAssignment(DistributionAssignment):

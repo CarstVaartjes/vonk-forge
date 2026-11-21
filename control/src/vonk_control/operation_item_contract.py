@@ -39,12 +39,12 @@ from vonk_agent_protocol.contracts import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from . import agent_operation_states
 from .fleet_profile_contract import FleetProfileApplicationCancellationView
-from .integer_domains import MAX_DATABASE_INTEGER
 from .model_cache_contract import ModelCacheCancellation
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import (

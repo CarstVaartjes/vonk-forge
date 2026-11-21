@@ -16,9 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 if __name__ == "__main__":
-    from check_environment import run_in_control
+    from check_environment import run_in_protocol
 
-    run_in_control(ROOT)
+    run_in_protocol(ROOT)
 
 
 def main() -> None:

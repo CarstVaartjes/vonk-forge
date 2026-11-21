@@ -79,16 +79,16 @@ def test_key_encoding_signs_or_reports_typed_configuration_failure(
     """Catches accepting mismatches, decoding v2 in the Controller, or startup failure."""
     from datetime import timedelta
 
+    from vonk_agent_protocol.capability_reply import (
+        CapabilityReason,
+        ControllerCapability,
+    )
     from vonk_control.capabilities import (
         CapabilityConfigurationError,
         CapabilityUnavailableError,
         RecoveringService,
     )
-    from vonk_control.capability_contract import (
-        CapabilityAvailability,
-        CapabilityReason,
-        ControllerCapability,
-    )
+    from vonk_control.capability_contract import CapabilityAvailability
 
     material = _write_material(tmp_path)
     key = material["intermediate_key"]

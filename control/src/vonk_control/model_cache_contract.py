@@ -22,10 +22,10 @@ from vonk_agent_protocol import (
     ModelCacheOperatorStatus,
     canonical_message,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts.model import ModelReference
 
 from .cursor_contract import MAX_CURSOR_LENGTH
-from .integer_domains import MAX_DATABASE_INTEGER
 from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress

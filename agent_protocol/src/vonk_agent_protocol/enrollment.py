@@ -7,7 +7,9 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from .wire_model import WireModel
+from .lifecycle_vocabulary import LifecycleState
+from .outcome import UnknownError
+from .wire_model import StrictJSONModel, WireModel
 
 CertificateGeneration = Annotated[int, Field(ge=1, le=2**64 - 1)]
 
@@ -130,3 +132,8 @@ class IssuedCertificateResponse(WireModel):
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError("certificate timestamps must include a timezone")
         return value
+
+
+class EnrollmentObservationReply(StrictJSONModel):
+    detail: UnknownError
+    state: LifecycleState

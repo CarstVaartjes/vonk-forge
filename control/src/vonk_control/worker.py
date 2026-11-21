@@ -22,13 +22,13 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
     WaitReason,
 )
+from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
 from .bounded_retry import bounded_attempts
 from .capabilities import CapabilityRegistry
-from .capability_contract import ControllerCapability
 from .coordinator_failures import CoordinatorFailures
 from .failure_classification import disposition
 from .inventory_repository import INVENTORY_MAX_AGE_SECONDS

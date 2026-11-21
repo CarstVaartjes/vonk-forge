@@ -16,10 +16,10 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationProgress,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from .integer_domains import MAX_DATABASE_INTEGER
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import StrictJSONModel
 from .wait_contract import QueueWait

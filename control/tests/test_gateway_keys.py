@@ -1083,11 +1083,9 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
     """Catches a healthy relay staying unavailable despite recurring observations."""
     from datetime import UTC, datetime, timedelta
 
+    from vonk_agent_protocol.capability_reply import ControllerCapability
     from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableError
-    from vonk_control.capability_contract import (
-        CapabilityAvailability,
-        ControllerCapability,
-    )
+    from vonk_control.capability_contract import CapabilityAvailability
 
     now = datetime(2026, 10, 10, tzinfo=UTC)
     restored_at = now + timedelta(minutes=10)

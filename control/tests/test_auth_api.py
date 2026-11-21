@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -21,7 +22,6 @@ from vonk_control.browser_auth import (
     LoginRateLimiter,
 )
 from vonk_control.models import Base, User
-from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"

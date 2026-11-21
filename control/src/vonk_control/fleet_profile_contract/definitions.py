@@ -16,9 +16,9 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts import EndpointAlias
 
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..run_switch_contract import (

@@ -328,3 +328,42 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
     monkeypatch.setattr(environment, "run_preparation", build)
     assert module.resolve_recipe_library(str(library), False) == (library, "pinned")
     assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
+
+
+def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypatch):
+    """The wire exporter needs pydantic and jsonschema, never the Controller."""
+    root = clone(tmp_path)
+    (root / "agent_protocol/uv.lock").write_text("version = 1\n")
+    venv = root / "agent_protocol/.venv"
+    calls = []
+
+    def run(command, cwd, deadline):
+        calls.append(command)
+        (venv / "bin").mkdir(parents=True, exist_ok=True)
+        (venv / "bin/python").touch()
+
+    monkeypatch.setattr(environment, "run_preparation", run)
+    monkeypatch.setattr(
+        environment.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a[0], 0),
+    )
+    environment.ensure_protocol(root, venv)
+    assert calls == [
+        [
+            "env",
+            f"UV_PROJECT_ENVIRONMENT={venv}",
+            "uv",
+            "sync",
+            "--project",
+            "agent_protocol",
+            "--frozen",
+            "--no-dev",
+            "--no-install-project",
+        ]
+    ]
+    environment.ensure_protocol(root, venv)
+    assert len(calls) == 1  # the stamp matches the lock: nothing to do
+    (root / "agent_protocol/uv.lock").write_text("version = 2\n")
+    environment.ensure_protocol(root, venv)
+    assert len(calls) == 2

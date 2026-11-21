@@ -15,8 +15,8 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
     SupersedeCode,
 )
+from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
-from ..integer_domains import MAX_DATABASE_INTEGER
 from ..operation_blockers import OperationBlocker
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait

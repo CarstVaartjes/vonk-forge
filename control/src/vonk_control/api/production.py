@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import UnknownError, UnknownOutcomeError
+from vonk_agent_protocol.capability_reply import ControllerCapability
 
 import vonk_control
 
@@ -23,7 +24,6 @@ from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
-from ..capability_contract import ControllerCapability
 from ..catalog_service import CatalogService
 from ..catalog_sync import (
     ManagedRecipeCatalogSyncService,

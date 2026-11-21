@@ -2283,8 +2283,8 @@ def test_an_unavailable_image_store_is_no_image_items_this_pass_then_heals(
     """Catches the guarded image store's unavailability escaping the sweep as a
     failure that ends the storage lane on the first flap of the cache mount."""
 
+    from vonk_agent_protocol.capability_reply import ControllerCapability
     from vonk_control.capabilities import CapabilityRegistry
-    from vonk_control.capability_contract import ControllerCapability
 
     path = _receipt(tmp_path, AN_IMAGE)
     now = [NOW]

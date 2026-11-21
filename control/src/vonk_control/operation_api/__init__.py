@@ -19,9 +19,7 @@ from .contracts import AgentUpgradeIdentityResponse as AgentUpgradeIdentityRespo
 from .contracts import (
     AgentUpgradeTargetDiagnosticsResponse as AgentUpgradeTargetDiagnosticsResponse,
 )
-from .contracts import BoundedErrorResponse as BoundedErrorResponse
 from .contracts import EmptyBody as EmptyBody
-from .contracts import ErrorContextResponse as ErrorContextResponse
 from .contracts import HealthzResponse as HealthzResponse
 from .contracts import JobDetailResponse as JobDetailResponse
 from .contracts import JobOperationProgress as JobOperationProgress
@@ -41,8 +39,6 @@ from .contracts import OperationProviderProtocol as OperationProviderProtocol
 from .contracts import OperationQuery as OperationQuery
 from .contracts import OperationsResponse as OperationsResponse
 from .contracts import ReadyzResponse as ReadyzResponse
-from .contracts import RequestValidationIssue as RequestValidationIssue
-from .contracts import RequestValidationProblem as RequestValidationProblem
 from .contracts import bounded_error_responses as bounded_error_responses
 from .diagnostics import _agent_upgrade_diagnostics as _agent_upgrade_diagnostics
 from .diagnostics import _aware as _aware

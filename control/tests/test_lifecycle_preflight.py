@@ -334,7 +334,7 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         ExecuteContainerRuntimeRequestOperation,
         host_helper_grant_signing_bytes,
     )
-    from vonk_control.agent_api import HostRuntimeGrantRequest
+    from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,

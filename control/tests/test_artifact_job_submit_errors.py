@@ -16,11 +16,14 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.error_response import (
+    BoundedErrorResponse,
+    RequestValidationProblem,
+)
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.categorized_errors import InvalidType, SecurityRefused
 from vonk_control.models import AgentOperation, ArtifactJob, RecipeRun
-from vonk_control.operation_api import BoundedErrorResponse, RequestValidationProblem
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,

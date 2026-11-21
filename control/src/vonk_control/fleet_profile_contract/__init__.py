@@ -40,7 +40,6 @@ from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 
 from ..child_phases import FleetProfileChildPhase as FleetProfileChildPhase
 from ..endpoint_contract import EndpointResponse as EndpointResponse
-from ..integer_domains import MAX_DATABASE_INTEGER as MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate as CachedResourceEstimate
 from ..operation_blockers import OperationBlocker as OperationBlocker
 from ..preparation_contract import CompatibilityIdentity as CompatibilityIdentity

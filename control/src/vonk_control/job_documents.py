@@ -35,11 +35,14 @@ from vonk_agent_protocol import (
     RouteState,
 )
 from vonk_agent_protocol.contracts import RecipeBuildRequest
+from vonk_agent_protocol.integer_domains import (
+    MAX_DATABASE_BIGINT,
+    MAX_DATABASE_INTEGER,
+)
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
 from .distribution_assignment import NodeDistributionAssignment
-from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .lifecycle.evidence import BookkeepingReason
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
