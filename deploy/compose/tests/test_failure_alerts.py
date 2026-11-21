@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from deploy.compose.tests.test_runtime_asset_reload import _services
+from deploy.compose.tests.test_runtime_asset_startup import _services
 
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = 'job="vonk-control",instance="control-api:8000"'

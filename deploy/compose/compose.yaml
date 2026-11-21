@@ -269,9 +269,6 @@ services:
     logging: *bounded-logging
     command:
       - --config.file=/run/vonk-runtime-assets/prometheus/prometheus.yml
-      # Reloading on change applies a restage without a restart.
-      - --config.auto-reload
-      - --config.auto-reload-interval=10s
       - --storage.tsdb.path=/prometheus
       # One year of history for inference statistics. The size cap is a
       # backstop (oldest blocks go first), sized for roughly 100 series per
