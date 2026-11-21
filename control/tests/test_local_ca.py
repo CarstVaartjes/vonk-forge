@@ -7,25 +7,27 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
+from vonk_control.agent_api import AgentApiServices
+from vonk_control.api import build_agent_services
 from vonk_control.local_ca import LocalCertificateAuthority
-from vonk_control.models import AgentCertificate
+from vonk_control.models import AgentCertificate, Base
 from vonk_control.models.fleet import LocalCertificateRevocation
-from vonk_control.step_ca import (
-    StepCAError,
-    StepCAIssuancePending,
-    _validate_crl_freshness,
-)
+from vonk_control.step_ca import StepCAError, StepCAIssuancePending
 
-from .test_step_ca import NODE_ID, NOW, _csr, _leaf, _write_material
+from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
 
 
 @pytest.fixture
@@ -213,7 +215,8 @@ def test_renew_revoke_and_signed_crl(local_ca):
     crl = x509.load_pem_x509_crl(bundle)
     assert crl.is_signature_valid(material["intermediate"].public_key())
     assert crl.issuer == material["intermediate"].subject
-    _validate_crl_freshness(crl, NOW, timedelta(seconds=30))
+    assert crl.next_update_utc is not None
+    assert crl.last_update_utc <= NOW < crl.next_update_utc
     entry = crl.get_revoked_certificate_by_serial_number(int(source.serial))
     assert entry is not None and entry.revocation_date_utc == NOW
     assert crl.get_revoked_certificate_by_serial_number(int(replacement.serial)) is None
@@ -570,3 +573,145 @@ def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
             crl.get_revoked_certificate_by_serial_number(int(issued.serial)) is not None
         )
         assert crl.get_revoked_certificate_by_serial_number(int(renewed.serial)) is None
+
+
+@pytest.mark.parametrize(
+    "mutation", ("key", "subject", "san", "eku", "usage", "issuer")
+)
+def test_a_leaf_with_the_wrong_identity_key_or_profile_is_refused(local_ca, mutation):
+    """Catches adopting a certificate that is not the exact node client leaf."""
+    ca, material, _ = local_ca
+    csr_pem = _csr()
+    request = x509.load_pem_x509_csr(csr_pem)
+    node = "spk_fedcba9876543210fedcba9876543210"
+    other = _write_material(material["root_path"].parent / "other")
+    signer = other["intermediate_key"] if mutation == "issuer" else None
+    leaf = (
+        x509.CertificateBuilder()
+        .subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(
+                        NameOID.COMMON_NAME, node if mutation == "subject" else NODE_ID
+                    )
+                ]
+            )
+        )
+        .issuer_name(
+            other["intermediate"].subject
+            if mutation == "issuer"
+            else material["intermediate"].subject
+        )
+        .public_key(
+            ed25519.Ed25519PrivateKey.generate().public_key()
+            if mutation == "key"
+            else request.public_key()
+        )
+        .serial_number(9876)
+        .not_valid_before(NOW)
+        .not_valid_after(NOW + timedelta(days=30))
+        .add_extension(
+            x509.KeyUsage(
+                mutation != "usage",
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage(
+                [
+                    ExtendedKeyUsageOID.SERVER_AUTH
+                    if mutation == "eku"
+                    else ExtendedKeyUsageOID.CLIENT_AUTH
+                ]
+            ),
+            critical=False,
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.UniformResourceIdentifier(
+                        "spiffe://vonk-forge.local/node/"
+                        + (node if mutation == "san" else NODE_ID)
+                    )
+                ]
+            ),
+            critical=False,
+        )
+        .sign(signer or material["intermediate_key"], algorithm=None)
+    )
+    with pytest.raises(StepCAError):
+        ca._validate_leaf(NODE_ID, request, leaf)
+
+
+def _helper_key(path: Path) -> Path:
+    path.write_bytes(
+        ed25519.Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    path.chmod(0o600)
+    return path
+
+
+def _sessions(tmp_path: Path) -> sessionmaker:
+    engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
+    Base.metadata.create_all(engine)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleNamespace:
+    material = _write_material(tmp_path)
+    return SimpleNamespace(
+        secrets_root=tmp_path,
+        agent_runtime_enabled=True,
+        agent_controller_origin="https://agents.example.test:8443",
+        agent_enrollment_origin="https://enroll.example.test:8443",
+        nas_lan_ip="192.168.1.231",
+        agent_service_hostnames=(
+            "control.example.test",
+            "enroll.example.test",
+            "agents.example.test",
+        ),
+        install_channel="stable",
+        controller_ca_path=material["root_path"],
+        agent_intermediate_certificate_path=material["intermediate_path"],
+        agent_ca_root_path=material["root_path"],
+        agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
+        agent_ca_provisioner_kid=material["kid"],
+        agent_artifact_root=tmp_path / "artifacts",
+        host_runtime_grant_private_key_path=_helper_key(tmp_path / "host-key"),
+        management_cidrs="10.0.0.0/24",
+        direct_fabric_cidrs=direct_fabric_cidrs,
+    )
+
+
+def test_production_agent_service_builder_does_not_block_startup_on_local_ca(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeAuthority:
+        def __init__(self, **kwargs) -> None:
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "vonk_control.local_ca.LocalCertificateAuthority", FakeAuthority
+    )
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
+
+    services = build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
+
+    assert isinstance(services, AgentApiServices)
+    assert calls == []
+    assert services.enrollment is not None
+    assert services.presence is not None

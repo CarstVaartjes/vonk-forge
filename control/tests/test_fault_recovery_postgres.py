@@ -7,8 +7,8 @@ from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCAUnavailable
 
+from .ca_material import NODE_ID, NOW, _csr
 from .test_local_ca import _binding, local_ca  # noqa: F401 - pytest fixture
-from .test_step_ca import NODE_ID, NOW, _csr
 
 
 def test_ca_journal_unavailable_then_same_request_recovers(local_ca):  # noqa: F811 - pytest fixture
