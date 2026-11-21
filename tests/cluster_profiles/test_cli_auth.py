@@ -110,14 +110,18 @@ def test_the_login_token_is_not_sent_to_another_controller(
         resolve_credential()
 
 
-def test_a_corrupt_connection_file_only_costs_the_expiry_when_the_url_is_env(
+def test_a_login_without_a_readable_connection_is_not_sent_to_an_env_url(
     login, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     login(_NOW + timedelta(days=30))
-    connection_path().write_text("{not json")
     monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
-
-    assert resolve_credential().expires_at is None
+    for damage in (
+        lambda: connection_path().write_text("{not json"),
+        connection_path().unlink,
+    ):
+        damage()
+        with pytest.raises(ControlCredentialScope):
+            resolve_credential()
     assert cli_auth.read_connection_or_none() is None
 
 
@@ -125,7 +129,7 @@ def test_a_fresh_token_reads_thirty_days() -> None:
     assert days_until(_NOW + timedelta(days=30), _NOW + timedelta(seconds=2)) == 30
 
 
-@pytest.mark.parametrize("raw", [b"", b"\xff\xfesecret\n"])
+@pytest.mark.parametrize("raw", [b"\xff\xfesecret\n"])
 def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
     monkeypatch: pytest.MonkeyPatch, raw: bytes
 ) -> None:

@@ -855,7 +855,7 @@ def _main(
                 if args.global_json or getattr(args, "json", False)
                 else render_auth(auth_result)
             )
-            return 2 if getattr(auth_result, "check", "ok") != "ok" else 0
+            return 2 if getattr(auth_result, "check_error", None) else 0
         client = (
             cast(ControllerClient, control_client)
             if control_client is not None

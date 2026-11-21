@@ -39,6 +39,7 @@ from .control_client.errors import (
     _MAX_TOKEN,
     ControlClientError,
     ControlForbidden,
+    ControlHTTPError,
     ControlUnauthorized,
     LocalInputError,
 )
@@ -83,7 +84,11 @@ class StatusResult:
     credential_source: str
     token_expires_at: str | None
     days_left: int | None
-    check: str
+    check_error: str | None
+
+    @property
+    def check(self) -> str:
+        return "ok" if self.check_error is None else f"failed: {self.check_error}"
 
     @property
     def expiry_text(self) -> str:
@@ -247,9 +252,13 @@ def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
     try:
         ControlClient(url, login_token_path()).request("GET", "/api/fleet")
     except ControlClientError as error:
-        raise LoginFailed(
-            f"the login was stored, but the Fleet check failed: {error}"
-        ) from None
+        # Keep the Controller's own code and retry fields; only say what is stored.
+        print("the login was stored, but the Fleet check failed", file=sys.stderr)
+        if isinstance(error, ControlHTTPError):
+            error.recovery = tuple(
+                step for step in error.recovery if "auth login" not in step
+            )
+        raise
     shadowed = [name for name in (URL_ENV, TOKEN_FILE_ENV) if os.environ.get(name)]
     return LoginResult(
         controller_url=url,
@@ -266,9 +275,9 @@ def _status() -> StatusResult:
         ControlClient(credential.url, credential.token_file).request(
             "GET", "/api/fleet"
         )
-        check = "ok"
+        check_error = None
     except (ControlClientError, LocalInputError, OSError) as error:
-        check = f"failed: {error}"
+        check_error = str(error)
     if credential.token_from_environment:
         source = f"{TOKEN_FILE_ENV} ({credential.token_file})"
     else:
@@ -278,7 +287,7 @@ def _status() -> StatusResult:
         credential_source=source,
         token_expires_at=format_expiry(expires) if expires else None,
         days_left=days_until(expires, datetime.now(UTC)) if expires else None,
-        check=check,
+        check_error=check_error,
     )
 
 

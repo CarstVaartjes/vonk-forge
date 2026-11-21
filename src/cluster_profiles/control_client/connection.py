@@ -191,12 +191,14 @@ def resolve_credential() -> Credential:
     url = os.environ.get(URL_ENV, "")
     token = os.environ.get(TOKEN_FILE_ENV, "")
     stored: StoredConnection | None = None
-    if not token:
-        stored = read_connection_or_none() if url else read_connection()
-        if url and stored is not None and url.rstrip("/") != stored.controller_url:
-            # The login's bearer is for the Controller it was minted by.
-            raise ControlCredentialScope
-    elif not url:
+    if not token and url:
+        if login_token_path().exists():
+            # The login's bearer is for the Controller it was minted by; an
+            # unknown or different owner fails closed (login rewrites the file).
+            stored = read_connection_or_none()
+            if stored is None or url.rstrip("/") != stored.controller_url:
+                raise ControlCredentialScope
+    elif not token or not url:
         stored = read_connection()
     if not url and stored is not None:
         url = stored.controller_url
