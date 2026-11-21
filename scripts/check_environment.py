@@ -209,6 +209,10 @@ def ensure_protocol(root: Path, environment: Path) -> None:
         ready,
         [
             [
+                str(root / "scripts/ensure-project-venv"),
+                str((root / environment).resolve()),
+            ],
+            [
                 "env",
                 f"UV_PROJECT_ENVIRONMENT={environment}",
                 "uv",
@@ -218,7 +222,7 @@ def ensure_protocol(root: Path, environment: Path) -> None:
                 "--frozen",
                 "--no-dev",
                 "--no-install-project",
-            ]
+            ],
         ],
         completed=lambda: stamp.write_text(fingerprint),
     )

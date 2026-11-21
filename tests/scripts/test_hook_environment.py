@@ -350,6 +350,7 @@ def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypa
     )
     environment.ensure_protocol(root, venv)
     assert calls == [
+        [str(root / "scripts/ensure-project-venv"), str(venv.resolve())],
         [
             "env",
             f"UV_PROJECT_ENVIRONMENT={venv}",
@@ -360,10 +361,10 @@ def test_protocol_environment_syncs_only_the_protocol_project(tmp_path, monkeypa
             "--frozen",
             "--no-dev",
             "--no-install-project",
-        ]
+        ],
     ]
     environment.ensure_protocol(root, venv)
-    assert len(calls) == 1  # the stamp matches the lock: nothing to do
+    assert len(calls) == 2  # the stamp matches the lock: nothing to do
     (root / "agent_protocol/uv.lock").write_text("version = 2\n")
     environment.ensure_protocol(root, venv)
-    assert len(calls) == 2
+    assert len(calls) == 4
