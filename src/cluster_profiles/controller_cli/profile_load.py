@@ -8,7 +8,7 @@ import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 from ..cli_outcome import SubmissionAcceptance
@@ -23,6 +23,7 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
+from ..error_reporting import ClientCode, protocol_context
 from ..generated_control.models.fleet_profile_load_request import (
     FleetProfileLoadRequest,
 )
@@ -80,7 +81,7 @@ def _review_and_submit_profile_load(
     question: str,
     review_when_confirmed: bool,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -102,6 +103,9 @@ def _review_and_submit_profile_load(
     review_attempt = 1
     while True:
         reviewed = draft() if draft is not None else None
+        if isinstance(reviewed, dict):
+            # The profile could not be read in time; its observation ends the run.
+            return reviewed
 
         # Re-observe missing or unreadable bindings before asking for consent.
         # Review consent never authorizes an unbound current-plan submission.
@@ -141,9 +145,16 @@ def _review_and_submit_profile_load(
         if reviewed is not None and preview.get("profile_revision") is not None:
             # A Controller that ignores the body previews the saved row: its
             # plan would not show this edit, so nothing is written.
-            raise ValueError(
+            raise ControlMalformedResponse(
                 "This Controller cannot preview unsaved changes; update the "
-                "Controller, then run this again. Nothing was changed."
+                "Controller, then run this again. Nothing was changed.",
+                context=replace(
+                    protocol_context(
+                        operation="profile preview",
+                        endpoint=f"/api/profile/{number}/preview",
+                    ),
+                    code=ClientCode.CONTRACT_MISMATCH,
+                ),
             )
         effects_digest = _reviewed_effects_digest(preview)
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
@@ -188,7 +199,7 @@ def _load_profile(
     question: str,
     review_when_confirmed: bool = False,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 

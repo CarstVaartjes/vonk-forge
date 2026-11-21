@@ -5265,7 +5265,153 @@ def test_run_rebuilds_on_the_newest_profile_when_the_save_conflicts(
         put["expected_revision"] for put in _bodies(client, "PUT", "/api/profile/1")
     ]
     assert puts == [0, 5]
-    assert prompt.transcript.count("[y/N]") == 2
+    assert len(_bodies(client, "POST", "/api/profile/1/preview")) == 2
+
+
+def test_run_rereads_a_refused_save_after_a_revert_to_the_same_content(
+    monkeypatch,
+) -> None:
+    """Same content, moved revision (A, B, A) is a race: the run asks again."""
+    base = _run_responses()
+    older = cast(dict, base[("GET", "/api/profile/1/definition")])
+    reverted = {**older, "revision": 3}
+    client = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [older, reverted],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(409, "profile revision conflict"),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+    _Prompt(monkeypatch, "yes", "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    puts = [
+        put["expected_revision"] for put in _bodies(client, "PUT", "/api/profile/1")
+    ]
+    assert puts == [0, 3]
+
+
+def test_run_converges_when_the_profile_already_holds_the_assignment(
+    monkeypatch,
+) -> None:
+    """A rerun after a death between save and load: equal-content save, bound load."""
+    base = _run_responses()
+    first = cli.main
+    client = FakeClient(base)
+    _Prompt(monkeypatch, "yes")
+    assert (
+        first(
+            ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+            control_client=client,
+            request_id_factory=lambda: _RUN_KEY,
+        )
+        == 0
+    )
+    (saved,) = _bodies(client, "PUT", "/api/profile/1")
+    held = {k: v for k, v in saved.items() if k != "expected_revision"}
+    rerun = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): {
+                **cast(dict, base[("GET", "/api/profile/1/definition")]),
+                "revision": 1,
+                "definition": held,
+            }
+        }
+    )
+    _Prompt(monkeypatch, "yes")
+
+    status = cli.main(
+        ("--profile", "1", "run", "Qwen Code", "--spark", "Atlas"),
+        control_client=rerun,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    (put,) = _bodies(rerun, "PUT", "/api/profile/1")
+    assert put == {**held, "expected_revision": 1}
+    (load,) = _bodies(rerun, "POST", "/api/profile/1/load")
+    assert load["review"] == {"effects_digest": _RUN_DIGEST}
+
+
+def test_run_ends_with_the_observation_when_the_profile_read_times_out(
+    vonkctl_json,
+) -> None:
+    client = FakeClient(
+        _run_responses()
+        | {("GET", "/api/profile/1/definition"): ControlUnavailable(503, "down")}
+    )
+
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
+        "--timeout-seconds",
+        "1",
+        "--interval-seconds",
+        "0.05",
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 2
+    assert document["observation"]["status"] == "timed_out"
+    assert _effects(client) == []
+
+
+def test_run_keeps_round_one_option_answers_when_the_draft_is_rebuilt() -> None:
+    base = _run_responses()
+    older = cast(dict, base[("GET", "/api/profile/1/definition")])
+    client = FakeClient(
+        base
+        | {
+            ("GET", "/api/profile/1/definition"): [
+                older,
+                {**older, "revision": 2},
+            ],
+            ("PUT", "/api/profile/1"): [
+                ControlConflict(409, "profile revision conflict"),
+                base[("PUT", "/api/profile/1")],
+            ],
+        }
+    )
+
+    status = cli.main(
+        (
+            "--profile",
+            "1",
+            "run",
+            "Qwen Code",
+            "--spark",
+            "Atlas",
+            "--option",
+            "mode=fast",
+            "--yes",
+            "--json",
+        ),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    assert status == 0
+    drafts = _bodies(client, "POST", "/api/profile/1/preview")
+    assert [d["definition"]["assignments"][0]["option_choices"] for d in drafts] == [
+        {"mode": "fast"},
+        {"mode": "fast"},
+    ]
 
 
 def test_run_does_not_retry_a_refused_save_that_is_not_a_newer_profile(

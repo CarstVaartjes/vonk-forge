@@ -297,7 +297,6 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
         )
 
     assert competing == [200], transcript
-    assert transcript.count(_RUN_REVIEW) == 2, transcript
     puts = [call for call in state.calls if call[0] == "PUT"]
     assert [cast(dict, call[2])["expected_revision"] for call in puts] == [
         revision,

@@ -113,20 +113,32 @@ def _run(
         global_json=getattr(args, "global_json", False),
         json=getattr(args, "json", False),
     )
-    recipe_outcome, spark_outcome = _read_concurrently(
+    # The first definition read rides with the selector resolutions.
+    recipe_outcome, spark_outcome, first_read = _read_concurrently(
         lambda: _resolve_recipe_selector(client, selector, deadline=deadline),
         lambda: _resolve_spark_selectors(client, spark_names, deadline=deadline),
+        lambda: _read_saved_definition(client, args),
     )
     recipe_selector = cast(str, recipe_outcome.get())
     spark_ids = cast(list[str], spark_outcome.get())
-    refused: list[tuple[object, ControlConflict]] = []
+    prefetched = [first_read]
+    refused: list[tuple[int, ControlConflict]] = []
 
-    def draft() -> ReviewedDraft:
-        """This run's edit on the newest saved profile; nothing is written yet."""
-        current = _read_saved_definition(client, args)
-        revision = cast(int, current["revision"])
-        if refused and refused[-1][0] == current["definition"]:
-            # Refused over the same saved content: not a race, so not retried.
+    def draft() -> ReviewedDraft | dict:
+        """This run's edit on the newest saved profile; nothing is written yet.
+
+        A read that did not complete is returned as its observation instead.
+        """
+        current = (
+            cast(dict, prefetched.pop().get())
+            if prefetched
+            else _read_saved_definition(client, args)
+        )
+        if args.observation.status != "complete":
+            return current
+        saved_at = cast(int, current["revision"])
+        if refused and refused[-1][0] == saved_at:
+            # Refused over the same saved revision: not a race, so not retried.
             raise refused[-1][1]
         definition = _with_assignment(
             copy.deepcopy(
@@ -139,14 +151,22 @@ def _run(
             edit_args,
             client,
         )
+        # Answers given in round 1 stay answers when the draft is rebuilt.
+        edit_args.option = [
+            f"{name}={value}"
+            for assignment in cast(list, definition["assignments"])
+            if assignment["recipe_selector"] == recipe_selector
+            and assignment.get("assignment_name") == edit_args.assignment_name
+            for name, value in (assignment.get("option_choices") or {}).items()
+        ]
 
         def save() -> None:
             try:
                 saved = _profile_save(
-                    save_args, client, definition, current_revision=revision
+                    save_args, client, definition, current_revision=saved_at
                 )
             except ControlConflict as conflict:
-                refused.append((current["definition"], conflict))
+                refused.append((saved_at, conflict))
                 raise
             if not (
                 getattr(args, "global_json", False) or getattr(args, "json", False)
