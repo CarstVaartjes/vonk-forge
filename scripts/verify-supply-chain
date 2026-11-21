@@ -66,10 +66,23 @@ def uv_lock_packages(lock: bytes) -> list[dict[str, str]]:
     return packages
 
 
-def packages_python(lock: bytes) -> list[tuple[str, str]]:
-    return sorted(
-        {(package["name"], package["version"]) for package in uv_lock_packages(lock)}
-    )
+UV_LOCK_DEPENDENCY = re.compile(r'\{ name = "([^"\\\r\n]+)"')
+
+
+def packages_python(lock: bytes, root: str) -> list[tuple[str, str]]:
+    """The workspace member ``root`` and everything it locks, groups included."""
+
+    records = {package["name"]: package for package in uv_lock_packages(lock)}
+    if root not in records:
+        raise ValueError(f"uv lock does not contain {root}")
+    pending, seen = [root], set()
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        pending.extend(UV_LOCK_DEPENDENCY.findall(records[name]["record"]))
+    return sorted((name, records[name]["version"]) for name in seen)
 
 
 def packages_cargo(lock: bytes) -> list[tuple[str, str]]:
@@ -154,9 +167,9 @@ def protocol_version(lock: bytes) -> str:
         for package in uv_lock_packages(lock)
         if package["name"] == "vonk-agent-protocol"
     ]
-    expected_source = 'source = { registry = "../inventory/wheels" }'
+    expected_source = 'source = { editable = "agent_protocol" }'
     if len(packages) != 1 or expected_source not in packages[0]["record"].splitlines():
-        raise ValueError("control and agent must resolve the verified protocol wheel")
+        raise ValueError("control must resolve the protocol as a workspace member")
     return packages[0]["version"]
 
 
@@ -241,17 +254,16 @@ def spdx(
 
 
 def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, object]]:
-    control_lock = (root / "control/uv.lock").read_bytes()
+    lock = (root / "uv.lock").read_bytes()
     cargo_lock = (root / "Cargo.lock").read_bytes()
-    protocol_lock = (root / "agent_protocol/uv.lock").read_bytes()
     web_lock = (root / "control/web/package-lock.json").read_bytes()
     protocol_project = tomllib.loads(
         (root / "agent_protocol/pyproject.toml").read_text()
     )
     version = protocol_project["project"]["version"]
-    if not isinstance(version, str) or protocol_version(control_lock) != version:
+    if not isinstance(version, str) or protocol_version(lock) != version:
         raise ValueError("control must resolve the exact protocol version")
-    verify_public_contract_lock(root, control_lock)
+    verify_public_contract_lock(root, lock)
     public_contract_lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
     protocol_wheel = f"inventory/wheels/{protocol_wheel_name(root)}"
     wheel_path = root / protocol_wheel
@@ -260,8 +272,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
     sboms = {
         "inventory/sbom/control-python.spdx.json": spdx(
             "control-python",
-            control_lock,
-            packages_python(control_lock),
+            lock,
+            packages_python(lock, "vonk-control"),
             protocol_wheel_sha256=wheel_sha256,
             protocol_wheel=protocol_wheel,
         ),
@@ -270,8 +282,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
         ),
         "inventory/sbom/agent-protocol.spdx.json": spdx(
             "agent-protocol",
-            protocol_lock,
-            packages_python(protocol_lock),
+            lock,
+            packages_python(lock, "vonk-agent-protocol"),
             protocol_wheel_sha256=wheel_sha256,
             protocol_wheel=protocol_wheel,
         ),
@@ -284,8 +296,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes | None, dict[str, obje
         "sboms": {path: digest(content) for path, content in sboms.items()},
         "protocol_wheel_sha256": wheel_sha256,
         "lockfiles": {
-            "control/uv.lock": digest(control_lock),
-            "agent_protocol/uv.lock": digest(protocol_lock),
+            "uv.lock": digest(lock),
             "Cargo.lock": digest(cargo_lock),
             "control/web/package-lock.json": digest(web_lock),
             PUBLIC_CONTRACT_LOCK: digest((root / PUBLIC_CONTRACT_LOCK).read_bytes()),

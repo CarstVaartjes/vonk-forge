@@ -398,7 +398,7 @@ def test_python_commit_requests_environment_preparation(
         module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0)
     )
     assert module.main() == 0
-    assert prepared == [(tmp_path, tmp_path / "control/.venv")]
+    assert prepared == [(tmp_path, tmp_path / ".venv")]
 
 
 def test_hook_preserves_nul_filenames_and_only_runs_checks(

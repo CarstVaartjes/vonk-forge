@@ -67,10 +67,9 @@ Every model an `/agent/` route takes or returns (grant requests and replies, the
 bounded error envelope, the capability-unavailable reply, the enrollment
 observation reply) lives in `vonk_agent_protocol`, never in `vonk_control`. The
 wire exporter (`scripts/export-agent-wire-schema`) walks only the protocol and
-runs in the protocol project's own environment (`scripts/check_environment.py`
-`run_in_protocol`, default `agent_protocol/.venv`, override
-`VONK_PROTOCOL_ENVIRONMENT`), so Cargo's `build.rs` and the Rust jobs need no
-Controller environment. A route model defined outside the protocol fails
+runs with only the protocol member installed (`scripts/check_environment.py`
+`run_in_protocol`, into the workspace's one `.venv`, or `UV_PROJECT_ENVIRONMENT`
+when set), so Cargo's `build.rs` and the Rust jobs need no Controller environment. A route model defined outside the protocol fails
 `require_wire_exports` in `control/tests/test_api_contract_completeness.py`.
 
 NAS/project setup and administration use Python, including the standalone
@@ -327,8 +326,19 @@ message only when a staged file also has unstaged edits.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 
-A fresh clone must run `scripts/build-control-wheel` before any tests: the agent
-protocol wheel the `control` project installs is built locally, not kept in git.
+One uv workspace owns every Python package: the root `vonk-cluster-profiles`
+(vonkctl) plus `agent_protocol`, `control` and `nas_setup`, with the single
+root `uv.lock` and one environment, the root `.venv`. The protocol is an editable
+member, so a fresh clone needs no wheel before tests; `scripts/build-control-wheel`
+only builds the protocol wheel the Controller image and the release carry, and
+every job that builds `control/Dockerfile` runs it first (a workflow test checks
+that). Never exact-sync a subset into the shared environment: `uv sync --package X`
+or `--project X` for a member other than `control` uninstalls the other members.
+Run a subset with `uv sync --inexact --package X` (what `check_environment`
+`ensure_protocol` does) or `uv run --package X`, or give it its own
+`UV_PROJECT_ENVIRONMENT` through `scripts/ensure-project-venv`. After changing any
+member's dependencies or version run `uv lock`; CI runs `uv lock --check` in the
+lint job, the only place the lock is compared with the pyprojects.
 
 Every change lands through an integration PR (same-repository `integration/*`
 head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`

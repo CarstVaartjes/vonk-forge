@@ -5,12 +5,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for input in [
         "agent_protocol/src",
         "agent_protocol/pyproject.toml",
-        "agent_protocol/uv.lock",
+        "uv.lock",
         "scripts/export-agent-wire-schema",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(input).display());
     }
-    println!("cargo:rerun-if-env-changed=VONK_PROTOCOL_ENVIRONMENT");
+    println!("cargo:rerun-if-env-changed=UV_PROJECT_ENVIRONMENT");
     let output = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let schema = output.join("wire.json");
     let status = Command::new("python3")

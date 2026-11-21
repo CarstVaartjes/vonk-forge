@@ -18,11 +18,10 @@ PUBLIC_CONTRACT_WHEEL = tomllib.loads(
 )["wheel"]
 INPUTS = (
     "Cargo.lock",
-    "control/uv.lock",
+    "uv.lock",
     "control/web/package-lock.json",
     "control/packaging/public-contracts.lock",
     "control/Dockerfile",
-    "agent_protocol/uv.lock",
     "agent_protocol/pyproject.toml",
     "deploy/compose/images.lock.json",
     "deploy/compose/compose.yaml",
@@ -101,6 +100,14 @@ def test_verifier_generates_deterministic_lock_derived_evidence(tmp_path: Path) 
             (repository / "control/packaging/public-contracts.lock").read_text()
         )["sha256"]
     )
+    # One lock, one closure per member: the protocol SBOM never lists the server.
+    names = {
+        name: {package["name"] for package in json.loads(content)["packages"]}
+        for name, content in first_sboms.items()
+    }
+    assert {"fastapi", "vonk-control"} <= names["control-python.spdx.json"]
+    assert {"pydantic", "vonk-agent-protocol"} <= names["agent-protocol.spdx.json"]
+    assert not {"fastapi", "vonk-control"} & names["agent-protocol.spdx.json"]
     assert manifest["sboms"] == {
         f"inventory/sbom/{name}": hashlib.sha256(content).hexdigest()
         for name, content in first_sboms.items()
@@ -321,21 +328,17 @@ def test_protocol_version_bump_reaches_wheel_evidence_without_consumer_edits(
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"
     version = tomllib.loads(project.read_text())["project"]["version"]
-    old_name = protocol_wheel_name(repository)
     project.write_text(
         project.read_text().replace(f'version = "{version}"', 'version = "9.8.7"', 1)
     )
     new_name = protocol_wheel_name(repository)
-    for relative in ("control/uv.lock", "agent_protocol/uv.lock"):
-        lock = repository / relative
-        lock.write_text(
-            lock.read_text()
-            .replace(
-                f'name = "vonk-agent-protocol"\nversion = "{version}"',
-                'name = "vonk-agent-protocol"\nversion = "9.8.7"',
-            )
-            .replace(old_name, new_name)
+    lock = repository / "uv.lock"
+    lock.write_text(
+        lock.read_text().replace(
+            f'name = "vonk-agent-protocol"\nversion = "{version}"',
+            'name = "vonk-agent-protocol"\nversion = "9.8.7"',
         )
+    )
     wheel = repository / "inventory/wheels" / new_name
     wheel.write_bytes(b"new protocol wheel")
     output = tmp_path / "evidence"

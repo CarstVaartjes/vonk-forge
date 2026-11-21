@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 TYPE_INPUTS = {
     "pyproject.toml",
     "control/pyproject.toml",
-    "control/uv.lock",
     "uv.lock",
     "pyrightconfig.json",
     "tools/pyright-baseline.json",
@@ -40,7 +39,7 @@ def main() -> int:
     full_types = bool(TYPE_INPUTS.intersection(paths))
     if not files and not full_types:
         return 0
-    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv"))
     if not environment.is_absolute():
         environment = ROOT / environment
     python = environment / "bin/python"

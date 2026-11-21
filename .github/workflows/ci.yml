@@ -165,6 +165,10 @@ jobs:
         with:
           contracts: python
           cli-dependencies: "false"
+      - name: Check the workspace lock is current
+        # Every other step runs --frozen, which never compares the lock with
+        # the pyprojects; this one resolves, so it is the only drift check.
+        run: scripts/retry-dependency-fetch uv lock --check
       - name: Reject new principle violations on added lines
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
@@ -238,7 +242,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build protocol wheel and verify Controller lock hash
+      - name: Build the protocol wheel
         run: scripts/build-control-wheel
       - name: Include protocol wheel with generated release evidence
         run: |
@@ -375,6 +379,8 @@ jobs:
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Generate the Rust wire peers for the installed protocol tests
         run: scripts/generate-agent-wire
+      - name: Build the protocol wheel the adapter consumes
+        run: scripts/build-control-wheel
       - name: Exercise the installed protocol wheel on adapter Python
         run: |
           set -euo pipefail
@@ -609,6 +615,8 @@ jobs:
           wheels=("$RUNNER_TEMP/nas-wheel/"vonk_nas_setup-*-py3-none-any.whl)
           test "${#wheels[@]}" -eq 1
           printf 'VONK_ACCEPTANCE_LOCAL_SETUP_WHEEL=%s\n' "${wheels[0]}" >> "$GITHUB_ENV"
+      - name: Build the protocol wheel the Controller image carries
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true
@@ -1102,6 +1110,8 @@ jobs:
         uses: ./.github/actions/recipe-library
         with:
           build: "true"
+      - name: Build the protocol wheel the Controller image carries
+        run: scripts/build-control-wheel
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

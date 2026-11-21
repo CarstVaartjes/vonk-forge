@@ -4,9 +4,8 @@
     scripts/refresh-public-contracts <recipes-commit>
 
 Builds the wheel from that commit (the build is byte-reproducible), then rewrites
-every place that names the pin: the control/pyproject.toml revision, control/uv.lock
-(``uv lock``, then ``scripts/refresh-protocol-wheel-lock`` restores the protocol
-wheel digest), control/packaging/public-contracts.lock, the acceptance
+every place that names the pin: the control/pyproject.toml revision, the workspace
+uv.lock (``uv lock``), control/packaging/public-contracts.lock, the acceptance
 library revision, the wheel in inventory/wheels and the wheel name in the files
 that must spell it. The version is read from the built wheel, never typed. ``scripts/verify-supply-chain`` checks
 the result.
@@ -67,23 +66,8 @@ def build_wheel(source: str, commit: str, work: Path) -> Path:
 
 
 def relock(root: Path) -> None:
-    # uv resolves vonk-agent-protocol from the local wheel directory.
     subprocess.run(
-        [str(root / "scripts/build-control-wheel")],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        timeout=COMMAND_TIMEOUT,
-    )
-    subprocess.run(
-        ["uv", "lock", "--project", str(root / "control")],
-        check=True,
-        timeout=COMMAND_TIMEOUT,
-    )
-    # uv lock drops the protocol wheel's digest; put it back.
-    subprocess.run(
-        [sys.executable, str(root / "scripts/refresh-protocol-wheel-lock")],
-        check=True,
-        timeout=COMMAND_TIMEOUT,
+        ["uv", "lock", "--project", str(root)], check=True, timeout=COMMAND_TIMEOUT
     )
 
 

@@ -30,6 +30,9 @@ dev = [
     "pyyaml>=6.0.3",
 ]
 
+[tool.uv.workspace]
+members = ["agent_protocol", "control", "nas_setup"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluster_profiles"]
 # The hook includes these explicitly, including builds without .gitignore.

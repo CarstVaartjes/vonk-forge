@@ -63,8 +63,7 @@ requires that step, installed cosign and ordering before every LiteLLM build.
 To move the public-contracts pin, run
 `scripts/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
 commit and writes exactly: the revision in `control/pyproject.toml`;
-`control/uv.lock` (`uv lock`, then `scripts/refresh-protocol-wheel-lock` restores
-the protocol wheel digest); `control/packaging/public-contracts.lock`;
+the workspace `uv.lock` (`uv lock`); `control/packaging/public-contracts.lock`;
 `tests/acceptance/recipe-library-revision.txt` (the library the suites and the
 profile-effect proof check out, which must equal the lock revision); the wheel in
 `inventory/wheels`; and the wheel name in `control/Dockerfile` and
@@ -84,8 +83,10 @@ scripts/build-control-wheel
 scripts/verify-supply-chain --output-dir /tmp/vonk-supply-chain --json
 ```
 
-The helper builds the protocol wheel from source and verifies its SHA-256
-against the Controller lock before local syncs, runs, or Docker image builds.
+The helper builds the protocol wheel from source for Docker image builds and
+releases; the SBOM records its SHA-256. The workspace lock holds the protocol as
+an editable member, so no lock carries a wheel hash. The Controller and protocol
+SBOMs are each member's dependency closure in the one `uv.lock`.
 
 ## Local diagnostic builds
 

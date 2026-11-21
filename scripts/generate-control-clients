@@ -2,7 +2,7 @@
 """Generate the admin-only OpenAPI and pinned upstream language clients.
 
 Generator provenance:
-- openapi-python-client==0.29.1 from control/uv.lock
+- openapi-python-client==0.29.1 from the workspace uv.lock
 - openapi-typescript==7.13.0 from tools/openapi-client/package-lock.json
 
 The TypeScript transport uses pinned openapi-fetch. Its DTOs and standalone

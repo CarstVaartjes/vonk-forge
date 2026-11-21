@@ -1,7 +1,7 @@
 name: Locked protocol environment
 description: >-
-  Install uv and sync only the protocol project's environment (pydantic and
-  jsonschema). The wire exporter that Cargo build scripts run reads nothing
+  Install uv and sync only the protocol workspace member (pydantic and
+  jsonschema) into the workspace environment. The wire exporter that Cargo build scripts run reads nothing
   else, so Rust jobs need no Controller environment. Jobs that also run Python
   suites use the python-env action instead.
 runs:
@@ -14,24 +14,27 @@ runs:
         python-version: "3.14"
         enable-cache: true
         cache-python: true
-        cache-dependency-glob: agent_protocol/uv.lock
+        cache-dependency-glob: uv.lock
         # Pull requests restore the cache main last saved; only main writes it.
         save-cache: ${{ github.ref == 'refs/heads/main' }}
-    - name: Sync the locked protocol environment
+    - name: Sync the locked protocol member
+      # Inexact on purpose: a bare `uv sync --package` removes other members.
       shell: bash
-      run: scripts/retry-dependency-fetch uv sync --project agent_protocol --frozen --no-dev --no-install-project
+      run: scripts/retry-dependency-fetch uv sync --inexact --package vonk-agent-protocol --frozen --no-dev
     - name: Record the prepared protocol environment
       # The exporter calls scripts/check_environment.py, which resyncs unless
       # its stamp matches the lock.
       shell: bash
       run: |
         python3 - <<'PY'
+        import os
         import sys
         from pathlib import Path
 
         sys.path.insert(0, "scripts")
-        from check_environment import ensure_protocol
+        from check_environment import DEFAULT_ENVIRONMENT, ensure_protocol
 
         root = Path.cwd().resolve()
-        ensure_protocol(root, root / "agent_protocol/.venv")
+        environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", DEFAULT_ENVIRONMENT))
+        ensure_protocol(root, environment if environment.is_absolute() else root / environment)
         PY

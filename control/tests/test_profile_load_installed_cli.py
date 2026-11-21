@@ -263,7 +263,6 @@ def _build_installed_vonkctl(workspace: Path) -> Path:
         workspace / "build-home",
         extra={
             "VONK_BUILD_SOURCE_SHA": "d" * 40,
-            "VONK_PROTOCOL_ENVIRONMENT": str(root / "agent_protocol/.venv"),
             "VONK_BUILD_RELEASE_VERSION": "0.1.1",
         },
     )

@@ -9,11 +9,8 @@ import signal
 import subprocess
 import sys
 import time
-import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
-
-from protocol_wheel import protocol_wheel_name
 
 PREPARATION_TIMEOUT = 600
 
@@ -72,63 +69,62 @@ def prepare(
             completed()
 
 
+# One virtual environment (the workspace root's .venv) holds every member, so
+# control and protocol preparation share one lock file and never sync at once.
+ENVIRONMENT_LOCK = ".state/commit-checks/environment.lock"
+DEFAULT_ENVIRONMENT = ".venv"
+
+
+def _fingerprint(root: Path, names: Sequence[str], source: str | None) -> str:
+    inputs = [root / name for name in names]
+    if source is not None:
+        inputs.extend(sorted((root / source).rglob("*.py")))
+    return hashlib.sha256(b"".join(path.read_bytes() for path in inputs)).hexdigest()
+
+
+def _imports(root: Path, environment: Path, modules: str) -> bool:
+    return (
+        subprocess.run(
+            [str(environment / "bin/python"), "-c", f"import {modules}"],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        ).returncode
+        == 0
+    )
+
+
 def ensure_control(root: Path, environment: Path) -> None:
-    inputs = [
-        root / name
-        for name in (
-            "control/uv.lock",
+    fingerprint = _fingerprint(
+        root,
+        (
+            "uv.lock",
+            "pyproject.toml",
             "control/pyproject.toml",
             "nas_setup/pyproject.toml",
             "nas_setup/hatch_build.py",
             "agent_protocol/pyproject.toml",
-        )
-    ]
-    inputs.extend(sorted((root / "agent_protocol/src").rglob("*.py")))
-    fingerprint = hashlib.sha256(
-        b"".join(path.read_bytes() for path in inputs)
-    ).hexdigest()
+        ),
+        "agent_protocol/src",
+    )
     stamp = environment / ".commit-check-inputs"
 
     def ready() -> bool:
-        if not (environment / "bin/python").is_file() or not stamp.is_file():
-            return False
-        if stamp.read_text() != fingerprint:
-            return False
-        packages = tomllib.loads((root / "control/uv.lock").read_text())["package"]
-        package = next(
-            item for item in packages if item["name"] == "vonk-agent-protocol"
-        )
-        wheel = root / "inventory/wheels" / protocol_wheel_name(root)
-        if not wheel.is_file():
-            return False
-        digest = "sha256:" + hashlib.sha256(wheel.read_bytes()).hexdigest()
-        if not any(pin.get("hash") == digest for pin in package["wheels"]):
-            return False
         return (
-            subprocess.run(
-                [
-                    str(environment / "bin/python"),
-                    "-c",
-                    "import ruff, pyright, nodejs_wheel",
-                ],
-                cwd=root,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=30,
-            ).returncode
-            == 0
+            (environment / "bin/python").is_file()
+            and stamp.is_file()
+            and stamp.read_text() == fingerprint
+            and _imports(root, environment, "ruff, pyright, nodejs_wheel")
         )
 
     prepare(
         root,
-        root / ".state/commit-checks/control.lock",
+        root / ENVIRONMENT_LOCK,
         "control environment",
         ready,
-        [
-            [str(root / "scripts/build-control-wheel")],
-            ["uv", "sync", "--project", "control", "--frozen"],
-        ],
+        [["uv", "sync", "--project", "control", "--frozen"]],
         completed=lambda: stamp.write_text(fingerprint),
     )
 
@@ -177,34 +173,31 @@ def ensure_catalog(root: Path, library: Path) -> None:
 
 
 def ensure_protocol(root: Path, environment: Path) -> None:
-    """The protocol's own two dependencies: all the wire exporter imports."""
+    """The protocol member's own dependencies: all the wire exporter imports.
 
-    inputs = [root / "agent_protocol/uv.lock", root / "agent_protocol/pyproject.toml"]
-    fingerprint = hashlib.sha256(
-        b"".join(path.read_bytes() for path in inputs)
-    ).hexdigest()
-    stamp = environment / ".commit-check-inputs"
+    ``uv run --package`` semantics (inexact): this adds the member to the shared
+    environment and never removes what control installed. A bare
+    ``uv sync --package`` would uninstall the other members from it.
+    """
+
+    fingerprint = _fingerprint(
+        root,
+        ("uv.lock", "pyproject.toml", "agent_protocol/pyproject.toml"),
+        "agent_protocol/src",
+    )
+    stamp = environment / ".protocol-inputs"
 
     def ready() -> bool:
-        if not (environment / "bin/python").is_file() or not stamp.is_file():
-            return False
-        if stamp.read_text() != fingerprint:
-            return False
         return (
-            subprocess.run(
-                [str(environment / "bin/python"), "-c", "import jsonschema, pydantic"],
-                cwd=root,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=30,
-            ).returncode
-            == 0
+            (environment / "bin/python").is_file()
+            and stamp.is_file()
+            and stamp.read_text() == fingerprint
+            and _imports(root, environment, "jsonschema, pydantic, vonk_agent_protocol")
         )
 
     prepare(
         root,
-        root / ".state/commit-checks/protocol.lock",
+        root / ENVIRONMENT_LOCK,
         "protocol environment",
         ready,
         [
@@ -217,11 +210,11 @@ def ensure_protocol(root: Path, environment: Path) -> None:
                 f"UV_PROJECT_ENVIRONMENT={environment}",
                 "uv",
                 "sync",
-                "--project",
-                "agent_protocol",
+                "--inexact",
+                "--package",
+                "vonk-agent-protocol",
                 "--frozen",
                 "--no-dev",
-                "--no-install-project",
             ],
         ],
         completed=lambda: stamp.write_text(fingerprint),
@@ -253,27 +246,22 @@ def _reexec_in(environment: Path) -> None:
         )
 
 
+def _environment(root: Path) -> Path:
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", DEFAULT_ENVIRONMENT))
+    return environment if environment.is_absolute() else root / environment
+
+
 def run_in_control(root: Path) -> None:
     """The locked environment is ready before generator imports execute."""
 
-    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
-    if not environment.is_absolute():
-        environment = root / environment
+    environment = _environment(root)
     ensure_control(root, environment)
     _reexec_in(environment)
 
 
 def run_in_protocol(root: Path) -> None:
-    """The wire exporters read only the protocol, so they run in its environment.
+    """The wire exporters read only the protocol member of the same environment."""
 
-    ``UV_PROJECT_ENVIRONMENT`` names the control environment; the protocol one is
-    never synced into it.
-    """
-
-    environment = Path(
-        os.environ.get("VONK_PROTOCOL_ENVIRONMENT", "agent_protocol/.venv")
-    )
-    if not environment.is_absolute():
-        environment = root / environment
+    environment = _environment(root)
     ensure_protocol(root, environment)
     _reexec_in(environment)

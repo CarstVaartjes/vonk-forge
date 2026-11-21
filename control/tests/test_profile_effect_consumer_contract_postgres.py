@@ -67,7 +67,6 @@ def installed_vonkctl(tmp_path_factory):
         extra={
             "VONK_BUILD_SOURCE_SHA": source,
             "VONK_BUILD_RELEASE_VERSION": "0.1.1",
-            "VONK_PROTOCOL_ENVIRONMENT": str(root / "agent_protocol/.venv"),
         },
     )
     wheels = workspace / "wheel"

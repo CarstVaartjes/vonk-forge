@@ -161,9 +161,9 @@ schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
 `OUT_DIR`, from the protocol alone: it reruns on `agent_protocol/src`,
-`agent_protocol/pyproject.toml`, `agent_protocol/uv.lock` and the exporter, and the
+`agent_protocol/pyproject.toml`, the root `uv.lock` and the exporter, and the
 Rust jobs (`rust-quality`, `rust-tests`, the agent package jobs) prepare only the
-protocol environment (`.github/actions/protocol-env`), not `python-env`. Pytest prepares missing or outdated inputs before collecting
+protocol member (`.github/actions/protocol-env`, an inexact sync), not `python-env`. Pytest prepares missing or outdated inputs before collecting
 consumers: `tools/generated_contracts.py` stamps the fingerprint of the
 generator inputs and outputs under `.state/`, so a tree is generated once per
 change and every later pytest start, web hook (`prebuild`, `pretest`) and CI
@@ -272,12 +272,14 @@ and fails in CI. `scripts/test-local --with-image-build` builds the two images
 first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
-The local `control` project refers to the ignored protocol wheel under
-`inventory/wheels`; it is not in git, so a fresh clone has none.
-`scripts/test-local` builds and verifies it automatically. Before any other
-test or `uv sync --project control` / `uv run --project control` command in a
-fresh clone, run `scripts/build-control-wheel` once first; it also checks the wheel against
-the hash locked in `control/uv.lock`.
+The protocol is an editable workspace member, so no test or
+`uv sync --project control` / `uv run --project control` command needs a wheel.
+`scripts/build-control-wheel` only builds the ignored protocol wheel under
+`inventory/wheels` that the Controller image and the release carry; every CI job
+that builds `control/Dockerfile` runs it first, and the adapter-Python job
+installs that wheel into a Python 3.12 venv, which is what proves the protocol's
+3.12 support (the workspace lock itself resolves for 3.14). Nothing compares the
+wheel with a lock: it is our own build output, not ingress.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
 the host and sends tests marked `linux_only`, `needs_systemd`,
@@ -328,7 +330,9 @@ directory, builds the VM-side environments under unique names in the VM's
 point the VM at the host checkout, and never delete other agents' directories.
 
 Every Python suite, lint and type check runs in one locked environment: the
-`control` project with its `dev` dependency group (`control/uv.lock`). It
+`control` project with its `dev` dependency group, installed from the one
+workspace lock (`uv.lock`) into the root `.venv`; `uv lock --check` in the lint job
+keeps the lock current. It
 contains the Controller and, as a test client only, the root
 `vonk-cluster-profiles` package (editable; the Controller image does not install it),
 the locked recipe contracts, pytest and its plugins, the build backend and

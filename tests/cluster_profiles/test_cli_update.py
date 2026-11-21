@@ -794,8 +794,6 @@ def _prepare_signed_update_tool(
             env={
                 **environment,
                 "UV_PROJECT_ENVIRONMENT": str(Path(sys.executable).parent.parent),
-                # The offline hook export needs the prepared protocol environment.
-                "VONK_PROTOCOL_ENVIRONMENT": str(root / "agent_protocol/.venv"),
                 "VONK_BUILD_SOURCE_SHA": source,
                 "VONK_BUILD_RELEASE_VERSION": version,
             },

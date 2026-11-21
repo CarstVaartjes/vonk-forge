@@ -70,6 +70,14 @@ def test_workflows_run_project_python_scripts_through_uv() -> None:
     assert problems == []
 
 
+def test_lint_job_checks_the_one_workspace_lock_is_current() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    commands = [step.get("run", "") for step in workflow["jobs"]["lint"]["steps"]]
+    assert "scripts/retry-dependency-fetch uv lock --check" in commands
+    assert not (ROOT / "control/uv.lock").exists()
+    assert not (ROOT / "agent_protocol/uv.lock").exists()
+
+
 def test_contract_generators_prepare_before_project_imports() -> None:
     """A bare interpreter must enter preparation before loading dependencies."""
 
