@@ -619,33 +619,10 @@ jobs:
           channel: ${{ inputs.channel }}
           generation: ${{ inputs.generation }}
 
-      - name: Resolve exact canonical recipe library source
-        id: recipe-library-source
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision=$(cat tests/acceptance/recipe-library-revision.txt)
-          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
-          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
-
-      - name: Check out exact canonical recipe library
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
         with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: ${{ steps.recipe-library-source.outputs.revision }}
-          path: .recipe-library
-          persist-credentials: false
-
-      - name: Record canonical recipe library source
-        shell: bash
-        env:
-          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
-        run: |
-          set -euo pipefail
-          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify 'HEAD^{commit}')
-          test "$resolved" = "$EXPECTED_REVISION"
-          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
+          build: "true"
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -654,8 +631,6 @@ jobs:
           python-version: "3.14"
           enable-cache: true
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 
       - name: Build and verify the Controller protocol wheel
         uses: ./.github/actions/prepare-control-wheel
