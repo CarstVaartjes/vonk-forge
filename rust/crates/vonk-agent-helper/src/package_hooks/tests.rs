@@ -239,11 +239,22 @@ fn dpkg_arguments_parse_into_one_closed_hook() {
         parse(&["finish", "12", "34"]),
         Ok(Hook::Finish {
             dpkg_pid: 12,
-            dpkg_start: 34
+            dpkg_start: 34,
+            reference: None
+        })
+    );
+    assert_eq!(
+        parse(&["finish", "12", "34", "ab"]),
+        Ok(Hook::Finish {
+            dpkg_pid: 12,
+            dpkg_start: 34,
+            reference: Some("ab".into())
         })
     );
     assert!(parse(&["finish", "x", "34"]).is_err());
-    assert!(parse(&["prerm", "remove"]).is_err());
+    assert_eq!(parse(&["prerm", "remove"]), Ok(Hook::PrermRemove));
+    assert_eq!(parse(&["prerm", "upgrade", "2.0"]), Ok(Hook::Unrecognized));
+    assert!(parse(&["preinst", "install"]).is_err());
 }
 
 #[test]
@@ -353,11 +364,14 @@ fn a_missing_subordinate_range_fails_the_configure() {
     assert!(configure(None, &mut fake).is_err());
 }
 
+/// The finisher as `Configure` schedules it: handed the reference digest.
 fn finish(fake: &mut Fake) -> Result<(), String> {
+    let reference = fake.armed.clone();
     run(
         &Hook::Finish {
             dpkg_pid: 77,
             dpkg_start: 5,
+            reference,
         },
         fake,
     )
@@ -426,4 +440,77 @@ fn a_special_mode_bit_on_an_existing_directory_is_not_a_difference() {
     fake.commands.clear();
     configure(None, &mut fake).unwrap();
     assert!(!fake.ran(&format!("mkdir {AGENT_DIR}")));
+}
+
+#[test]
+fn the_scheduled_finisher_carries_the_reference_it_was_scheduled_by() {
+    let mut fake = Fake::machine();
+    fake.armed = Some(NEW_HELPER.into());
+    configure(Some("1.0"), &mut fake).unwrap();
+    assert!(fake.ran(&format!("--package-hook finish 77 5 {NEW_HELPER}")));
+    assert_eq!(
+        fake.commands
+            .iter()
+            .filter(|command| command.contains("dpkg-query"))
+            .count(),
+        1,
+        "one lookup"
+    );
+}
+
+fn units_named(fake: &Fake, program: &str, verb: &str) -> Vec<String> {
+    let prefix = format!("{program} {verb} ");
+    let mut units: Vec<String> = fake
+        .commands
+        .iter()
+        .filter_map(|command| command.strip_prefix(&prefix))
+        .map(str::to_owned)
+        .collect();
+    units.sort();
+    units
+}
+
+fn remove(fake: &mut Fake) {
+    run(&Hook::PrermRemove, fake).unwrap();
+}
+
+#[test]
+fn removal_stops_the_consumers_first_and_disables_exactly_what_install_enabled() {
+    let mut fake = Fake::machine();
+    fake.put(
+        "/etc/vonk-forge-agent/docker-firewall.conf",
+        "",
+        node(Kind::File, 0, 0, 0o644),
+    );
+    // A fresh machine has no boot recovery yet, so configure enables every unit.
+    fake.failing.push("is-enabled");
+    configure(None, &mut fake).unwrap();
+    let enabled = units_named(&fake, "/usr/bin/deb-systemd-helper", "enable");
+    assert_eq!(enabled.len(), 5, "{enabled:?}");
+
+    fake.commands.clear();
+    remove(&mut fake);
+    assert_eq!(
+        units_named(&fake, "/usr/bin/deb-systemd-helper", "disable"),
+        enabled
+    );
+    let stop = |unit: &str| fake.position(&format!("deb-systemd-invoke stop {unit}"));
+    assert!(stop("vonk-forge-agent.service") < stop("vonk-forge-package-helper.socket"));
+    assert!(stop("vonk-forge-monitor.service") < stop("vonk-forge-package-helper.service"));
+    assert!(fake.ran("stop vonk-forge-docker-firewall.service"));
+    assert!(fake.ran("stop vonk-forge-package-helper-upgrade-finish.service"));
+    assert!(fake.ran("loginctl disable-linger vonk-agent"));
+    assert!(
+        !fake.ran("stop vonk-forge-package-rollback.service"),
+        "the watchdog keeps its own deadline in this step"
+    );
+}
+
+#[test]
+fn removal_never_fails_however_many_steps_do() {
+    let mut fake = Fake::machine();
+    fake.failing.push("/usr/");
+    run(&Hook::PrermRemove, &mut fake).unwrap();
+    // Every step was still attempted.
+    assert!(fake.ran("disable-linger") && fake.ran("disable vonk-forge-package-rollback"));
 }

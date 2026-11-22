@@ -822,10 +822,7 @@ def build(
         install_file(
             stage, "DEBIAN/conffiles", source("packaging/debian/conffiles"), 0o644
         )
-        for name in ("prerm",):
-            install_file(
-                stage, f"DEBIAN/{name}", source(f"packaging/debian/{name}"), 0o755
-            )
+        install_file(stage, "DEBIAN/prerm", source("packaging/debian/prerm"), 0o755)
         install_file(stage, "DEBIAN/postrm", source("packaging/debian/postrm"), 0o755)
         install_file(
             stage, "DEBIAN/postinst", source("packaging/debian/postinst"), 0o755

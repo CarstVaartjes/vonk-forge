@@ -8,7 +8,10 @@ use std::time::Duration;
 use crate::package_command;
 use crate::package_rollback::Store;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+/// A command outlasts the helper's worst-case restart (15 s stop, 15 s stop
+/// again, 30 s start) with margin, so a slow good upgrade is not refused.
+pub(super) const COMMAND_SECONDS: u64 = 90;
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(COMMAND_SECONDS);
 const PAUSE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
