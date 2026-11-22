@@ -250,6 +250,12 @@ fn run() -> Result<(), String> {
         return vonk_agent_helper::package_rollback::Store::system()
             .validate_maintainer_rollback(version, agent, helper);
     }
+    if let Some(("--package-hook", hook)) = arguments.split_first().map(|(a, r)| (a.as_str(), r)) {
+        return vonk_agent_helper::package_hooks::run_arguments(
+            hook,
+            &mut vonk_agent_helper::package_hooks::SystemHost,
+        );
+    }
     if arguments == ["--package-rollback-watchdog"] {
         return vonk_agent_helper::package_rollback::Store::system().watch();
     }

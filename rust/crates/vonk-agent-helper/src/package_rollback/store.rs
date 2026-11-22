@@ -92,6 +92,18 @@ impl Store {
         )?;
         held.ok_or_else(|| "rollback lock not taken".to_string())
     }
+    /// The ingress digest of the candidate helper while that candidate's
+    /// activation is armed; `None` for any other installed version (an
+    /// installer upgrade, a restore, a finished upgrade). Read-only, so the
+    /// finisher's strict sandbox can use it.
+    pub fn armed_helper_sha256(&self, installed_version: &str) -> Option<String> {
+        let path = self.root.join("transaction.json");
+        safe(&path, false, self.owner, 0o600).ok()?;
+        let tx: Transaction = parse_strict(&fs::read(path).ok()?).ok()?;
+        (tx.phase == vonk_agent_protocol::PackageActivationPhase::Armed
+            && tx.candidate_version == installed_version)
+            .then_some(tx.candidate_helper_sha256)
+    }
     pub(super) fn read(&self) -> Result<Transaction, String> {
         let path = self.root.join("transaction.json");
         if let Ok(metadata) = fs::symlink_metadata(&path)

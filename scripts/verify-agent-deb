@@ -55,10 +55,7 @@ REQUIRED_CONTROL = {
     "postrm",
     "prerm",
 }
-FORBIDDEN_MAINTAINER = re.compile(
-    rb"(?:\bcurl\b|\bwget\b|\bgit\s+(?:clone|pull|fetch)\b|https?://|\bapt(?:-get)?\b)",
-    re.IGNORECASE,
-)
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SEMVER_TEXT = (
     r"(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\."
@@ -238,46 +235,13 @@ def _verify_control(control: Path) -> None:
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
     if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
         raise VerificationError("package conffile set is invalid")
+    # Package logic lives in the helper; the maintainer scripts only exec it.
+    # The package carries exactly the script sources of the tree that built it.
     for name in ("postinst", "prerm", "postrm"):
-        raw = (control / name).read_bytes()
         mode = stat.S_IMODE((control / name).stat().st_mode)
-        if mode != 0o755 or FORBIDDEN_MAINTAINER.search(raw):
-            raise VerificationError(f"maintainer script is unsafe: {name}")
-    postinst = (control / "postinst").read_text(encoding="utf-8")
-    for required in (
-        "adduser",
-        "usermod --add-subuids",
-        "usermod --add-subgids",
-        "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
-        "openssl rand -hex 32",
-        "install -o root -g vonk-agent -m 0640",
-        "deb-systemd-helper enable vonk-forge-agent.service",
-        "daemon-reload",
-        "schedule_permanent_helper_restart",
-        '"/proc/$new_helper_pid/exe"',
-        "vonk-forge-agent.service vonk-forge-monitor.service >/dev/null",
-        "vonk-forge-package-helper-upgrade-finish.service",
-        "RuntimeMaxSec=240s",
-        "/proc/$wait_pid/stat",
-    ):
-        if required not in postinst:
-            raise VerificationError("postinst lifecycle is incomplete")
-    if any(
-        forbidden in postinst
-        for forbidden in (
-            "supervisor",
-            "/var/lib/vonk-forge/slots",
-            "verify-readiness",
-            "readiness.json",
-            "--property MainPID",
-            " is-active ",
-            "self-test",
-            "/run/vonk-forge-agent",
-        )
-    ):
-        raise VerificationError("postinst contains obsolete agent lifecycle state")
-    if "/usr/bin/python" in postinst or "python3" in postinst:
-        raise VerificationError("postinst has an undeclared interpreter dependency")
+        source = (SOURCE_ROOT / "packaging/debian" / name).read_bytes()
+        if mode != 0o755 or (control / name).read_bytes() != source:
+            raise VerificationError(f"maintainer script differs from its source: {name}")
 
 
 def _verify_payload(payload: Path, control: Path, architecture: str) -> None:

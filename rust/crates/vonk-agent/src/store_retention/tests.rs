@@ -922,7 +922,6 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
             &mut sources,
         );
     }
-    sources.push(repository.join("packaging/debian/postinst"));
     // Shared store names have one owner in the protocol crate, visible to both.
     let mut protocol = Vec::new();
     collect_sources(
@@ -965,10 +964,19 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
             for (root, name) in super::source_guard::stores(&text, &constants, default) {
                 names.insert((root, name, source.display().to_string()));
             }
-        } else {
-            for (root, name) in super::source_guard::package_stores(&text) {
-                names.insert((root, name, source.display().to_string()));
-            }
+        }
+    }
+    // The package hooks name their paths as plain absolute strings.
+    let hooks = repository.join("rust/crates/vonk-agent-helper/src/package_hooks");
+    for entry in fs::read_dir(&hooks).unwrap() {
+        let source = entry.unwrap().path();
+        if source.file_name().is_some_and(|name| name == "tests.rs") {
+            continue;
+        }
+        for (root, name) in
+            super::source_guard::package_stores(&fs::read_to_string(&source).unwrap())
+        {
+            names.insert((root, name, source.display().to_string()));
         }
     }
     let declared: BTreeSet<_> = STORES
@@ -989,6 +997,17 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     );
     assert!(names.len() > 10, "the scan found the data root's stores");
     assert_eq!(declared.len(), STORES.len(), "one entry per store");
+    // An exact-name Ended entry is walked as a directory and never collected.
+    let unreachable: Vec<_> = STORES
+        .iter()
+        .filter(|store| store.1 == super::Collector::Ended && !store.0.contains(['/', '*']))
+        .map(|store| store.0)
+        .collect();
+    assert_eq!(
+        unreachable,
+        Vec::<&str>::new(),
+        "an Ended entry names a directory or a pattern"
+    );
     assert!(STORES.iter().all(|store| !store.2.is_empty()));
     // An entry only a Controller order removes stays for ever once the
     // Controller forgets it. Each such store is a reviewed exception; prefer a
