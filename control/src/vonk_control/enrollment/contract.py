@@ -10,9 +10,9 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentPurpose,
 )
 
-from .ca_issuance_contract import CertificateIssuanceBinding
-from .machine_states import EnrollmentGrantStateField
-from .strict_json import StrictJSONModel
+from ..ca_issuance_contract import CertificateIssuanceBinding
+from ..machine_states import EnrollmentGrantStateField
+from ..strict_json import StrictJSONModel
 
 ENROLLMENT_ID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

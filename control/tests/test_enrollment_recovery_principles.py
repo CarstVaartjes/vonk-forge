@@ -17,7 +17,7 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
 )
 from vonk_control.enrollment import EnrollmentDenied
-from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,

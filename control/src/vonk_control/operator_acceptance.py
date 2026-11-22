@@ -214,7 +214,7 @@ class OperatorReceiptResolver:
     ) -> AcceptanceReceipt:
         from .agent_acceptance import AGENT_POLICIES, resolve_agent_receipt
         from .artifact_jobs import ArtifactJobResponse
-        from .enrollment_contract import EnrollmentGrantStatus
+        from .enrollment.contract import EnrollmentGrantStatus
         from .fleet_profile_contract import (
             FleetProfileApplicationView,
             FleetProfileView,

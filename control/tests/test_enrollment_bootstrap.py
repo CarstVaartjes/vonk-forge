@@ -8,7 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
 
 
 def _controller_ca() -> tuple[x509.Certificate, bytes]:

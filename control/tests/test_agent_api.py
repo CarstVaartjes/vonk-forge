@@ -79,8 +79,8 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
-from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
+from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,

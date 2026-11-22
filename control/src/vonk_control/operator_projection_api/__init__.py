@@ -54,15 +54,15 @@ from ..enrollment import (
 )
 from ..enrollment import EnrollmentDenied as EnrollmentDenied
 from ..enrollment import RemoteRevocationUncertain as RemoteRevocationUncertain
-from ..enrollment_bootstrap import accepted_installer_url as accepted_installer_url
-from ..enrollment_contract import ENROLLMENT_ID_PATTERN as ENROLLMENT_ID_PATTERN
-from ..enrollment_contract import EnrollmentGrant as EnrollmentGrant
-from ..enrollment_contract import EnrollmentGrantStatus as EnrollmentGrantStatus
-from ..enrollment_contract import EnrollmentId as EnrollmentId
-from ..enrollment_contract import (
+from ..enrollment.bootstrap import accepted_installer_url as accepted_installer_url
+from ..enrollment.contract import ENROLLMENT_ID_PATTERN as ENROLLMENT_ID_PATTERN
+from ..enrollment.contract import EnrollmentGrant as EnrollmentGrant
+from ..enrollment.contract import EnrollmentGrantStatus as EnrollmentGrantStatus
+from ..enrollment.contract import EnrollmentId as EnrollmentId
+from ..enrollment.contract import (
     EnrollmentObservationOutcome as EnrollmentObservationOutcome,
 )
-from ..enrollment_contract import (
+from ..enrollment.contract import (
     EnrollmentRevocationStatus as EnrollmentRevocationStatus,
 )
 from ..failure_evidence import AttemptPhase as AttemptPhase

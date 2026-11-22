@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
-from ..enrollment_contract import (
+from ..enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,

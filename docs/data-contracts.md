@@ -189,7 +189,7 @@ module defines its own.
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
 | `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
-| `control/src/vonk_control/enrollment_contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
+| `control/src/vonk_control/enrollment/contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
 | `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |

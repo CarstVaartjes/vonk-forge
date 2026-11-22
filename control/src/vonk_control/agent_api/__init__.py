@@ -2,10 +2,10 @@
 
 from vonk_agent_protocol import InventoryRequest as InventoryRequest
 
-from ..enrollment_body import _bounded_enrollment_body as _bounded_enrollment_body
-from ..enrollment_body import _decode_bounded_json_string as _decode_bounded_json_string
-from ..enrollment_body import _json_string_end as _json_string_end
-from ..enrollment_body import _skip_json_whitespace as _skip_json_whitespace
+from ..enrollment.body import _bounded_enrollment_body as _bounded_enrollment_body
+from ..enrollment.body import _decode_bounded_json_string as _decode_bounded_json_string
+from ..enrollment.body import _json_string_end as _json_string_end
+from ..enrollment.body import _skip_json_whitespace as _skip_json_whitespace
 from .artifacts import IMAGE_CACHE_DIRECTORY as IMAGE_CACHE_DIRECTORY
 from .artifacts import DistributionAssignment as DistributionAssignment
 from .artifacts import DistributionCode as DistributionCode

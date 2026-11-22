@@ -20,7 +20,7 @@ from vonk_agent_protocol.enrollment import (
 
 
 def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
-    from .enrollment import _NODE_ID, EnrollmentDenied
+    from . import _NODE_ID, EnrollmentDenied
 
     try:
         request = x509.load_pem_x509_csr(csr)
@@ -104,7 +104,7 @@ def _validate_evidence(
 
 
 def _decode_token(token: str) -> bytes:
-    from .enrollment import _TOKEN, EnrollmentDenied
+    from . import _TOKEN, EnrollmentDenied
 
     if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
         raise EnrollmentDenied("invalid enrollment grant")
@@ -124,7 +124,7 @@ def _digest(value: bytes) -> str:
 
 
 def _validate_node_id(node_id: str) -> None:
-    from .enrollment import _NODE_ID
+    from . import _NODE_ID
 
     if _NODE_ID.fullmatch(node_id) is None:
         raise ValueError(

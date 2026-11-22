@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .agent_api import AgentApiServices, _EnrollmentGrantScan
+    from ..agent_api import AgentApiServices, _EnrollmentGrantScan
 
 from fastapi import HTTPException, Request
 
@@ -26,7 +26,7 @@ def _json_string_end(value: bytes | bytearray, start: int) -> int | None:
 
 
 def _skip_json_whitespace(value: bytes | bytearray, start: int) -> int:
-    from .agent_api import _JSON_WHITESPACE
+    from ..agent_api import _JSON_WHITESPACE
 
     while start < len(value) and value[start] in _JSON_WHITESPACE:
         start += 1
@@ -55,7 +55,7 @@ def _decode_bounded_json_string(
 
 def _scan_enrollment_grants(value: bytes | bytearray) -> _EnrollmentGrantScan:
     """Discover bounded grant strings without recursively parsing the body."""
-    from .agent_api import _ENROLLMENT_TOKEN, _EnrollmentGrantScan
+    from ..agent_api import _ENROLLMENT_TOKEN, _EnrollmentGrantScan
 
     tokens: list[str] = []
     seen: set[str] = set()
@@ -109,7 +109,7 @@ def _scan_enrollment_grants(value: bytes | bytearray) -> _EnrollmentGrantScan:
 async def _bounded_enrollment_body(
     request: Request, services: AgentApiServices
 ) -> bytearray:
-    from .agent_api import (
+    from ..agent_api import (
         _MAX_ENROLLMENT_BODY_BYTES,
         _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES,
     )

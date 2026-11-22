@@ -35,38 +35,6 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..categorized_errors import InvalidValue
-from ..enrollment_contract import (
-    ENROLLMENT_ID_PATTERN,
-    EnrollmentGrantStatus,
-    EnrollmentObservationOutcome,
-)
-from ..enrollment_validation import (
-    EVIDENCE_REFUSAL_REASONS,
-)
-from ..enrollment_validation import (
-    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _digest as _digest,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _utc as _utc,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
-)
 from ..models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -87,6 +55,36 @@ from ..security.enrollment import (
 )
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..step_ca import StepCAIssuancePending
+from .contract import (
+    ENROLLMENT_ID_PATTERN,
+    EnrollmentGrantStatus,
+    EnrollmentObservationOutcome,
+)
+from .validation import EVIDENCE_REFUSAL_REASONS
+from .validation import (
+    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _digest as _digest,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _utc as _utc,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
+)
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 

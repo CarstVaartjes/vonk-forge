@@ -530,7 +530,7 @@ def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
 ):
     """Catches old HTTP wiring and a CRL that loses a confirmed revocation."""
     from vonk_control.agent_services import build_enrollment_service
-    from vonk_control.enrollment_contract import EnrollmentGrant
+    from vonk_control.enrollment.contract import EnrollmentGrant
     from vonk_control.pki import IssuedCertificate
     from vonk_control.settings import Settings
 

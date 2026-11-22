@@ -16,7 +16,7 @@ from vonk_control.agent_upgrade_contract import (
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
-from vonk_control.enrollment_contract import EnrollmentRevocationStatus
+from vonk_control.enrollment.contract import EnrollmentRevocationStatus
 from vonk_control.library_api import _error as library_error
 from vonk_control.operator_projection_api import (
     FleetActionResponse,

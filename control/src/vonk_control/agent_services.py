@@ -53,7 +53,7 @@ def build_agent_services(
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
     from .enrollment import EnrollmentService
-    from .enrollment_bootstrap import EnrollmentBootstrapConfig
+    from .enrollment.bootstrap import EnrollmentBootstrapConfig
     from .host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
