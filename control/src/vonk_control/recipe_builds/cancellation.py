@@ -21,7 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_forge_contracts import read_recipe
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..admission_locking import is_admission_contention
 from ..agent_jobs import _JsonFlagIsTrue
 from ..categorized_errors import InvalidValue
@@ -31,6 +31,7 @@ from ..fleet_profile_contract import (
     FleetProfilePreview,
     profile_switch_child_request_key,
 )
+from ..jobs import states as job_states
 from ..models import AgentNode, FleetProfileApplication, Job, RecipeBuild
 from ..recipe_availability_intent import read_availability_intent
 from ..recipe_lifecycle_contract import (

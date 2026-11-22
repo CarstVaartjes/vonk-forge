@@ -18,10 +18,10 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 
-from .. import job_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,

@@ -41,7 +41,7 @@ from vonk_control.fleet_profiles import (
     _roster_digest,
 )
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     Base,
     CatalogDocument,

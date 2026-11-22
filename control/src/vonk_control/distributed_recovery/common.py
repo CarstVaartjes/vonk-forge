@@ -33,7 +33,7 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 from ..agent_jobs import release_owned_reservations_in_session
 from ..categorized_errors import UnsettledOutcome
 from ..distributed_lifecycle import DistributedRecoveryInvalid
-from ..job_documents import (
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
     RecipeStopParent,

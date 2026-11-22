@@ -47,7 +47,7 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.distribution_executor import children as executor_module
 from vonk_control.distribution_executor import durable as durable_executor_module
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
 )

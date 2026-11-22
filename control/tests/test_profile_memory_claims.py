@@ -381,7 +381,7 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     tmp_path, postgres_engine, changed_field: str | None
 ):
     from vonk_agent_protocol import InvalidRequestReason
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
     from vonk_control.recipe_operations import RecipeRequestInvalid
     from vonk_control.run_switch_contract import RunSwitchOperationResult
     from vonk_control.run_switch_operations import (

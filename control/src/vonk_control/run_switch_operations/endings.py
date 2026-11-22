@@ -16,9 +16,9 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 
-from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
+from ..jobs import states as job_states
 from ..lifecycle.run_switch import end_unclaimed_children
 from ..models import (
     Job,

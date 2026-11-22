@@ -44,7 +44,7 @@ from vonk_control.catalog.revision_collection import (
     CatalogRevisionCollector,
 )
 from vonk_control.catalog.revision_contract import ModelRevisionProjection
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     Base,

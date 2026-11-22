@@ -29,7 +29,7 @@ from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
     ModelCacheObjectSource,
 )
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import (
     _CHUNK_BYTES,
     ArtifactSetManifest,

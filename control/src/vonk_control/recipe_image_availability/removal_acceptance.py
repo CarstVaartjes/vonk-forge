@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     RecipeImageCode,
 )
 
-from .. import job_states
 from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -27,9 +26,8 @@ from ..artifact_lifecycle import (
 from ..cache_removal_review import (
     refusing_removal_blockers,
 )
-from ..job_documents import (
-    AvailabilityJobPayload,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload
 from ..model_cache import (
     ModelCacheConflict,
 )

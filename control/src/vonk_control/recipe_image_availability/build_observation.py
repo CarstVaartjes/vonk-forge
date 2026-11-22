@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
-from .. import job_states
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..models import AgentOperation, CatalogDocumentRevision, Job, RecipeBuild
 from ..recipe_execution_contract import (

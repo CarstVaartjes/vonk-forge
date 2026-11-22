@@ -32,9 +32,7 @@ from ..admission_locking import (
     admission_wait_exhausted,
 )
 from ..installed_bytes import demote_ranks_on_lost_image
-from ..job_documents import (
-    RecipeBuildCleanupParent,
-)
+from ..jobs.documents import RecipeBuildCleanupParent
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (

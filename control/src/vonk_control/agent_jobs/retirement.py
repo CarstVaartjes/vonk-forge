@@ -20,13 +20,14 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..installation_transitions import end_unfinished_installation
+from ..jobs import states as job_states
 from ..lifecycle import CancelRequested, OperatorAction, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,

@@ -20,11 +20,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..catalog.queries import active_head_revision
-from ..job_documents import (
-    AvailabilityJobPayload,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache import (
     ModelCacheRemovalScope,

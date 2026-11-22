@@ -36,7 +36,7 @@ from ..distributed_recovery import (
     run_node_reports_absent,
     settle_absent_run_in_session,
 )
-from ..job_documents import (
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     RecipeStopParent,

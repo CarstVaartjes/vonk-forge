@@ -250,7 +250,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from ..install_admission import (
         InstallAdmissionService,
     )
-    from ..jobs import JobService
+    from ..jobs.queue import JobService
     from ..metrics import OperationalMetricsCollector
     from ..models import Job
     from ..operation_api import durable_operation_services

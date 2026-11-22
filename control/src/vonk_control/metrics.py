@@ -22,9 +22,10 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
-from . import agent_operation_states, job_states
+from . import agent_operation_states
 from .compose_bundle import ComposeBundle
-from .jobs import without_agent_operation
+from .jobs import states as job_states
+from .jobs.queue import without_agent_operation
 from .metrics_readings import (
     engine_reading_lines,
     host_reading_lines,

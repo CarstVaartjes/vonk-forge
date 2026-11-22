@@ -90,10 +90,7 @@ from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from ..gateway_keys import GatewayKeyService, install_gateway_key_routes
 from ..http_errors import RetryAfterMiddleware, TemporaryHTTPError
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
-from ..job_operator_receipts import (
-    JobOperatorReceipt,
-    read_job_operator_receipt,
-)
+from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt
 from ..logging import current_request_id
 from ..metrics import MetricsRegistry
 from ..model_cache_api import install_model_operator_routes

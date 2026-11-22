@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -34,6 +34,7 @@ from ..artifact_reference_scan import (
 )
 from ..categorized_errors import InvalidValue
 from ..failure_classification import error_code
+from ..jobs import states as job_states
 from ..logging import log_event
 from ..model_cache import (
     ModelCacheError,

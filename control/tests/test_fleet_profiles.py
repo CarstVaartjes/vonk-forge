@@ -2227,7 +2227,7 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
     tmp_path: Path,
 ) -> None:
     from vonk_agent_protocol.agent_words import ProfileChildJobKind
-    from vonk_control.job_documents import RunSwitchJobPayload
+    from vonk_control.jobs.documents import RunSwitchJobPayload
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services

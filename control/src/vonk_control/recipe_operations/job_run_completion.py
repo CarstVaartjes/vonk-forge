@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states as aos
-from .. import job_states
+from ..jobs import states as job_states
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -77,7 +77,7 @@ class JobRunCompletionMixin:
                 return parent
             authorization: JobRunStopScope = parent.profile_stop_authorization
         else:
-            from ..job_documents import RecipeStopParent
+            from ..jobs.documents import RecipeStopParent
 
             try:
                 direct = RecipeStopParent.model_validate_json(

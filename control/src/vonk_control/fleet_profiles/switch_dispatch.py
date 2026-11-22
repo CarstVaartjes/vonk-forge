@@ -24,7 +24,7 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchQueueItem,
     profile_switch_child_request_key,
 )
-from ..job_documents import RunSwitchJobPayload
+from ..jobs.documents import RunSwitchJobPayload
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,

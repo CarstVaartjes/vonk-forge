@@ -197,7 +197,7 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
     enrollment.revoke_node(NODE_ID, "admin")
     authority.revoke_failures.clear()
     from vonk_control.coordinator_failures import CoordinatorFailures
-    from vonk_control.jobs import JobService
+    from vonk_control.jobs.queue import JobService
     from vonk_control.worker import Worker
 
     worker = Worker(

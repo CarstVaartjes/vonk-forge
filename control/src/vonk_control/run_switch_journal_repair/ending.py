@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
-from ..job_documents import RecipeInstallParent
+from ..jobs.documents import RecipeInstallParent
 from ..machine_states import reservation_live
 from ..models import (
     AgentNode,

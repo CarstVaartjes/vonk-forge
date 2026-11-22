@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import run_switch_operations as owner
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.job_documents import RunSwitchRunIntent
+from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentOperation,
@@ -1231,7 +1231,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
     from psycopg.errors import LockNotAvailable
     from sqlalchemy import event
     from sqlalchemy.engine import ExceptionContext
-    from vonk_control.job_documents import RunSwitchRunIntent
+    from vonk_control.jobs.documents import RunSwitchRunIntent
     from vonk_control.run_switch_journal_contract import (
         RunSwitchJournalRepairPendingState,
     )

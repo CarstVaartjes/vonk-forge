@@ -51,9 +51,6 @@ from vonk_forge_contracts import (
 )
 
 from .. import (
-    job_states as job_states,
-)
-from .. import (
     model_cache_states as model_cache_states,
 )
 from ..artifact_lifecycle import (

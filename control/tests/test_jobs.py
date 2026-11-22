@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.auth import TokenCodec
-from vonk_control.jobs import JobService, StaleAttempt
+from vonk_control.jobs.queue import JobService, StaleAttempt
 from vonk_control.models import Base, Job
 from vonk_control.operation_api import JobProgress, OperationPage, job_response
 from vonk_control.stored_json import write_guard_mode

@@ -22,7 +22,7 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchCh
 from ..admission_locking import (
     set_admission_timeout,
 )
-from ..job_documents import (
+from ..jobs.documents import (
     RecipeStopParent,
     RunSwitchJobPayload,
     ServiceRunStopReview,

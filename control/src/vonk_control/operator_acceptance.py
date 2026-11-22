@@ -221,7 +221,7 @@ class OperatorReceiptResolver:
         )
         from .fleet_projection import FleetNodeIdentity
         from .gateway_keys import GatewayKeyCreated, GatewayKeyRevoked
-        from .job_operator_receipts import read_job_operator_receipt
+        from .jobs.operator_receipts import read_job_operator_receipt
         from .model_cache_contract import ModelCacheOperatorResponse
         from .operation_api import JobResumeResponse
         from .operator_projection_api.contracts import FleetActionResponse

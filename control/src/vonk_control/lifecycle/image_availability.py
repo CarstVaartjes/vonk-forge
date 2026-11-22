@@ -64,8 +64,8 @@ from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind, WaitReason
 
-from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
+from ..jobs import states as job_states
 from ..models import Job
 from ..persisted_waits import (
     initialize_wait,
@@ -98,7 +98,7 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from ..job_documents import AvailabilityJobPayload
+    from ..jobs.documents import AvailabilityJobPayload
 
 KIND = "image-availability"
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -299,7 +299,7 @@ class ImageAvailabilityAdapter:
         Return the updated typed payload; the caller stores it through its contract.
         """
 
-        from ..job_documents import AvailabilityJobPayload
+        from ..jobs.documents import AvailabilityJobPayload
 
         now = aware(now)
         if after.state is State.BACKOFF:

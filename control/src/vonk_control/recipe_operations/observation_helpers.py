@@ -25,8 +25,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     RecipeBuildCleanupParent,
     RecipeBuildParent,
     RecipeInstallParent,

@@ -33,7 +33,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
-from vonk_control.job_documents import RecipeStartParent
+from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.models import (
     AgentCertificate,

@@ -32,7 +32,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
-from . import fleet_profile_states, job_states
+from . import fleet_profile_states
 from .content_identity import same_image
 from .fleet_profile_capacity_repair import (
     capacity_document as _capacity_document,
@@ -51,6 +51,7 @@ from .fleet_profile_contract import (
     FleetProfilePreview,
     FleetProfileResourceRequirement,
 )
+from .jobs import states as job_states
 from .models import (
     AgentNode,
     FleetProfileApplication,

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
-from vonk_control.job_documents import RunSwitchJobPayload
+from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models import Job, RecipeRun
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,

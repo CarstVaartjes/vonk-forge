@@ -10,7 +10,7 @@ from vonk_agent_protocol import (
     OutcomeKind,
 )
 
-from .. import job_states
+from ..jobs import states as job_states
 from ..models import (
     Job,
 )

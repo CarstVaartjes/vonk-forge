@@ -32,7 +32,7 @@ from .capabilities import CapabilityRegistry
 from .coordinator_failures import CoordinatorFailures
 from .failure_classification import disposition
 from .inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from .jobs import JobService
+from .jobs.queue import JobService
 from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES

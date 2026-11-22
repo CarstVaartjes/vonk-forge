@@ -17,13 +17,14 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
 )
 from ..categorized_errors import InvalidValue
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilitySupersession,
     AvailabilityUnknownEnd,

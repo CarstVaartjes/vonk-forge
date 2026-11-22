@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
@@ -24,6 +24,7 @@ from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
+from ..jobs import states as job_states
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.recipe_operation import RecipeOperationAdapter

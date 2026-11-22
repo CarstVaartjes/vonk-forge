@@ -267,7 +267,7 @@ def _profile(world: Catalog, selector: str, sparks: list[str] | None = None) -> 
 def _queued_load(world: Catalog, installation_id: str) -> None:
     """A load that has been accepted and names this exact installation."""
     from vonk_agent_protocol import AgentOperation as OperationKind
-    from vonk_control.job_documents import RecipeInstallParent
+    from vonk_control.jobs.documents import RecipeInstallParent
 
     with world.sessions.begin() as session:
         session.add(
@@ -3523,7 +3523,7 @@ def test_live_two_spark_owner_does_not_pin_unrelated_installations(
         ProfileSwitchChildKind,
     )
     from vonk_agent_protocol.state_machines import NodeIdentityState
-    from vonk_control.job_documents import RecipeInstallParent
+    from vonk_control.jobs.documents import RecipeInstallParent
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)
@@ -3704,7 +3704,7 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
     """
     from vonk_agent_protocol import AgentOperation as OperationKind
     from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
-    from vonk_control.job_documents import InstallPhaseOperation, RecipeInstallParent
+    from vonk_control.jobs.documents import InstallPhaseOperation, RecipeInstallParent
     from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
     from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 

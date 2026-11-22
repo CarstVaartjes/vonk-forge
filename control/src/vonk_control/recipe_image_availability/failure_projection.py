@@ -20,12 +20,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..failure_classification import is_definite, is_redownload
-from ..job_documents import (
-    AvailabilityJobResult,
-    AvailabilityUnknownEnd,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
 from ..lifecycle.types import State

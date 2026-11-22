@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     RecipeImageCode,
 )
-from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.recipe_image_availability import (
@@ -484,7 +484,7 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     tmp_path: Path,
 ) -> None:
     """A vanished exact child must not keep its parent's execution claim retrying."""
-    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.jobs.documents import AvailabilityModelChild
     from vonk_control.model_cache import ModelCacheNotFound
     from vonk_control.strict_json import serialize_json_value
 
@@ -684,7 +684,7 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
 ) -> None:
     """A read fault must not turn verified image availability into a refusal."""
     from sqlalchemy.exc import SQLAlchemyError
-    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.jobs.documents import AvailabilityModelChild
     from vonk_control.model_cache import ModelCacheError
     from vonk_control.strict_json import serialize_json_value
 

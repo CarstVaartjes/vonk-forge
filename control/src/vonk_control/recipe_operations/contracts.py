@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import ConfigDict
 from vonk_agent_protocol import WireModel
 
-from ..job_documents import (
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     ServiceRunStopReview,

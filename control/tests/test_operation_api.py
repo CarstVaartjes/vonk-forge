@@ -35,8 +35,8 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.job_operator_receipts import record_job_operator_receipt
-from vonk_control.jobs import JobService
+from vonk_control.jobs.operator_receipts import record_job_operator_receipt
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

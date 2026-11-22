@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from ..content_identity import same_image
-from ..job_documents import RecipeInstallParent
+from ..jobs.documents import RecipeInstallParent
 from ..models import (
     AgentCertificate,
     AgentOperation,

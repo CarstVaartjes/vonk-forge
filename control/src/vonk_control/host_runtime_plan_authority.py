@@ -114,7 +114,7 @@ def derive_runtime_plan_binding(
         return RuntimePlanBinding()
     if action is ContainerRuntimeAction.STOP:
         from .cancelled_runtime import cancellation_stop_current
-        from .job_documents import RecipeStopParent
+        from .jobs.documents import RecipeStopParent
 
         if not cancellation_stop_current(session, parent, operation):
             # The cancellation's runtime owner moved on: this order can never

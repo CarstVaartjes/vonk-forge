@@ -35,7 +35,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeAuthorityService,
 )
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.job_documents import RecipeStartParent, RecipeStopParent
+from vonk_control.jobs.documents import RecipeStartParent, RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     AgentOperation,

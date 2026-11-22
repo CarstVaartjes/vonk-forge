@@ -241,7 +241,7 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
     if isinstance(owner, Job):
-        from .job_documents import AvailabilityJobPayload, RunSwitchJobPayload
+        from .jobs.documents import AvailabilityJobPayload, RunSwitchJobPayload
         from .recipe_image_removal_contract import RecipeCacheRemovalOwner
         from .recipe_update_contract import RecipeUpdateDocument
 
@@ -311,7 +311,7 @@ def owner_identity(
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
             from .agent_upgrade_contract import AgentUpgradeRolloutPayload
-            from .job_documents import (
+            from .jobs.documents import (
                 AvailabilityJobPayload,
                 RecipeBuildCleanupParent,
                 RecipeBuildParent,
@@ -432,7 +432,7 @@ def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     """Give a new queued owner its initial wait, before it is flushed."""
     from uuid import uuid4
 
-    from . import job_states
+    from .jobs import states as job_states
     from .models import (
         AgentOperation,
         FleetProfileApplication,

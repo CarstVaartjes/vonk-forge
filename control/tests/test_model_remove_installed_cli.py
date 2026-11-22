@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult

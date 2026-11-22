@@ -21,7 +21,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from ..job_documents import RecipeStartParent, RecipeStopParent
+from ..jobs.documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.evidence import Residue
 from ..models import (
     AgentNode,

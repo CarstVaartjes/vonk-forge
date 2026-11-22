@@ -66,7 +66,7 @@ SECURITY_CLASSES: dict[str, frozenset[SecurityEdge]] = {
     "vonk_control.host_runtime_plan_authority:RuntimePlanAuthorityRefused": frozenset(
         {_SIGNED}
     ),
-    "vonk_control.jobs:StaleAttempt": frozenset({_FENCE}),
+    "vonk_control.jobs.queue:StaleAttempt": frozenset({_FENCE}),
     "vonk_control.model_cache.errors:ModelCacheCredentialPathUnsafe": frozenset(
         {_AUTHN, _AUTHZ}
     ),

@@ -24,7 +24,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
 
-from .. import job_states
 from ..categorized_errors import MissingRecord
 from ..failure_classification import is_definite, is_redownload, is_security_failure
 from ..fleet_profile_contract import (
@@ -35,6 +34,7 @@ from ..fleet_profile_contract import (
     FleetProfilePreview,
     FleetProfileSwitchAdapterState,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import (
     CatalogDocumentRevision,

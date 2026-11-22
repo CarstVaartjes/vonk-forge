@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,

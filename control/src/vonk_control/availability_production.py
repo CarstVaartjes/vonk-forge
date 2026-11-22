@@ -34,7 +34,6 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
-from . import job_states
 from .admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
@@ -46,7 +45,8 @@ from .categorized_errors import InvalidValue
 from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text
 from .inventory_items import runtime_value
-from .job_documents import AvailabilityJobPayload, AvailabilityRuntime
+from .jobs import states as job_states
+from .jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (
     AgentNode,
     AgentOperation,

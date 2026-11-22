@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     RemovalOwnerKind,
@@ -32,7 +31,8 @@ from ..cache_removal_review import (
 )
 from ..categorized_errors import InvalidValue
 from ..install_admission import InstallPlan
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
     AvailabilityRuntime,

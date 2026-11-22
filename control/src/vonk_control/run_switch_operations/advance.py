@@ -17,13 +17,13 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
-from .. import job_states
 from ..admission_locking import (
     admission_attempts,
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import disposition, is_definite
+from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason
 from ..lifecycle.run_switch import (
     KEEP as _KEEP_REASON,

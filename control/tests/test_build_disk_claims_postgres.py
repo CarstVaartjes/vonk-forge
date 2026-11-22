@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     ReservationState,
     canonical_message,
 )
-from vonk_control.job_documents import RecipeBuildParent
+from vonk_control.jobs.documents import RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, RecipeBuild, ResourceReservation
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_execution_contract import parse_stored_build_plan

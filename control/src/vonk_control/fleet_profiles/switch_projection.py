@@ -13,7 +13,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import job_states
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
@@ -25,6 +24,7 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchChildResult,
     FleetProfileSwitchQueueItem,
 )
+from ..jobs import states as job_states
 from ..lifecycle.fleet_profile import doc_state
 from ..models import FleetProfileApplication
 from ..operation_blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT

@@ -14,7 +14,7 @@ from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.models import (
     Base,
     FleetProfileApplication,

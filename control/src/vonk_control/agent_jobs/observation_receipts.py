@@ -123,7 +123,7 @@ def adopt_observation_receipt(
 ) -> bool:
     """One decision for live ingress and worker replay under the queue's locks."""
     from ..cancelled_runtime import cancellation_stop_current
-    from ..job_documents import DistributionJobPayload
+    from ..jobs.documents import DistributionJobPayload
 
     if (
         state != AgentResultState.SUCCEEDED

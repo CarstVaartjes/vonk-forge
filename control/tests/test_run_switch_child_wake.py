@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason, canonical_message
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     RecipeJobActivateParent,
     RecipeStartParent,
     controller_recipe_document,

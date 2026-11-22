@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -25,6 +24,7 @@ from ..artifact_lifecycle import (
 from ..artifact_reference_scan import (
     runtime_image_reference_reasons,
 )
+from ..jobs import states as job_states
 from ..models import (
     Job,
 )

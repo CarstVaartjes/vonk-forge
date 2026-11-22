@@ -35,7 +35,7 @@ from vonk_control.auth import Actor
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.catalog.revision_contract import write_catalog_projection
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
     AvailabilityRetry,

@@ -72,9 +72,6 @@ from vonk_control.control_limits import (
     MAX_CONTROL_DOCUMENT_BYTES as MAX_CONTROL_DOCUMENT_BYTES,
 )
 
-from .. import (
-    job_states as job_states,
-)
 from ..auth import (
     MUTATION_ROLES as MUTATION_ROLES,
 )

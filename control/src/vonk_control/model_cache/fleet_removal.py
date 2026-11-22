@@ -22,7 +22,6 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_forge_contracts import ModelDefinition
 
-from .. import job_states
 from ..admission_locking import (
     AdmissionRowLock,
     ConstraintReplay,
@@ -57,6 +56,7 @@ from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
 from ..inventory_repository import spark_model_objects
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,

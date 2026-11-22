@@ -17,8 +17,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import job_states
 from ..bounded_json import require_integer
+from ..jobs import states as job_states
 from ..lifecycle.run_switch import (
     RunSwitchAdapter,
 )

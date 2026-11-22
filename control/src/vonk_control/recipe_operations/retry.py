@@ -19,8 +19,8 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
-from .. import job_states
 from ..admission_locking import admission_attempts
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     Damaged,
     Residue,

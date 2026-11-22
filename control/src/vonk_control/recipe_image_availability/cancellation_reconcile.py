@@ -17,10 +17,8 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
-from .. import job_states
-from ..job_documents import (
-    AvailabilityJobPayload,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.core import STOP_BUDGET
 from ..model_cache import ModelCacheError
 from ..models import (

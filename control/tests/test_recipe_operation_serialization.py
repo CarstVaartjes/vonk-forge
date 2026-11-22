@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RecipeStartResult, RouteState, canonical_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStopParent,
     ServiceRunStopReview,
@@ -157,7 +157,7 @@ def test_profile_stop_authorization_documents_round_trip():
     import hashlib
 
     from vonk_agent_protocol import RecipeStopPayload
-    from vonk_control.job_documents import OfflineStopIntent
+    from vonk_control.jobs.documents import OfflineStopIntent
     from vonk_control.profile_stop_authority import (
         JobRunStopScope,
         ProfileJobRunStopAuthorization,

@@ -34,10 +34,7 @@ from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
-from ..job_documents import (
-    RunSwitchJobPayload,
-    controller_recipe_document,
-)
+from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
 from ..lifecycle import CancelRequested, Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter

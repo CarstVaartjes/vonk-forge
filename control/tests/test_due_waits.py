@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitOwnerKind
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.wait_contract import WaitEvidence
@@ -42,7 +42,7 @@ from datetime import datetime
 from vonk_control.coordinator_failures import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.worker import Worker

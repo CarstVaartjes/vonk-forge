@@ -51,7 +51,7 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
 
-from . import agent_operation_states, job_states
+from . import agent_operation_states
 from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
@@ -60,6 +60,7 @@ from .host_runtime_plan_authority import (
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
+from .jobs import states as job_states
 from .logging import log_event
 from .models import (
     AgentCertificate,

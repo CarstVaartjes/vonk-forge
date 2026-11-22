@@ -16,7 +16,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, FleetProfile, FleetProfileApplication, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService

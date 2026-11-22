@@ -40,7 +40,7 @@ from vonk_control.execution_plan_service import (
     _placement,
     _PlacementTarget,
 )
-from vonk_control.jobs import _canonical_payload
+from vonk_control.jobs.queue import _canonical_payload
 from vonk_control.models import (
     CatalogDocumentRevision,
     ClusterMappingNode,

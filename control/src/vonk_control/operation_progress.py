@@ -23,7 +23,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from . import agent_operation_states, job_states
+from . import agent_operation_states
+from .jobs import states as job_states
 from .lifecycle.evidence import Residue
 from .operation_contract import same_progress_attempt
 from .stall_window import progress_advanced

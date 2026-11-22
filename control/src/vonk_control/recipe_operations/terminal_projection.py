@@ -25,7 +25,7 @@ from ..distributed_recovery import (
     enforce_recovery_deadline,
     recovery_start_plan,
 )
-from ..job_documents import (
+from ..jobs.documents import (
     ProfilePartialStop,
     RecipeStopParent,
     controller_recipe_document,

@@ -17,7 +17,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import FleetProfileInvalid
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,

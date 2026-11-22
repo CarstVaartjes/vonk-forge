@@ -28,7 +28,7 @@ from ..admission_locking import is_admission_contention
 from ..agent_jobs import (
     AgentJobService,
 )
-from ..job_documents import RecipeStopParent, controller_recipe_document
+from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
 from ..lifecycle.recipe_operation import RecipeOperationAdapter

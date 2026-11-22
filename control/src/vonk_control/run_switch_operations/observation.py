@@ -14,9 +14,9 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,

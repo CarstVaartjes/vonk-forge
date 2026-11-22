@@ -75,7 +75,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import (
     AGENT_ORDER_RECOVERY_BUDGET,
@@ -94,6 +94,7 @@ from ..agent_operation_facts import (
     start_deadline,
 )
 from ..categorized_errors import InvalidValue
+from ..jobs import states as job_states
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop

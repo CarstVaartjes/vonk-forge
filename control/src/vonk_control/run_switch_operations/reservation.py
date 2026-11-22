@@ -21,12 +21,12 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import job_states
 from ..admission_locking import ConstraintReplay, admitting
 from ..agent_jobs import AgentJobService
 from ..bounded_json import require_integer, require_mapping
 from ..failure_classification import error_code, is_security_failure
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchIntent,
     RunSwitchJobPayload,

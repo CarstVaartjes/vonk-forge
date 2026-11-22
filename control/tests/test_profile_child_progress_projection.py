@@ -29,7 +29,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.job_documents import RecipeStartParent
+from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentCertificate,

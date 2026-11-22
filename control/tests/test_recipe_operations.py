@@ -78,7 +78,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.models import (
     AgentCertificate,

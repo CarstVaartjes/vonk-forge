@@ -24,7 +24,7 @@ from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from .. import bounded_retry
 from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
-from ..job_documents import DistributedRecoveryMarker
+from ..jobs.documents import DistributedRecoveryMarker
 from ..litellm import (
     LiteLlmGeneration,
     ServedModelInfo,

@@ -58,7 +58,7 @@ from ..compiled_artifact_contract import (
     ParameterScalar,
     compile_artifact_contract,
 )
-from ..job_documents import RecipeJobRunParent
+from ..jobs.documents import RecipeJobRunParent
 from ..library_contract import UuidId
 from ..lifecycle.evidence import (
     BookkeepingReason,

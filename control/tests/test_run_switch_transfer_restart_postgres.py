@@ -454,7 +454,7 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
 ):
     """Catches a bounded sweep stuck examining the same unusable history row."""
     from vonk_control.agent_jobs import results as ingress
-    from vonk_control.job_documents import DistributionJobPayload
+    from vonk_control.jobs.documents import DistributionJobPayload
     from vonk_control.run_switch_operations import _stored_job_plan
     from vonk_control.strict_json import read_stored_model
 

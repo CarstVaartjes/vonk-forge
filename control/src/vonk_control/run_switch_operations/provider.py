@@ -18,11 +18,11 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states
 from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
+from ..jobs import states as job_states
 from ..lifecycle.run_switch import (
     RunSwitchAdapter,
 )

@@ -18,16 +18,13 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     require_reference_open,
 )
 from ..content_identity import same_image
-from ..job_documents import (
-    AvailabilityJobPayload,
-    AvailabilityRuntime,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
 from ..models import (
     Job,
     RecipeBuild,

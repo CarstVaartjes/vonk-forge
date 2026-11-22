@@ -17,10 +17,10 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
-from .. import job_states
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..failure_classification import is_definite
-from ..job_documents import DistributedRecoveryMarker
+from ..jobs import states as job_states
+from ..jobs.documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
 from ..logging import log_event
 from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode

@@ -60,9 +60,7 @@ from ..admission_locking import (
 from ..content_identity import (
     same_image as same_image,
 )
-from ..job_documents import (
-    RecipeInstallParent as RecipeInstallParent,
-)
+from ..jobs.documents import RecipeInstallParent as RecipeInstallParent
 from ..models import (
     AgentCertificate as AgentCertificate,
 )

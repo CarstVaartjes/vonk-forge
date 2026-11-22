@@ -30,7 +30,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from .job_documents import (
+from .jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,
     RecipeJobActivateParent,

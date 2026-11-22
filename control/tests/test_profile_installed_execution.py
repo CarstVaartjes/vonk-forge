@@ -1607,7 +1607,7 @@ def test_prepared_installation_is_referenced_before_its_child_is_issued(
     """Catches replacing the node hold while ignoring the prepared result."""
     from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
     from vonk_control.catalog.revision_collection import operation_tokens
-    from vonk_control.job_documents import RunSwitchJobPayload
+    from vonk_control.jobs.documents import RunSwitchJobPayload
     from vonk_control.run_switch_contract import (
         RunSwitchOperationResult,
         RunSwitchRuntimeInstallResult,

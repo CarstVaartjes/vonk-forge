@@ -21,7 +21,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .agent_jobs.stored import column_field, column_value
 from .artifact_job_evidence import read_result_evidence
-from .job_documents import RecipeStopParent
+from .jobs.documents import RecipeStopParent
 from .models import AgentNode, AgentOperation, ArtifactJob, Job
 from .recipe_stop_payloads import stop_payload_from_job_run
 from .stored_json import read_row_column

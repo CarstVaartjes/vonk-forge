@@ -4388,7 +4388,7 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
 
 def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -> None:
     """A rebuildable child cannot turn pending cleanup into a human gate."""
-    from vonk_control.job_documents import RecipeBuildParent
+    from vonk_control.jobs.documents import RecipeBuildParent
     from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 
     jobs, sessions, clock = service
@@ -4609,7 +4609,7 @@ def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
 def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service):
     """Catch hashing full Controller state instead of its canonical typed identity."""
     from vonk_control.agent_jobs.stored import column_message, column_value
-    from vonk_control.job_documents import RecipeStartParent
+    from vonk_control.jobs.documents import RecipeStartParent
 
     _jobs, sessions, clock = service
     job = parent(sessions, clock)

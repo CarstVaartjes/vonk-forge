@@ -12,7 +12,6 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
@@ -22,7 +21,8 @@ from ..fleet_profile_contract import (
     FleetProfilePreview,
     FleetProfileScopePreview,
 )
-from ..job_documents import DistributionJobPayload, RunSwitchJobPayload, _RecipeParent
+from ..jobs import states as job_states
+from ..jobs.documents import DistributionJobPayload, RunSwitchJobPayload, _RecipeParent
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Damaged,

@@ -28,7 +28,8 @@ from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
 from vonk_agent_protocol import WaitReason
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import read_wait, schedule_wait

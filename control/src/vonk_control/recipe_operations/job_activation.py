@@ -24,7 +24,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
-from ..job_documents import RecipeJobActivateParent, controller_recipe_document
+from ..jobs.documents import RecipeJobActivateParent, controller_recipe_document
 from ..models import (
     RecipeInstallation,
     RecipeRun,

@@ -35,10 +35,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_mapping
 from ..failure_classification import disposition
-from ..job_documents import (
-    RecipeStopParent,
-    controller_recipe_document,
-)
+from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..logging import redact_text
 from ..models import (
     AgentOperation,

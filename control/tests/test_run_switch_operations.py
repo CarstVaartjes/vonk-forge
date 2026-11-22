@@ -2653,7 +2653,7 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        from vonk_control.job_documents import RunSwitchRunIntent
+        from vonk_control.jobs.documents import RunSwitchRunIntent
 
         payload = _run_switch_payload(session.get(Job, operation.operation_id))
         assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)

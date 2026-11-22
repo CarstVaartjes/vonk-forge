@@ -20,7 +20,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.library_api import install_library_routes
 from vonk_control.operation_api import durable_operation_services
 

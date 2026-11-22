@@ -16,7 +16,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
 )
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy

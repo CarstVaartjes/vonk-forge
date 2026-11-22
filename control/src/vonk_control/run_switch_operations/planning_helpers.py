@@ -26,10 +26,7 @@ from vonk_agent_protocol import (
 from ..categorized_errors import (
     InvalidValue,
 )
-from ..job_documents import (
-    RecipeStartParent,
-    RunSwitchJobPayload,
-)
+from ..jobs.documents import RecipeStartParent, RunSwitchJobPayload
 from ..memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,

@@ -8,9 +8,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState
-from vonk_control import job_states, telemetry_maintenance
+from vonk_control import telemetry_maintenance
 from vonk_control.coordinator_failures import CoordinatorFailures
-from vonk_control.jobs import JobService
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base
 from vonk_control.worker import HandlerRequest, Worker, WorkerWatchdog
 

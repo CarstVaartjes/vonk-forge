@@ -21,7 +21,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -35,10 +34,8 @@ from ..admission_locking import (
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
-from ..job_documents import (
-    RecipeBuildParent,
-    controller_recipe_document,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import RecipeBuildParent, controller_recipe_document
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,

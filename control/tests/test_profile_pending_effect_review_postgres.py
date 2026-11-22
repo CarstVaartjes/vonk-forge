@@ -28,7 +28,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     build_production_fleet_profile_service,
 )
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,

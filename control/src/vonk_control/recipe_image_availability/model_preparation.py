@@ -18,9 +18,7 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import ConstraintDefect
-from ..job_documents import (
-    AvailabilityModelChild,
-)
+from ..jobs.documents import AvailabilityModelChild
 from ..model_cache_contract import (
     CacheManifest,
     ModelCacheOperationProgress,

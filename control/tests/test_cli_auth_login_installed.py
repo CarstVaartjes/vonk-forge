@@ -16,7 +16,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base, User
 from vonk_control.passwords import hash_password
 

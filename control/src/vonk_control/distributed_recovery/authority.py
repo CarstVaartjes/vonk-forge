@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
 from ..distributed_lifecycle import canonical_distributed_readiness
-from ..job_documents import (
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
     RecipeStopParent,

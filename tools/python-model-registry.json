@@ -168,7 +168,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/agent_job_contract.py",
+      "module": "control/src/vonk_control/jobs/agent_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -334,7 +334,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/job_documents.py",
+      "module": "control/src/vonk_control/jobs/documents.py",
       "kind": "controller-contract"
     },
     {

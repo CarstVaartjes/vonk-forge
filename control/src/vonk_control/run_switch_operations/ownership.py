@@ -15,8 +15,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
-from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
+from ..jobs import states as job_states
 from ..models import (
     AgentNode,
     Job,

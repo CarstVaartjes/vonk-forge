@@ -9,7 +9,7 @@ from .models import AgentOperation, Job
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:
     # Imported here because the canonical job contracts reach the queue adapters.
-    from .job_documents import RecipeStopParent
+    from .jobs.documents import RecipeStopParent
     from .profile_stop_authority import ProfileJobRunStopJob
     from .strict_json import read_stored_model
 
@@ -35,7 +35,7 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
     digests of the Controller's own rows never decide it. Authentication and
     attempt fences remain enforced by the normal claim and result paths.
     """
-    from .job_documents import RecipeStopParent
+    from .jobs.documents import RecipeStopParent
     from .profile_stop_authority import ProfileJobRunStopJob
     from .strict_json import read_stored_model
 

@@ -17,9 +17,10 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..failure_classification import is_security_failure
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityModelChild,

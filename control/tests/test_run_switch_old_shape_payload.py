@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import select, text
 from vonk_agent_protocol import canonical_message
-from vonk_control.job_documents import RunSwitchJobPayload
+from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models import Job, RecipeRun
 from vonk_control.preparation_contract import ModelArtifactIdentity
 from vonk_control.run_switch_contract import (

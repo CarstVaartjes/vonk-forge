@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -23,6 +22,7 @@ from ..artifact_lifecycle import (
     require_reference_open,
 )
 from ..content_identity import ImageContent, differing_image_fields
+from ..jobs import states as job_states
 from ..models import (
     AgentNode,
 )

@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation, InvalidRequestReason, LifecycleState
 from vonk_agent_protocol.agent_words import FailureStage
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_upgrade_status import operator_agent_upgrade_reason
 from ..categorized_errors import MissingRecord
 from ..inventory_items import runtime_value
+from ..jobs import states as job_states
 from ..lifecycle.agent_operation import (
     aggregate_parent_state,
     is_artifact_owned,

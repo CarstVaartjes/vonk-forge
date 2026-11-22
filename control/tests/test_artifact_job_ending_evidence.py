@@ -35,11 +35,12 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import job_states, operation_api
+from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
     AgentNode,

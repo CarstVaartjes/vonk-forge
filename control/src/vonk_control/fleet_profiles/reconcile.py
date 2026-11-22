@@ -23,7 +23,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..failure_classification import error_code, is_definite, is_security_failure
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -31,6 +31,7 @@ from ..fleet_profile_contract import (
     FleetProfileChildOperation,
     FleetProfileStepResult,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect

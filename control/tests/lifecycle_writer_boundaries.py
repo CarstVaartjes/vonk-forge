@@ -74,7 +74,7 @@ DICT_STATE_OWNERS = frozenset(
             )
         ),
         "control/src/vonk_control/fleet_profiles/",
-        "control/src/vonk_control/jobs.py",
+        "control/src/vonk_control/jobs/queue.py",
         "control/src/vonk_control/model_cache/artifacts.py",
         "control/src/vonk_control/model_cache/availability.py",
         "control/src/vonk_control/model_cache/cancellation.py",

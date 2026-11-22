@@ -188,7 +188,7 @@ def test_live_operation_protects_file_identity_without_a_matching_cache_owner(
         )
         expected = {file.sha256 for file in definition.files}
         assert expected
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
 
     world.job(
         RecipeStopParent(
@@ -233,7 +233,7 @@ def test_missing_model_dependency_defers_collection_instead_of_authorizing_parti
             .where(CatalogDocumentRevision.id == model_id)
             .values(document=document, content_digest=digest)
         )
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
 
     world.job(
         RecipeStopParent(

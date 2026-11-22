@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
     RecipeImageCode,
     WaitReason,
 )
-from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,
     PREPARATION_STALL_WINDOW,

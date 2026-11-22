@@ -42,24 +42,24 @@ from vonk_agent_protocol.integer_domains import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
-from .distribution_assignment import NodeDistributionAssignment
-from .lifecycle.evidence import BookkeepingReason
-from .mapping_parameters import EngineArgumentValue
-from .operation_blockers import OperationBlocker
-from .operation_contract import AvailabilityOperationFailure
-from .profile_stop_authority import (
+from ..distribution_assignment import NodeDistributionAssignment
+from ..lifecycle.evidence import BookkeepingReason
+from ..mapping_parameters import EngineArgumentValue
+from ..operation_blockers import OperationBlocker
+from ..operation_contract import AvailabilityOperationFailure
+from ..profile_stop_authority import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
-from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
-from .recipe_builds.cancellation import RecipeBuildIntent
-from .recipe_image_availability_contract import (
+from ..recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
+from ..recipe_builds.cancellation import RecipeBuildIntent
+from ..recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,
 )
-from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .run_switch_contract import (
+from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..run_switch_contract import (
     RunSwitchAction,
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
@@ -72,9 +72,9 @@ from .run_switch_contract import (
     RunSwitchReconciliationAuthority,
     RunSwitchStopApplyRequest,
 )
-from .runtime_image_preparation import RuntimeImageReceipt, RuntimeImageReferenceIntent
-from .stored_json import ExternalPassthrough
-from .strict_json import StrictJSONModel
+from ..runtime_image_preparation import RuntimeImageReceipt, RuntimeImageReferenceIntent
+from ..stored_json import ExternalPassthrough
+from ..strict_json import StrictJSONModel
 
 UuidText = Annotated[
     str,

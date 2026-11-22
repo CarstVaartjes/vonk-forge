@@ -18,12 +18,12 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
-from ..job_documents import controller_recipe_document
+from ..jobs import states as job_states
+from ..jobs.documents import controller_recipe_document
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.core import RECOVERY

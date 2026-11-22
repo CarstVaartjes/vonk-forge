@@ -83,7 +83,7 @@ from .fleet_profile_contract import (
     LabelName,
     LabelValue,
 )
-from .job_documents import (
+from .jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityUnknownEnd,

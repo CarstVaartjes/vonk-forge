@@ -20,7 +20,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileEffects,
@@ -28,6 +28,7 @@ from ..fleet_profile_contract import (
     FleetProfileReason,
     FleetProfileRunEffect,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..models import (
     STOPPABLE_RUN_STATES,

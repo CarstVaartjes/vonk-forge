@@ -21,7 +21,7 @@ from vonk_agent_protocol import (
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
-from vonk_control.job_documents import AvailabilityJobPayload, RecipeBuildParent
+from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.oci_image_store import OciImageStore
 from vonk_control.operation_contract import AvailabilityOperationFailure

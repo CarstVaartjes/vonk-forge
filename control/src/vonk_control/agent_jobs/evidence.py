@@ -166,7 +166,7 @@ def _exact_service_stop_receipt_covers_start(
     runtime generation is resolved; cancellation or a terminal parent alone
     proves nothing. Current node intent still fences every original Start claim.
     """
-    from ..job_documents import RecipeStartParent, RecipeStopParent
+    from ..jobs.documents import RecipeStartParent, RecipeStopParent
     from ..recipe_stop_payloads import (
         durable_run_stop_payloads,
         stop_payload_from_start,

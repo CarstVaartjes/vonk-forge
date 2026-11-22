@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 
 from tests.test_fleet_profiles import _SwitchAdapter
 from tests.test_fleet_profiles_canonical import NOW

@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
-from .. import job_states
 from ..agent_jobs import (
     AgentJobService,
     authorize_operator_resume_in_session,
@@ -36,7 +35,8 @@ from ..fleet_profile_contract import (
     FleetProfileEndpointsView,
 )
 from ..inventory_items import runtime_value
-from ..job_operator_receipts import (
+from ..jobs import states as job_states
+from ..jobs.operator_receipts import (
     JobOperatorReceipt,
     record_job_operator_receipt,
     replay_job_operator_receipt,

@@ -41,7 +41,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from .. import job_states
 from ..admission_locking import is_admission_contention
 from ..cache_removal_review import (
     CacheRemovalAsset,
@@ -50,9 +49,8 @@ from ..cache_removal_review import (
 from ..categorized_errors import InvalidValue
 from ..categorized_faults import security_reason
 from ..failure_classification import disposition, error_code, is_security_failure
-from ..job_documents import (
-    AvailabilityRuntime,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityRuntime
 from ..model_cache import (
     ModelCacheRemovalScope,
 )
