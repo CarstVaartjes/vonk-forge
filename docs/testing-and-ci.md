@@ -780,6 +780,13 @@ request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.
 
+The lane's amd64 Controller leaf starts the runner-disk cleanup in the background
+(`free-runner-disk` with `phase: start`) and waits for it (`phase: finish`, bounded to
+300 s, reporting the margin and warning when it is low) right before the image build,
+so the 76 s deletion overlaps the Python environment and mirror steps. Its per-pull-request
+registry cache is exported with `mode=min` (final-image layers; main's cache still
+supplies the intermediate stages) instead of `mode=max`.
+
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
 

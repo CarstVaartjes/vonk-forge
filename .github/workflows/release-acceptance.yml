@@ -153,9 +153,11 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - name: Free runner disk
+      - name: Free runner disk in the background
         if: matrix.platform == 'amd64'
         uses: ./.github/actions/free-runner-disk
+        with:
+          phase: start
       - uses: ./.github/actions/python-env
       - name: Build the protocol wheel the Controller image carries
         run: scripts/build-control-wheel
@@ -184,6 +186,11 @@ jobs:
       - name: Name the dependency layer day
         id: day
         run: echo "value=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Wait for the runner disk to be freed
+        if: matrix.platform == 'amd64'
+        uses: ./.github/actions/free-runner-disk
+        with:
+          phase: finish
       - name: Build the native candidate leaf
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -209,7 +216,7 @@ jobs:
           cache-from: |
             ${{ matrix.cache }}
             ${{ matrix.role == 'api' && format('type=registry,ref={0}', env.PR_CACHE) || '' }}
-          cache-to: ${{ matrix.role == 'api' && format('type=registry,ref={0},mode=max', env.PR_CACHE) || '' }}
+          cache-to: ${{ matrix.role == 'api' && format('type=registry,ref={0},mode=min', env.PR_CACHE) || '' }}
       - name: Build the native candidate worker leaf on the shared Controller builder
         if: matrix.role == 'api'
         id: worker
