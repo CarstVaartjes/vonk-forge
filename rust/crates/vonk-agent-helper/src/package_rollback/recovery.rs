@@ -1,6 +1,5 @@
-use std::fs::{self, File};
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vonk_agent_protocol::PackageActivationPhase as Phase;
@@ -116,8 +115,6 @@ impl Store {
             }
         }
         for unit in [
-            "vonk-forge-package-upgrade-recover-capsule.service",
-            "vonk-forge-package-upgrade-recover.service",
             "vonk-forge-agent.service",
             "vonk-forge-package-helper.service",
         ] {
@@ -130,7 +127,6 @@ impl Store {
                 command("/usr/bin/systemctl", &["--system", "stop", unit], false)?;
             }
         }
-        retire_candidate_recovery(&tx.candidate_sha256)?;
         command_with_nonce(
             "/usr/bin/dpkg",
             &[
@@ -224,46 +220,4 @@ fn digest_process(pid: u32) -> Result<String, String> {
     // /proc/PID/exe is a kernel-owned symlink to the actual running executable.
     let mut process = File::open(format!("/proc/{pid}/exe")).map_err(|e| e.to_string())?;
     digest_file(&mut process)
-}
-
-fn retire_candidate_recovery(candidate: &str) -> Result<(), String> {
-    let root = Path::new("/var/lib/vonk-forge/package-upgrade");
-    let intent = root.join("intent");
-    if !intent.exists() {
-        return Ok(());
-    }
-    if safe(root, true, 0, 0o700).is_err() || safe(&intent, false, 0, 0o600).is_err() {
-        return Ok(());
-    }
-    let Ok(text) = fs::read_to_string(&intent) else {
-        return Ok(());
-    };
-    if text.lines().count() != 17
-        || text.lines().next() != Some("schema_version=2")
-        || text.lines().nth(1) != Some("package=vonk-forge-agent")
-        || text.lines().nth(4) != Some(format!("package_sha256={candidate}").as_str())
-    {
-        // Unmatched history cannot authorize cleanup or veto source recovery.
-        return Ok(());
-    }
-    for path in [
-        intent,
-        root.join("agent-blocked"),
-        PathBuf::from("/var/lib/vonk-forge/helper-upgrade.pending"),
-        PathBuf::from(
-            "/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
-        ),
-        PathBuf::from(
-            "/lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
-        ),
-    ] {
-        match fs::symlink_metadata(&path) {
-            Ok(m) if m.is_file() && !m.file_type().is_symlink() && m.uid() == 0 => {
-                fs::remove_file(path).map_err(|e| e.to_string())?
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            _ => (), // Preserve unknown entries; they are not restore authority.
-        }
-    }
-    Ok(())
 }

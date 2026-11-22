@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Actual signed DEB/systemd rollback acceptance in a disposable ARM64 machine.
 
-Both package generations use the current helper and current preinst contract.
+Both package generations use the current helper and ship no preinst.
 The tiny agent executable and postinst are explicit fault-injection fixtures;
-full production maintainer-script recovery remains in the adjacent shell lanes.
+the production maintainer scripts are exercised by the transition lane.
 Never run on a deployed Spark. No Controller or physical GPU acceptance is claimed.
 """
 
@@ -100,17 +100,6 @@ def build(work: Path, helper: Path, generation: int, fault: str = "") -> dict:
         stage / "DEBIAN/control",
         f"Package: vonk-forge-agent\nVersion: {version}\nArchitecture: arm64\nMaintainer: acceptance <test@example.invalid>\nDescription: current-contract signed rollback fixture\n",
     )
-    # Use the actual current downgrade/preflight preinst. This probe's unit is
-    # separate from the production helper unit, so capsule recovery is not armed.
-    preinst = (ROOT / "packaging/debian/preinst").read_text()
-    for key, value in {
-        "VERSION": version,
-        "ARCHITECTURE": "arm64",
-        "AGENT_SHA256": agent_sha,
-        "HELPER_SHA256": helper_sha,
-    }.items():
-        preinst = preinst.replace(f"@{key}@", value)
-    write(stage / "DEBIAN/preinst", preinst, 0o755)
     write(
         stage / "DEBIAN/prerm",
         "#!/bin/sh\nset -eu\n/usr/bin/systemctl stop vonk-forge-agent.service\n",

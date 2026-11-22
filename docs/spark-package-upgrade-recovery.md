@@ -1,133 +1,140 @@
 # Spark package upgrade recovery
 
-Controller-managed Spark upgrades use a single root-custody protocol. The agent
-downloads both the complete signed candidate and the captured installed source DEB into its private incoming directory, but the
-already-installed signed package helper never passes that agent-owned path to
-`dpkg`. It opens the source without following links, validates the artifact,
-copies those exact bytes into a fresh root-only
-`/run/vonk-forge-package-candidates/<invocation>/` directory, and invokes `dpkg`
-with that custodied path. The durable pre-install script accepts only that path
-shape with exact root ownership, modes, link count, invocation grammar, digest
-filename, package fields, and payload identity before taking its durable cache
-copy. There is no direct agent-owned candidate or package-helper bridge path.
+A Controller-managed Spark upgrade has one recovery path. The package ships no
+`preinst` and no recovery runner: nothing in the package completes an
+interrupted upgrade forward. The path is
 
-Once the new pre-install script starts, it commits the exact signed package,
-recovery runner, static boot trigger, and agent-start gate before publishing the
-intent. The intent denies agent startup until exact activation evidence exists;
-a following root-owned blocker records the pre-activation phase. Recovery
-accepts only the canonical three-line schema-2 pending record, normalizes it to
-the exact target, repairs only `vonk-forge-agent`, proves the
-installed and running helper/agent identities, and compare-deletes the intent.
-It uses no network and never runs an unbounded `dpkg --configure -a`.
+custody -> rollback arm -> dpkg -> finisher -> acknowledgement or deadline
+restore -> Controller re-drive.
 
-If named-package configure or exact-cache install still fails, the recovery
-runner may remove and reinstall only `vonk-forge-agent`. That fallback is
-allowed only while all of the following still match: the root-owned 17-line
-intent, target version and architecture, package and payload digests, recovery
-nonce, recovery systemd cgroup, and the exact parent `dpkg` argv. The package
-scripts preserve enrollment configuration, certificates, recovery gates, and
-the root-owned package cache across that narrowly authorized remove. A newer
-installed package is never removed or downgraded.
+## 1. Custody
 
-`/var/lib/vonk-forge/package-upgrade.status` is a root-owned, seven-line,
-secret-free receipt containing only a bounded outcome, allowlisted stage,
-bounded reason token, the target package-version metadata and package digest,
-and bounded `dpkg` state. New helpers also return allowlisted package
-verification, metadata, custody, or installation codes; only installation
-failures may carry an exit status in the range 0 through 255. The Controller
-treats every one of these detailed failures as recoverable but operator-paused.
-It does not dispatch that Spark's retry, nor count its upgrade done, until a
-new authenticated protocol-v3 contact proves the exact signed package, binary digest, build digest,
-architecture, required upgrade capability, and successful self-test, followed
-by the exact activation acknowledgement described below. Package and semantic version strings,
-plus any capabilities unknown to this Controller, are informational/open
-metadata and are not required to match across Controller and Spark. The
-protocol version and the required upgrade capability remain safety checks so
-the receiving side can understand and execute the signed operation.
+The agent downloads the complete signed candidate and the captured installed
+source DEB into its private incoming directory, but the already-installed
+signed package helper never passes that agent-owned path to `dpkg`. It opens the
+file without following links, validates the artifact (digest and Ed25519
+signature, once, at this ingress), copies those exact bytes into a fresh
+root-only `/run/vonk-forge-package-candidates/<invocation>/` directory, and
+invokes `dpkg` with that custodied path. No later step re-hashes the package.
 
-Recovery refuses unsafe package effects but preserves automatic observation.
-Both temporary and unsafe-state attempts exit 75 and systemd starts a fresh
-attempt after ten seconds, without a start limit or excluded exit status.
-The durable status receipt and journal expose the cause on every attempt;
-`OnFailure` also retains its critical alert hook. Existing reconciliation
-retires unusable intents without installing unverified bytes. Package signature
-and ingress digest verification, grant authentication, and protection against
-destructive changes to user data remain effect boundaries. A refused effect
-never disables the recovery executor permanently.
+## 2. Rollback arm
 
-## Bounded source restoration
+Before `dpkg` can stop the healthy agent, the helper arms the bounded source
+restoration, and refuses to install if it cannot. The signed install operation
+carries one nested `PackageRollbackAuthority`: source package
+digest/signature/version and agent/helper hashes, a fresh attempt nonce, and an
+activation deadline (900 s). The helper verifies the source DEB signature,
+retains the source bytes and a copy of the source helper executable in a
+root-only durable transaction directory, and records the transaction as armed.
+The fixed `vonk-forge-package-rollback.service` watchdog runs that retained
+executable, so replacing or stopping the installed helper cannot remove the
+recovery runner. The unit is enabled by the package, so a reboot resumes an
+armed transaction.
 
-Before `dpkg` can stop the healthy agent, the current helper verifies both DEB
-signatures, all maintainer-script and watchdog executables, configured package
-state, and the source package/version/agent/helper hashes. The prior package
-must be the exact signed source captured by the Controller for this attempt;
-there is no caller-provided package path or arbitrary downgrade request. The
-source bytes and source helper executable are retained in a root-only durable
-transaction directory. The fixed systemd watchdog uses that retained executable,
-so replacing or stopping the installed helper cannot remove the recovery runner.
-The unit is enabled by the current package and checked before activation.
+The Controller path stays anti-rollback: the helper arms rollback only for a
+candidate whose version is at least the exact captured source. A root
+operator's explicit `dpkg --install` of an older package is the latest request
+and proceeds; maintainer scripts do not refuse a downgrade.
 
-The signed install operation carries one nested `PackageRollbackAuthority`:
-source package digest/signature/version and agent/helper hashes, a fresh attempt
-nonce, and a bounded activation deadline. A failed install triggers restoration
-immediately. An absent readiness/reconnect acknowledgement triggers restoration
-at the deadline. Restoration stops the exact conflicting package services,
-retires only the matching candidate recovery intent, reinstalls only the captured
-source DEB, and verifies configured package state plus the actual restarted
-process executable. Interrupted restoration resumes from that same durable
-transaction; it cannot select a different package or overwrite a third identity.
+## 3. dpkg
 
-Maintainer scripts no longer refuse a downgrade: a root operator's explicit
-`dpkg --install` of an older package is the latest request and proceeds. The
-Controller path stays anti-rollback: the signed helper arms rollback only for a
-candidate whose version is at least the exact captured source, so a
-Controller-driven install cannot downgrade. The watchdog restores only the exact
-captured source while the transaction is `rolling_back`. Source installation runs
-with the current maintainer scripts' offline activation setting; the watchdog
-itself restarts and proves the source process afterwards.
+The old helper runs `dpkg --install --force-confold` on the custodied
+candidate inside its own unit sandbox. The candidate has no `preinst`, so
+nothing arms before unpack. The old package's `prerm upgrade` and `postrm
+upgrade` do nothing. The candidate's `postinst configure` converges the
+account, directories, machine evidence and unit enablement, retires any
+forward-capsule files an older package staged (the old capsule unit, its
+drop-ins, its wants link; they are not dpkg-owned), reloads systemd, and
+schedules the finisher. A `postinst` failure leaves the package `iF`, the
+install fails, and the helper moves the transaction to `activation_failed`, so
+the watchdog restores at once.
 
-The Controller issues the signed fixed `confirm-package-activation` operation
-only for the candidate that has met the contact/readiness gate. It binds the
-candidate package digest and original attempt nonce; the host grant binds the
-node. The helper also checks the installed candidate executable hashes, that dpkg
-reports the package `install ok installed` at the candidate version. Any other or unreadable state refuses, the
-transaction stays armed and the watchdog restores at the deadline. A
-successful contact alone does not cancel the watchdog or advance the canary.
-The acknowledged root receipt is the final activation gate.
+## 4. Finisher
+
+On every upgrade `postinst` starts the transient
+`vonk-forge-package-helper-upgrade-finish.service`, run by PID 1 so it outlives
+the helper it restarts. It waits for the dpkg process to exit, stops the agent
+and monitor, restarts the helper, proves from `/proc/<pid>/exe` that the
+running helper is the candidate's, and then restarts the agent and monitor.
+No agent talks to a helper of another release: the old agent stops before the
+helper restarts, and the new one starts after the helper is proven. Whatever
+happens in between, the finisher's exit starts the agent again; it never stays
+stopped. Docker containers belong to dockerd and are untouched.
+
+## 5. Acknowledgement or deadline restore
+
+The new agent contacts the Controller, which issues the signed fixed
+`confirm-package-activation` operation only for the candidate that has met the
+contact and readiness gate. It binds the candidate package digest and the
+original attempt nonce; the host grant binds the node. The helper acknowledges
+only when `dpkg` reports the package `install ok installed` at the candidate
+version and the installed agent and helper hashes are the candidate's. Any
+other or unreadable state refuses, the transaction stays armed, and the
+watchdog restores at the deadline: a candidate that is only unpacked or
+half-configured is never acknowledged. The acknowledged root receipt is the
+final activation gate.
+
+Any other end is restored by the watchdog: a failed install restores
+immediately; no acknowledgement restores at the deadline, including after a
+crash of the helper, of `dpkg`, or a reboot (the deadline has usually passed
+and the enabled watchdog restores at boot). Restoration stops the agent and
+helper, reinstalls only the captured source DEB, and verifies the configured
+package state plus the actual restarted process executable. Interrupted
+restoration resumes from the same durable transaction; it cannot select a
+different package or overwrite a third identity. The restore runs `dpkg`
+offline, so the source `postinst` schedules no finisher; the watchdog itself
+reloads systemd and restarts the helper socket and the agent.
+
+An interrupted upgrade therefore ends on the previous version within the
+deadline, not forward on the candidate.
 
 `/var/lib/vonk-forge/package-activation.receipt.json` is a root-owned readable
 current schema-2 `PackageActivationReceipt`. It carries the node, source and
 candidate versions/package and agent hashes, attempt nonce, phase, creation and
 update times, and bounded outcome. It contains no arbitrary shell output,
 credentials, package paths, or signature private material. The Controller can
-report `armed`, `activation_failed`, `acknowledged`, `rolling_back`, `rolled_back`,
-or `rollback_failed` without confusing candidate contact with activation success.
+report `armed`, `activation_failed`, `acknowledged`, `rolling_back`,
+`rolled_back`, or `rollback_failed` without confusing candidate contact with
+activation success.
 
-The ARM64 systemd CI lane executes
-`tests/nodes/test_agent_package_rollback_systemd.py` with the built current
-helper and its disposable acceptance probe. Both fixture package generations
-use the current signed protocol and current preinst; no obsolete supported
-baseline is invented. The small service executable and postinst are explicit
-fault-injection fixtures, while the adjacent recovery shell lane exercises
-the complete production maintainer scripts. This is Debian/systemd acceptance,
-not physical Spark, NVIDIA, or live Controller deployment evidence.
+## 6. Controller re-drive
 
-`tests/nodes/test_agent_package_transition_systemd.py` starts from the promoted
-dev release package instead. It downloads the package named by the signed
-`release.json`, reseals it with a throwaway key, and drives the promoted
-helper's own units, sandbox and watchdog. Signed grants go over the real socket
-through `vonk-agent-helper`'s `package_grant_probe` example. The candidates are
-this tree's package: unmodified (today's path, which arms the capsule), and
-without a preinst, so the watchdog alone is the recovery. The no-preinst cases
-are a finisher upgrade with acknowledgement, a failing postinst, and three
-faults. dpkg alone is killed while its payload extraction is held (`iHR`, no
-candidate file on disk). The helper cgroup is killed, and separately a reboot
-stand-in runs, while the candidate's postinst is held (`iF`, every candidate
-file and script unpacked), so the deadline restore runs. No capsule intent or
-arming breadcrumb may appear in any of them. A runner cannot reboot inside a job, so the stand-in
-kills and stops the package's units, waits past the activation deadline, and
-starts the units a boot starts. A kernel boot and lost unsynced writes are not
-reproduced.
+The Controller retries a failed or unacknowledged order automatically, after
+`AGENT_UPGRADE_RECOVERY_FENCE` has passed, and only while the Spark still runs
+the exact rollback source. A later authenticated contact that proves the
+target completes the order first. Package and semantic version strings, plus
+any capabilities unknown to this Controller, are informational metadata; the
+protocol version and the required upgrade capability remain safety checks.
+
+## Retired state
+
+`/var/lib/vonk-forge/package-upgrade/`, `package-upgrade.status` and
+`package-upgrade.preflight.*` belonged to the retired forward capsule. Nothing
+writes them any more; the helper's store retention removes them once unused
+for a day.
+
+## Proof
+
+- `tests/nodes/test_agent_package_rollback_systemd.py` runs the built helper
+  and its disposable acceptance probe on a systemd host. Both fixture package
+  generations ship no `preinst`; the service executable and postinst are
+  explicit fault-injection fixtures.
+- `tests/nodes/test_agent_package_transition_systemd.py` starts from the
+  promoted dev release package. It downloads the package named by the signed
+  `release.json`, reseals it with a throwaway key, and drives the promoted
+  helper's own units, sandbox and watchdog; signed grants go over the real
+  socket through `package_grant_probe`. The candidate is this tree's package.
+  Cases: a finisher upgrade with acknowledgement; a candidate that arrives
+  with a capsule's staged files left by the promoted package; a failing
+  postinst; dpkg killed while its payload extraction is held (`iHR`); the
+  helper cgroup killed, and a reboot stand-in, while the candidate's postinst
+  is held (`iF`). No capsule intent or arming breadcrumb may appear in any of
+  them. A runner cannot reboot inside a job, so the stand-in kills and stops the
+  package's units, waits past the deadline and starts the units a boot starts;
+  a kernel boot and lost unsynced writes are not reproduced.
+
+This is Debian/systemd acceptance on disposable ARM64 runners, not physical
+Spark, NVIDIA, or live Controller deployment evidence.
 
 ## Retry behavior and diagnostics
 
@@ -140,7 +147,7 @@ After restoring the captured source, the watchdog retries service activity,
 MainPID, and the actual executable digest for up to 15 seconds of polling.
 A transient startup observation does not immediately trigger another reinstall.
 The expected source digest remains mandatory. Failed installation still transfers
-control to rollback, which stops candidate recovery before restoring the source.
+control to rollback, which restores the source.
 
 The helper streams dpkg stdout and stderr to its service journal while retaining
 a short diagnostic tail. Inspect `journalctl -u vonk-forge-package-helper`

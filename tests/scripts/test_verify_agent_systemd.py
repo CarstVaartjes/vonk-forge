@@ -16,8 +16,6 @@ PACKAGED_UNITS = [
     "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
-    "vonk-forge-package-upgrade-recover.service",
-    "vonk-forge-package-upgrade-alert@.service",
 ]
 
 
@@ -50,21 +48,12 @@ def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
     assert "/var/lib/vonk-forge/incoming" not in inaccessible
 
 
-def test_agent_unit_has_notify_watchdog_and_unsafe_recovery_alert_contract() -> None:
+def test_agent_unit_has_notify_watchdog() -> None:
     agent = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
-    recovery = (
-        ROOT / "packaging/systemd/vonk-forge-package-upgrade-recover.service"
-    ).read_text()
-    alert = (
-        ROOT / "packaging/systemd/vonk-forge-package-upgrade-alert@.service"
-    ).read_text()
 
     assert "Type=notify" in agent
     assert "WatchdogSec=15min" in agent
     assert "TimeoutStartSec=5min" in agent
-    assert "OnFailure=vonk-forge-package-upgrade-alert@%n.service" in recovery
-    assert "RestartPreventExitStatus=" not in recovery
-    assert "package-upgrade.status" in alert
 
 
 @pytest.mark.linux_only
@@ -94,25 +83,14 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         "device_policy": "closed",
         "type": "notify",
         "watchdog": "15min",
-        "package_recovery_alert": "vonk-forge-package-upgrade-alert@%n.service",
     }
-    # Template units are assessed through the instance systemd starts.
     assert set(report["security_units"]) == {
-        unit.replace("@.service", "@vonk-forge-package-upgrade-recover.service")
-        for unit in PACKAGED_UNITS
-        if unit.endswith(".service")
+        unit for unit in PACKAGED_UNITS if unit.endswith(".service")
     }
     assert all(
         not unit["ambient_capabilities"] for unit in report["security_units"].values()
     )
-    assert report["security_units"]["vonk-forge-package-upgrade-recover.service"][
-        "cap_sys_ptrace"
-    ]
-    assert all(
-        not unit["cap_sys_ptrace"]
-        for name, unit in report["security_units"].items()
-        if name != "vonk-forge-package-upgrade-recover.service"
-    )
+    assert all(not unit["cap_sys_ptrace"] for unit in report["security_units"].values())
 
 
 def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> None:
