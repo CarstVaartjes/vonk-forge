@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -256,4 +258,58 @@ def test_folded_proofs_follow_their_area() -> None:
     results["oci-link-fallback"] = "skipped"
     assert _module().verify("success", selected, results) == [
         "oci-link-fallback result is 'skipped', expected 'success'"
+    ]
+
+
+def _gate_needs() -> list[str]:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    return ci["jobs"]["ci-gate"]["needs"]
+
+
+def _needs_document(selected: dict[str, str], results: dict[str, str]) -> str:
+    """The `toJSON(needs)` the gate receives, built from ci.yml's real needs."""
+    keys = _module().JOB_KEYS
+    document = {
+        job: {"result": results[keys.get(job, job)], "outputs": {}}
+        for job in _gate_needs()
+        if job != "changes"
+    }
+    outputs = {key.replace("-", "_"): value for key, value in selected.items()}
+    document["changes"] = {"result": "success", "outputs": outputs}
+    return json.dumps(document)
+
+
+def _refusals(document: str) -> list[str]:
+    selector_result, selected, results, errors = _module().from_needs(document)
+    return errors + _module().verify(selector_result, selected, results)
+
+
+def _member_selection() -> tuple[dict[str, str], dict[str, str]]:
+    selected, results = _valid(full="false")
+    results = dict.fromkeys(results, "skipped")
+    results.update(lint="success", **{"member-web": "success"})
+    return selected, results
+
+
+@pytest.mark.parametrize("tier", ["full", "member"])
+def test_every_gated_job_failing_is_refused(tier: str) -> None:
+    selected, results = _valid() if tier == "full" else _member_selection()
+    assert _refusals(_needs_document(selected, results)) == []
+    keys = _module().JOB_KEYS
+    for job in _gate_needs():
+        if job == "changes":
+            continue
+        failed = dict(results, **{keys.get(job, job): "failure"})
+        assert _refusals(_needs_document(selected, failed)), job
+    document = json.loads(_needs_document(selected, results))
+    document["changes"]["result"] = "failure"
+    assert _refusals(json.dumps(document))
+
+
+def test_a_gated_job_without_a_rule_is_refused() -> None:
+    selected, results = _valid()
+    document = json.loads(_needs_document(selected, results))
+    document["brand-new-proof"] = {"result": "success", "outputs": {}}
+    assert _refusals(json.dumps(document)) == [
+        "brand-new-proof is gated but has no rule here"
     ]

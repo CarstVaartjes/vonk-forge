@@ -16,6 +16,11 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
+`ci-gate` passes `toJSON(needs)` to `scripts/verify-ci-gate`, which applies one
+rule per job and refuses a gated job it has no rule for, so a job added to
+`ci-gate.needs` without a rule fails the run. Adding a proof job means the job,
+its `ci-gate.needs` entry and its rule in `scripts/verify-ci-gate`.
+
 Every change lands through an integration PR: a same-repository
 `integration/*` head, or any PR with the `release-acceptance` label. `full` in
 `scripts/select-ci-areas` owns that rule; `ci.yml` reads it, and every proof is a `ci.yml` job behind
