@@ -906,7 +906,7 @@ jobs:
           guard_list="$RUNNER_TEMP/repository-guards.txt"
           python3 scripts/repository-guards > "$guard_list"
           mapfile -t guards < "$guard_list"
-          uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n 0 "${guards[@]}"
+          uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n auto "${guards[@]}"
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard }}-of-${{ strategy.job-total }})

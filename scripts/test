@@ -57,7 +57,7 @@ case "$suite" in
     # idle; the few module-scoped fixtures are set up once per worker instead.
     guards)
         guard_paths=$(python3 scripts/repository-guards)
-        paths=() selection=() parallel=(-n 0) prefix= suite_markers=
+        paths=() selection=() parallel=(-n auto) prefix= suite_markers=
         while IFS= read -r path; do paths+=("$path"); done <<< "$guard_paths"
         ;;
     repository)
