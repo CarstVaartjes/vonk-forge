@@ -1639,9 +1639,10 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     thread.start()
     assert authority.entered.wait(timeout=30)
 
-    follower.renew(NODE_ID, issued.serial, request)
+    # The follower observes the begun journal row and finishes it by exact replay.
+    healed = follower.renew(NODE_ID, issued.serial, request)
+    assert isinstance(healed, IssuedCertificate)
     with sessions() as session:
-        assert session.get(AgentCertificateRotation, NODE_ID) is not None
         source = session.get(AgentCertificate, issued.serial)
         assert source is not None and source.revoked_at is None
     assert len(authority.calls) == 1
@@ -1649,7 +1650,7 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     authority.release.set()
     thread.join(timeout=30)
     assert not thread.is_alive()
-    assert len(results) == 1
+    assert results == [healed]
     assert follower.renew(NODE_ID, issued.serial, request) == results[0]
     assert len(authority.calls) == 1
 
