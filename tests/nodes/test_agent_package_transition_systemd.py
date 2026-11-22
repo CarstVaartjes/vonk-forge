@@ -49,6 +49,8 @@ FIREWALL = Path("/run/systemd/system/vonk-forge-docker-firewall.service")
 # dpkg-deb on PATH for the payload extraction. Nothing else resolves it there.
 HOLD = Path("/run/vonk-transition-hold")
 HOLD_WRAPPER = Path("/usr/local/sbin/dpkg-deb")
+# The probe runs as the agent account, which cannot traverse a build workspace.
+PROBE = Path("/usr/local/bin/vonk-transition-grant-probe")
 # Everything a forward capsule leaves when it arms, including the breadcrumb
 # that outlives the capsule's own retirement.
 ARMING = (
@@ -532,8 +534,10 @@ def main() -> None:
             variants["failing"],
         )
         packages = [promoted, tree, no_preinst, failing]
-        prepare_host(args.probe, promoted)
-        lane = Lane(args.probe, promoted)
+        shutil.copyfile(args.probe, PROBE)
+        PROBE.chmod(0o755)
+        prepare_host(PROBE, promoted)
+        lane = Lane(PROBE, promoted)
 
         with ArmingWatch() as watch:
             lane.baseline(packages)
@@ -621,6 +625,7 @@ def main() -> None:
     finally:
         HOLD.unlink(missing_ok=True)
         HOLD_WRAPPER.unlink(missing_ok=True)
+        PROBE.unlink(missing_ok=True)
         shutil.rmtree(work, ignore_errors=True)
 
 
