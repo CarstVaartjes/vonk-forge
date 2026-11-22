@@ -151,8 +151,6 @@ jobs:
           find coverage-input -path '*/coverage.*' -type f -exec mv -t coverage-data {} +
           pipx run --spec "coverage==$COVERAGE_VERSION" coverage combine --quiet coverage-data
           pipx run --spec "coverage==$COVERAGE_VERSION" coverage json -o report/python-coverage.json
-          # Absolute paths keep the three source roots apart; report repository paths.
-          sed -i "s|$GITHUB_WORKSPACE/||g" report/python-coverage.json
           pipx run --spec "coverage==$COVERAGE_VERSION" coverage html -d report/html
           args=(--python report/python-coverage.json)
           if [[ -f coverage-input/coverage-rust/rust-coverage.json ]]; then
