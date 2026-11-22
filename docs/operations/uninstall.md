@@ -32,6 +32,16 @@ removing the whole Controller.
 
 ### 1b. Remove the package and its services (`sudo`)
 
+Removal does not yet stop `vonk-forge-package-rollback.service`. If a Controller
+package upgrade is still armed (a rollback transaction exists), stop it first,
+or it reinstalls the previous package at its deadline:
+
+```sh
+sudo systemctl stop vonk-forge-package-rollback.service
+```
+
+Then remove the package:
+
 ```sh
 sudo dpkg --purge vonk-forge-agent
 ```
@@ -44,21 +54,14 @@ removes first) the hook stops the upgrade finisher, then `vonk-forge-agent`,
 `vonk-forge-docker-firewall`, disables those units and
 `vonk-forge-package-rollback`, and disables lingering for the `vonk-agent`
 account. Every step is best effort: removal never fails because a unit is
-already gone or the helper binary is damaged, and the shim does nothing on
-`upgrade`. Purge then deletes the package files (`/usr/lib/vonk-forge`, the unit
+already gone or the helper binary is damaged, but with a damaged or missing
+binary nothing is stopped or disabled, so the services keep running until the
+next reboot. The shim does nothing on `upgrade`. Purge then deletes the package files (`/usr/lib/vonk-forge`, the unit
 files under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 `/usr/share/doc/vonk-forge-agent`) and the package conffile
 `/etc/vonk-forge-agent/containers-storage.conf`. Its `postrm` is shell and only
 forgets the units' enablement state on purge (the binary is gone by then), so
 everything below is cleaned up by hand.
-
-Removal does not yet stop `vonk-forge-package-rollback.service`. If a Controller
-package upgrade is still armed (a rollback transaction exists), stop it first,
-or it reinstalls the previous package at its deadline:
-
-```sh
-sudo systemctl stop vonk-forge-package-rollback.service
-```
 
 ### 1c. Remove workloads and runtime images (`sudo`)
 

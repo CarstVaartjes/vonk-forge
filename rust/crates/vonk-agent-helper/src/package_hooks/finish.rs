@@ -1,16 +1,16 @@
 //! The transient finisher unit: after dpkg exits, restart the helper (so the
 //! new binary serves) and then the agent, with no agent talking to a helper
 //! of another release in between.
-use super::host::COMMAND_SECONDS;
+use super::host::{COMMAND_SECONDS, POLLS_PER_SECOND};
 use super::{Host, best_effort};
 
 const SYSTEMCTL: &str = "/usr/bin/systemctl";
 const HELPER_UNIT: &str = "vonk-forge-package-helper.service";
 pub(super) const AGENT_UNITS: [&str; 2] =
     ["vonk-forge-agent.service", "vonk-forge-monitor.service"];
-/// Polls of 100 ms: 120 s for dpkg to leave.
-const DPKG_EXIT_POLLS: u32 = 1200;
+/// How long dpkg has to leave; the unit's budget below counts the same wait.
 const DPKG_WAIT_SECONDS: u64 = 120;
+const DPKG_EXIT_POLLS: u32 = DPKG_WAIT_SECONDS as u32 * POLLS_PER_SECOND;
 /// The most commands one run issues: stop, restart, is-active and show of the
 /// helper, the agent restart, and the settling start.
 const MOST_COMMANDS: u64 = 6;

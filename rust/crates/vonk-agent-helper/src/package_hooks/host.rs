@@ -12,7 +12,9 @@ use crate::package_rollback::Store;
 /// again, 30 s start) with margin, so a slow good upgrade is not refused.
 pub(super) const COMMAND_SECONDS: u64 = 90;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(COMMAND_SECONDS);
-const PAUSE: Duration = Duration::from_millis(100);
+/// One poll of a wait loop; waits are counted in `POLLS_PER_SECOND`.
+pub(super) const POLLS_PER_SECOND: u32 = 10;
+const PAUSE: Duration = Duration::from_millis(1000 / POLLS_PER_SECOND as u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

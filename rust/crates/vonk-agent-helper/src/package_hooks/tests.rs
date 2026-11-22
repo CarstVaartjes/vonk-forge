@@ -514,3 +514,12 @@ fn removal_never_fails_however_many_steps_do() {
     // Every step was still attempted.
     assert!(fake.ran("disable-linger") && fake.ran("disable vonk-forge-package-rollback"));
 }
+
+#[test]
+fn a_failing_boot_recovery_enable_fails_the_configure_after_the_agent_is_enabled() {
+    let mut fake = Fake::machine();
+    fake.failing.push("is-enabled");
+    fake.failing.push("enable vonk-forge-package-rollback");
+    assert!(configure(None, &mut fake).is_err());
+    assert!(fake.ran("enable vonk-forge-agent.service"));
+}
