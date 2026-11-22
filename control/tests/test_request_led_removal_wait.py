@@ -27,7 +27,8 @@ from .recipe_image_availability_support import (
 )
 from .recipe_removal_review_support import remove_after_review
 from .removal_settle import release_ended_gates
-from .test_model_cache import _remove_model, threaded_cache  # noqa: F401 - fixture
+from .test_model_cache_part3 import _remove_model
+from .test_model_cache_part4 import threaded_cache  # noqa: F401 - fixture
 from .test_model_removal_reference_lifecycle import (
     _force_model_request,
     _one_model,

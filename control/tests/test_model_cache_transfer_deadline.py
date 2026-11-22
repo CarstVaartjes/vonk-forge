@@ -3,7 +3,7 @@ import time
 import httpx2
 import vonk_control.model_cache.download as download_module
 
-from .test_model_cache import (  # noqa: F401
+from .model_cache_support import (  # noqa: F401
     _download,
     _http_artifact,
     _http_cache_service,

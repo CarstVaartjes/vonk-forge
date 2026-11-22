@@ -18,9 +18,9 @@ from vonk_control.models import CatalogDocument, CatalogDocumentRevision, ModelC
 from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
+from .model_cache_support import _canonical_model
 from .removal_settle import advance_until_ended
 from .test_fleet_model_removal_postgres import submit_model_download
-from .test_model_cache import _canonical_model
 from .test_model_cache_revisions import _contains, _content_keys, _revision
 from .test_model_removal_reference_lifecycle import _removal_service
 

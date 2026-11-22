@@ -12,15 +12,15 @@ from pydantic import ValidationError
 from vonk_control.model_cache.input_contracts import FixtureArtifact
 from vonk_control.operations.contract import AvailabilityOperationFailure
 
-from .non_blocking import assert_ended_without_blocking
-from .test_model_cache import (
+from .model_cache_support import (  # noqa: F401 - shared service fixture
     _artifact,
     _download,
     _gone_handler,
     _http_artifact,
     _http_cache_service,
-    cache,  # noqa: F401 - shared service fixture
+    cache,
 )
+from .non_blocking import assert_ended_without_blocking
 
 
 def test_model_cache_has_one_package_owner():

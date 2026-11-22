@@ -54,8 +54,8 @@ from vonk_control.unused_storage_collection import (
 from vonk_control.unused_storage_collection.evidence import _Evidence
 
 from . import unused_storage_collection_support as _support
+from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
-from .test_model_cache import _artifact, _download
 from .test_model_removal_decided_by_evidence import _installation
 from .test_run_switch_build_fencing import _direct_parent
 from .unused_storage_collection_support import (

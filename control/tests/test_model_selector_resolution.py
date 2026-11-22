@@ -21,7 +21,7 @@ from vonk_control.model_cache.errors import ModelCacheError
 from vonk_control.models import Base, CatalogDocumentRevision
 
 from .display_fixtures import create_draft
-from .test_model_cache import _artifact, _canonical_model, _download
+from .model_cache_support import _artifact, _canonical_model, _download
 
 NOW = datetime(2026, 10, 18, tzinfo=UTC)
 

@@ -50,9 +50,9 @@ from vonk_control.unused_storage_collection import (
 from vonk_forge_contracts.model import ModelReference
 
 from . import unused_storage_collection_support as _support
+from .model_cache_support import _artifact, _download
 from .removal_settle import release_ended_gates
 from .test_catalog_revision_collection import NODE, NOW, Catalog
-from .test_model_cache import _artifact, _download
 from .unused_storage_collection_support import (
     _REAL_CLOCK,
     A_MODEL,

@@ -31,8 +31,9 @@ from vonk_control.models import (
 from vonk_control.recipe_execution_contract import installation_plan_document
 from vonk_control.recovery_policy import RecoveryPolicy
 
+from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, Catalog
-from .test_model_cache import _artifact, _download, _remove_model
+from .test_model_cache_part3 import _remove_model
 from .test_model_removal_reference_lifecycle import (
     _removal_service,
     _settle_removal,

@@ -34,10 +34,10 @@ from vonk_control.unused_storage_collection import (
     UnusedStorageCollector,
 )
 
+from .model_cache_support import _artifact, _download
 from .removal_settle import advance_until_ended
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
-from .test_model_cache import _artifact, _download
 
 A_MODEL = "a" * 64
 

@@ -1003,8 +1003,8 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
     from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache import ModelCacheService
 
+    from .model_cache_support import _artifact, _download
     from .removal_settle import advance_until_ended, release_ended_gates
-    from .test_model_cache import _artifact, _download
 
     original, sessions, existing_cache, *_ = assessed_library
     cache = ModelCacheService(
