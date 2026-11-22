@@ -121,7 +121,6 @@ PRODUCERS = {
             "scripts/retry-dependency-fetch",
             "scripts/retry_dependency_fetch.py",
             "tests/nodes/test_agent_package_native_lifecycle.sh",
-            "tests/nodes/test_agent_upgrade_recovery_systemd.sh",
         ),
         artifacts=(
             "vonk-agent-development-{sha}",

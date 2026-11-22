@@ -9,7 +9,6 @@ agent_semver=${agent_semver%%+*}
 helper_unit_path=/lib/systemd/system/vonk-forge-package-helper.service
 helper_pending=/var/lib/vonk-forge/helper-upgrade.pending
 helper_receipt=/var/lib/vonk-forge/helper-upgrade.receipt
-upgrade_intent=/var/lib/vonk-forge/package-upgrade/intent
 
 # Package-owned state is self-describing and regenerable. Callers validate
 # the root-controlled parent first; a malformed regular file or symlink at the
@@ -25,35 +24,6 @@ discard_own_state() {
         echo "vonk-forge-agent: discarded malformed $state_label" >&2
     fi
     [ ! -e "$state_path" ] && [ ! -L "$state_path" ]
-}
-
-upgrade_state_dir_is_safe() {
-    [ -d /var/lib/vonk-forge/package-upgrade ] \
-        && [ ! -L /var/lib/vonk-forge/package-upgrade ] \
-        && [ "$(/usr/bin/stat -c %u:%g:%a \
-            /var/lib/vonk-forge/package-upgrade)" = 0:0:700 ]
-}
-
-durable_intent_is_safe() {
-    upgrade_state_dir_is_safe \
-        && [ -f "$upgrade_intent" ] && [ ! -L "$upgrade_intent" ] \
-        && [ "$(/usr/bin/stat -c %u:%g:%a:%h "$upgrade_intent")" \
-            = 0:0:600:1 ] \
-        && [ "$(/usr/bin/wc -l < "$upgrade_intent")" -eq 17 ] \
-        && /usr/bin/sed -n '1p' "$upgrade_intent" \
-            | grep -Fxq 'schema_version=2' \
-        && /usr/bin/sed -n '2p' "$upgrade_intent" \
-            | grep -Fxq 'package=vonk-forge-agent' \
-        && /usr/bin/sed -n '3p' "$upgrade_intent" \
-            | grep -Fxq "target_version=$package_version" \
-        && /usr/bin/sed -n '14p' "$upgrade_intent" \
-            | grep -Eq '^recovery_nonce=[0-9a-f]{64}$' \
-        && /usr/bin/sed -n '15p' "$upgrade_intent" \
-            | grep -Eq '^capsule_unit_sha256=[0-9a-f]{64}$' \
-        && /usr/bin/sed -n '16p' "$upgrade_intent" \
-            | grep -Eq '^capsule_gate_sha256=[0-9a-f]{64}$' \
-        && /usr/bin/sed -n '17p' "$upgrade_intent" \
-            | grep -Eq '^capsule_suppression_sha256=[0-9a-f]{64}$'
 }
 
 write_helper_pending() {
@@ -120,14 +90,12 @@ pending_is_safe() {
 # A pre-schema-2 install may leave an old helper receipt behind after the
 # helper transaction has already completed.  It is not input to the current
 # protocol and must not block the first current-schema upgrade.  Only retire a
-# root-owned, mode-0600 receipt when no current pending/intent state exists;
-# any receipt participating in an active recovery remains fail-closed below.
+# root-owned, mode-0600 receipt when no current pending state exists.
 retire_stale_helper_receipt() {
     if [ ! -e "$helper_receipt" ] && [ ! -L "$helper_receipt" ]; then
         return 0
     fi
-    [ "$pending_present" -eq 0 ] && [ "$durable_recovery" -eq 0 ] \
-        || return 0
+    [ "$pending_present" -eq 0 ] || return 0
     state_parent_is_safe || return 1
     [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
         && [ "$(/usr/bin/stat -c %u:%a:%h "$helper_receipt" 2>/dev/null \
@@ -468,54 +436,36 @@ if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]; then
         }
     fi
 fi
-durable_recovery=0
-if [ -e "$upgrade_intent" ] || [ -L "$upgrade_intent" ]; then
-    upgrade_state_dir_is_safe || {
-        echo 'vonk-forge-agent: durable package upgrade state is unsafe' >&2
-        exit 1
-    }
-    if durable_intent_is_safe; then
-        if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
-            grep -Fxq \
-                "recovery_nonce=$VONK_FORGE_UPGRADE_RECOVERY_NONCE" \
-                "$upgrade_intent" || {
-                echo 'vonk-forge-agent: package recovery nonce does not match intent' >&2
-                exit 1
-            }
-        fi
-        durable_recovery=1
-    elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
-        echo 'vonk-forge-agent: package recovery intent does not bind this package' >&2
-        exit 1
-    else
-        # A malformed intent, or one for another version, is superseded by
-        # this configure: the latest installed package leads, and the
-        # Controller re-drives any upgrade it still wants.
-        discard_own_state "$upgrade_intent" \
-            'superseded durable package upgrade intent' \
-            && discard_own_state \
-                /var/lib/vonk-forge/package-upgrade/agent-blocked \
-                'superseded agent start blocker' || {
-            echo 'vonk-forge-agent: durable package upgrade intent is unsafe' >&2
-            exit 1
-        }
-    fi
-elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
-    echo 'vonk-forge-agent: package recovery intent is missing' >&2
-    exit 1
-fi
 retire_stale_helper_receipt || {
     echo 'vonk-forge-agent: stale helper receipt cannot be retired safely' >&2
     exit 1
 }
+# This package ships no forward recovery capsule. A capsule a previous package
+# staged is not dpkg-owned and would keep gating the agent on a runner nothing
+# maintains, so it is retired here, before the daemon-reload below. Best
+# effort: a leftover only costs a retry at the next configure.
+if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
+    /usr/bin/systemctl --system stop \
+        vonk-forge-package-upgrade-recover-capsule.service >/dev/null 2>&1 || true
+fi
+/usr/bin/rm -f -- \
+    /lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service \
+    /lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service \
+    /lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf \
+    /lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf \
+    /lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf \
+    || true
+/usr/bin/rmdir \
+    /lib/systemd/system/vonk-forge-agent.service.d \
+    /lib/systemd/system/vonk-forge-package-upgrade-recover.service.d \
+    /lib/systemd/system/vonk-forge-package-helper.socket.d \
+    2>/dev/null || true
 needs_finisher=0
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ] \
-    && [ "$durable_recovery" -ne 1 ] \
     && { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; }; then
     needs_finisher=1
 fi
-if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ] \
-    && [ "$durable_recovery" -ne 1 ]; then
+if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ]; then
     # Without a live systemd the helper cannot be restarted here. Keep the
     # pending gate so the next live configure or recovery finishes it.
     echo 'vonk-forge-agent: interrupted helper activation requires a live systemd configure retry; pending state kept' >&2
