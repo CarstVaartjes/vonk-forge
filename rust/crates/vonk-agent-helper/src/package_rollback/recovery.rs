@@ -187,7 +187,14 @@ fn start_services() {
         "vonk-forge-package-helper.socket",
         "vonk-forge-agent.service",
     ] {
-        let _ = command("/usr/bin/systemctl", &["--system", "start", unit], false);
+        // --no-block: a Type=notify agent must not hold the store lock.
+        if let Err(error) = command(
+            "/usr/bin/systemctl",
+            &["--system", "start", "--no-block", unit],
+            false,
+        ) {
+            eprintln!("vonk-agent-helper: rollback heal: {unit}: {error}");
+        }
     }
 }
 

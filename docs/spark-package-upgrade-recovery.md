@@ -108,8 +108,11 @@ does not undo an explicit stop. So whenever a restore ends without success
 (`dpkg` keeps failing until the retry budget is spent, or a restarted watchdog
 finds no budget left and cannot confirm the source), the watchdog starts the
 helper socket and the agent again, best effort, before it records
-`rollback_failed`. The Spark stays reachable, the receipt still reports
-`rollback_failed`, and the Controller re-drives. The stops stay before `dpkg`:
+`rollback_failed`. The units are started with `--no-block`, so a slow agent
+start cannot hold the store lock. The Spark stays reachable and the receipt
+reports `rollback_failed`, or `rolled_back` once the watchdog's later rerun
+(no budget left) proves the restarted source agent. The Controller re-drives
+while the source binary runs; otherwise it settles the order as done or failed. The stops stay before `dpkg`:
 whether `dpkg` can proceed is only known by running it.
 
 An interrupted upgrade therefore ends on the previous version within the
