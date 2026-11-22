@@ -64,6 +64,8 @@ pub trait Host {
     /// The ingress digest of the helper being activated, if one is armed for
     /// the installed package version.
     fn armed_helper_sha256(&self, installed_version: &str) -> Option<String>;
+    /// End the armed rollback transaction, if one is still pending.
+    fn retire_rollback(&mut self) -> Result<(), String>;
     fn pause(&mut self);
 }
 
@@ -191,6 +193,9 @@ impl Host for SystemHost {
     }
     fn armed_helper_sha256(&self, installed_version: &str) -> Option<String> {
         Store::system().armed_helper_sha256(installed_version)
+    }
+    fn retire_rollback(&mut self) -> Result<(), String> {
+        Store::system().retire()
     }
     fn pause(&mut self) {
         std::thread::sleep(PAUSE);

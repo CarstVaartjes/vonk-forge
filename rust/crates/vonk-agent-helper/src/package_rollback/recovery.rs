@@ -31,7 +31,7 @@ impl Store {
                 return Ok(());
             }
             let mut tx = observed.ok_or("rollback observation unavailable")?;
-            if matches!(tx.phase, Phase::Acknowledged | Phase::RolledBack) {
+            if !pending(tx.phase) {
                 return Ok(());
             }
             if tx.phase == Phase::Armed && now()? < tx.rollback.activation_deadline {
@@ -156,6 +156,11 @@ impl Store {
         .map_err(|_| "source process identity differs after rollback".to_owned())?;
         Ok(())
     }
+}
+
+/// Whether the watchdog still has work for a transaction in this phase.
+pub(super) fn pending(phase: Phase) -> bool {
+    !matches!(phase, Phase::Acknowledged | Phase::RolledBack)
 }
 
 pub(super) fn rollback_retry_budget(tx: &Transaction, timestamp: i64) -> Option<Duration> {

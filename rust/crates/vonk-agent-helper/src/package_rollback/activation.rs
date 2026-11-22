@@ -7,6 +7,7 @@ use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthor
 
 use super::commands::command;
 use super::custody::{digest, now, safe};
+use super::recovery::pending;
 use super::{AGENT, HELPER, PACKAGE, Store, Transaction, prerequisites};
 
 /// What dpkg and the filesystem say is installed at confirm time.
@@ -214,6 +215,35 @@ impl Store {
             self.write(&tx)?;
         }
         Ok(())
+    }
+    /// Removal supersedes an upgrade still in flight. A transaction the
+    /// watchdog would still act on is deleted with its receipt: no journal is
+    /// no rollback authority, so the watchdog ends at its next check and the
+    /// unit's `ConditionPathExists` keeps it from starting at boot. Finished
+    /// transactions and a missing store stay as they are.
+    pub fn retire(&self) -> Result<(), String> {
+        let journal = self.root.join("transaction.json");
+        if matches!(fs::symlink_metadata(&journal), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Ok(());
+        }
+        let _lock = self.lock()?;
+        // Unreadable counts as no authority already: the watchdog ends on it.
+        if !self.read().is_ok_and(|tx| pending(tx.phase)) {
+            return Ok(());
+        }
+        fs::remove_file(&journal).map_err(|error| format!("{}: {error}", journal.display()))?;
+        let receipt = self
+            .root
+            .parent()
+            .ok_or("rollback parent missing")?
+            .join("package-activation.receipt.json");
+        match fs::remove_file(&receipt) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(format!("{}: {error}", receipt.display()))
+            }
+            _ => Ok(()),
+        }
     }
     pub fn acknowledge(&self, node: &str, candidate: &str, nonce: &str) -> Result<(), String> {
         let _lock = self.lock()?;
