@@ -83,7 +83,7 @@ def test_pending_profile_references_are_read_from_the_canonical_stored_plan() ->
     from vonk_control.fleet_profiles import FleetProfileService
     from vonk_control.unused_storage_collection import _applied_revision_ids
 
-    from .test_fleet_profiles import NOW, _database, _input, _seed, _uuid
+    from .fleet_profiles_support import NOW, _database, _input, _seed, _uuid
 
     sessions = _database()
     _, revision_id = _seed(sessions)

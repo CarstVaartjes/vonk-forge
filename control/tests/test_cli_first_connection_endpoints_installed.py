@@ -61,10 +61,10 @@ from vonk_control.operation_api import durable_operation_services
 from cluster_profiles.cli_json_contract import DocumentKind
 
 from .conftest import load_tools_module
+from .fleet_profiles_support import _installed_pair_plan
 from .recipe_routes_support import NOW as ROUTE_NOW
 from .recipe_routes_support import atomic_service
 from .recipe_routes_support import setup as setup_routes
-from .test_fleet_profiles import _installed_pair_plan
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,

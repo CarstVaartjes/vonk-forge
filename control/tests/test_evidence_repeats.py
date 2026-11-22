@@ -28,6 +28,7 @@ from vonk_control.models import AgentNode, AgentNodeContact
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
+from .fleet_profiles_support import _uuid
 from .test_agent_api import (
     NODE_A,
     STOP_PAYLOAD,
@@ -36,7 +37,6 @@ from .test_agent_api import (
     parent,
 )
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import _uuid
 from .test_host_runtime_grant_answers import _BODY
 
 LIMIT = RECOVERY.max_failures

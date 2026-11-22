@@ -42,15 +42,15 @@ from vonk_control.run_switch_contract import RunSwitchMemberProgress
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
-from .node_contacts import contact_row
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     NOW,
     _node_id,
     _seed,
     _seed_dual_solo_without_runtime_state,
     _uuid,
 )
+from .node_contacts import contact_row
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,

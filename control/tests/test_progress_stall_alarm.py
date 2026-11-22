@@ -48,9 +48,9 @@ from vonk_control.operations.blockers import (
 from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
 
+from .fleet_profiles_support import NOW, _database, _input, _node_id, _seed, _uuid
 from .test_attempt_residues import _load, _loop, _switch
 from .test_fleet_profile_continuity import _world
-from .test_fleet_profiles import NOW, _database, _input, _node_id, _seed, _uuid
 from .test_profile_claim_selfheal import _application, _follow_due, _settle
 from .test_run_switch_operations import (
     CompleteArtifactInspector,

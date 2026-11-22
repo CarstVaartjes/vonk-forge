@@ -25,8 +25,8 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .fleet_profiles_support import NOW, _node_id, _uuid
 from .test_fleet_profile_continuity import _world
-from .test_fleet_profiles import NOW, _node_id, _uuid
 
 
 def _running_child(operation_id, node_id):
