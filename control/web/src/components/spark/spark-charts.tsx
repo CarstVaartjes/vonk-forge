@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { ControlApi, Metric, MetricRange, MetricSpec } from "../api/types";
-import { useMetricCatalogue } from "../hooks/use-metric-catalogue";
-import { useMetricRead } from "../hooks/use-metric-series";
-import { GPU_TEMP_WARN_C } from "../lib/gpu-thresholds";
-import { MetricCard } from "./metric-card";
+import type { ControlApi, Metric, MetricRange, MetricSpec } from "../../api/types";
+import { useMetricCatalogue } from "../../hooks/use-metric-catalogue";
+import { useMetricRead } from "../../hooks/use-metric-series";
+import { GPU_TEMP_WARN_C } from "../../lib/gpu-thresholds";
+import { MetricCard } from "../metric-card";
 
 /**
  * The charts a Spark has, in order: its metric, the one summary the card's second line gives, and a

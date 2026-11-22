@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
-import { errorText } from "../lib/error-display";
-import { ConfirmDialog } from "./confirm-dialog";
-import { EnrollmentGrant } from "./enrollment-grant";
-import { useToast } from "./toast";
+import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../../api/types";
+import { errorText } from "../../lib/error-display";
+import { ConfirmDialog } from "../confirm-dialog";
+import { EnrollmentGrant } from "../enrollment-grant";
+import { useToast } from "../toast";
 
 enum Dialog {
   Remove,

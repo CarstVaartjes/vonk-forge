@@ -2,7 +2,7 @@ import type { ControlApi, VisualFleetNode } from "../api/types";
 import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../hooks/use-workload-reads";
 import { groupByWorkload, type WorkloadCluster } from "../lib/fleet";
-import { SparkCard } from "./spark-card";
+import { SparkCard } from "./spark/spark-card";
 import { WorkloadUnit } from "./workload-unit";
 
 /** One cluster of workloads as a unit, with a Spark card for each Spark that carries it. */

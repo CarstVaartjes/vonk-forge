@@ -8,7 +8,7 @@ import { ClusterUnit } from "../components/workload-units";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { MetricsChart } from "../components/metrics-chart";
 import { PageHeader } from "../components/page-header";
-import { SparksTable } from "../components/sparks-table";
+import { SparksTable } from "../components/spark/sparks-table";
 import { WorkloadRow } from "../components/workload-row";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { useFleetStream } from "../hooks/use-fleet-stream";

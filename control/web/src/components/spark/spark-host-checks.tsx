@@ -1,6 +1,6 @@
-import type { VisualFleetNode } from "../api/types";
-import { hostCheckLines, UNDO_LABEL } from "../lib/host-checks";
-import { CommandBlock } from "./command-block";
+import type { VisualFleetNode } from "../../api/types";
+import { hostCheckLines, UNDO_LABEL } from "../../lib/host-checks";
+import { CommandBlock } from "../command-block";
 
 /** Informative host advice from the Controller; never attention, and absent when there is none. */
 export function SparkHostChecks({ node }: { node: VisualFleetNode }) {

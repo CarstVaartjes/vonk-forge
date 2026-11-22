@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { SparkCard } from "./spark-card";
-import type { VisualFleetNode } from "../api/types";
+import type { VisualFleetNode } from "../../api/types";
 
 const GIB = 1024 ** 3;
 const gib = (value: number) => Math.round(value * GIB);

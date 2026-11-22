@@ -1,6 +1,6 @@
 import { useId } from "react";
-import type { VisualFleetNode } from "../api/types";
-import { HISTORY_SECONDS, type HistoryPoint } from "../hooks/use-telemetry-history";
+import type { VisualFleetNode } from "../../api/types";
+import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
 import {
   GIB,
   MEMORY_WARN_FREE_BYTES,
@@ -8,9 +8,9 @@ import {
   nodeDisplayName,
   nodeMemorySplit,
   nodeVitals,
-} from "../lib/fleet";
-import { StackedArea } from "./chart/stacked-area";
-import { MemoryIngot } from "./memory-ingot";
+} from "../../lib/fleet";
+import { StackedArea } from "../chart/stacked-area";
+import { MemoryIngot } from "../memory-ingot";
 
 const LAYERS = [
   { key: "models", color: "var(--mem-model)" },

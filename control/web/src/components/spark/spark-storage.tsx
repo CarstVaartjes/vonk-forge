@@ -1,13 +1,13 @@
 import { useId } from "react";
-import type { VisualFleetNode } from "../api/types";
+import type { VisualFleetNode } from "../../api/types";
 import {
   NOT_REPORTED_TEXT,
   formatBytes,
   nodeDiskSplit,
   nodeDisplayName,
   nodeVitals,
-} from "../lib/fleet";
-import { MemoryIngot } from "./memory-ingot";
+} from "../../lib/fleet";
+import { MemoryIngot } from "../memory-ingot";
 
 /**
  * The Spark's disk as Used and Free, and the models on it: each installation's title and the size the

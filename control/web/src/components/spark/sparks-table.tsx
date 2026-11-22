@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { VisualFleetNode } from "../api/types";
+import type { VisualFleetNode } from "../../api/types";
 import {
   nodeDiskFreeBytes,
   nodeDisplayName,
@@ -11,13 +11,13 @@ import {
   nodeVitals,
   nodeWorkloadLines,
   type NodeStatus,
-} from "../lib/fleet";
-import { sparkPath } from "../lib/spark-route";
-import { EmptyState } from "./empty-state";
-import { Meter } from "./meter";
-import { SortHeader, useSort } from "./sort-header";
-import { StatusPill } from "./status-pill";
-import { interceptPlainClick } from "../lib/plain-click";
+} from "../../lib/fleet";
+import { sparkPath } from "../../lib/spark-route";
+import { EmptyState } from "../empty-state";
+import { Meter } from "../meter";
+import { SortHeader, useSort } from "../sort-header";
+import { StatusPill } from "../status-pill";
+import { interceptPlainClick } from "../../lib/plain-click";
 
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };

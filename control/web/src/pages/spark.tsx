@@ -3,9 +3,9 @@ import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react"
 import type { ControlApi, MetricRange } from "../api/types";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { RangeSwitch } from "../components/range-switch";
-import { SparkLogs } from "../components/spark-logs";
-import { SparkOverview } from "../components/spark-overview";
-import { SparkSettings } from "../components/spark-settings";
+import { SparkLogs } from "../components/spark/spark-logs";
+import { SparkOverview } from "../components/spark/spark-overview";
+import { SparkSettings } from "../components/spark/spark-settings";
 import { StatusPill } from "../components/status-pill";
 import { Time } from "../components/time";
 import { sparkColor } from "../components/chart/series";

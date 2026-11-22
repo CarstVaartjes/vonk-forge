@@ -1,12 +1,12 @@
 import { useId } from "react";
-import type { VisualFleetNode } from "../api/types";
-import { HISTORY_SECONDS, type HistoryPoint } from "../hooks/use-telemetry-history";
-import { NOT_REPORTED_TEXT, halfUp, liveSample } from "../lib/fleet";
-import { GPU_READINGS, num } from "../lib/gpu-readings";
-import { throttleReasons } from "../lib/throttle";
-import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "../lib/gpu-thresholds";
-import { ArcGauge } from "./chart/arc-gauge";
-import { Sparkline } from "./chart/sparkline";
+import type { VisualFleetNode } from "../../api/types";
+import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
+import { NOT_REPORTED_TEXT, halfUp, liveSample } from "../../lib/fleet";
+import { GPU_READINGS, num } from "../../lib/gpu-readings";
+import { throttleReasons } from "../../lib/throttle";
+import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "../../lib/gpu-thresholds";
+import { ArcGauge } from "../chart/arc-gauge";
+import { Sparkline } from "../chart/sparkline";
 
 const [UTILISATION, TEMPERATURE, POWER, CLOCK] = GPU_READINGS;
 

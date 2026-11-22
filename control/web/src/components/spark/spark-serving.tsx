@@ -1,8 +1,8 @@
 import { useId, type MouseEvent } from "react";
-import type { VisualFleetNode } from "../api/types";
-import { NOT_REPORTED_TEXT, nodeRuns } from "../lib/fleet";
-import { sparkPath } from "../lib/spark-route";
-import { StatusPill } from "./status-pill";
+import type { VisualFleetNode } from "../../api/types";
+import { NOT_REPORTED_TEXT, nodeRuns } from "../../lib/fleet";
+import { sparkPath } from "../../lib/spark-route";
+import { StatusPill } from "../status-pill";
 
 /**
  * What this Spark serves: each run's alias, title and state, its rank and the Sparks it shares the run

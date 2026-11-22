@@ -1,7 +1,7 @@
 import "./spark-card.css";
-import type { ControlApi, VisualFleetNode } from "../api/types";
-import { HISTORY_SECONDS, useTelemetryHistory } from "../hooks/use-telemetry-history";
-import { GPU_READINGS as READINGS } from "../lib/gpu-readings";
+import type { ControlApi, VisualFleetNode } from "../../api/types";
+import { HISTORY_SECONDS, useTelemetryHistory } from "../../hooks/use-telemetry-history";
+import { GPU_READINGS as READINGS } from "../../lib/gpu-readings";
 import {
   NOT_REPORTED_TEXT,
   halfUp,
@@ -13,13 +13,13 @@ import {
   nodeStatusTone,
   nodeVitals,
   uptimeText,
-} from "../lib/fleet";
-import { sparkPath } from "../lib/spark-route";
-import { sparkColor } from "./chart/series";
-import { MemoryIngot } from "./memory-ingot";
-import { StatusPill } from "./status-pill";
-import { TraceTile } from "./trace-tile";
-import { interceptPlainClick } from "../lib/plain-click";
+} from "../../lib/fleet";
+import { sparkPath } from "../../lib/spark-route";
+import { sparkColor } from "../chart/series";
+import { MemoryIngot } from "../memory-ingot";
+import { StatusPill } from "../status-pill";
+import { TraceTile } from "../trace-tile";
+import { interceptPlainClick } from "../../lib/plain-click";
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */
 function Traces({

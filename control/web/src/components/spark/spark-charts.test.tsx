@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ControlApi, MetricSpec } from "../api/types";
+import type { ControlApi, MetricSpec } from "../../api/types";
 import { SparkCharts } from "./spark-charts";
 
 const spec = (
