@@ -4,12 +4,14 @@
 //! runs it against an in-memory machine.
 //!
 //! A hook runs only where its own binary is on disk (design: `postinst
-//! configure` and its aborts, plus the transient finisher it schedules).
+//! configure` and its aborts, `prerm remove`, plus the transient finisher
+//! `configure` schedules).
 mod account;
 mod directories;
 mod finish;
 mod host;
 mod machine_evidence;
+mod removal;
 mod subids;
 mod units;
 
@@ -26,8 +28,15 @@ pub enum Hook {
     /// `postinst abort-upgrade|abort-remove|abort-deconfigure`: the shims
     /// leave nothing to undo.
     PostinstAbort,
-    /// The transient finisher unit `Configure` schedules. Internal.
-    Finish { dpkg_pid: u32, dpkg_start: u64 },
+    /// `prerm remove`: stop and disable what the package runs.
+    PrermRemove,
+    /// The transient finisher unit `Configure` schedules. Internal. `reference`
+    /// is the armed candidate's helper digest, absent for an installer upgrade.
+    Finish {
+        dpkg_pid: u32,
+        dpkg_start: u64,
+        reference: Option<String>,
+    },
     /// A dpkg action this package has no work for (`triggered`, a future one).
     Unrecognized,
 }
@@ -48,13 +57,16 @@ impl Hook {
                 ..,
             ] => Ok(Self::PostinstAbort),
             ["postinst", ..] => Ok(Self::Unrecognized),
-            ["finish", pid, start] => Ok(Self::Finish {
+            ["prerm", "remove", ..] => Ok(Self::PrermRemove),
+            ["prerm", ..] => Ok(Self::Unrecognized),
+            ["finish", pid, start, rest @ ..] => Ok(Self::Finish {
                 dpkg_pid: pid
                     .parse()
                     .map_err(|_| "finisher dpkg pid is not a number")?,
                 dpkg_start: start
                     .parse()
                     .map_err(|_| "finisher dpkg start is not a number")?,
+                reference: rest.first().map(|digest| (*digest).to_owned()),
             }),
             _ => Err("unknown package hook".into()),
         }
@@ -69,16 +81,22 @@ pub fn run_arguments(arguments: &[String], host: &mut impl Host) -> Result<(), S
 pub fn run(hook: &Hook, host: &mut impl Host) -> Result<(), String> {
     match hook {
         Hook::Configure { previous } => configure(previous.is_some(), host),
+        Hook::PrermRemove => {
+            removal::run(host);
+            Ok(())
+        }
         Hook::Finish {
             dpkg_pid,
             dpkg_start,
-        } => finish::run(host, *dpkg_pid, *dpkg_start),
+            reference,
+        } => finish::run(host, *dpkg_pid, *dpkg_start, reference.as_deref()),
         Hook::PostinstAbort | Hook::Unrecognized => Ok(()),
     }
 }
 
 /// Converge the machine to what the package needs. Idempotent: a converged
-/// machine takes no write and runs no command.
+/// machine takes no write; it still asks systemd to reload and, on an upgrade,
+/// to schedule the finisher.
 fn configure(upgrade: bool, host: &mut impl Host) -> Result<(), String> {
     let ids = account::ensure(host)?;
     subids::ensure(host, ids.uid)?;

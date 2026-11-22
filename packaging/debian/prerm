@@ -1,21 +1,3 @@
 #!/bin/sh
-set -eu
-
-if [ "${1:-}" = remove ]; then
-    /usr/bin/systemctl --system stop \
-        vonk-forge-package-helper-upgrade-finish.service >/dev/null 2>&1 || true
-    deb-systemd-invoke stop vonk-forge-agent.service >/dev/null || true
-    deb-systemd-invoke stop vonk-forge-monitor.service >/dev/null || true
-    deb-systemd-invoke stop vonk-forge-package-helper.socket >/dev/null || true
-    deb-systemd-invoke stop vonk-forge-package-helper.service >/dev/null || true
-    deb-systemd-invoke stop vonk-forge-docker-firewall.service >/dev/null || true
-    deb-systemd-helper disable vonk-forge-agent.service >/dev/null || true
-    deb-systemd-helper disable vonk-forge-monitor.service >/dev/null || true
-    deb-systemd-helper disable vonk-forge-package-helper.socket >/dev/null || true
-    deb-systemd-helper disable vonk-forge-docker-firewall.service >/dev/null || true
-    deb-systemd-helper disable vonk-forge-package-rollback.service >/dev/null || true
-    # The clock ceiling holds to the next boot: no workload is disturbed.
-    /usr/bin/loginctl disable-linger vonk-agent >/dev/null || true
-fi
-
-exit 0
+[ "$1" = remove ] || exit 0
+/usr/lib/vonk-forge/vonk-agent-helper --package-hook prerm remove || true

@@ -1,20 +1,23 @@
 //! The transient finisher unit: after dpkg exits, restart the helper (so the
 //! new binary serves) and then the agent, with no agent talking to a helper
 //! of another release in between.
-use vonk_agent_protocol::HostHelperContainerRuntimeAction as ContainerRuntimeAction;
-use vonk_agent_protocol::generated::OperatorActionName;
-
+use super::host::{COMMAND_SECONDS, POLLS_PER_SECOND};
 use super::{Host, best_effort};
 
 const SYSTEMCTL: &str = "/usr/bin/systemctl";
 const HELPER_UNIT: &str = "vonk-forge-package-helper.service";
 pub(super) const AGENT_UNITS: [&str; 2] =
     ["vonk-forge-agent.service", "vonk-forge-monitor.service"];
-/// Polls of 100 ms: 120 s for dpkg to leave.
-const DPKG_EXIT_POLLS: u32 = 1200;
-/// Budget of the unit: 120 s for dpkg to leave, then at most six commands of
-/// 60 s each (`SystemHost`), 480 s, with margin.
-pub(super) const FINISHER_RUNTIME_SECONDS: u32 = 600;
+/// How long dpkg has to leave; the unit's budget below counts the same wait.
+const DPKG_WAIT_SECONDS: u64 = 120;
+const DPKG_EXIT_POLLS: u32 = DPKG_WAIT_SECONDS as u32 * POLLS_PER_SECOND;
+/// The most commands one run issues: stop, restart, is-active and show of the
+/// helper, the agent restart, and the settling start.
+const MOST_COMMANDS: u64 = 6;
+/// Budget of the unit: the wait for dpkg, then every command at its timeout,
+/// with a minute of margin.
+pub(super) const FINISHER_RUNTIME_SECONDS: u64 =
+    DPKG_WAIT_SECONDS + MOST_COMMANDS * COMMAND_SECONDS + 60;
 const STAGES: usize = 4;
 
 /// One step of the restart. Each transition is one command or proof; the
@@ -27,14 +30,20 @@ enum Stage {
     StartAgent,
 }
 
-pub(super) fn run(host: &mut impl Host, dpkg_pid: u32, dpkg_start: u64) -> Result<(), String> {
+/// `reference`: the digest the restarted helper must run, as `Configure` found
+/// it; `None` when no candidate is armed.
+pub(super) fn run(
+    host: &mut impl Host,
+    dpkg_pid: u32,
+    dpkg_start: u64,
+    reference: Option<&str>,
+) -> Result<(), String> {
     // Nothing is stopped yet, so waiting too long needs no repair.
     wait_for_dpkg(host, dpkg_pid, dpkg_start)?;
-    let reference = reference_digest(host);
     let mut stage = Stage::StopAgent;
     // Every transition moves forward, so the machine settles within its stages.
     for _ in 0..STAGES {
-        match advance(host, stage, reference.as_deref()) {
+        match advance(host, stage, reference) {
             Ok(Some(next)) => stage = next,
             Ok(None) => return Ok(()),
             Err(error) => return settle(host, stage, reference.is_some(), error),
@@ -51,19 +60,6 @@ fn wait_for_dpkg(host: &mut impl Host, pid: u32, start: u64) -> Result<(), Strin
         host.pause();
     }
     Err("dpkg did not exit".into())
-}
-
-/// The digest the restarted helper must run: the ingress digest of an armed
-/// candidate. Nothing is re-hashed from disk; with no armed candidate for the
-/// installed version (an installer upgrade) there is no reference to prove.
-pub(super) fn reference_digest(host: &mut impl Host) -> Option<String> {
-    let version = host
-        .run(
-            "/usr/bin/dpkg-query",
-            &["-W", "-f=${Version}", "vonk-forge-agent"],
-        )
-        .ok()?;
-    host.armed_helper_sha256(&version)
 }
 
 fn helper_property(host: &mut impl Host, name: &str) -> Result<String, String> {
@@ -86,7 +82,7 @@ fn advance(
 ) -> Result<Option<Stage>, String> {
     match stage {
         Stage::StopAgent => {
-            let mut arguments = vec!["--system", OperatorActionName::Stop.as_str()];
+            let mut arguments = vec!["--system", "stop"];
             arguments.extend(AGENT_UNITS);
             best_effort(host, SYSTEMCTL, &arguments);
             Ok(Some(Stage::RestartHelper))
@@ -130,7 +126,7 @@ fn advance(
 fn settle(host: &mut impl Host, stage: Stage, armed: bool, error: String) -> Result<(), String> {
     let helper_unproven = matches!(stage, Stage::RestartHelper | Stage::ProveHelper { .. });
     if !(armed && helper_unproven) {
-        let mut arguments = vec!["--system", ContainerRuntimeAction::Start.as_str()];
+        let mut arguments = vec!["--system", "start"];
         arguments.extend(AGENT_UNITS);
         best_effort(host, SYSTEMCTL, &arguments);
     }
