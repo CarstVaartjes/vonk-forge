@@ -1,6 +1,8 @@
 import pytest
 
-from .added_line_guards import AGENT_REQUESTS, added_lines, changed_lines, check_source
+from .added_line_guards.check import check_source
+from .added_line_guards.patch import added_lines, changed_lines
+from .added_line_guards.scans import AGENT_REQUESTS
 from .added_line_guards_support import PATH
 
 

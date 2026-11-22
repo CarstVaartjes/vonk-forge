@@ -114,7 +114,11 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
     for path in (root / "control/src/vonk_control").rglob("*.py"):
         tree = parse_file(path).tree
         lines = []
-        if {"api", "agent_api"} & set(path.parts) or path.name.endswith("_api.py"):
+        if (
+            {"api", "agent_api"} & set(path.parts)
+            or path.name.endswith("_api.py")
+            or path.name == "api.py"
+        ):
             lines.extend(_server_cursors(tree))
         errors.extend(f"{path.relative_to(root)}:{line}" for line in lines)
     errors.extend(
@@ -154,7 +158,7 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
 )
 def test_library_storage_walks_are_rejected_on_added_lines(provider, path):
     """A new direct storage provider in a view must fail the patch gate."""
-    from control.tests.added_line_guards import check_source
+    from control.tests.added_line_guards.check import check_source
 
     target = provider if "." in provider else f"self.{provider}"
     source = f"def models(self):\n    return {target}()\n"

@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 
 from . import optimistic_boundaries as optimistic
-from .added_line_guards import check_source
+from .added_line_guards.check import check_source
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
 AGENT_FACING = (
-    *sorted(SRC.glob("telemetry*.py")),
-    SRC / "inventory.repository.py",
+    *sorted((SRC / "telemetry").glob("*.py")),
+    SRC / "inventory" / "repository.py",
     SRC / "agent_contacts.py",
     SRC / "installed_bytes.py",
     *sorted((SRC / "agent_api").glob("*.py")),

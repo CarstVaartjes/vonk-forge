@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .added_line_guards import check_source
+from .added_line_guards.check import check_source
 from .contract_constant_copies import contract_constants, scan_literals, scan_source
 
 NAMES = frozenset({"MAX_RUNTIME_ARGUMENTS", "MIN_SPEECH_SECONDS"})

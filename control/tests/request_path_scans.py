@@ -277,7 +277,9 @@ def _scoped(nodes: list[ast.AST]) -> bool:
 
 def scan_tree(tree: ast.Module, *, path: str) -> list[int]:
     if not (
-        path.endswith("_api.py") or "/api/" in path or "/library_projection/" in path
+        path.endswith(("_api.py", "/api.py"))
+        or "/api/" in path
+        or "/library_projection/" in path
     ):
         return []
     sites: list[int] = []

@@ -1,57 +1,15 @@
-"""Count-free guards over an externally supplied unified diff. Never reads Git."""
-
 from __future__ import annotations
 
 import ast
 import re
-import sys
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from difflib import SequenceMatcher
 from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import TypeGuard
 
-from . import (
-    alias_rules,
-    bare_savepoints,
-    contract_constant_copies,
-    docker_listings,
-    durable_revocations,
-    fixture_closures,
-    git_free_test_lines,
-    intent_ordinal_writers,
-    job_owner_payload,
-    legacy_tolerance,
-    lifecycle_sets,
-    locked_io,
-    model_set_first_requester,
-    raw_barriers,
-    raw_loopback_bind,
-    repeated_parse,
-    request_path_scans,
-    retention_head_digests,
-    scratch_names,
-    shell_trap_waits,
-    sync_io_in_async,
-    typed_string_lengths,
-    whole_collection_readers,
-)
-from . import claim_registry as claims
-from . import collection_continuation as collections
-from . import content_identity_boundaries as identity
-from . import coordination_boundaries as coordination
-from . import deterministic_retries as retries
-from . import document_read_boundaries as document_reads
-from . import lifecycle_reasons as reasons
-from . import optimistic_boundaries as optimistic
-from . import principle_guards as principles
-from . import progress_attempt_boundaries as progress_attempts
-from . import short_wall_clocks as wall_clocks
-from . import untyped_mapping_boundaries as mappings
-from . import vocabulary_literals as vocabulary
-from .recipe_run_write_verdicts import classified_write_lines
+from .. import principle_guards as principles
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -135,11 +93,15 @@ MODES = (
     "printed-output",
     "maintainershim",
 )
+
+
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
 # the request's own bytes may say it; a clock, a race or an owner still
 # settling is a wait (temporary_http_answer or UnknownOutcomeError).
 AGENT_422_VERDICT_MARKER = "422-verdict:"
+
+
 # The only code that may name DEMAND_EXCEEDS_CAPACITY: sibling starts that
 # cannot share one Spark, and the mapping between the resource and run-switch
 # vocabularies. A disk allocation larger than its device is the one other site,
@@ -150,27 +112,41 @@ CAPACITY_REFUSAL_SITES = frozenset(
         "control/src/vonk_control/fleet_profiles/dependencies.py",
     }
 )
+
+
 CAPACITY_REFUSAL_MARKER = "capacity-refusal: disk"
+
+
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
 FIXED_RESERVE = re.compile(
     r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
 )
+
+
 # Artifact-job limits have one owner, `vonk_agent_protocol/job_limits.py`;
 # a second assignment restates a number that must stay equal to it.
 JOB_LIMIT_ASSIGNMENT = re.compile(
     r"^\s*(?:MAX_(?:INPUT|OUTPUT)_[A-Z_]+|MAX_TIMEOUT_SECONDS)\s*(?::[^=]+)?="
 )
+
+
 JOB_LIMITS_OWNER = "agent_protocol/src/vonk_agent_protocol/job_limits.py"
+
+
 # A display title feeding a normalised name builds identity from display text;
 # a title edit then changes behaviour with no new revision (#2009).
 TITLE_IDENTITY = re.compile(
     r"(?:\b\w+_title|\.title)\b(?!\()\s*\.(?:lower|casefold|replace)\(|slugify\([^)]*title"
 )
+
+
 # Search filters compare a title with the query; they name nothing.
 TITLE_IDENTITY_VERDICTS: dict[str, str] = {
     "control/src/vonk_control/library_projection/views.py": "wanted_search in",
 }
+
+
 # Fixed reserves that guard something other than NAS volume space.
 FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
     (
@@ -190,6 +166,8 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
         "reserve_floor_bytes",
     ): "the collector's headroom floor, defaulted from that setting",
 }
+
+
 # The only modules that may lock a whole table: one-time schema adoption at
 # startup (before services run) and the administrator bootstrap (security;
 # request paths read users without a lock).
@@ -200,22 +178,32 @@ TABLE_LOCK_OWNERS = frozenset(
         "control/src/vonk_control/browser_auth.py",
     }
 )
+
+
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
 # Whether a rank is installed is one shared predicate, machine_states.rank_installed.
 RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
+
+
 RANK_INSTALLED_KIND = (
     "rank INSTALLED test spelled inline; use machine_states.rank_installed"
 )
+
+
 # Whether a reservation is live (not history) is one shared predicate,
 # machine_states.reservation_live.
 LIVE_RESERVATION_COPY = re.compile(
     r"ResourceReservation\.state\s*!=\s*(?:ReservationState\.RELEASED|\"released\")"
 )
+
+
 LIVE_RESERVATION_KIND = (
     "live-reservation test spelled inline; use machine_states.reservation_live"
 )
+
+
 # A node's newest inventory report is one indexed probe per node
 # (inventory_repository.newest_snapshot_ids); a window or grouped max over
 # node_id reads every retained report (~720 per node over 24 h).
@@ -224,6 +212,8 @@ LIVE_RESERVATION_KIND = (
 # bare partition_by= ends at its argument comma, group_by( and a partition_by
 # tuple at the close paren (two nested paren levels are read).
 _NEST = r"\((?:[^()]|\([^()]*\))*\)"
+
+
 NEWEST_SNAPSHOT_SCAN = re.compile(
     r"(?:(?:partition_by\s*=\s*(?:\((?:[^()]|"
     + _NEST
@@ -234,18 +224,28 @@ NEWEST_SNAPSHOT_SCAN = re.compile(
     r"\bNode(?:Inventory)?Snapshot\.node_id\b)"
     r"|func\.max\(\s*Node(?:Inventory)?Snapshot\.observed_at\s*\)"
 )
+
+
 NEWEST_SNAPSHOT_KIND = (
     "newest report per node by window, grouped max or max(observed_at); "
     "use inventory_repository.newest_snapshot_ids"
 )
+
+
 # A vonkctl test decides on data (status, requests, a typed result, the --json
 # document); a positive string literal found in captured stdout/stderr is
 # wording, which no test asserts. Absence, count
 # and emptiness checks on captured output (a secret never printed, a line shown
 # once) are leak and duplication checks and stay allowed.
 CAPTURED_TEXT = re.compile(r"\.(?:out|err)\b|\.getvalue\(\)|readouterr\(\)")
+
+
 PRINTED_OUTPUT_SCOPE = "tests/cluster_profiles/test_"
+
+
 PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_layout.py"
+
+
 PRINTED_OUTPUT_KIND = (
     "vonkctl test asserts wording in printed output; assert the status, the "
     "requests, a typed result, a view function or the --json document "
@@ -300,7 +300,11 @@ def printed_wording_lines(source: str) -> list[int]:
 
 
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
+
+
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
+
+
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
     {
@@ -322,17 +326,22 @@ SECURITY_EDGES = frozenset(
 READINESS_READERS = frozenset(
     {"control/src/vonk_control/library_projection/local_state.py"}
 )
+
+
 REVISION_NUMBER_ALLOCATORS = frozenset(
     {
         "control/src/vonk_control/catalog/entities.py",
         "control/src/vonk_control/catalog/service.py",
     }
 )
+
+
 # Readers that keep each document's newest revision_number, so an allocator
 # (max + 1) never hands one out twice; they never allocate.
 REVISION_NUMBER_KEEPERS = frozenset(
     {"control/src/vonk_control/catalog/revision_collection.py"}
 )
+
 
 # The one owner of how a container's exit cause is spelled and read.
 EXIT_CAUSE_OWNER = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
@@ -354,6 +363,8 @@ CONTACT_WRITERS = frozenset(
         "control/src/vonk_control/db/node_facts.py",
     }
 )
+
+
 # Facts only the contact row has; ``last_seen_at``, ``protocol_version`` and
 # ``management_address`` also name unrelated fields, so for those only a
 # receiver named for the contact row counts.
@@ -367,6 +378,8 @@ _CONTACT_ONLY = frozenset(
         "recipe_observation_status_at",
     }
 )
+
+
 _CONTACT_SHARED = frozenset({"last_seen_at", "protocol_version", "management_address"})
 
 
@@ -464,10 +477,14 @@ _MODEL_SIZED_TOKENS = frozenset(
         "paths",
     }
 )
+
+
 # Database-range and fleet-size constants are not item counts.
 _RANGE_CONSTANTS = frozenset(
     {"MAX_DATABASE_INTEGER", "_MAX_SIGNED_BIGINT", "_MAX_FLEET_NODES"}
 )
+
+
 # A real protocol limit states why on the line: ``# item-count-limit: <why>``.
 ITEM_COUNT_PRAGMA = "# item-count-limit:"
 
@@ -525,6 +542,8 @@ def model_sized_count_caps(source: str) -> list[int]:
 _MODEL_SIZED_PLURALS = frozenset(
     token for token in _MODEL_SIZED_TOKENS if token.endswith("s")
 )
+
+
 _MAX_CONSTANT = re.compile(r"^_?MAX_[A-Z0-9_]+$")
 
 
@@ -649,165 +668,6 @@ def paging_count_ceilings(source: str) -> list[int]:
     return sorted(found)
 
 
-def added_lines(patch: str) -> dict[str, set[int]]:
-    return changed_lines(patch)[0]
-
-
-def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]]:
-    """Parse hunks, carrying unchanged relocated blocks without duplicating debt.
-
-    A deleted block may account for one identical added block in the same
-    language. Copies and changed lines remain additions. Matching preserves
-    context and permits a uniform extraction indentation shift, so a common isolated line cannot hide new work.
-    All evidence comes from the supplied patch, never repository history.
-    Returns each file's added line numbers and its removed text; a deleted line
-    that a relocated block spent is no longer in the removed text.
-    """
-    files: dict[str, set[int]] = {}
-    additions: list[tuple[str, list[tuple[int, str]]]] = []
-    deletions: list[tuple[str, list[str]]] = []
-    path = ""
-    old_path = ""
-    line = 0
-    in_hunk = False
-    added: list[tuple[int, str]] = []
-    deleted: list[str] = []
-
-    def finish() -> None:
-        if added:
-            additions.append((path, added.copy()))
-            added.clear()
-        if deleted:
-            deletions.append((old_path, deleted.copy()))
-            deleted.clear()
-
-    for text in patch.splitlines():
-        if text.startswith("diff --git "):
-            finish()
-            in_hunk = False
-        elif text.startswith("--- a/") and not in_hunk:
-            old_path = text[6:]
-        elif text.startswith("+++ b/") and not in_hunk:
-            path = text[6:]
-            files.setdefault(path, set())
-        elif match := re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", text):
-            finish()
-            line = int(match.group(1))
-            in_hunk = True
-        elif in_hunk and text.startswith("+"):
-            files[path].add(line)
-            added.append((line, text[1:]))
-            line += 1
-        elif in_hunk and text.startswith("-"):
-            deleted.append(text[1:])
-        elif in_hunk and text.startswith(" "):
-            finish()
-            line += 1
-    finish()
-    # Hunk boundaries describe the original layout, not the relocated block.
-    # Gather each file's changed text so a split module can spend deleted text
-    # across hunks. Consumption still permits only one relocated occurrence.
-    added_by_file: dict[str, list[tuple[int, str]]] = {}
-    deleted_by_file: dict[str, list[str]] = {}
-    for target, lines in additions:
-        added_by_file.setdefault(target, []).extend(lines)
-    for owner, removed in deletions:
-        deleted_by_file.setdefault(owner, []).extend(removed)
-    for target, lines in added_by_file.items():
-        for owner, removed in deleted_by_file.items():
-            if Path(owner).suffix != Path(target).suffix:
-                continue
-            old_lines = [
-                (index, text) for index, text in enumerate(removed) if text.strip()
-            ]
-            new_lines = [
-                (index, text) for index, (_, text) in enumerate(lines) if text.strip()
-            ]
-            matches = SequenceMatcher(
-                a=[text.lstrip() for _, text in old_lines],
-                b=[text.lstrip() for _, text in new_lines],
-                autojunk=False,
-            ).get_matching_blocks()
-            shifted_blocks: list[tuple[int, int, int]] = []
-            for old, new, size in matches:
-                start = 0
-                previous_shift = None
-                for offset in range(size):
-                    left = old_lines[old + offset][1]
-                    right = new_lines[new + offset][1]
-                    shift = (
-                        len(left)
-                        - len(left.lstrip())
-                        - len(right)
-                        + len(right.lstrip())
-                    )
-                    if previous_shift is not None and shift != previous_shift:
-                        shifted_blocks.append(
-                            (old + start, new + start, offset - start)
-                        )
-                        start = offset
-                    previous_shift = shift
-                shifted_blocks.append((old + start, new + start, size - start))
-            for old, new, size in shifted_blocks:
-                if size < 2:
-                    continue
-                old_indices = [index for index, _ in old_lines[old : old + size]]
-                new_indices = [index for index, _ in new_lines[new : new + size]]
-                # Require a block, including its separating blank line, never
-                # an isolated vocabulary word. A uniform indentation shift is
-                # expected when extracting a function from a dispatch wrapper.
-                shifts = {
-                    len(removed[left])
-                    - len(removed[left].lstrip())
-                    - len(lines[right][1])
-                    + len(lines[right][1].lstrip())
-                    for left, right in zip(old_indices, new_indices, strict=True)
-                }
-                if len(shifts) != 1 or any(
-                    lines[index][0] not in files[target]
-                    for index in range(new_indices[0], new_indices[-1] + 1)
-                ):
-                    continue
-                old_end = old_indices[-1] + 1
-                new_end = new_indices[-1] + 1
-                while old_end < len(removed) and not removed[old_end].strip():
-                    old_end += 1
-                while new_end < len(lines) and not lines[new_end][1].strip():
-                    new_end += 1
-                if min(old_end - old_indices[0], new_end - new_indices[0]) < 3:
-                    continue
-                new_end = (
-                    new_indices[-1]
-                    + 1
-                    + min(
-                        old_end - old_indices[-1] - 1,
-                        new_end - new_indices[-1] - 1,
-                    )
-                )
-                for offset in range(new_indices[0], new_end):
-                    files[target].discard(lines[offset][0])
-                for offset in range(old_indices[0], old_end):
-                    # A second copy cannot spend the same deleted occurrence.
-                    removed[offset] = f"\0consumed:{offset}"
-            # Reordered extracted methods need not preserve the old file's
-            # sequence alignment. Spend remaining exact blocks independently.
-            for _ in range(len(lines)):
-                match = SequenceMatcher(
-                    a=removed,
-                    b=[
-                        text if number in files[target] else f"\0added:{number}"
-                        for number, text in lines
-                    ],
-                    autojunk=False,
-                ).find_longest_match()
-                if match.size < 3:
-                    break
-                for offset in range(match.size):
-                    files[target].discard(lines[match.b + offset][0])
-                    removed[match.a + offset] = f"\0consumed:{match.a + offset}"
-    return files, deleted_by_file
-
-
 _QUOTED = re.compile(r"""(["'])([^"'\n]*)\1""")
 
 
@@ -926,6 +786,8 @@ REHASH_INGRESS = (
     "control/src/vonk_control/model_cache/split_transfer.py",
     "control/src/vonk_control/model_cache/http.py",
 )
+
+
 _STORED_VALUES = ("document", "plan", "payload", "recipe")
 
 
@@ -1007,7 +869,11 @@ def _two_step_rehashes(tree: ast.Module) -> list[int]:
 
 
 _CLOCK_NAMES = frozenset({"now", "current", "timestamp"})
+
+
 _QUERY_CALLS = frozenset({"scalar", "scalars", "execute", "get", "all", "first", "one"})
+
+
 _STAMP_NAME = re.compile(r"observed(?:_at)?")
 
 
@@ -1038,6 +904,8 @@ _AGENT_FACTS = (
     "InventorySnapshotView",
     "_latest_snapshots",
 )
+
+
 #: The two ingress handlers that judge an agent stamp against the receive
 #: clock to accept or refuse a report: (path, function).
 _INGRESS = frozenset(
@@ -1235,6 +1103,8 @@ START_BUDGET_VERDICTS: dict[tuple[str, str], str] = {
     ): "display only (startup_budget_seconds); overstates by the queue wait "
     "once anchored, follow-up",
 }
+
+
 _START_STAMPS = ("start_deadline", "start_anchored_at")
 
 
@@ -1375,15 +1245,20 @@ def replanned_digest_reads(source: str) -> list[int]:
 _PROVIDER_OPENERS = frozenset(
     {"_open_http_response", "_open_github_release_asset", "_open_github_lfs_object"}
 )
+
+
 _OPENER_OWNERS = {
     "control/src/vonk_control/model_cache/providers.py": None,
     "control/src/vonk_control/model_cache/download.py": "_open_provider",
 }
 
+
 # The anonymous GitHub request primitive skips the cooldown and the stream
 # throttle too: only the two GitHub provider modules, whose openers run under
 # ``_open_provider``, may call it.
 _ANONYMOUS_SEND = "_send_anonymous_github_request"
+
+
 _ANONYMOUS_SEND_MODULES = frozenset(
     {
         "control/src/vonk_control/model_cache/github.py",
@@ -1393,6 +1268,7 @@ _ANONYMOUS_SEND_MODULES = frozenset(
 
 
 _MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
+
 
 # The one reader outside the model cache that may require NAS coverage.
 NAS_COVERAGE_READER = "control/src/vonk_control/distribution/model_cache.py"
@@ -1533,6 +1409,8 @@ _MOVEMENT_FIELDS = frozenset(
         "last_progress_at",
     }
 )
+
+
 MOVEMENT_VERDICTS: dict[tuple[str, str], str] = {
     (
         "control/src/vonk_control/stall_window.py",
@@ -1592,6 +1470,8 @@ def _says_422(text: str, following: str) -> bool:
 _SAYS_FATAL_AUTH = re.compile(
     r"\bstatus_code\s*=\s*40[13]\b|\bHTTPException\(\s*40[13]\b"
 )
+
+
 _BROAD_EXCEPT = re.compile(
     r"\b(?:Exception|ValueError|OSError|PermissionError|RuntimeError|KeyError"
     r"|TypeError|SQLAlchemyError)\b"
@@ -1602,7 +1482,11 @@ _BROAD_EXCEPT = re.compile(
 # every attempt with nothing changed (#2299: an internal InvalidValue during a
 # load retry backed off for ever). It asks the one classifier first.
 _BROAD_PARKED_EXCEPT = re.compile(r"\b(?:Exception|ValueError|RuntimeError|KeyError)\b")
+
+
 _PARKS_WORK = re.compile(r"\b(?:_decline_retry\w*|_defer_\w+|_park_for_retry)\(")
+
+
 _CONSULTS_DISPOSITION = re.compile(r"\b(?:disposition|is_definite)\(")
 
 
@@ -1646,6 +1530,8 @@ SHIM_LINE = re.compile(
       | do|done|fi
     )$"""
 )
+
+
 SHIM_SCRIPTS = frozenset({"postinst", "prerm", "postrm"})
 
 
@@ -1673,1270 +1559,6 @@ def shim_hits(path: str, source: str, added: set[int]) -> list[str]:
     return []
 
 
-def check_source(
-    path: str,
-    source: str,
-    added: set[int],
-    *,
-    modes: Sequence[str] = MODES,
-    words: frozenset[str] | None = None,
-    removed: Sequence[str] = (),
-) -> list[str]:
-    """Old findings cannot fail the change; only a reported added line can.
-
-    ``removed`` is the file's removed text from the same patch.
-    """
-    if not added or "generated_control" in path or "/generated/" in path:
-        return []
-    is_test = (
-        "/tests/" in path
-        # Browser fixtures (control/web/e2e) hold the wire documents, like the .spec files.
-        or path.startswith(("tests/", "control/web/e2e/"))
-        or path.endswith(
-            ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
-        )
-    )
-    noexit_hits: list[str] = (
-        shim_hits(path, source, added) if "maintainershim" in modes else []
-    )
-    if "noexit" in modes and not is_test:
-        test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
-        patterns = [
-            r"^\s*RestartPreventExitStatus\s*=",
-            r"^\s*TimeoutStartSec\s*=\s*(?:0|infinity)\s*$",
-            r"^\s*StartLimit(?:IntervalSec|Interval|Burst)\s*=\s*(?!0(?:\s|$))\S+",
-        ]
-        if path.endswith(".rs"):
-            patterns.extend(
-                [
-                    r"(?:std::)?process::(?:exit|abort)\s*\(",
-                    r"ExitCode::(?:from|FAILURE)",
-                    r"\b(?:panic!|unreachable!)\s*\(",
-                    r"\.expect\s*\(",
-                ]
-            )
-        if path.startswith(("packaging/", "deploy/")):
-            patterns.extend(
-                [r"\bexit\s+(?:78|\$EX_CONFIG)\b", r"^\s*Restart\s*=\s*no\b"]
-            )
-        for line, text in enumerate(source.splitlines(), 1):
-            if (
-                line in added
-                and line not in test_lines
-                and any(re.search(pattern, text) for pattern in patterns)
-            ):
-                noexit_hits.append(f"{path}:{line}: permanent process stop")
-    if "noexit" in modes and not is_test and path.endswith(".service"):
-        restart = re.search(r"^Restart=(.+)$", source, re.MULTILINE)
-        oneshot = re.search(r"^Type=oneshot$", source, re.MULTILINE)
-        if (restart is not None or not oneshot) and (
-            restart is None
-            or restart[1] not in {"always", "on-failure"}
-            or not re.search(r"^RestartSec=(?!0(?:s)?$).+$", source, re.MULTILINE)
-            or not re.search(r"^StartLimitIntervalSec=0$", source, re.MULTILINE)
-        ):
-            noexit_hits.append(
-                f"{path}:{min(added)}: service without bounded perpetual recovery"
-            )
-    if "causes" in modes and not is_test and path.endswith(".rs"):
-        # P6: evidence is never lost. A refusal, a failed send or an error is
-        # kept with its cause (in the outcome's evidence, the result spool or
-        # the journal), never dropped by `.ok();`, `Err(_) =>` or `let _ =`.
-        test_lines = rust_test_lines(source)
-        for line, text in enumerate(source.splitlines(), 1):
-            if (
-                line in added
-                and line not in test_lines
-                and re.search(
-                    r"\btemporary_runtime_observation_failure\s*\(\s*\)"
-                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;"
-                    r"|\.ok\(\)\s*;"
-                    r"|\bErr\s*\(\s*_\s*\)\s*=>"
-                    r"|\blet\s+_\s*=.*\.(?:send|post|put|report)\w*\s*\(",
-                    text,
-                )
-            ):
-                noexit_hits.append(f"{path}:{line}: failure discards its cause")
-            # A missing observation is re-observed, never replaced by a
-            # literal exit status: an exit is measured or stays unknown. A
-            # deliberate helper-ended exit is one documented constant.
-            if (
-                line in added
-                and line not in test_lines
-                and re.search(
-                    r"\bSome\s*\(\s*124\s*\)"
-                    r"|\bexit_code\s*:\s*Some\s*\(\s*-?\d+\s*\)"
-                    r"|\bOk\s*\(\s*\(\s*Some\s*\(\s*-?\d+\s*\)",
-                    text,
-                )
-            ):
-                noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
-    if (
-        "exit-causes" in modes
-        and not is_test
-        and path.endswith((".rs", ".py"))
-        and path != EXIT_CAUSE_OWNER
-    ):
-        # P10: a container's exit cause is decided through ``ExitCause``
-        # (``of_summary``/``from_token``/``token``), never by matching its
-        # ``exit_cause=`` text or spelling a cause token: five such literal
-        # parses let a job's host-memory kill report an output breach (#1906).
-        test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
-        spelled = re.compile(
-            r"exit_cause="
-            r"|[\"'](?:" + "|".join(sorted(exit_cause_tokens())) + r")[\"']"
-        )
-        noexit_hits.extend(
-            f"{path}:{line}: exit cause spelled outside ExitCause"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added and line not in test_lines and spelled.search(text)
-        )
-    if "listings" in modes and not is_test:
-        # GitHub lists a run's artifacts 30 to a page; a reader of one page
-        # silently misses the rest (shard timings, #1900). Read every page or
-        # ask for the one artifact by name; a download by id is not a listing.
-        # A line that calls a function of this file whose own gh argv pages
-        # reads every page. The window is four lines before (workflow
-        # continuations) and one after (a split URL).
-        rows = source.splitlines()
-        paging = re.compile(
-            r"[\"']gh[\"'],\s*[\"']api[\"'],\s*(?:[\"'][^\"']*[\"'],\s*)*[\"']--paginate[\"']"
-        )
-        wrappers = {
-            name
-            for name, body in re.findall(
-                r"^def (\w+)\(([\s\S]*?)(?=^\S|\Z)", source, re.MULTILINE
-            )
-            if paging.search(body)
-        }
-        for line, text in enumerate(rows, 1):
-            window = " ".join(rows[max(line - 5, 0) : line + 1])
-            if (
-                line in added
-                and re.search(
-                    r"actions/(?:runs/[^\s\"']*/)?artifacts(?!\w|/[\w{$])", text
-                )
-                and not re.search(r"--paginate|\bpage=|[?&]name=", window)
-                and not (
-                    any(re.search(rf"\b{name}\(", text) for name in wrappers)
-                    and not re.search(r"[\"']gh[\"'],", window)
-                )
-            ):
-                noexit_hits.append(f"{path}:{line}: artifact listing reads one page")
-    if "excerpts" in modes and not is_test and path.endswith(".py"):
-        # A process's output is bounded from its end, where a failure is
-        # printed, and a retained diagnostic tail is read from both streams: a
-        # log, excerpt or stream value cut from the front, or a tail's
-        # ``stderr.text or stdout.text`` choosing one stream by presence, kept a
-        # build's echoed command instead of its error (#1905). A raw tool's
-        # ``stderr or stdout`` (skopeo prints its errors on stderr) is not a
-        # retained tail and is not matched.
-        name = r"\b(?:\w+_)?(?:log|excerpt|stderr|stdout)(?:_\w+)?\b"
-        spelled = re.compile(
-            name + r"(?:\.text)?\)?\[\s*:\s*[\w.]+\s*\]"
-            r"|\bstderr\.text\s+or\s+[\w.()]*stdout\.text"
-            r"|\bstdout\.text\s+or\s+[\w.()]*stderr\.text"
-        )
-        noexit_hits.extend(
-            f"{path}:{line}: output bounded from its front or one stream preferred"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added and spelled.search(text)
-        )
-    if (
-        "locks" in modes
-        and not is_test
-        and path.endswith(".rs")
-        and not path.endswith("/held_lock.rs")
-    ):
-        # A flock belongs to the open file, which a child forked by any thread
-        # shares until exec: released only by closing our descriptor, the lock
-        # stays held and the next locker is refused as busy. HeldLock unlocks
-        # explicitly on drop.
-        test_lines = rust_test_lines(source)
-        noexit_hits.extend(
-            f"{path}:{line}: raw exclusive flock; take a HeldLock"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added
-            and line not in test_lines
-            and re.search(
-                r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
-            )
-        )
-    if (
-        "plan-validation" in modes
-        and not is_test
-        and path.startswith(
-            (
-                "rust/crates/vonk-agent/src/",
-                "rust/crates/vonk-agent-protocol/src/compiled_oci/",
-            )
-        )
-        and path.endswith(".rs")
-        and path
-        not in {
-            "rust/crates/vonk-agent/src/executor/plans.rs",
-            "rust/crates/vonk-agent/src/oci/custody.rs",
-            "rust/crates/vonk-agent/src/oci/observation.rs",
-        }
-    ):
-        # A compiled plan is validated once, by `refuse_invalid_plan` (plans.rs)
-        # at dispatch. Another call repeats a rule. Added lines only; the
-        # rustfmt split shape (`.validate()` on its own line after the plan
-        # expression) counts too.
-        test_lines = rust_test_lines(source)
-        owner = r"\b(?:plan|spec|invocation|compiled_execution_plan)\s*"
-        lines = source.splitlines()
-        previous = ""
-        for line, text in enumerate(lines, 1):
-            if (
-                line in added
-                and line not in test_lines
-                and (
-                    re.search(owner + r"\.validate\(\)", text)
-                    or (
-                        text.lstrip().startswith(".validate()")
-                        and re.search(owner + r"$", previous)
-                    )
-                )
-            ):
-                noexit_hits.append(
-                    f"{path}:{line}: compiled plan validated again; dispatch owns it"
-                )
-            if text.strip():
-                previous = text.rstrip()
-    if (
-        "locks" in modes
-        and not is_test
-        and path.endswith(".py")
-        and path.startswith("control/src/")
-        and path not in TABLE_LOCK_OWNERS
-    ):
-        # A table-wide lock taken NOWAIT loses to any writer in flight, so a
-        # recurring pass that needs one is refused for as long as traffic
-        # lasts (the catalog collector's 21-table fence, 2026-11-04). Recheck
-        # per row instead: a conditional delete, the foreign keys, and a short
-        # lock_timeout that skips a held row.
-        noexit_hits.extend(
-            f"{path}:{line}: table-wide lock; recheck per row instead"
-            for line, text in enumerate(source.splitlines(), 1)
-            if line in added and re.search(r"\bLOCK\s+TABLE\b", text, re.IGNORECASE)
-        )
-    python = path.endswith(".py") or (
-        source.startswith("#!") and "python" in source.splitlines()[0]
-    )
-    hits: list[tuple[int, str]] = []
-    if "legacy" in modes and not is_test and legacy_tolerance.in_web_scope(path):
-        hits.extend(legacy_tolerance.scan_web_source(source))
-    if "optimistic" in modes and python and path.startswith("control/src/"):
-        hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
-        # workload_intent is the one writer of the intent ordinal: a conditional
-        # UPDATE on that column, which locks nothing it does not write (lock plan
-        # step 4). Anywhere else the same update is still refused here.
-        if (
-            not is_security_edge(path)
-            and not path.startswith("control/src/vonk_control/enrollment/")
-            and path != intent_ordinal_writers.OWNER
-        ):
-            hits.extend(
-                (line, optimistic.NODE_KIND)
-                for line in optimistic.scan_agent_node_locks(source)
-            )
-        if path not in CONTACT_WRITERS:
-            hits.extend(
-                (line, "contact fact written outside agent_contacts (one upsert path)")
-                for line in contact_writes(source)
-            )
-        classified = classified_write_lines(path, source)
-        hits.extend(
-            (line, optimistic.WRITE_KIND)
-            for line in optimistic.scan_unwrapped_recipe_run_writes(source)
-            if line not in classified
-        )
-    if (
-        "boundaries" in modes
-        and python
-        and path.startswith("src/cluster_profiles/")
-        and not path.startswith("src/cluster_profiles/control_client/")
-    ):
-        hits.extend(
-            (
-                node.lineno,
-                (
-                    "vonkctl failure raised as a bare ControlClientError; "
-                    "use a typed error with its own code (control_client/errors.py)"
-                ),
-            )
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Raise)
-            and isinstance(node.exc, ast.Call)
-            and ast.unparse(node.exc.func) == "ControlClientError"
-        )
-    if (
-        "boundaries" in modes
-        and python
-        and path.startswith("control/tests/")
-        and path != AGENT_REQUESTS
-    ):
-        hits.extend(
-            (node.lineno, f"agent request built by hand; send {AGENT_REQUESTS}'s")
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Call)
-            and ast.unparse(node.func).split(".")[-1] in AGENT_REQUEST_BUILDERS
-        )
-    if (
-        "vocabulary" in modes
-        and not is_test
-        and (python or path.endswith((".rs", ".ts", ".tsx")))
-    ):
-        definitions = _enum_member_lines(source) if python else set()
-        if path.endswith(".rs"):
-            definitions.update(rust_test_lines(source))
-        contract = vocabulary.contract_words() if words is None else words
-        hits.extend(
-            (line, "contract literal")
-            for line in new_literal_lines(
-                (
-                    line
-                    for line in vocabulary.scan_source(
-                        source, path=path, words=contract
-                    )
-                    if line not in definitions
-                ),
-                source,
-                added,
-                () if python else removed,
-                contract,
-            )
-        )
-    if (
-        "retries" in modes
-        and not is_test
-        and path.startswith("rust/crates/vonk-agent/src/")
-        and path.endswith(".rs")
-    ):
-        hits.extend(
-            retries.scan_rust_dispositions(
-                source, path=path, test_lines=rust_test_lines(source)
-            )
-        )
-    if "docker-listings" in modes and docker_listings.in_scope(path) and not is_test:
-        hits.extend(
-            (line, docker_listings.KIND)
-            for line in docker_listings.scan_source(source, rust_test_lines(source))
-        )
-    if "identity" in modes and path.endswith(".rs") and not is_test:
-        test_lines = rust_test_lines(source)
-        hits.extend(
-            (site.line, "provenance comparison")
-            for site in identity.scan_source(source, path=path)
-            if site.line not in test_lines
-        )
-    if python and not is_test:
-        if "request-scans" in modes:
-            hits.extend(
-                (line, "unbounded request catalog/history scan")
-                for line in request_path_scans.scan_tree(ast.parse(source), path=path)
-            )
-        if "collection-readers" in modes and path.startswith(
-            "control/src/vonk_control/"
-        ):
-            hits.extend(whole_collection_readers.scan_source(source, path=path))
-        if "repeated-parse" in modes and path.startswith("control/src/"):
-            hits.extend(
-                (line, "one stored value parsed twice in one function")
-                for line in repeated_parse.scan_source(source)
-            )
-        if "legacy" in modes and legacy_tolerance.in_scope(path):
-            hits.extend(legacy_tolerance.scan_source(source))
-        if "job-owner-payload" in modes and job_owner_payload.in_scope(path):
-            hits.extend(job_owner_payload.scan_source(source))
-        if "lifecycle-sets" in modes and lifecycle_sets.in_scope(path):
-            hits.extend(
-                (line, lifecycle_sets.KIND)
-                for line in lifecycle_sets.scan_source(source)
-            )
-        if "progress" in modes:
-            hits.extend(
-                (line, "monotonic progress without attempt key")
-                for line in progress_attempts.scan_source(source)
-            )
-        if "mapping" in modes:
-            hits.extend(
-                (site.line, "untyped mapping")
-                for site in (
-                    *mappings.scan_source(source, path=path),
-                    *mappings.scan_bare_class_fields(source, path=path),
-                )
-            )
-        if "document-reads" in modes and path.startswith(
-            tuple(
-                root.relative_to(document_reads.REPO_ROOT).as_posix() + "/"
-                for root in document_reads.SOURCE_ROOTS
-            )
-        ):
-            hits.extend(
-                (
-                    site.line,
-                    (
-                        "raw or strict document read; use vonk_forge_contracts "
-                        "read_recipe/read_model/read_*_display"
-                    ),
-                )
-                for site in document_reads.scan_source(source, path=path)
-            )
-        if "identity" in modes:
-            ingress = path.startswith(
-                "control/src/vonk_control/recipe_packages/"
-            ) or path in {
-                "control/src/vonk_control/catalog/entities.py",
-                "control/src/vonk_control/catalog/service.py",
-            }
-            if not ingress:
-                tree = ast.parse(source)
-                aliases = {"document_sha256"} | {
-                    alias.asname or alias.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.ImportFrom)
-                    for alias in node.names
-                    if alias.name == "document_sha256"
-                }
-                hits.extend(
-                    (node.lineno, "document digest outside ingress")
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.Call)
-                    and (
-                        (isinstance(node.func, ast.Name) and node.func.id in aliases)
-                        or (
-                            isinstance(node.func, ast.Attribute)
-                            and node.func.attr == "document_sha256"
-                        )
-                    )
-                )
-            # One definition of a recipe's current revision: the catalog head
-            # (catalog.queries.active_head_revision). Any use of revision_number
-            # (ordering, max, comparison, sorting) can pick a reverted revision
-            # over the head. Only the revision-number allocators and the column
-            # definition may name it.
-            if (
-                path.startswith("control/src/vonk_control/")
-                and path not in REVISION_NUMBER_ALLOCATORS | REVISION_NUMBER_KEEPERS
-                and not path.startswith("control/src/vonk_control/models/")
-            ):
-                hits.extend(
-                    (line, "revision_number: current is the catalog head")
-                    for line, text in enumerate(source.splitlines(), 1)
-                    if line in added and re.search(r"\brevision_number\b", text)
-                )
-            hits.extend(
-                (site.line, "provenance comparison")
-                for site in identity.scan_source(source, path=path)
-            )
-            # A readiness reader finds a recipe's cache and image facts by the
-            # recipe's own artifact set and by the image digest. The recipe that
-            # asked first (the set's recorded provenance, the revision or
-            # document a build row names) does not own the shared bytes.
-            if path.startswith("control/src/vonk_control/"):
-                hits.extend(
-                    (line, "cache set provenance: key by the recipe's own set")
-                    for line, text in enumerate(source.splitlines(), 1)
-                    if line in added
-                    and re.search(r"\bModelCacheSet\.recipe_revision_sha256\b", text)
-                )
-            if path in READINESS_READERS:
-                hits.extend(
-                    (line, "readiness reader keyed by the asking recipe")
-                    for line, text in enumerate(source.splitlines(), 1)
-                    if line in added
-                    and re.search(
-                        r"\bRecipeBuild\.recipe_revision_id\b|\bdocument_id\b", text
-                    )
-                )
-            # No internal hashing: a row's digest is recorded once, when it is
-            # written. Re-hashing the Controller's own row to decide what it is
-            # refuses it whenever a newer Controller reads it back differently.
-            if not path.startswith(REHASH_INGRESS):
-                rehash_tree = ast.parse(source)
-                hits.extend(
-                    (node.lineno, "stored row re-hashed")
-                    for node in ast.walk(rehash_tree)
-                    if isinstance(node, ast.Compare) and _rehashes_stored_row(node)
-                )
-                hits.extend(
-                    (line, "stored row re-hashed")
-                    for line in _two_step_rehashes(rehash_tree)
-                )
-        if "coordination" in modes:
-            hits.extend(
-                (site.line, site.kind)
-                for site in coordination.scan_source(source, path=path)
-            )
-        if "retries" in modes and path.startswith("control/src/"):
-            hits.extend(
-                (line, "deterministic error retried")
-                for line in retries.scan_source(source)
-            )
-            hits.extend(retries.scan_dispositions(source, path=path))
-            hits.extend(
-                (line, "count ends standing intent")
-                for line in retries.scan_count_endings(source)
-            )
-            hits.extend(
-                (line, "durable retry can exhaust")
-                for line in retries.scan_recovery_policy_users(source, path=path)
-            )
-        if "repeats" in modes and path.startswith("control/src/"):
-            hits.extend(
-                (line, "retry scheduled without note_repeat")
-                for line in retries.scan_repeats(source)
-            )
-        if "residues" in modes and path.startswith("control/src/"):
-            # A stored column read answers with a Residue for a damaged document;
-            # handing that answer straight to a parser or consumer makes the
-            # unknown a crash of whoever called it (core rule 5).
-            hits.extend(
-                (node.lineno, "stored read used without its residue")
-                for node in ast.walk(ast.parse(source))
-                if isinstance(node, ast.Call)
-                and ast.unparse(node.func) != "isinstance"
-                and any(
-                    isinstance(argument, ast.Call)
-                    and ast.unparse(argument.func).split(".")[-1]
-                    in {"read_row_column", "read_column"}
-                    for argument in (
-                        *node.args,
-                        *(keyword.value for keyword in node.keywords),
-                    )
-                )
-            )
-        if "reasons" in modes and path.startswith("control/src/"):
-            # Lifecycle reasons are contract enum values, never prose.
-            hits.extend(
-                (line, "free-text lifecycle reason")
-                for line in reasons.scan_source(source, path=path)
-            )
-            hits.extend(
-                (line, "decision by reason text")
-                for line in reasons.prose_reason_reads(source)
-            )
-        if "claims" in modes and path.startswith("control/src/"):
-            hits.extend(
-                (line, "in-flight-by-stored-state")
-                for line in claims.in_flight_by_stored_state(source, path=path)
-            )
-        if "security" in modes:
-            tree = ast.parse(source)
-            aliases = set(security_refusals())
-            aliases.update(
-                alias.asname or alias.name
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom)
-                for alias in node.names
-                if alias.name in aliases
-            )
-            for _ in tuple(ast.walk(tree)):
-                previous = aliases.copy()
-                aliases.update(
-                    node.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.ClassDef)
-                    and any(
-                        ast.unparse(base).split(".")[-1] in aliases
-                        for base in node.bases
-                    )
-                )
-                if aliases == previous:
-                    break
-            refusals = [
-                node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Raise)
-                and node.exc is not None
-                and ast.unparse(
-                    node.exc.func if isinstance(node.exc, ast.Call) else node.exc
-                ).split(".")[-1]
-                in aliases
-            ]
-            if not is_security_edge(path):
-                hits.extend(
-                    (node.lineno, "security refusal outside ingress")
-                    for node in refusals
-                )
-            # Bookkeeping drift is a wait, a conflict or an unknown, never a
-            # terminal security refusal, even at a declared edge.
-            hits.extend(
-                (node.lineno, "security refusal for bookkeeping drift")
-                for node in refusals
-                if isinstance(node.exc, ast.Call)
-                and any(
-                    isinstance(part, ast.Constant)
-                    and isinstance(part.value, str)
-                    and BOOKKEEPING_DRIFT.search(part.value)
-                    for argument in node.exc.args
-                    for part in ast.walk(argument)
-                )
-            )
-            # A 403 is a terminal security answer: an edge may turn only a
-            # reviewed refusal class into one, never a broad error that also
-            # carries drift (the grant route's 403 for stale authority).
-            if is_security_edge(path):
-                hits.extend(
-                    (node.lineno, "403 for an error that is not a security refusal")
-                    for handler in ast.walk(tree)
-                    if isinstance(handler, ast.ExceptHandler)
-                    and not _catches_only(handler, aliases)
-                    for node in ast.walk(handler)
-                    if isinstance(node, ast.Call) and _is_forbidden_response(node)
-                )
-    for mode in ("waits", "reads", "tests"):
-        if mode not in modes or (is_test != (mode == "tests")):
-            continue
-        if python:
-            sites = principles.scan_source(source, path=path, mode=mode)
-        elif mode == "waits" and path.endswith(".rs"):
-            sites = principles.scan_rust(source, path=path)
-        elif mode == "waits" and path.endswith((".yaml", ".yml")):
-            sites = principles.scan_compose_shell(source, path=path)
-        elif mode == "waits" and (path.endswith(".sh") or source.startswith("#!")):
-            sites = principles.scan_shell(source, path=path)
-        else:
-            sites = []
-        hits.extend((site.line, site.kind) for site in sites)
-    if not is_test and "collections" in modes:
-        hits.extend(
-            (line, collections.KIND) for line in collections.scan_source(path, source)
-        )
-    if (
-        python
-        and not is_test
-        and "contact-clocks" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, "Controller contact rejected for negative clock age")
-            for line in controller_contact_clock_checks(source)
-        )
-    if (
-        python
-        and not is_test
-        and "contact-clocks" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, "agent stamp aged against the Controller clock; use received_at")
-            for line in agent_stamp_freshness(source, path)
-        )
-    if (
-        python
-        and "tick-polls" in modes
-        and path.startswith("control/tests/")
-        and TICK_POLL_SCOPE.search(source)
-    ):
-        hits.extend((line, TICK_POLL_MESSAGE) for line in fixed_tick_polls(source))
-    if python and not is_test and "future-workers" in modes:
-        # An edit anywhere inside the worker can drop its BaseException handler.
-        hits.extend(
-            (changed, FUTURE_WORKER_MESSAGE)
-            for start, end in future_workers_catching_exception(source)
-            for changed in sorted(added)
-            if start <= changed <= end
-        )
-    if python and not is_test and "planner-defects" in modes:
-        hits.extend(
-            (line, "planner contract defect hidden by broad wait")
-            for line in planner_defect_waits(source)
-        )
-    if (
-        python
-        and not is_test
-        and "capacity-gates" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (site.line, site.kind)
-            for site in principles.capacity_gates_before_claims(source, path=path)
-            if (site.path, site.function) not in principles.CAPACITY_GATE_VERDICTS
-        )
-    if (
-        python
-        and not is_test
-        and "start-budgets" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, "start budget derived from a stored start timestamp")
-            for line, function in start_budget_derivations(source)
-            if (path, function) not in START_BUDGET_VERDICTS
-        )
-    if python and not is_test and "waits" in modes:
-        hits.extend(
-            (line, "unknown outcome turned terminal (report it unknown; callers retry)")
-            for line in unknown_to_terminal_handlers(source)
-        )
-    if (
-        python
-        and not is_test
-        and "plan-digests" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, "plan digest read from the pre-admission plan (use run.plan_digest)")
-            for line in replanned_digest_reads(source)
-        )
-    if python and path in BACKGROUND_OWNERS and "background-retries" in modes:
-        hits.extend(
-            (
-                line,
-                (
-                    "in-request retry helper in a background owner (resolve once "
-                    "and re-observe on its schedule; residue: core.py "
-                    "_stored_manifest.rebuild, recipe_routes service "
-                    "decide_publication/_execute and withdrawal.py's hand-rolled loop)"
-                ),
-            )
-            for line in background_retry_calls(source)
-        )
-    if (
-        python
-        and not is_test
-        and "movement" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, "pairwise progress movement (compare against forward marks)")
-            for line, function in pairwise_movement_checks(source)
-            if (path, function) not in MOVEMENT_VERDICTS
-        )
-    if (
-        python
-        and not is_test
-        and "nas-space" in modes
-        and path.startswith("control/src/vonk_control/model_cache/")
-        and path != "control/src/vonk_control/model_cache/storage.py"
-    ):
-        # NAS space is decided once, in storage.py's _storage_shortfall, next to what
-        # the running transfers still write. A comparison with the free disk
-        # alone let parallel downloads overcommit the volume (#1910).
-        hits.extend(
-            (line, "NAS space read outside storage.py; use _storage_shortfall")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
-        )
-    if (
-        python
-        and not is_test
-        and "capacity-refusals" in modes
-        and path.startswith("control/src/")
-        and path not in CAPACITY_REFUSAL_SITES
-    ):
-        # A recipe's declared peak and swap are estimates, tried on hardware and
-        # judged by the host memory guard (owner 2026-11-02). "Demand exceeds
-        # capacity" ends a request for good, so only the classified sites may
-        # emit it; a memory or swap estimate waits or is tried, never ends.
-        hits.extend(
-            (line, "demand-exceeds-capacity outside its classified sites")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(r"\b(?:RESOURCE_)?DEMAND_EXCEEDS_CAPACITY\b", text)
-            and CAPACITY_REFUSAL_MARKER not in text
-        )
-    if (
-        python
-        and not is_test
-        and "agent-422" in modes
-        and path.startswith("control/src/vonk_control/agent_api/")
-    ):
-        lines = source.splitlines()
-        hits.extend(
-            (line, "agent-facing 422 outside body validation; answer a wait")
-            for line, text in enumerate(lines, 1)
-            if _says_422(text, lines[line] if line < len(lines) else "")
-            and AGENT_422_VERDICT_MARKER not in text
-        )
-        # A caught exception is not a verdict: it is as often this Controller's
-        # own bug or race, and a 422 makes the Spark drop real evidence. Any
-        # handler body that produces an unmarked 422 is refused at its `except`
-        # line; the handler answers through contract_verdict_or_wait instead.
-        hits.extend(
-            (line, "except handler answers 422; use contract_verdict_or_wait")
-            for line, text in enumerate(lines, 1)
-            if re.match(r"\s*except\b", text)
-            and any(
-                _says_422(body, nxt) and AGENT_422_VERDICT_MARKER not in body
-                for body, nxt in _handler_body(lines, line)
-            )
-        )
-    if (
-        python
-        and not is_test
-        and "agent-422" in modes
-        and path.startswith("control/src/vonk_control/agent_api/")
-    ):
-        # A broad exception is as often this Controller's own bug as a denial
-        # (#2061 review: an internal ValueError in renewal killed the agent).
-        lines = source.splitlines()
-        for line, text in enumerate(lines, 1):
-            if not re.match(r"\s*except\b", text):
-                continue
-            header, header_end = _except_header(lines, line)
-            if not _BROAD_EXCEPT.search(header):
-                continue
-            # The except line and every 401/403 body line are flagged, so a
-            # 403 added into an existing handler is caught by its own line.
-            fatal = [
-                number
-                for number, (body, _) in enumerate(
-                    _handler_body(lines, header_end), header_end + 1
-                )
-                if _SAYS_FATAL_AUTH.search(body)
-            ]
-            hits.extend(
-                (
-                    number,
-                    "broad exception answers 401/403; use contract_verdict_or_wait",
-                )
-                for number in (*([line] if fatal else []), *fatal)
-            )
-    if (
-        python
-        and not is_test
-        and "retry-dispositions" in modes
-        and path.startswith("control/src/")
-    ):
-        lines = source.splitlines()
-        for line, text in enumerate(lines, 1):
-            if not re.match(r"\s*except\b", text):
-                continue
-            header, header_end = _except_header(lines, line)
-            if not _BROAD_PARKED_EXCEPT.search(header):
-                continue
-            body = _handler_body(lines, header_end)
-            if any(_CONSULTS_DISPOSITION.search(handled) for handled, _ in body):
-                continue
-            # The except line and every parking line are flagged, so a park
-            # added into an existing handler is caught by its own line.
-            parks = [
-                number
-                for number, (handled, _) in enumerate(body, header_end + 1)
-                if _PARKS_WORK.search(handled)
-            ]
-            hits.extend(
-                (
-                    number,
-                    "broad exception parks work; classify it with disposition() first",
-                )
-                for number in (*([line] if parks else []), *parks)
-            )
-    if (
-        python
-        and not is_test
-        and "fixed-reserves" in modes
-        and path.startswith("control/src/")
-    ):
-        # A reserve of volume space is a share of the volume (#1962): a fixed
-        # byte count was 0.1 % of the NAS volume PostgreSQL shares with the
-        # model cache, and a full volume stopped the database.
-        hits.extend(
-            (line, "fixed byte reserve; derive it from the volume's total")
-            for line, text in enumerate(source.splitlines(), 1)
-            if (match := FIXED_RESERVE.search(text))
-            and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
-        )
-    if (
-        python
-        and not is_test
-        and "job-limits" in modes
-        and path != JOB_LIMITS_OWNER
-        and path.startswith(("control/src/", "agent_protocol/src/"))
-    ):
-        hits.extend(
-            (line, "job limit restated; import it from vonk_agent_protocol.job_limits")
-            for line, text in enumerate(source.splitlines(), 1)
-            if JOB_LIMIT_ASSIGNMENT.search(text)
-        )
-    if (
-        python
-        and not is_test
-        and "identity" in modes
-        and path.startswith("control/src/")
-    ):
-        marker = TITLE_IDENTITY_VERDICTS.get(path)
-        hits.extend(
-            (line, "name built from a display title; derive it from identity")
-            for line, text in enumerate(source.splitlines(), 1)
-            if TITLE_IDENTITY.search(text) and not (marker and marker in text)
-        )
-    if (
-        python
-        and not is_test
-        and "model-sets" in modes
-        and path.startswith("control/src/vonk_control/model_cache/")
-        and re.fullmatch(r"(?:removal_\w+|fleet_removal)\.py", path.rpartition("/")[2])
-        and path.count("/") == 4
-    ):
-        # Removal takes a model's sets from the one resolver the Library shares
-        # (model_cache/lineage.py). Choosing them by the first requester's
-        # digest missed every set downloaded under an earlier revision, and
-        # removals "succeeded" having removed nothing (#1911).
-        hits.extend(
-            (line, "model sets chosen by first-requester digest; use lineage.py")
-            for line, text in enumerate(source.splitlines(), 1)
-            if "ModelCacheSet.model_content_sha256" in text
-        )
-    if (
-        python
-        and not is_test
-        and "model-sets" in modes
-        and path.startswith("control/src/vonk_control/")
-        and path
-        not in {
-            "control/src/vonk_control/model_cache/removal_execution.py",
-            "control/src/vonk_control/model_cache/partials_collection.py",
-        }
-    ):
-        # Only the removal executor unlinks model files: it alone applies the
-        # yield-to-newer-owner rule (retained objects, owned sets) first.
-        hits.extend(
-            (line, "model file removal outside removal_execution.py")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(r"\b_remove_model_(?:object_files|partial_set)\(", text)
-            and not re.match(r"\s*def ", text)
-        )
-    if (
-        python
-        and not is_test
-        and "model-sets" in modes
-        and path.startswith("control/src/vonk_control/")
-    ):
-        hits.extend(
-            (line, "whole-table membership read; select only the named sets")
-            for line in unfiltered_membership_selects(source)
-        )
-    if (
-        python
-        and not is_test
-        and "model-sets" in modes
-        and path.startswith("control/src/vonk_control/")
-        and not path.startswith("control/src/vonk_control/model_cache/")
-        and path != NAS_COVERAGE_READER
-    ):
-        # NAS coverage is read only where NAS bytes are read: the distribution
-        # adapter. A planner or compiler that required it downloaded a model
-        # every target Spark already held, after the NAS evicted it (#2337);
-        # a grant built from the NAS set parked an image-only copy. Grants
-        # name the accepted compiled plan's objects (``plan_objects``).
-        hits.extend(
-            (line, "NAS coverage required outside the copy that reads NAS bytes")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(
-                r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set"
-                r"|objects_for_set|verified_model_objects_for_set)\b",
-                text,
-            )
-        )
-    if (
-        python
-        and not is_test
-        and "item-counts" in modes
-        and path.startswith(("control/src/", "agent_protocol/src/"))
-    ):
-        hits.extend(
-            (line, "item-count cap on a model-sized list; bound by bytes instead")
-            for line in sorted(
-                {
-                    *model_sized_count_caps(source),
-                    *runtime_count_caps(source),
-                    *paging_count_ceilings(source),
-                }
-            )
-        )
-    if (
-        python
-        and not is_test
-        and "openers" in modes
-        and path.startswith("control/src/")
-    ):
-        owner = _OPENER_OWNERS.get(path, "")
-        hits.extend(
-            (line, "provider opened outside download.py:_open_provider")
-            for line, function in provider_opener_calls(source)
-            if path not in _OPENER_OWNERS or (owner is not None and function != owner)
-        )
-    if (
-        python
-        and not is_test
-        and "openers" in modes
-        and path.startswith("control/src/")
-        and path not in _ANONYMOUS_SEND_MODULES
-    ):
-        hits.extend(
-            (
-                node.lineno,
-                "anonymous GitHub request outside the GitHub provider modules",
-            )
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == _ANONYMOUS_SEND
-        )
-    if (
-        python
-        and not is_test
-        and "follow-validators" in modes
-        and path.startswith("src/cluster_profiles/controller_cli/")
-    ):
-        # A follow validator checks the job's identity, never how many
-        # operations run: every Spark upgrades at once, and a count assertion
-        # made `fleet upgrade --all` end TIMED_OUT while the upgrades ran (N1).
-        hits.extend(
-            (line, "follow validator asserts an operation count; check identity only")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(
-                r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=)"
-                r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
-                text,
-            )
-        )
-    if (
-        python
-        and not is_test
-        and "event-loops" in modes
-        and path.startswith("src/cluster_profiles/")
-        and path != "src/cluster_profiles/control_transport.py"
-    ):
-        # Every event-loop entry goes through HTTPSResponse._run, which keeps
-        # a Ctrl-C a Ctrl-C (exit 130) however the runner's SIGINT race lands.
-        hits.extend(
-            (line, "event loop entered outside control_transport.py:HTTPSResponse._run")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(
-                r"\b(?:asyncio\.run|asyncio\.Runner|uvloop\.run|anyio\.run)\(|\.run_until_complete\(",
-                text.split("#", 1)[0],
-            )
-        )
-    if (
-        path.startswith("deploy/compose/")
-        and path.endswith(".sh")
-        and not is_test
-        and "trap-waits" in modes
-    ):
-        hits.extend(
-            (line, shell_trap_waits.KIND)
-            for line in shell_trap_waits.scan_source(source)
-        )
-    if python and path.startswith("control/src/") and "locked-io" in modes:
-        hits.extend((line, locked_io.KIND) for line in locked_io.scan_source(source))
-    if "alias-rules" in modes and alias_rules.in_scope(path) and not is_test:
-        hits.extend(
-            (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
-        )
-    if "alias-rules" in modes and alias_rules.run_alias_in_scope(path) and not is_test:
-        hits.extend(
-            (line, alias_rules.RUN_ALIAS_KIND)
-            for line in alias_rules.scan_run_alias(source)
-        )
-    if (
-        "alias-rules" in modes
-        and alias_rules.run_alias_write_in_scope(path)
-        and not is_test
-    ):
-        hits.extend(
-            (line, alias_rules.RUN_ALIAS_WRITE_KIND)
-            for line in alias_rules.scan_run_alias_write(source, path)
-        )
-    if (
-        "intent-ordinal" in modes
-        and intent_ordinal_writers.in_scope(path)
-        and not is_test
-    ):
-        hits.extend(
-            (line, intent_ordinal_writers.KIND)
-            for line in intent_ordinal_writers.scan_source(source)
-        )
-    if (
-        python
-        and not is_test
-        and "durable-revocations" in modes
-        and durable_revocations.in_scope(path)
-    ):
-        hits.extend(
-            (line, durable_revocations.KIND)
-            for line in durable_revocations.scan_source(source)
-        )
-    if (
-        python
-        and not is_test
-        and "savepoints" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (line, bare_savepoints.KIND) for line in bare_savepoints.scan_source(source)
-        )
-    if (
-        python
-        and "typed-string-lengths" in modes
-        and typed_string_lengths.in_scope(path)
-    ):
-        hits.extend(
-            (line, typed_string_lengths.KIND)
-            for line in typed_string_lengths.scan_source(source)
-        )
-    if python and not is_test and "scratch-names" in modes:
-        hits.extend(
-            (line, scratch_names.KIND)
-            for line in scratch_names.scan_source(source, path)
-        )
-    if (
-        python
-        and not is_test
-        and "sync-in-async" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend((line, kind) for line, kind in sync_io_in_async.scan_source(source))
-    if python and "head-digests" in modes and retention_head_digests.in_scope(path):
-        hits.extend(
-            (line, retention_head_digests.KIND)
-            for line in retention_head_digests.scan_source(source)
-        )
-    if (
-        python
-        and not is_test
-        and "set-first-requester" in modes
-        and model_set_first_requester.in_scope(path)
-    ):
-        hits.extend(
-            (line, model_set_first_requester.KIND)
-            for line in model_set_first_requester.scan_source(source)
-        )
-    if python and "barriers" in modes and raw_barriers.in_scope(path):
-        hits.extend(
-            (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
-        )
-    if "loopback-bind" in modes and path.endswith(".rs"):
-        every_line = set(range(1, source.count("\n") + 2))
-        hits.extend(
-            (line, raw_loopback_bind.KIND)
-            for line in raw_loopback_bind.scan_source(
-                source, every_line if is_test else rust_test_lines(source)
-            )
-        )
-    if "git-free-tests" in modes:
-        # A Rust file under tests/ is all test; elsewhere only cfg(test) items.
-        every_line = set(range(1, source.count("\n") + 2))
-        hits.extend(
-            (line, git_free_test_lines.KIND)
-            for line in git_free_test_lines.scan_path(
-                path,
-                source,
-                is_test=is_test,
-                test_lines=every_line
-                if is_test
-                else (rust_test_lines(source) if path.endswith(".rs") else set()),
-            )
-        )
-    if (
-        python
-        and not is_test
-        and "rank-installed" in modes
-        and path.startswith("control/src/")
-        and path != "control/src/vonk_control/machine_states.py"
-    ):
-        hits.extend(
-            (number, RANK_INSTALLED_KIND)
-            for number, text in enumerate(source.splitlines(), 1)
-            if RANK_INSTALLED_COPY.search(text)
-        )
-    if (
-        python
-        and not is_test
-        and "live-reservation" in modes
-        and path.startswith("control/src/")
-        and path != "control/src/vonk_control/machine_states.py"
-    ):
-        hits.extend(
-            (number, LIVE_RESERVATION_KIND)
-            for number, text in enumerate(source.splitlines(), 1)
-            if LIVE_RESERVATION_COPY.search(text)
-        )
-    if (
-        python
-        and not is_test
-        and "newest-snapshot" in modes
-        and path.startswith("control/src/")
-    ):
-        hits.extend(
-            (source.count("\n", 0, position) + 1, NEWEST_SNAPSHOT_KIND)
-            for found in NEWEST_SNAPSHOT_SCAN.finditer(source)
-            for position in (found.start(), found.end())
-        )
-    if (
-        python
-        and "printed-output" in modes
-        and path.startswith(PRINTED_OUTPUT_SCOPE)
-        and path != PRINTED_OUTPUT_WORDING
-    ):
-        hits.extend(
-            (number, PRINTED_OUTPUT_KIND) for number in printed_wording_lines(source)
-        )
-    if python and "contract-constants" in modes:
-        hits.extend(
-            (line, contract_constant_copies.LITERAL_KIND)
-            for line in contract_constant_copies.scan_literals(path, source)
-        )
-    if python and not is_test and "contract-constants" in modes:
-        hits.extend(
-            (line, contract_constant_copies.KIND)
-            for line in contract_constant_copies.scan_source(path, source)
-        )
-    if python and "fixture-closures" in modes:
-        hits.extend(
-            (line, fixture_closures.KIND)
-            for line in fixture_closures.scan_source(source)
-        )
-    if python and is_test and "clocks" in modes:
-        hits.extend(
-            (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
-        )
-    if python:
-        tree = ast.parse(source)
-        spans = [
-            (node.lineno, node.end_lineno or node.lineno)
-            for node in ast.walk(tree)
-            if isinstance(
-                node,
-                (
-                    ast.Subscript,
-                    ast.Compare,
-                    ast.Call,
-                    ast.Raise,
-                    ast.Constant,
-                    ast.ExceptHandler,
-                ),
-            )
-        ]
-        hits = [
-            (
-                line
-                if kind in {optimistic.KIND, optimistic.WRITE_KIND}
-                else next(
-                    (
-                        changed
-                        for changed in sorted(added)
-                        if any(
-                            start == line and start <= changed <= end
-                            for start, end in spans
-                        )
-                    ),
-                    line,
-                ),
-                kind,
-            )
-            for line, kind in hits
-        ]
-    return sorted(
-        set(noexit_hits)
-        | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
-    )
-
-
 # Background owners keep their own re-observation schedule; the in-request retry
 # helpers sleep inside the caller. Known residue, not an allowlist:
 # core.py `_stored_manifest.rebuild` still calls resolve_artifact_set.
@@ -2951,6 +1573,8 @@ BACKGROUND_OWNERS = frozenset(
         "control/src/vonk_control/recipe_routes/service.py",
     }
 )
+
+
 BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
 
 
@@ -2974,10 +1598,14 @@ def background_retry_calls(source: str) -> list[int]:
 # it, that read the cache: other services' ``tick`` is synchronous. Any state
 # counts: a worker also reports QUEUED (an access wait, a rate limit).
 TICK_POLL_SCOPE = re.compile(r"\bModelCacheService\(|\b_service\(")
+
+
 TICK_POLL_MESSAGE = (
     "fixed tick count before a threaded model-cache outcome; wait with "
     "_drain, _drain_until or _wait_for"
 )
+
+
 CACHE_READS = frozenset(
     {"get_operation", "get_operator_operation", "get_operator_request"}
 )
@@ -3067,6 +1695,8 @@ def fixed_tick_polls(source: str) -> list[int]:
 FUTURE_WORKER_MESSAGE = (
     "thread completes a Future only on Exception; complete it in except BaseException"
 )
+
+
 FUTURE_COMPLETIONS = frozenset({"set_result", "set_exception"})
 
 
@@ -3196,27 +1826,3 @@ def planner_defect_waits(source: str) -> list[int]:
             ) and not protected:
                 sites.extend([handler.lineno, *(call.lineno for call in calls)])
     return sites
-
-
-def main(*, modes: Sequence[str] = MODES) -> int:
-    messages = []
-    changes, removed = changed_lines(sys.stdin.read())
-    for path, lines in changes.items():
-        target = ROOT / path
-        if target.is_file() and target.resolve().is_relative_to(ROOT):
-            messages.extend(
-                check_source(
-                    path,
-                    target.read_text(),
-                    lines,
-                    modes=modes,
-                    removed=removed.get(path, ()),
-                )
-            )
-    for message in messages:
-        print(message, file=sys.stderr)
-    return int(bool(messages))
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

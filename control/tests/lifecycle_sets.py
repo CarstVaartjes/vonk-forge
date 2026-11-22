@@ -56,7 +56,9 @@ def in_scope(path: str) -> bool:
     return (
         path.startswith(SCOPE)
         and path.endswith(".py")
-        and not path.endswith(("_states.py", "_contract.py"))
+        and not path.endswith(
+            ("_states.py", "/states.py", "_contract.py", "/contract.py")
+        )
         and "_contract/" not in path
     )
 

@@ -16,7 +16,7 @@ from vonk_agent_protocol import SecurityRefusalReason
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.security_edges import SECURITY_REFUSAL_EDGES, SecurityEdge
 
-from .added_line_guards import check_source
+from .added_line_guards.check import check_source
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "control/src"

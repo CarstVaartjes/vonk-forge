@@ -1,6 +1,6 @@
 import pytest
 
-from .added_line_guards import check_source
+from .added_line_guards.check import check_source
 from .added_line_guards_support import _BARRIER_TEST, PATH
 
 
