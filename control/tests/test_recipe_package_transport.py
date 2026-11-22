@@ -15,6 +15,8 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
@@ -1572,3 +1574,22 @@ def test_library_tar_keeps_reading_a_long_flat_name(
     release = _release_for(index, package)
     release.members["a" * 119 + ".txt"] = b"x"
     _ingest(tmp_path, release.library)
+
+
+@pytest.mark.property
+@given(
+    st.lists(
+        st.sampled_from(["a", "b.txt", "..", ".", "", "\\", "\x00"]), max_size=5
+    ).map("/".join)
+)
+@example("./a")
+@example("a//b")
+@example("a/../b")
+@example("/etc/passwd")
+def test_accepted_package_path_is_canonical_and_relative(raw: str) -> None:
+    if not recipe_packages._safe_path(raw):
+        return
+    parts = raw.split("/")
+    assert raw and not raw.startswith("/")
+    assert "\x00" not in raw and "\\" not in raw
+    assert all(part not in {"", ".", ".."} for part in parts)
