@@ -14,7 +14,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.models import Base, ControlProcessHeartbeat
-from vonk_control.platform_observation import PlatformObservation, PlatformObserver
+from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
 
 from tests.observation_transfer_peer import fleet_authority

@@ -28,13 +28,13 @@ from vonk_control.library.contract import (
     LibraryFacetValues,
     RecipeLibraryResponse,
 )
-from vonk_control.observation_transfer import (
-    OBSERVATION_MEDIA_TYPE,
-    observation_response,
-)
-from vonk_control.platform_observation import (
+from vonk_control.observation.platform import (
     ApiRuntimeObservation,
     PlatformObservation,
+)
+from vonk_control.observation.transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    observation_response,
 )
 
 from cluster_profiles import cli

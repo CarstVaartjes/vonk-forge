@@ -29,7 +29,7 @@ from vonk_control.fleet_projection import (
 )
 from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.models import AgentNode, AgentNodeContact, Base
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     ObservationTransferChunk,
     ObservationTransferComplete,
     ObservationTransferRecord,
@@ -406,7 +406,7 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     tmp_path, monkeypatch
 ):
     from vonk_control.api import application as api
-    from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
+    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     def unreadable_capture():
         raise ObservationCaptureUnavailable(phase="stored-worker-validation")

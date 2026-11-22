@@ -5,7 +5,7 @@ from typing import Literal
 from starlette.responses import Response
 from vonk_agent_protocol import WaitReason, canonical_message
 
-from .categorized_errors import BookkeepingUnknown
+from ..categorized_errors import BookkeepingUnknown
 
 
 class ObservationCaptureUnavailable(BookkeepingUnknown):

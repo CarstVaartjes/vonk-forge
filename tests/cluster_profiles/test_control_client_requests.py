@@ -20,7 +20,7 @@ from typing import Self, cast
 import httpx2
 import pytest
 from vonk_control.fleet_projection import FleetSnapshot as OwnedFleetSnapshot
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
     ObservationTransferComplete,
@@ -1515,7 +1515,7 @@ def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     tmp_path, observation_clock, exhaust_budget
 ):
     from vonk_agent_protocol.reason_codes import ProjectionCode
-    from vonk_control.observation_transfer import ObservationTransferError
+    from vonk_control.observation.transfer import ObservationTransferError
 
     from cluster_profiles.controller_cli.observation import _poll_path
 

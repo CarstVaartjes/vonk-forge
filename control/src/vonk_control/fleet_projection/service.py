@@ -40,7 +40,7 @@ from ..models import (
     RunNode,
 )
 from ..nas_transfer_rate import slow_nas_transfers
-from ..observation_capture import begin_observation_capture
+from ..observation.capture import begin_observation_capture
 from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW

@@ -17,7 +17,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import route_runtime
-from vonk_control.platform_observation import PlatformObservation
+from vonk_control.observation.platform import PlatformObservation
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.settings import Settings
 

@@ -8,13 +8,14 @@ from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
-from vonk_control import build_identity, platform_observation
+from vonk_control import build_identity
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import RuntimeBuildIdentity
 from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.observation import platform as platform_observation
+from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.operation_api import admin_openapi_schema
-from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity

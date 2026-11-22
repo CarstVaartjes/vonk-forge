@@ -33,7 +33,11 @@ from ..fleet_projection import (
 )
 from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
 from ..models import RecipeRun, RunNode
-from ..observation_transfer import (
+from ..observation.platform_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
+from ..observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
@@ -41,10 +45,6 @@ from ..observation_transfer import (
 )
 from ..operation_api import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
-from ..platform_observation_errors import (
-    ObservationCaptureUnavailable,
-    observation_capture_unavailable_response,
-)
 from ..run_states import ENDED_RUN_STATES
 from .contracts import (
     _SELECTOR_PATTERN,

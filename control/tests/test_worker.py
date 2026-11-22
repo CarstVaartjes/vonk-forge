@@ -860,8 +860,8 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     from vonk_control.coordinator_contract import CoordinatorFailureEvidence
     from vonk_control.due_waits import DueWaitBackstop, WaitSource
     from vonk_control.models import CoordinatorFailure
+    from vonk_control.observation.platform import PlatformObserver
     from vonk_control.persisted_waits import read_wait
-    from vonk_control.platform_observation import PlatformObserver
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

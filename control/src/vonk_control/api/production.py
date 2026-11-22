@@ -39,8 +39,8 @@ from ..logging import configure_controller_logging
 from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
 from ..model_cache import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
+from ..observation.platform import PlatformObserver
 from ..operator_projection_api import build_fleet_operator_services
-from ..platform_observation import PlatformObserver
 from ..recipe_builds import RecipeBuildService
 from ..recipe_operation_worker import RecipeOperationWorker
 from ..recipe_operations import RecipeOperationService

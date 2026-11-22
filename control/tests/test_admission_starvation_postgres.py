@@ -20,7 +20,7 @@ from vonk_control.admission_locking import (
     patient_admission,
 )
 from vonk_control.models import AgentNode, AgentNodeContact, Base, NodeTelemetrySample
-from vonk_control.observation_delivery import ObservationDeliveryMiddleware
+from vonk_control.observation.delivery import ObservationDeliveryMiddleware
 
 from .node_contacts import contact_row
 

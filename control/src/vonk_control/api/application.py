@@ -96,8 +96,17 @@ from ..metrics.prometheus_api import PrometheusReader
 from ..metrics.registry import MetricsRegistry
 from ..model_cache_api import install_model_operator_routes
 from ..model_cache_contract import UUID_PATTERN
-from ..observation_delivery import ObservationDeliveryMiddleware
-from ..observation_transfer import (
+from ..observation.delivery import ObservationDeliveryMiddleware
+from ..observation.platform import (
+    PlatformObserver,
+    api_only_capture,
+    api_only_observation,
+)
+from ..observation.platform_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
+from ..observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
@@ -135,15 +144,6 @@ from ..operator_projection_api import (
     install_operator_projection_routes,
 )
 from ..operator_receipt_contract import ReceiptCode
-from ..platform_observation import (
-    PlatformObserver,
-    api_only_capture,
-    api_only_observation,
-)
-from ..platform_observation_errors import (
-    ObservationCaptureUnavailable,
-    observation_capture_unavailable_response,
-)
 from ..profile_application_cancel_api import install_profile_application_cancel_route
 from ..recipe_operations import RecipeOperationService
 from ..run_switch_operations import RunSwitchOperationService
