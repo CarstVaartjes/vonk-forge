@@ -13,7 +13,8 @@ from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base
 from vonk_control.telemetry import maintenance as telemetry_maintenance
-from vonk_control.worker import HandlerRequest, Worker, WorkerWatchdog
+from vonk_control.worker.liveness import WorkerWatchdog
+from vonk_control.worker.loop import HandlerRequest, Worker
 
 
 def _service(
@@ -47,7 +48,7 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
 ):
     """Catches abandoning remaining executors after one checkpoint is busy."""
     from vonk_agent_protocol import UnknownOutcomeError, WaitReason
-    from vonk_control import worker as module
+    from vonk_control.worker import loop as module
 
     calls = []
 
@@ -461,7 +462,7 @@ def test_failing_source_does_not_starve_a_healthy_durable_job(
     """A source that keeps failing must not deny unrelated jobs their turn."""
 
     now = [0.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
     epoch = datetime(2026, 8, 3, tzinfo=UTC)
     jobs = _service(tmp_path, clock=lambda: epoch + timedelta(seconds=now[0]))
     for index in range(3):
@@ -555,7 +556,7 @@ def test_unexpected_owner_fault_does_not_suppress_other_work(
     calls = []
     broken = True
     now = [10.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
 
     def task():
         calls.append(owner)
@@ -595,7 +596,7 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     """Runtime net: no source or housekeeping key may stay off after a fault."""
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
     )
     broken = True
     calls: list[str] = []
@@ -714,7 +715,7 @@ def test_a_security_refusal_stays_refused_until_its_cause_clears(tmp_path, monke
 
     now = [datetime(2026, 8, 3, tzinfo=UTC)]
     monkeypatch.setattr(
-        "vonk_control.worker.time.monotonic", lambda: now[0].timestamp()
+        "vonk_control.worker.loop.time.monotonic", lambda: now[0].timestamp()
     )
     refused = True
     calls = []
@@ -820,7 +821,7 @@ def test_shutdown_fault_is_bounded_and_other_owners_and_fresh_work_continue(
     tmp_path, monkeypatch, fault
 ):
     """Catches unexpected closer errors suppressing every later shutdown owner."""
-    from vonk_control import worker as module
+    from vonk_control.worker import loop as module
 
     calls = []
 
@@ -1038,7 +1039,8 @@ def test_hung_step_restarts_the_worker_and_a_fresh_request_is_served(
 ) -> None:
     """Catches a hang that nothing bounds: one step longer than the watchdog
     timeout must restart the worker, naming the step."""
-    from vonk_control.worker import _background_source_name, watch_worker
+    from vonk_control.worker.liveness import watch_worker
+    from vonk_control.worker.loop import _background_source_name
 
     now = [0.0]
     watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
@@ -1097,10 +1099,11 @@ def test_a_hang_after_a_readiness_write_is_named_by_its_own_step(
 ) -> None:
     """Catches the watchdog naming the readiness heartbeat (written between
     steps) instead of the step that then hangs."""
-    from vonk_control.worker import _background_source_name, watch_worker
+    from vonk_control.worker.liveness import watch_worker
+    from vonk_control.worker.loop import _background_source_name
 
     now = [0.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
     watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
     release = threading.Event()
 
@@ -1176,10 +1179,10 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
     parks its source (or creates a due-wait row) delays the very work it
     names."""
     from vonk_control.models import CoordinatorFailure
-    from vonk_control.worker import _STEP_BUDGET_SECONDS, _background_source_name
+    from vonk_control.worker.loop import _STEP_BUDGET_SECONDS, _background_source_name
 
     monotonic = [1000.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: monotonic[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: monotonic[0])
     runs: list[int] = []
 
     def step() -> bool:
@@ -1216,11 +1219,11 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
 def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -> None:
     """Catches readiness written only at the end of a pass: a pass of several
     slow steps would look unavailable (``workers: null``) while it turns."""
-    from vonk_control.worker import _READINESS_BEAT_SECONDS
+    from vonk_control.worker.liveness import _READINESS_BEAT_SECONDS
     from vonk_control.worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
 
     now = [0.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
     events: list[tuple[str, float]] = []
 
     def step() -> bool:
@@ -1252,7 +1255,7 @@ def test_production_worker_beats_the_watchdog_it_is_watched_by() -> None:
     import ast
     import inspect
 
-    from vonk_control import worker as module
+    from vonk_control.worker import __main__ as module
 
     tree = ast.parse(inspect.getsource(module))
     main = next(
@@ -1289,7 +1292,7 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker import assemble_production_worker
+    from vonk_control.worker.assembly import assemble_production_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
     Base.metadata.create_all(engine)
@@ -1329,7 +1332,7 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
     import ast
     import inspect
 
-    from vonk_control import worker as module
+    from vonk_control.worker import loop as module
 
     # Everything the pass methods may call outside a lambda (a lambda builds a
     # step that _timed runs later): the timing wrapper, failure custody,
@@ -1394,7 +1397,7 @@ def test_due_run_switch_wait_is_redriven_within_one_step_of_any_number_of_slow_s
     wait would sit behind every slow source (a full rotation), not one step."""
     step_seconds = 120.0
     now = [0.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: now[0])
     due_at = 1.0
     redriven: list[float] = []
 
@@ -1437,10 +1440,10 @@ def test_slow_recipe_subtask_is_named_in_the_over_budget_alarm(
     from datetime import UTC, datetime
 
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
-    from vonk_control.worker import _STEP_BUDGET_SECONDS
+    from vonk_control.worker.loop import _STEP_BUDGET_SECONDS
 
     monotonic = [1000.0]
-    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: monotonic[0])
+    monkeypatch.setattr("vonk_control.worker.loop.time.monotonic", lambda: monotonic[0])
 
     def slow_build_cleanup() -> bool:
         monotonic[0] += _STEP_BUDGET_SECONDS + 1

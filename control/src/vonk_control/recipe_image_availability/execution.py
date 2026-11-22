@@ -51,7 +51,7 @@ from ..recipe_image_availability_reader_contract import (
 )
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from .contracts import (
     OPERATION_KIND,
     SCHEMA_VERSION,

@@ -19,7 +19,7 @@ from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 
 from tests.signed_recipe_release import signed_recipe_releases
 
@@ -524,7 +524,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.models import AgentOperation
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.worker import assemble_production_worker
+    from vonk_control.worker.assembly import assemble_production_worker
 
     from .test_recipe_operations import (
         NOW as RECIPE_NOW,

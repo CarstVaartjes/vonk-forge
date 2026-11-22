@@ -249,7 +249,7 @@ module defines its own.
 | `control/src/vonk_control/runtime/spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
 | `control/src/vonk_control/strict_json.py` | declared | 1 | Controller JSON models and their field-presence serialization policy. |
-| `control/src/vonk_control/worker_memory_contract.py` | controller-contract | 5 | Typed memory report the worker publishes and the Controller API exports. |
+| `control/src/vonk_control/worker/memory_contract.py` | controller-contract | 5 | Typed memory report the worker publishes and the Controller API exports. |
 
 `stored/json_values.py` and `stored/columns.py` hold no wire models: they bind every JSON column of `models.py` to its typed contract (36 of 36), and `tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
 

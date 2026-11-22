@@ -47,7 +47,7 @@ from ..runtime_image_preparation import (
 )
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
 

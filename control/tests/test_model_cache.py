@@ -69,7 +69,7 @@ from vonk_control.models import (
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
 

@@ -24,7 +24,8 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.telemetry import maintenance as telemetry_maintenance
-from vonk_control.worker import Worker, assemble_production_worker
+from vonk_control.worker.assembly import assemble_production_worker
+from vonk_control.worker.loop import Worker
 
 from .test_worker import _failures
 

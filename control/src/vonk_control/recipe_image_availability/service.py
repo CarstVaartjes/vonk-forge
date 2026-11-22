@@ -76,7 +76,7 @@ from ..runtime_image_preparation import (
     RuntimeImageReferenceIntent,
 )
 from ..stored.json_values import Residue
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from . import (
     cancellation as cancellation_ops,
 )

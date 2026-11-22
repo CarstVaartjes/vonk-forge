@@ -28,8 +28,8 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from .logging import log_event
-from .worker_memory_contract import (
+from ..logging import log_event
+from .memory_contract import (
     MAX_LOCATION_LENGTH,
     MAX_TOP_ALLOCATIONS,
     WorkerMemoryCgroupKind,

@@ -34,7 +34,7 @@ from ..storage_demands import (
     StorageRelief,
     spark_scope,
 )
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from .common import (
     _COLLECTABLE_STATES,
     _HOLDING_STATES,

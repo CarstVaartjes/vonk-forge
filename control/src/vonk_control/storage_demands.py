@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 
 from vonk_agent_protocol import StorageDemandCode
 
-from .worker_memory_contract import WorkerMemoryComponent
+from .worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
 

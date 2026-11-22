@@ -16,7 +16,7 @@ from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.operation_api import admin_openapi_schema
-from vonk_control.worker import WorkerHeartbeatRecorder
+from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
 

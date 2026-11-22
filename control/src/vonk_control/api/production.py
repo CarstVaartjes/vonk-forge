@@ -268,7 +268,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
     from ..runtime_image_preparation.transport import OciLayoutImageTransport
     from ..telemetry.samples import TelemetryRepository
-    from ..worker_memory import read_worker_memory_report, worker_memory_report_path
+    from ..worker.memory import read_worker_memory_report, worker_memory_report_path
 
     if settings is None:
         settings = Settings.from_env_and_secrets()

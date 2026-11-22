@@ -37,7 +37,7 @@ from ..models import (
 from ..operations.progress import project_progress
 from ..strict_json import read_stored_model
 from ..terminal_history_collection import history_rows_past_grace
-from ..worker_memory_contract import WorkerMemoryReport, WorkerTraceState
+from ..worker.memory_contract import WorkerMemoryReport, WorkerTraceState
 from .readings import (
     engine_reading_lines,
     host_reading_lines,

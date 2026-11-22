@@ -198,7 +198,7 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
     authority.revoke_failures.clear()
     from vonk_control.coordinator_failures import CoordinatorFailures
     from vonk_control.jobs.queue import JobService
-    from vonk_control.worker import Worker
+    from vonk_control.worker.loop import Worker
 
     worker = Worker(
         JobService(sessions, clock=enrollment._clock),

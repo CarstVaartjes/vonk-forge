@@ -558,7 +558,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/worker_memory_contract.py",
+      "module": "control/src/vonk_control/worker/memory_contract.py",
       "kind": "controller-contract"
     },
     {
