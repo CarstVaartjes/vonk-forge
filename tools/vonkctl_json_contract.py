@@ -13,7 +13,9 @@ an explicit ``null`` and are ``required``. Clients treat absent and ``null``
 alike for the former.
 
 This is a repository tool, not Controller code: it needs both the CLI vocabulary
-and the server models, so the server image never imports it. Regenerate the files
+and the server models, so the server image never imports it. Every definition lives once in
+``definitions.schema.json``; a kind's file holds its root and ``$ref``s into it.
+Regenerate the files
 with ``uv run --project control --frozen python tools/vonkctl_json_contract.py
 schemas/vonkctl``; a test fails when they drift.
 """
@@ -330,8 +332,12 @@ def _open(schema: object) -> object:
     return schema
 
 
-def document_schema(kind: DocumentKind) -> dict:
-    """The published JSON Schema of one kind."""
+DEFINITIONS_FILENAME = "definitions.schema.json"
+_DEFS_PREFIX = "#/$defs/"
+
+
+def _bundled_schema(kind: DocumentKind) -> dict:
+    """One kind as pydantic exports it: its root plus every definition it uses."""
 
     schema = cast(dict, _open(DOCUMENTS[kind].json_schema()))
     schema["$schema"] = JSON_SCHEMA_DIALECT
@@ -339,8 +345,94 @@ def document_schema(kind: DocumentKind) -> dict:
     return schema
 
 
+def _retarget(schema: object, old: str, new: str) -> object:
+    """``schema`` with every ``$ref`` that starts with ``old`` starting with ``new``."""
+
+    if isinstance(schema, dict):
+        return {
+            key: (
+                new + value[len(old) :]
+                if key == "$ref" and isinstance(value, str) and value.startswith(old)
+                else _retarget(value, old, new)
+            )
+            for key, value in schema.items()
+        }
+    if isinstance(schema, list):
+        return [_retarget(item, old, new) for item in schema]
+    return schema
+
+
+def definitions_schema() -> dict:
+    """Every definition of every kind, once. A name means one definition."""
+
+    definitions: dict[str, dict] = {}
+    for kind in DOCUMENTS:
+        for name, definition in _bundled_schema(kind).get("$defs", {}).items():
+            if definitions.setdefault(name, definition) != definition:
+                raise SystemExit(f"{name}: two kinds define it differently")
+    return {
+        "$schema": JSON_SCHEMA_DIALECT,
+        "title": "vonkctl shared definitions",
+        "$defs": definitions,
+    }
+
+
+def document_schema(kind: DocumentKind) -> dict:
+    """The published JSON Schema of one kind: its root, definitions by reference."""
+
+    schema = _bundled_schema(kind)
+    schema.pop("$defs", None)
+    return cast(
+        dict, _retarget(schema, _DEFS_PREFIX, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}")
+    )
+
+
+def bundled(published: dict, definitions: dict) -> dict:
+    """A published kind with its definitions inlined as local ``$defs``."""
+
+    schema = cast(
+        dict,
+        _retarget(published, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}", _DEFS_PREFIX),
+    )
+    return {**schema, "$defs": definitions["$defs"]}
+
+
+def schema_registry(directory: Path) -> Any:
+    """A ``referencing`` registry holding every published file by file name."""
+
+    from referencing import Registry, Resource
+    from referencing.jsonschema import DRAFT202012
+
+    return Registry().with_resources(
+        (
+            path.name,
+            Resource.from_contents(
+                json.loads(path.read_text()), default_specification=DRAFT202012
+            ),
+        )
+        for path in directory.glob("*.schema.json")
+    )
+
+
+def validator(kind: DocumentKind, directory: Path) -> Any:
+    """A validator of one published kind that resolves its shared definitions."""
+
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads((directory / schema_filename(kind)).read_text())
+    return Draft202012Validator(schema, registry=schema_registry(directory))
+
+
 def schema_text(kind: DocumentKind) -> str:
-    return json.dumps(document_schema(kind), indent=2, sort_keys=True) + "\n"
+    return _text(document_schema(kind))
+
+
+def definitions_text() -> str:
+    return _text(definitions_schema())
+
+
+def _text(schema: dict) -> str:
+    return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 
 
 def _definition(root: object, ref: object) -> object:
@@ -435,13 +527,17 @@ def write_schemas(directory: Path) -> None:
     """
 
     directory.mkdir(parents=True, exist_ok=True)
-    expected = {schema_filename(kind) for kind in DOCUMENTS}
+    expected = {schema_filename(kind) for kind in DOCUMENTS} | {DEFINITIONS_FILENAME}
+    shared = definitions_schema()
+    previous = directory / DEFINITIONS_FILENAME
+    old_definitions = json.loads(previous.read_text()) if previous.exists() else None
     for kind in DOCUMENTS:
         target = directory / schema_filename(kind)
         if target.exists():
-            problems = incompatibilities(
-                json.loads(target.read_text()), document_schema(kind)
-            )
+            old = json.loads(target.read_text())
+            if "$defs" not in old and old_definitions is not None:
+                old = bundled(old, old_definitions)
+            problems = incompatibilities(old, bundled(document_schema(kind), shared))
             if problems:
                 raise SystemExit(
                     f"{target.name}: incompatible change without a version bump:\n"
@@ -454,6 +550,7 @@ def write_schemas(directory: Path) -> None:
         (directory / schema_filename(kind)).write_text(
             schema_text(kind), encoding="utf-8"
         )
+    previous.write_text(definitions_text(), encoding="utf-8")
 
 
 if __name__ == "__main__":

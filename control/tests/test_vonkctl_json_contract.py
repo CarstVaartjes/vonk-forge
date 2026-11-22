@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
 
 import jsonschema
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_control.api import create_app
@@ -97,8 +99,7 @@ def _prove(kind: DocumentKind, document: dict, printed: str) -> None:
     """The printed document satisfies its published schema and its strict model."""
 
     assert document["schema_version"] == schema_version(kind)
-    schema = json.loads((SCHEMAS / schema_filename(kind)).read_text())
-    jsonschema.Draft202012Validator(schema).validate(document)
+    _contract.validator(kind, SCHEMAS).validate(document)
     DOCUMENTS[kind].validate_json(printed)
 
 
@@ -384,13 +385,14 @@ def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() ->
 
 
 def test_schema_version_is_required_and_owned_by_one_model() -> None:
+    shared = _contract.definitions_schema()["$defs"]
     for kind in DOCUMENTS:
         schema = json.loads(schema_text(kind))
         members = (
             [schema]
             if "properties" in schema
             else [
-                schema["$defs"][alternative["$ref"].rsplit("/", 1)[-1]]
+                shared[alternative["$ref"].rsplit("/", 1)[-1]]
                 for alternative in schema.get("anyOf", schema.get("oneOf", []))
             ]
         )
@@ -404,12 +406,37 @@ def test_schema_version_is_required_and_owned_by_one_model() -> None:
 def test_published_schema_files_are_the_models_current_export() -> None:
     assert {path.name for path in SCHEMAS.glob("*.schema.json")} == {
         schema_filename(kind) for kind in DOCUMENTS
-    }
+    } | {_contract.DEFINITIONS_FILENAME}
     for kind in DOCUMENTS:
         assert (SCHEMAS / schema_filename(kind)).read_text() == schema_text(kind), (
             f"{kind}: run python tools/vonkctl_json_contract.py schemas/vonkctl"
         )
         jsonschema.Draft202012Validator.check_schema(json.loads(schema_text(kind)))
+    assert (
+        SCHEMAS / _contract.DEFINITIONS_FILENAME
+    ).read_text() == _contract.definitions_text(), "run tools/vonkctl_json_contract.py"
+
+
+def test_definitions_live_only_in_the_shared_file() -> None:
+    """A kind file keeps no ``$defs``; every ``$ref`` of it resolves in the shared file."""
+
+    shared = json.loads((SCHEMAS / _contract.DEFINITIONS_FILENAME).read_text())["$defs"]
+    prefix = f"{_contract.DEFINITIONS_FILENAME}#/$defs/"
+    for kind in DOCUMENTS:
+        text = (SCHEMAS / schema_filename(kind)).read_text()
+        assert '"$defs"' not in text, kind
+        refs = set(re.findall(r'"\$ref": "([^"]+)"', text))
+        assert all(ref.startswith(prefix) for ref in refs), kind
+        assert {ref.removeprefix(prefix) for ref in refs} <= shared.keys(), kind
+
+
+def test_a_shared_definition_still_rejects_an_invalid_document() -> None:
+    kind = DocumentKind.ERROR
+    good = {"schema_version": schema_version(kind), "error": "x", "error_type": "local"}
+    validator = _contract.validator(kind, SCHEMAS)
+    validator.validate(good)
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate({**good, "error_type": "not-a-type"})
 
 
 def test_every_published_kind_names_its_version_in_schema_and_file() -> None:

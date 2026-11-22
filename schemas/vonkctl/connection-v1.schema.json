@@ -1,31 +1,4 @@
 {
-  "$defs": {
-    "ConnectionClient": {
-      "properties": {
-        "source_sha": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Source Sha"
-        },
-        "version": {
-          "title": "Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "version",
-        "source_sha"
-      ],
-      "title": "ConnectionClient",
-      "type": "object"
-    }
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "authorized_read": {
@@ -33,7 +6,7 @@
       "type": "string"
     },
     "client": {
-      "$ref": "#/$defs/ConnectionClient"
+      "$ref": "definitions.schema.json#/$defs/ConnectionClient"
     },
     "connected": {
       "const": true,
