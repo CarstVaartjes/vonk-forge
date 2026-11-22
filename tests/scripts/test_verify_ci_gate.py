@@ -310,6 +310,24 @@ def test_a_gated_job_without_a_rule_is_refused() -> None:
     selected, results = _valid()
     document = json.loads(_needs_document(selected, results))
     document["brand-new-proof"] = {"result": "success", "outputs": {}}
-    assert _refusals(json.dumps(document)) == [
-        "brand-new-proof is gated but has no rule here"
+    [refusal] = _refusals(json.dumps(document))
+    assert "brand-new-proof" in refusal
+
+
+def test_a_job_sharing_a_verdict_key_cannot_mask_a_failure() -> None:
+    selected, results = _valid()
+    document = json.loads(_needs_document(selected, results))
+    document["web-suite"]["result"] = "failure"
+    document["web"] = {"result": "success", "outputs": {}}
+    assert _refusals(json.dumps(document))
+
+
+def test_the_gate_step_hands_it_the_needs_json() -> None:
+    ci = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    [step] = [
+        step
+        for step in ci["jobs"]["ci-gate"]["steps"]
+        if "scripts/verify-ci-gate" in step.get("run", "")
     ]
+    assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"
+    assert step["run"].split() == ["scripts/verify-ci-gate", "--needs-env", "NEEDS"]
