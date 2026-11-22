@@ -8,6 +8,7 @@ use std::time::Duration;
 const STATE: &str = "/var/lib/vonk-forge/package-rollback";
 const AGENT: &str = "/usr/lib/vonk-forge/vonk-agent";
 const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
+const PACKAGE: &str = "vonk-forge-agent";
 const PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
 const PROCESS_PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 const PROCESS_PROOF_INTERVAL: Duration = Duration::from_millis(100);
