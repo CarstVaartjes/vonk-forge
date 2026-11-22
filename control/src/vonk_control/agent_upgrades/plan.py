@@ -8,7 +8,6 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
-    AgentUpgradeRepairManifest,
     AgentUpgradeRequestIntent,
 )
 
@@ -19,7 +18,6 @@ class AgentUpgradePlan:
     node_ids: tuple[str, ...]
     package: AgentUpgradePackage
     plan_digest: str
-    repair_manifest: AgentUpgradeRepairManifest | None
     request_intent: AgentUpgradeRequestIntent
     sources: dict[str, AgentPackageSource]
     #: Selected Sparks this rollout will not touch, with the reason.  A Spark

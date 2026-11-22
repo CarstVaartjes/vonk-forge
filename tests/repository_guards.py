@@ -346,10 +346,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "agent package metadata: fixed entrypoint/fixture behavior.",
     ),
     (
-        "tests/scripts/test_agent_repair_lifecycle.py",
-        "agent repair lifecycle: fixed entrypoint/fixture behavior.",
-    ),
-    (
         "tests/scripts/test_build_control_wheel.py",
         "build control wheel: fixed entrypoint/fixture behavior. The cross-area scan is selected separately in GUARDS.",
     ),
@@ -433,10 +429,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_render_production_compose.py",
         "render production compose: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/scripts/test_repair_capsule_publication.py",
-        "repair capsule publication: fixed entrypoint/fixture behavior.",
     ),
     (
         "tests/scripts/test_changed_tests.py",

@@ -62,5 +62,3 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             continue
         if "systemd" in item.nodeid:
             item.add_marker(pytest.mark.needs_systemd)
-        if "test_agent_upgrade_repair_systemd.sh" in item.nodeid:
-            item.add_marker(pytest.mark.needs_repair_probe)

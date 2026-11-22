@@ -164,15 +164,7 @@ class ResumeMixin:
                 return
             try:
                 normalized_intent = _request_intent(stored.request_intent, None)
-                normalized_repair = (
-                    None
-                    if stored.repair_manifest is None
-                    else service._repair_manifest(stored.repair_manifest, package)
-                )
             except AgentUpgradeConflict:
-                service._retire_rollout(parent, now, invalid_plan)
-                return
-            if normalized_repair is not None and order != [normalized_repair.node_id]:
                 service._retire_rollout(parent, now, invalid_plan)
                 return
             if parent.payload_digest != _plan_digest(
@@ -181,7 +173,6 @@ class ResumeMixin:
                 node_ids=order,
                 package=package,
                 request_intent=normalized_intent,
-                repair_manifest=normalized_repair,
             ):
                 service._retire_rollout(parent, now, invalid_plan)
                 return
