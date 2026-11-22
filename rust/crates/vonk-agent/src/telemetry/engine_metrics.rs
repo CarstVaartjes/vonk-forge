@@ -279,6 +279,17 @@ pub fn parse_engine(body: &str, run_id: Uuid) -> Option<EngineReading> {
             add(&mut reading, *field, value);
         }
     }
+    // Finite samples can still sum past f64::MAX; such a sum is unusable, like a
+    // non-finite sample, so the field is absent. (Counts saturate instead.)
+    for sum in [
+        &mut reading.ttft_seconds_sum,
+        &mut reading.time_per_output_token_seconds_sum,
+        &mut reading.prefill_seconds_sum,
+        &mut reading.decode_seconds_sum,
+        &mut reading.e2e_seconds_sum,
+    ] {
+        *sum = sum.filter(|value| value.is_finite());
+    }
     Some(reading)
 }
 
@@ -372,6 +383,17 @@ mod tests {
                 .retain(|_, value| !value.is_null());
             assert_eq!(actual, *expected, "{}", sample["name"]);
         }
+    }
+
+    #[test]
+    fn a_sum_that_overflows_is_absent_not_infinite() {
+        let body = "vllm:e2e_request_latency_seconds_sum 1e308\n\
+                    vllm:e2e_request_latency_seconds_sum 1e308\n\
+                    vllm:e2e_request_latency_seconds_sum -1e308\n\
+                    vllm:e2e_request_latency_seconds_count 3\n";
+        let reading = parse_engine(body, Uuid::nil()).unwrap();
+        assert_eq!(reading.e2e_seconds_sum, None);
+        assert_eq!(reading.e2e_seconds_count, Some(3));
     }
 
     async fn serve(body: Option<String>) -> u16 {
