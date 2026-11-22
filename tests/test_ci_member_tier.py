@@ -105,6 +105,16 @@ def test_only_ci_yml_runs_on_pull_requests() -> None:
             )
 
 
+def test_the_fuzz_workflow_runs_only_on_schedule_and_dispatch() -> None:
+    """Fuzzing costs no batch minute: nothing calls it and nothing else triggers it."""
+    text = (WORKFLOWS / "fuzz.yml").read_text()
+    assert set(yaml.safe_load(text)[True]) == {"schedule", "workflow_dispatch"}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        assert "workflows/fuzz.yml" not in path.read_text() or path.name == "fuzz.yml"
+    for path in sorted((ROOT / ".github/actions").glob("*/action.yml")):
+        assert "workflows/fuzz.yml" not in path.read_text(), path
+
+
 def test_the_quick_tier_uses_standard_runners() -> None:
     """A member pull request must not consume the big or ARM runners."""
     jobs = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())["jobs"]

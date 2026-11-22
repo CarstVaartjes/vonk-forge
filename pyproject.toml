@@ -56,6 +56,8 @@ target-version = "py312"
 extend-exclude = [
     "src/cluster_profiles/generated_control",
 ]
+# Python scripts without a .py suffix.
+extend-include = ["rust/fuzz/seed-corpus"]
 
 [tool.pyright]
 # One checker for the whole repository. scripts/check-python-types runs it from

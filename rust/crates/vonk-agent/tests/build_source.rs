@@ -85,4 +85,30 @@ fn archive_rejects_traversal_and_digest_substitution() {
         materialize_source_bundle(&malicious, &"f".repeat(64), root.path()),
         Err(BuildSourceError::Path)
     ));
+
+    // A refused bundle leaves nothing on disk, not even its directories.
+    let mut with_directory = Vec::new();
+    {
+        let mut archive = tar::Builder::new(&mut with_directory);
+        let mut header = tar::Header::new_ustar();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_path("sub/").unwrap();
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive.append(&header, std::io::empty()).unwrap();
+        let mut header = tar::Header::new_ustar();
+        header.set_path("sub/a").unwrap();
+        header.set_size(1);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append(&header, Cursor::new(b"x")).unwrap();
+        archive.finish().unwrap();
+    }
+    let fresh = root.path().join("fresh");
+    assert!(matches!(
+        materialize_source_bundle(&with_directory, &"f".repeat(64), &fresh),
+        Err(BuildSourceError::Digest)
+    ));
+    assert!(!fresh.exists());
 }
