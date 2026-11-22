@@ -587,6 +587,69 @@ def test_an_older_library_under_latest_is_refused_and_the_held_one_keeps_serving
     restarted.close()
 
 
+def test_a_newer_publish_is_admitted_after_a_refusal(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    held = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    older = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    newer = _release_for(index, package, updated_at="2026-11-03T00:00:00Z")
+    client = _client(held, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(held, older)
+    with pytest.raises(RecipePackageError):
+        client.list()
+    _replace_with(held, newer)
+    assert client.list().updated_at == datetime(2026, 11, 3, tzinfo=UTC)
+    client.close()
+
+
+def test_a_forged_signature_is_remembered_and_the_held_library_survives_a_restart(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    cache = tmp_path / "packages"
+    client = _client(release, cache)
+    held = client.list()
+    client.prepare(held)
+    release.members["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
+    for _ in range(2):
+        with pytest.raises(RecipeReleaseError):
+            client.list()
+    assert release.library_downloads == 2  # the forged bundle only once
+    client.close()
+    restarted = _client(release, cache)
+    with pytest.raises(RecipeReleaseError):
+        restarted.list()
+    assert restarted.fetch(held.items[0].uri).package_handle is not None
+    restarted.close()
+
+
+def test_a_disk_fault_during_ingest_is_retried_not_remembered(
+    tmp_path: Path, signed_releases: list[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    first = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    second = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    client = _client(first, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(first, second)
+    real = RecipePackageClient._store_package
+    full = [True]
+
+    def store(self: RecipePackageClient, *args: object) -> bool:
+        if full[0]:
+            raise OSError(28, "No space left on device")
+        return real(self, *args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(RecipePackageClient, "_store_package", store)
+    client.list()  # the held library serves meanwhile
+    full[0] = False
+    assert client.list().updated_at == datetime(2026, 11, 2, tzinfo=UTC)
+    client.close()
+
+
 def test_a_republish_with_the_same_updated_at_is_accepted(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
@@ -638,10 +701,7 @@ def test_a_failed_download_is_retried_next_cycle_despite_the_listing_etag(
 ) -> None:
     index, _, package = _canonical_package_fixture()
     old = _release_for(index, package, tag=f"v{MAJOR}.1.0")
-    new = _Release(
-        f"v{MAJOR}.2.0",
-        {"catalog-index.json": index, "tiny-recipe.tar.gz": package, "NOTES": b"2"},
-    )
+    new = _release_for(index, package, tag=f"v{MAJOR}.2.0")
     served = {"release": old, "download_fails": False}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -662,11 +722,11 @@ def test_a_failed_download_is_retried_next_cycle_despite_the_listing_etag(
         cache_root=tmp_path / "packages",
         transport=httpx2.MockTransport(handler),
     )
-    assert client.list().version == f"{MAJOR}.0.0"
+    assert client.list().version == f"{MAJOR}.1.0"
     served.update(release=new, download_fails=True)
     client.list()  # the new release's download is unavailable: the old stays
     served["download_fails"] = False
-    client.list()
+    assert client.list().version == f"{MAJOR}.2.0"
     assert new.library_downloads == 1
     client.close()
 

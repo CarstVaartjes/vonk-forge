@@ -92,7 +92,7 @@ Sigstore bundle and every file `SHA256SUMS` lists, under flat names. Replacing
 that one asset makes the in-place update of a contract-version release atomic.
 The Controller follows the newest published release whose major version is its
 own contract major (drafts are skipped); set `VONK_RECIPE_LIBRARY_RELEASE` to
-an exact `v2.MINOR.PATCH` tag to hold one. A sync costs one conditional release
+an exact `vMAJOR.MINOR.PATCH` tag of that major to hold one. A sync costs one conditional release
 listing and, only when the bundle's digest changed, one bundle download.
 The signed index must name the release it is served under, and under `latest`
 it must not be older than the library already held: a refused bundle leaves the

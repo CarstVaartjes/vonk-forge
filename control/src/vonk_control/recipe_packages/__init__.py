@@ -14,6 +14,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -260,7 +261,7 @@ class RecipePackageClient:
         self._library_digest: str | None = None
         # The asset digest of a bundle refused at ingress and why: while the
         # listing still shows it, the refusal stands without a new download.
-        self._refused: tuple[str, RecipePackageError] | None = None
+        self._refused: tuple[str, RecipeLibraryError] | None = None
         self._listing_unchanged = False
         # The highest contract major the last release listing showed.
         self._newest_major: int | None = None
@@ -327,7 +328,7 @@ class RecipePackageClient:
             refused = self._refused
             if refused is not None:
                 if resolved[2] == refused[0]:
-                    raise RecipePackageError(refused[1].code, refused[1].detail)
+                    raise type(refused[1])(refused[1].code, refused[1].detail)
                 self._refused = None
             if (
                 (
@@ -356,7 +357,7 @@ class RecipePackageClient:
                 )
                 snapshot, packages = _bind_release(snapshot, packages, release)
                 self._refuse_replay(snapshot, release)
-            except RecipePackageError as error:
+            except RecipeLibraryError as error:
                 self._remember_refusal(resolved[2], error)
                 raise
         except (httpx2.HTTPError, OSError) as error:
@@ -367,7 +368,7 @@ class RecipePackageClient:
             raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE, "recipe package index is unavailable"
             ) from error
-        except RecipePackageError as error:
+        except RecipeLibraryError as error:
             # Only an unreachable publication falls back to the previous
             # verified generation; an integrity failure is always surfaced,
             # and the generation held before it keeps serving afterwards.
@@ -410,20 +411,38 @@ class RecipePackageClient:
             )
         if self._release_selector != "latest":
             return
-        held = self._snapshot or self._read_persisted_snapshot()
+        held = self._held_updated_at()
         if (
             held is not None
-            and held.updated_at is not None
             and snapshot.updated_at is not None
-            and snapshot.updated_at < held.updated_at
+            and snapshot.updated_at < held
         ):
             raise RecipePackageError(
                 RecipePackageCode.RELEASE_INVALID,
-                f"signed library {snapshot.commit} at {snapshot.updated_at} is "
-                f"older than the held one at {held.updated_at}",
+                f"signed library {snapshot.commit} at {snapshot.updated_at} "
+                f"is older than the held one at {held}",
             )
 
-    def _remember_refusal(self, digest: str | None, error: RecipePackageError) -> None:
+    def _held_updated_at(self) -> datetime | None:
+        """When the held library's recipes last changed.
+
+        After a restart this reads the persisted index envelope only: it was
+        verified when stored and is verified again before it is served.
+        """
+        if self._snapshot is not None:
+            return self._snapshot.updated_at
+        try:
+            payload = json.loads(self._snapshot_path.read_bytes())
+            envelope = json.loads(payload["index"])
+            if str(envelope["contract_version"]).split(".")[0] != str(CONTRACT_MAJOR):
+                return None
+            return datetime.fromisoformat(envelope["updated_at"])
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+            # An unreadable envelope: the full verified read decides.
+            persisted = self._read_persisted_snapshot()
+            return persisted.updated_at if persisted is not None else None
+
+    def _remember_refusal(self, digest: str | None, error: RecipeLibraryError) -> None:
         """Keep a content refusal standing while the listing shows that asset."""
         if error.code == RecipePackageCode.UNAVAILABLE:
             return
@@ -456,7 +475,7 @@ class RecipePackageClient:
             self._download_library(tag, partial)
             try:
                 return self._ingest_library(tag, partial)
-            except RecipePackageError as error:
+            except RecipeLibraryError as error:
                 self._remember_refusal(digest, error)
                 raise
         finally:
@@ -573,7 +592,9 @@ class RecipePackageClient:
                         continue
                     if self._store_package(tar, member, digest):
                         verified.add(name)
-        except (OSError, tarfile.TarError) as error:
+        except tarfile.TarError as error:
+            # A local disk fault (OSError) is not about the bytes: it
+            # propagates to the retry path and is never remembered.
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID,
                 f"{RELEASE_LIBRARY} is not a readable tar archive",
