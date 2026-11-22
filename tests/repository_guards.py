@@ -318,6 +318,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Native agent lifecycle; belongs to the systemd/Linux lane.",
     ),
     (
+        "tests/nodes/test_agent_package_transition_systemd.py",
+        "Native agent lifecycle; belongs to the systemd/Linux lane.",
+    ),
+    (
         "tests/nodes/test_helper_runtime_filesystem.py",
         "Native agent lifecycle; belongs to the systemd/Linux lane.",
     ),
