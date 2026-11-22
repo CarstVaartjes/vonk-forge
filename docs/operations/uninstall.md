@@ -156,8 +156,8 @@ left when it is configured. If a Spark never reached the current package, remove
 `/var/lib/vonk-forge/package-upgrade` (step 1f), then re-run step 1b, or remove
 the files below by hand. The old preinst recovery wrote
 `/var/lib/vonk-forge/package-upgrade/` (`intent`, `lock`, `agent-blocked`,
-`recovery-capsule/`) and `/var/lib/vonk-forge/helper-upgrade.pending`, which 1f
-removes, and these systemd files, which it does not:
+`recovery-capsule/`) and `/var/lib/vonk-forge/helper-upgrade.pending` (store retention
+removes it from the current agent), and these systemd files, which it does not:
 
 ```sh
 sudo rm -f /lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service \
