@@ -2568,10 +2568,9 @@ def check_source(
         python
         and not is_test
         and "model-sets" in modes
-        and re.fullmatch(
-            r"control/src/vonk_control/model_cache/(?:removal_\w+|fleet_removal)\.py",
-            path,
-        )
+        and path.startswith("control/src/vonk_control/model_cache/")
+        and re.fullmatch(r"(?:removal_\w+|fleet_removal)\.py", path.rpartition("/")[2])
+        and path.count("/") == 4
     ):
         # Removal takes a model's sets from the one resolver the Library shares
         # (model_cache/lineage.py). Choosing them by the first requester's
@@ -2942,12 +2941,16 @@ def check_source(
 # helpers sleep inside the caller. Known residue, not an allowlist:
 # core.py `_stored_manifest.rebuild` still calls resolve_artifact_set.
 BACKGROUND_OWNERS = frozenset(
-    f"control/src/vonk_control/model_cache/{name}.py"
-    for name in ("revisions", "inventory", "observation", "storage", "repair")
-) | {
-    f"control/src/vonk_control/recipe_routes/{name}.py"
-    for name in ("withdrawal", "service")
-}
+    {
+        "control/src/vonk_control/model_cache/revisions.py",
+        "control/src/vonk_control/model_cache/inventory.py",
+        "control/src/vonk_control/model_cache/observation.py",
+        "control/src/vonk_control/model_cache/storage.py",
+        "control/src/vonk_control/model_cache/repair.py",
+        "control/src/vonk_control/recipe_routes/withdrawal.py",
+        "control/src/vonk_control/recipe_routes/service.py",
+    }
+)
 BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
 
 
