@@ -551,6 +551,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "cli dependencies platform: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/test_coverage_workflow.py",
+        "coverage workflow: dispatch-only trigger and a fixed in-memory report fixture.",
+    ),
+    (
         "tests/test_container_release_workflow.py",
         "container release workflow: fixed entrypoint/fixture behavior.",
     ),
