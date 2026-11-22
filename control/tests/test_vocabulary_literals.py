@@ -76,6 +76,22 @@ def test_only_docker_subcommands_in_the_helper_are_exempt() -> None:
     ) == [1, 2]
 
 
+def test_a_systemctl_verb_in_the_helper_is_not_a_contract_word() -> None:
+    source = (
+        'let a = ["--system", "stop", unit];\n'
+        'let b = vec!["--system", "start"];\n'
+        'let state = "stop";\n'
+        'best_effort(host, INVOKE, &["stop", unit]);\n'
+        '["prerm", "remove"] => Hook::PrermRemove;\n'
+    )
+    helper = "rust/crates/vonk-agent-helper/src/package_hooks/example.rs"
+    words = frozenset({"start", "stop", "remove"})
+    assert scan.scan_source(source, path=helper, words=words) == [3]
+    assert scan.scan_source(
+        source, path="rust/crates/vonk-agent/src/example.rs", words=words
+    ) == [1, 2, 3, 4, 5]
+
+
 def _module(tmp_path: Path, source: str, relative: str = REL) -> Path:
     path = tmp_path / relative
     path.parent.mkdir(parents=True, exist_ok=True)

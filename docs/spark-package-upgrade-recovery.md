@@ -65,11 +65,13 @@ the agent stays stopped, so nothing can acknowledge the candidate, and the
 watchdog restores the source at the deadline. With no armed candidate (an
 installer upgrade) the agent is started again on any failure, and the
 transient unit carries an `ExecStopPost` that starts it whenever the finisher
-ends, a kill by `RuntimeMaxSec` (600 s: 120 s for dpkg, then at most six
-commands of 60 s) included. Docker containers belong to dockerd and are untouched.
+ends, a kill by `RuntimeMaxSec` (720 s: 120 s for dpkg, then at most six
+commands of 90 s, then a minute of margin) included. A command's 90 s outlasts
+the helper's worst-case restart (15 s stop, 15 s stop again, 30 s start). Docker containers belong to dockerd and are untouched.
 
 The reference for the `/proc/<pid>/exe` comparison is the candidate's ingress
-digest, read from the armed rollback transaction (`candidate_helper_sha256`);
+digest, read once by `configure` from the armed rollback transaction
+(`candidate_helper_sha256`) and passed to the finisher as an argument;
 the installed file is not hashed again. The comparison is the only proof of the
 running helper (the agent's own identity gate covers the agent). Nothing else is
 hashed or re-validated here: there is no pending fence, no receipt, no

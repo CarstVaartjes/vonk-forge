@@ -945,6 +945,20 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             if path.endswith(".rs")
             else set()
         )
+        # The helper's argv to systemd and dpkg is their vocabulary, not the
+        # contract's: `systemctl --system start|stop UNIT`, `deb-systemd-invoke
+        # stop UNIT` (`INVOKE`) and dpkg's own `prerm remove`.
+        if path.endswith(".rs") and path.startswith(DOCKER_HELPER_SCOPE):
+            path_components |= {
+                match.start(group)
+                for match in re.finditer(
+                    r'(?:"--system"(?:\.to_owned\(\)|\.into\(\))?|\bINVOKE),\s*(?:&\[\s*)?("(?:start|stop)")'
+                    r'|"prerm",\s*("remove")',
+                    source,
+                )
+                for group in (1, 2)
+                if match.group(group)
+            }
         # An SVG paint value is markup, not a contract word (`fill="none"`).
         if path.endswith((".ts", ".tsx")):
             path_components = {

@@ -132,11 +132,7 @@ impl Store {
         // are verified. Invalid input never disrupts its authorized recovery.
         command(
             "/usr/bin/systemctl",
-            &[
-                "--system",
-                vonk_agent_protocol::generated::OperatorActionName::Stop.as_str(),
-                "vonk-forge-package-rollback.service",
-            ],
+            &["--system", "stop", "vonk-forge-package-rollback.service"],
             false,
         )?;
         let _lock = self.lock()?;

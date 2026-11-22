@@ -32,22 +32,36 @@ removing the whole Controller.
 
 ### 1b. Remove the package and its services (`sudo`)
 
+Removal does not yet stop `vonk-forge-package-rollback.service`. If a Controller
+package upgrade is still armed (a rollback transaction exists), stop it first,
+or it reinstalls the previous package at its deadline:
+
+```sh
+sudo systemctl stop vonk-forge-package-rollback.service
+```
+
+Then remove the package:
+
 ```sh
 sudo dpkg --purge vonk-forge-agent
 ```
 
-The package's `prerm` stops and disables `vonk-forge-agent`,
+The package's `prerm` is a three-line shim that runs
+`vonk-agent-helper --package-hook prerm remove` (package lifecycle logic lives
+in `vonk-agent-helper::package_hooks`). On `remove` and on `purge` (which
+removes first) the hook stops the upgrade finisher, then `vonk-forge-agent`,
 `vonk-forge-monitor`, `vonk-forge-package-helper` (socket and service) and
-`vonk-forge-docker-firewall`, and disables lingering for the `vonk-agent`
-account. Purge deletes the package files (`/usr/lib/vonk-forge`, the unit files
-under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
+`vonk-forge-docker-firewall`, disables those units and
+`vonk-forge-package-rollback`, and disables lingering for the `vonk-agent`
+account. Every step is best effort: removal never fails because a unit is
+already gone or the helper binary is damaged, but with a damaged or missing
+binary nothing is stopped or disabled, so the services keep running until the
+next reboot. The shim does nothing on `upgrade`. Purge then deletes the package files (`/usr/lib/vonk-forge`, the unit
+files under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 `/usr/share/doc/vonk-forge-agent`) and the package conffile
-`/etc/vonk-forge-agent/containers-storage.conf`. Its `postrm` only forgets the
-units' enablement state on purge, so everything below is cleaned up by hand.
-
-If a package upgrade is mid-recovery, `dpkg --purge` normally retires that
-recovery intent first (an explicit removal is the latest request); if it refuses,
-see "If a purge ran during a package upgrade" below.
+`/etc/vonk-forge-agent/containers-storage.conf`. Its `postrm` is shell and only
+forgets the units' enablement state on purge (the binary is gone by then), so
+everything below is cleaned up by hand.
 
 ### 1c. Remove workloads and runtime images (`sudo`)
 
@@ -129,9 +143,9 @@ agent depends on (podman, crun, and so on) are left installed; remove them with
 find /etc/systemd/system /lib/systemd/system -name 'vonk-forge*'
 ```
 
-should list only the link below. The package has no `postrm`, so the enablement link
+should list only the link below. The purge's `postrm` forgets the enablement records, but the enablement link
 `/etc/systemd/system/multi-user.target.wants/vonk-forge-package-rollback.service`
-is left dangling by the purge. Remove it and the package's enablement records,
+can be left dangling. Remove it and the package's enablement records,
 then reload:
 
 ```sh
