@@ -66,8 +66,8 @@ finisher; the `/proc/<pid>/exe` comparison is the only proof of the running
 helper (the agent's own identity gate covers the agent). Nothing else is
 hashed or re-validated here: there is no pending fence, no receipt, no
 `vonk-agent --version` check and no unit-text check. A `helper-upgrade.pending`
-or `helper-upgrade.receipt` an older package left is never read; the agent's
-store retention removes it.
+or `helper-upgrade.receipt` an older package left is never read; the helper's
+periodic store-retention pass removes it.
 
 ## 5. Acknowledgement or deadline restore
 
