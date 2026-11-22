@@ -148,9 +148,33 @@ jobs:
             echo "Images are built: pull request run $REUSE_RUN_ID has no reusable images for this tree" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Only a build needs the disk; reusing the pull request images does not.
+      - name: Download digest-keyed PR scan and smoke evidence
+        if: steps.pr_images.outputs.reused == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: candidate-image-security-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/pr-security
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Reuse fresh scan and smoke evidence for these exact digests
+        id: pr_security
+        if: steps.pr_images.outputs.reused == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
+          WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
+          LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
+        run: scripts/reuse-pr-image-security "$RUNNER_TEMP/pr-security" "$REUSE_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      # Builds and scans need the disk; reusing images and their security
+      # evidence needs neither.
       - name: Free runner disk
-        if: steps.pr_images.outputs.reused != 'true'
+        if: steps.pr_images.outputs.reused != 'true' || steps.pr_security.outputs.reused != 'true'
         uses: ./.github/actions/free-runner-disk
 
       - name: Restore accepted litellm digest and signed evidence
@@ -258,29 +282,6 @@ jobs:
             ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
           cache-from: type=gha,scope=vonk-forge-litellm
           cache-to: type=gha,mode=max,scope=vonk-forge-litellm
-
-      - name: Download digest-keyed PR scan and smoke evidence
-        if: steps.pr_images.outputs.reused == 'true'
-        continue-on-error: true
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: candidate-image-security-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/pr-security
-          run-id: ${{ inputs.reuse_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Reuse fresh scan and smoke evidence for these exact digests
-        id: pr_security
-        if: steps.pr_images.outputs.reused == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
-          API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
-          WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
-          LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
-        run: scripts/reuse-pr-image-security "$RUNNER_TEMP/pr-security" "$REUSE_RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Remove registry write credentials before acceptance
         shell: bash

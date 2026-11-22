@@ -460,7 +460,7 @@ jobs:
           [[ "$compose_source_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$setup_source_sha" =~ ^[0-9a-f]{40}$ ]]
 
-          # needs: settled every producer; still verify the exact evidence.
+          # needs: settled the evidence producers; still verify the exact evidence.
           artifacts() {
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \

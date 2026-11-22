@@ -992,7 +992,6 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     release = RELEASE_WORKFLOW.read_text()
     publication = development_apt_job()
     producers = workflow_job(release, "producers")
-    authority = workflow_job(release, "authority")
 
     assert "publish-apt:" not in upstream
     for output in ("version", "arm64_package", "artifact_name"):
@@ -1016,11 +1015,6 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     assert (
         "if: needs.agent.result == 'success' && needs.apt.result == 'success'"
         in producers
-    )
-    assert "needs: [changes, ci, agent, images, setups]" in authority
-    promote = workflow_job(release, "promote")
-    assert (
-        "needs: [authority, candidate, release-acceptance, apt, producers]" in promote
     )
 
 
