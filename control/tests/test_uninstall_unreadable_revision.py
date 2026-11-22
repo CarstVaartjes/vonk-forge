@@ -29,8 +29,8 @@ from .test_run_switch_operations import (
     _child_operation_id,
     _service,
 )
-from .test_unused_storage_collection import (
-    _agents_succeed,
+from .test_unused_storage_collection_part1 import _agents_succeed
+from .unused_storage_collection_support import (
     _real_collector,
     _real_lifecycle,
     _required,

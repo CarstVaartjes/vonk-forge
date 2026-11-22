@@ -46,7 +46,7 @@ from .test_recipe_image_availability import (
     _runtime,
     _service,
 )
-from .test_unused_storage_collection import FakeLifecycle
+from .unused_storage_collection_support import FakeLifecycle
 
 
 def _download(tmp_path: Path, engine: Engine):

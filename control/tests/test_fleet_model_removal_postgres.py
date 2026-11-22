@@ -518,7 +518,7 @@ def test_profile_or_running_workload_retains_model_and_installation(
         assert revision is not None
         recipe_selector = f"{revision.publisher}/{revision.slug}"
     if saved_profile:
-        from .test_unused_storage_collection import _profile
+        from .unused_storage_collection_support import _profile
 
         world = object.__new__(Catalog)
         world.sessions = sessions

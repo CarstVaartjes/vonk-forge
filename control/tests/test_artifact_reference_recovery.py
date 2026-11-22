@@ -30,7 +30,7 @@ from .test_model_cache import (
     _download,
 )
 from .test_removal_holds_models import cache_resolved
-from .test_unused_storage_collection import (
+from .unused_storage_collection_support import (
     A_MODEL,
     AN_IMAGE,
     _collector,
@@ -40,7 +40,7 @@ from .test_unused_storage_collection import (
     _set_exists,
     _settle,
 )
-from .test_unused_storage_collection import (
+from .unused_storage_collection_support import (
     world as world,  # noqa: PLC0414 - shared fixture
 )
 

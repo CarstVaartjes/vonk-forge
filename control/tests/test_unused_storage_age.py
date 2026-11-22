@@ -9,7 +9,7 @@ import pytest
 from vonk_agent_protocol import InstallationState, RunState
 
 from .test_catalog_revision_collection import NOW, Catalog
-from .test_unused_storage_collection import (
+from .unused_storage_collection_support import (  # noqa: F401 - shared model cache fixture  # noqa: F401 - shared database fixture
     A_MODEL,
     AN_IMAGE,
     TOTAL,
@@ -17,8 +17,8 @@ from .test_unused_storage_collection import (
     _collector,
     _receipt,
     _size,
-    cached,  # noqa: F401 - shared model cache fixture
-    world,  # noqa: F401 - shared database fixture
+    cached,
+    world,
 )
 
 
@@ -74,7 +74,7 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
 
 def test_age_collection_keeps_the_real_nas_model_cache(world: Catalog, cached) -> None:
     """Catches accidentally applying runtime expiry to model cache objects."""
-    from .test_unused_storage_collection import _models, _set_exists
+    from .unused_storage_collection_support import _models, _set_exists
 
     service, digest = cached
     result = _models(world, service, free=TOTAL // 2).collect()
@@ -94,11 +94,8 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
     )
     from vonk_control.unused_storage_collection import UnusedStorageCollector
 
-    from .test_unused_storage_collection import (
-        _REAL_CLOCK,
-        _agents_succeed,
-        _real_lifecycle,
-    )
+    from .test_unused_storage_collection_part1 import _agents_succeed
+    from .unused_storage_collection_support import _REAL_CLOCK, _real_lifecycle
 
     sessions, service, installation_id, _nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
