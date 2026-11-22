@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ConnectionExamples } from "../connection-examples";
+import { ConnectionExamples } from "../ui/connection-examples";
 import type { MouseEvent, ReactNode } from "react";
 import {
   addWire,
@@ -28,18 +28,18 @@ import type {
 } from "../../api/types";
 import { formatBytes, nodeDisplayName } from "../../lib/fleet";
 import type { LibraryRecipeRecord } from "./library-workcell";
-import { CancelOperation } from "../cancel-operation";
-import { ConfirmDialog } from "../confirm-dialog";
-import { StatusPill } from "../status-pill";
-import { WaitingFor } from "../waiting-for";
-import { ObservationNotice } from "../observation-notice";
+import { CancelOperation } from "../ui/cancel-operation";
+import { ConfirmDialog } from "../ui/confirm-dialog";
+import { StatusPill } from "../ui/status-pill";
+import { WaitingFor } from "../ui/waiting-for";
+import { ObservationNotice } from "../ui/observation-notice";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
-import { EmptyState } from "../empty-state";
-import { ProfileExport } from "../profile-export";
-import { SkeletonRows } from "../skeleton";
-import { useToast } from "../toast";
-import { RecipeOptionSelects, effectiveChoices } from "../recipe-option-selects";
-import type { OptionChoices, RecipeOption } from "../recipe-option-selects";
+import { EmptyState } from "../ui/empty-state";
+import { ProfileExport } from "../ui/profile-export";
+import { SkeletonRows } from "../ui/skeleton";
+import { useToast } from "../ui/toast";
+import { RecipeOptionSelects, effectiveChoices } from "../ui/recipe-option-selects";
+import type { OptionChoices, RecipeOption } from "../ui/recipe-option-selects";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type AssignmentInput = NonNullable<FleetProfileInput["assignments"]>[number];

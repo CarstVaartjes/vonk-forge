@@ -12,8 +12,8 @@ import type {
   LibraryViewRecipeDetail,
 } from "../../api/types";
 import { useLibraryNodeName } from "./library-node-names";
-import { RecipeOptionSelects, effectiveChoices } from "../recipe-option-selects";
-import type { OptionChoices } from "../recipe-option-selects";
+import { RecipeOptionSelects, effectiveChoices } from "../ui/recipe-option-selects";
+import type { OptionChoices } from "../ui/recipe-option-selects";
 
 function nextProfileNumber(profiles: FleetProfileRead[]): FleetProfileNumber {
   const number = addWire(

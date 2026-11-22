@@ -10,7 +10,7 @@ import {
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
 import { failureNotice } from "../../lib/error-display";
-import { useToast } from "../toast";
+import { useToast } from "../ui/toast";
 import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
 /** An accepted removal remains an observable operation until its owner settles. */

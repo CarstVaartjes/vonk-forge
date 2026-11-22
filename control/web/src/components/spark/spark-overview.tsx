@@ -14,15 +14,15 @@ import {
 } from "../../lib/fleet";
 import type { HistoryPoint } from "../../hooks/use-telemetry-history";
 import { nodeHealth } from "../../lib/node-health";
-import { HealthList } from "../health-list";
+import { HealthList } from "../ui/health-list";
 import { SparkCharts } from "./spark-charts";
 import { SparkGpuNow } from "./spark-gpu-now";
 import { SparkHostChecks } from "./spark-host-checks";
 import { SparkMemory } from "./spark-memory";
-import { SensorStrip } from "../sensor-strip";
+import { SensorStrip } from "../ui/sensor-strip";
 import { SparkServing } from "./spark-serving";
 import { SparkStorage } from "./spark-storage";
-import { StatusPill } from "../status-pill";
+import { StatusPill } from "../ui/status-pill";
 
 /** The Overview tab: the Spark's trends, its readings and what needs attention. */
 export function SparkOverview({

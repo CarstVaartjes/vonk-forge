@@ -1,13 +1,13 @@
 import "./workloads.css";
 import { useEffect, useState } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
-import { CertificateNotice, expiringCertificates } from "../components/certificate-notice";
-import { EmptyState } from "../components/empty-state";
-import { EnginePanel } from "../components/engine-panel";
+import { CertificateNotice, expiringCertificates } from "../components/ui/certificate-notice";
+import { EmptyState } from "../components/ui/empty-state";
+import { EnginePanel } from "../components/ui/engine-panel";
 import { ClusterUnit } from "../components/workload/workload-units";
 import { FleetFeedback } from "../components/fleet/fleet-feedback";
-import { MetricsChart } from "../components/metrics-chart";
-import { PageHeader } from "../components/page-header";
+import { MetricsChart } from "../components/ui/metrics-chart";
+import { PageHeader } from "../components/ui/page-header";
 import { SparksTable } from "../components/spark/sparks-table";
 import { WorkloadRow } from "../components/workload/workload-row";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";

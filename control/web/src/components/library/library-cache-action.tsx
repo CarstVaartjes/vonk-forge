@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRemovalReview, ControlApi, ModelCacheOperatorResponse } from "../../api/types";
 
 import { failureNotice } from "../../lib/error-display";
-import { CancelOperation } from "../cancel-operation";
-import { WaitingFor } from "../waiting-for";
-import { useToast } from "../toast";
+import { CancelOperation } from "../ui/cancel-operation";
+import { WaitingFor } from "../ui/waiting-for";
+import { useToast } from "../ui/toast";
 import { CacheRemovalProgress } from "../cache-removal/cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,

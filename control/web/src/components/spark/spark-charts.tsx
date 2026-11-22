@@ -3,7 +3,7 @@ import type { ControlApi, Metric, MetricRange, MetricSpec } from "../../api/type
 import { useMetricCatalogue } from "../../hooks/use-metric-catalogue";
 import { useMetricRead } from "../../hooks/use-metric-series";
 import { GPU_TEMP_WARN_C } from "../../lib/gpu-thresholds";
-import { MetricCard } from "../metric-card";
+import { MetricCard } from "../ui/metric-card";
 
 /**
  * The charts a Spark has, in order: its metric, the one summary the card's second line gives, and a

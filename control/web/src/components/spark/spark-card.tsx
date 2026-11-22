@@ -16,9 +16,9 @@ import {
 } from "../../lib/fleet";
 import { sparkPath } from "../../lib/spark-route";
 import { sparkColor } from "../chart/series";
-import { MemoryIngot } from "../memory-ingot";
-import { StatusPill } from "../status-pill";
-import { TraceTile } from "../trace-tile";
+import { MemoryIngot } from "../ui/memory-ingot";
+import { StatusPill } from "../ui/status-pill";
+import { TraceTile } from "../ui/trace-tile";
 import { interceptPlainClick } from "../../lib/plain-click";
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */

@@ -3,11 +3,11 @@ import { ContractViolation } from "../../api/errors";
 import { LifecycleState } from "../../api/vocabulary.generated";
 import type { ControlApi, RecipeImageAvailabilityResponse } from "../../api/types";
 import { failureNotice } from "../../lib/error-display";
-import { CancelOperation } from "../cancel-operation";
+import { CancelOperation } from "../ui/cancel-operation";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
-import { ObservationNotice } from "../observation-notice";
-import { useToast } from "../toast";
-import { WaitingFor } from "../waiting-for";
+import { ObservationNotice } from "../ui/observation-notice";
+import { useToast } from "../ui/toast";
+import { WaitingFor } from "../ui/waiting-for";
 
 const TERMINAL_STATES = new Set<string>([
   LifecycleState.SUCCEEDED,

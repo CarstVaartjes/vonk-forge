@@ -10,7 +10,7 @@ import type {
   FleetProfilePreview,
 } from "../../api/types";
 import { forgetUnsavedProfileDrafts, LibraryProfilesView } from "./library-profiles-view";
-import { ToastProvider } from "../toast";
+import { ToastProvider } from "../ui/toast";
 
 const nodeA = "spk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const nodeB = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";

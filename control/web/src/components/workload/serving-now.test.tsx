@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ControlApi, FleetProfile } from "../../api/types";
-import { connectionSnippets } from "../connection-examples";
+import { connectionSnippets } from "../ui/connection-examples";
 import { ServingNow } from "./serving-now";
 
 const endpoint = {

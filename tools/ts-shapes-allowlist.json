@@ -63,17 +63,17 @@
       "reason": "method-signature interface over the generated schema types (client seam for tests); declares no data fields"
     },
     {
-      "file": "control/web/src/components/admin-menu.tsx",
+      "file": "control/web/src/components/ui/admin-menu.tsx",
       "type": "AdminMenuProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/app-shell.tsx",
+      "file": "control/web/src/components/ui/app-shell.tsx",
       "type": "AppShellProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/app-shell.tsx",
+      "file": "control/web/src/components/ui/app-shell.tsx",
       "type": "Operator",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
@@ -143,12 +143,12 @@
       "reason": "Chart geometry point (time, value or gap) used only to draw SVG paths; built from generated series values, never sent or received."
     },
     {
-      "file": "control/web/src/components/confirm-dialog.tsx",
+      "file": "control/web/src/components/ui/confirm-dialog.tsx",
       "type": "ConfirmDialogProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/empty-state.tsx",
+      "file": "control/web/src/components/ui/empty-state.tsx",
       "type": "EmptyStateProps",
       "reason": "component props: UI-only, not API data"
     },
@@ -218,22 +218,22 @@
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/sort-header.tsx",
+      "file": "control/web/src/components/ui/sort-header.tsx",
       "type": "Sort",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "ToastItem",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "ToastLink",
       "reason": "UI-only follow-up link inside a notice (label, href, click handler); never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "Toasts",
       "reason": "UI-only state or form draft; never serialized to the API"
     },

@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import type { ControlApi } from "../../api/types";
 import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
-import { ToastProvider } from "../toast";
+import { ToastProvider } from "../ui/toast";
 
 const running = {
   kind: "recipe.image.availability.v2",

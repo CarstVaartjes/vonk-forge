@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRemovalReview, ControlApi } from "../../api/types";
 import { failureNotice } from "../../lib/error-display";
-import { useToast } from "../toast";
+import { useToast } from "../ui/toast";
 import { CacheRemovalProgress } from "../cache-removal/cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,

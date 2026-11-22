@@ -4,8 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { vi, test, expect } from "vitest";
 import { ApiClient } from "../../api/client";
 import { ContractViolation } from "../../api/contract-json";
-import { CancelOperation } from "../cancel-operation";
-import { ToastProvider } from "../toast";
+import { CancelOperation } from "../ui/cancel-operation";
+import { ToastProvider } from "../ui/toast";
 import { ModelCacheCancellationEvidence } from "../../pages/activity";
 
 // The focused hosted lane supplies responses emitted by the real PostgreSQL

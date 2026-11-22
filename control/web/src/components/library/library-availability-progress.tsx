@@ -8,7 +8,7 @@ import {
 import "./library-availability-progress.css";
 import { useMemo } from "react";
 import { formatBytes } from "../../lib/fleet";
-import { Time } from "../time";
+import { Time } from "../ui/time";
 
 export type AvailabilityProgress = {
   phase: string;

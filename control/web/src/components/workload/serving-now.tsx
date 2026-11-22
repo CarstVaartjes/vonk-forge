@@ -6,7 +6,7 @@ import {
   type FleetProfileEndpoints,
   type VisualFleetNode,
 } from "../../api/types";
-import { ConnectionExamples } from "../connection-examples";
+import { ConnectionExamples } from "../ui/connection-examples";
 
 type ServedAssignment = NonNullable<FleetProfileEndpoints["assignments"]>[number];
 

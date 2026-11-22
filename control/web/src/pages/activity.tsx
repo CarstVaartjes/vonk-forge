@@ -29,10 +29,10 @@ import type {
   OperationDetail,
   VisualFleetSnapshot,
 } from "../api/types";
-import { EmptyState } from "../components/empty-state";
-import { PageHeader } from "../components/page-header";
-import { SkeletonBlock, SkeletonRows } from "../components/skeleton";
-import { StatusPill } from "../components/status-pill";
+import { EmptyState } from "../components/ui/empty-state";
+import { PageHeader } from "../components/ui/page-header";
+import { SkeletonBlock, SkeletonRows } from "../components/ui/skeleton";
+import { StatusPill } from "../components/ui/status-pill";
 import { NOT_REPORTED_TEXT, nodeDisplayName } from "../lib/fleet";
 import { exactTime, relativeTime } from "../lib/time";
 

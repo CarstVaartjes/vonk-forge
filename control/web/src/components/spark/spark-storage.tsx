@@ -7,7 +7,7 @@ import {
   nodeDisplayName,
   nodeVitals,
 } from "../../lib/fleet";
-import { MemoryIngot } from "../memory-ingot";
+import { MemoryIngot } from "../ui/memory-ingot";
 
 /**
  * The Spark's disk as Used and Free, and the models on it: each installation's title and the size the

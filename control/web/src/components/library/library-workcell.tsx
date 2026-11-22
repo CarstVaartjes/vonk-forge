@@ -22,7 +22,7 @@ import { canonicalRecipeSelector } from "../../api/types";
 import { LibraryPath, type LibraryRoute } from "../../lib/library-route";
 import { modelKey, modelLibraryPath, recipeLibraryPath } from "../../lib/library-route";
 import { formatBytes } from "../../lib/fleet";
-import { EmptyState } from "../empty-state";
+import { EmptyState } from "../ui/empty-state";
 import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
 import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
 import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";

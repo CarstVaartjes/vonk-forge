@@ -1,7 +1,7 @@
 import type { RecipeQualification } from "../../api/types";
 import { compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
 import { QualificationOutcome, QualificationStatus } from "../../api/vocabulary.generated";
-import { Time } from "../time";
+import { Time } from "../ui/time";
 import { useStatusMeaning } from "./library-vocabulary";
 
 type PublishedStatus = RecipeQualification["status"];

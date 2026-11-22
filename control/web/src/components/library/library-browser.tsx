@@ -1,4 +1,4 @@
-import { SkeletonBlock } from "../skeleton";
+import { SkeletonBlock } from "../ui/skeleton";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import type {

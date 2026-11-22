@@ -10,8 +10,8 @@ import {
 } from "../../lib/metric-units";
 import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../../lib/fleet";
 import { AreaChart } from "../chart/area-chart";
-import { Estimate, EstimateTag } from "../estimate";
-import { StatusPill } from "../status-pill";
+import { Estimate, EstimateTag } from "../ui/estimate";
+import { StatusPill } from "../ui/status-pill";
 import { WorkloadChecking, WorkloadJobs } from "./workload-jobs";
 
 const WINDOW_SECONDS = 1800;

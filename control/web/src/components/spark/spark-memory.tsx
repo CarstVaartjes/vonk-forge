@@ -10,7 +10,7 @@ import {
   nodeVitals,
 } from "../../lib/fleet";
 import { StackedArea } from "../chart/stacked-area";
-import { MemoryIngot } from "../memory-ingot";
+import { MemoryIngot } from "../ui/memory-ingot";
 
 const LAYERS = [
   { key: "models", color: "var(--mem-model)" },

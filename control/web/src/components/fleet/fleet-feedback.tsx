@@ -1,8 +1,8 @@
 import type { useFleetStream } from "../../hooks/use-fleet-stream";
 import { staleWord } from "../../hooks/fleet-stream-state";
-import { ObservationNotice } from "../observation-notice";
-import { SkeletonRows } from "../skeleton";
-import { StatusPill } from "../status-pill";
+import { ObservationNotice } from "../ui/observation-notice";
+import { SkeletonRows } from "../ui/skeleton";
+import { StatusPill } from "../ui/status-pill";
 
 /** What the fleet pages say while the Fleet loads, fails, or is showing its last known state. */
 export function FleetFeedback({ fleet }: { fleet: ReturnType<typeof useFleetStream> }) {

@@ -13,11 +13,11 @@ import type {
   RecipeLibrary,
   VisualFleetSnapshot,
 } from "../api/types";
-import { CatalogSyncStatusLine } from "../components/catalog-sync-status";
-import { Time } from "../components/time";
+import { CatalogSyncStatusLine } from "../components/ui/catalog-sync-status";
+import { Time } from "../components/ui/time";
 import { formatDate } from "../lib/time";
-import { PageHeader } from "../components/page-header";
-import { SkeletonRows } from "../components/skeleton";
+import { PageHeader } from "../components/ui/page-header";
+import { SkeletonRows } from "../components/ui/skeleton";
 import { LibraryBrowser } from "../components/library/library-browser";
 import type { LibrarySubview } from "../components/library/library-browser";
 import { LibraryNodeNamesProvider } from "../components/library/library-node-names";

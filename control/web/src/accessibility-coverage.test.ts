@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { appRoutes } from "./components/app-shell";
+import { appRoutes } from "./components/ui/app-shell";
 
 // Every routed page must be opened by an e2e journey that also runs the axe check.
 test("every route in the app shell has an axe check in the admin e2e", () => {

@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
 import { NOT_REPORTED_TEXT, coverageText, fleetMemory, formatBytes } from "../../lib/fleet";
 import { compactCount, fleetFigure, formatValue, modelTotals } from "../../lib/metric-units";
-import { GPU_ONLY_CAPTION } from "../energy-card";
-import { Estimate } from "../estimate";
-import { MemoryIngot } from "../memory-ingot";
+import { GPU_ONLY_CAPTION } from "../ui/energy-card";
+import { Estimate } from "../ui/estimate";
+import { MemoryIngot } from "../ui/memory-ingot";
 
 /** A figure with no reading is a muted dash with a plain reason under it, never a display-size word. */
 function Tile({

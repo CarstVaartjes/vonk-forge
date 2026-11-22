@@ -13,10 +13,10 @@ import {
   type NodeStatus,
 } from "../../lib/fleet";
 import { sparkPath } from "../../lib/spark-route";
-import { EmptyState } from "../empty-state";
-import { Meter } from "../meter";
-import { SortHeader, useSort } from "../sort-header";
-import { StatusPill } from "../status-pill";
+import { EmptyState } from "../ui/empty-state";
+import { Meter } from "../ui/meter";
+import { SortHeader, useSort } from "../ui/sort-header";
+import { StatusPill } from "../ui/status-pill";
 import { interceptPlainClick } from "../../lib/plain-click";
 
 // Problems first when sorted ascending.

@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import type { ControlApi, FleetLogResponse } from "../../api/types";
 import { ProfileReasonSeverity } from "../../api/vocabulary.generated";
 import { errorText } from "../../lib/error-display";
-import { CommandBlock } from "../command-block";
-import { SkeletonBlock } from "../skeleton";
-import { StatusPill } from "../status-pill";
-import { Time } from "../time";
+import { CommandBlock } from "../ui/command-block";
+import { SkeletonBlock } from "../ui/skeleton";
+import { StatusPill } from "../ui/status-pill";
+import { Time } from "../ui/time";
 
 /** The Logs tab: the Spark's recent log lines, read when the tab opens. */
 export function SparkLogs({ api, id }: { api: ControlApi; id: string }) {

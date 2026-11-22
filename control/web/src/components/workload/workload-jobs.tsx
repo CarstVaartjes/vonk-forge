@@ -3,7 +3,7 @@ import { createJobTitle, jobElapsed, phaseOf } from "../../lib/artifact-job";
 import { jobTone } from "../artifact-job/artifact-job-workspace";
 import { recipeLibraryPath } from "../../lib/library-route";
 import { humanizeIdentifier } from "../library/library-technical-details";
-import { StatusPill } from "../status-pill";
+import { StatusPill } from "../ui/status-pill";
 
 /**
  * What a job workload shows in place of engine figures: one line that engine metrics do not apply, the

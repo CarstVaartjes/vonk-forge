@@ -20,8 +20,8 @@ import {
 } from "../../lib/metric-units";
 import { Sparkline } from "../chart/sparkline";
 import { sparkColor } from "../chart/series";
-import { Estimate } from "../estimate";
-import { StatusPill } from "../status-pill";
+import { Estimate } from "../ui/estimate";
+import { StatusPill } from "../ui/status-pill";
 
 const WINDOW_SECONDS = 1800;
 

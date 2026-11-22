@@ -94,9 +94,9 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/api/types.ts` | `LibraryViewSnapshot` | UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas |
 | `control/web/src/auth.tsx` | `AuthContextValue` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/auth.tsx` | `BrowserAuthApi` | method-signature interface over the generated schema types (client seam for tests); declares no data fields |
-| `control/web/src/components/admin-menu.tsx` | `AdminMenuProps` | component props: UI-only, not API data |
-| `control/web/src/components/app-shell.tsx` | `AppShellProps` | component props: UI-only, not API data |
-| `control/web/src/components/app-shell.tsx` | `Operator` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/ui/admin-menu.tsx` | `AdminMenuProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/app-shell.tsx` | `AppShellProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/app-shell.tsx` | `Operator` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/artifact-job/artifact-hash.ts` | `ArtifactHashProgress` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-hash.ts` | `HashWorker` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/components/artifact-job/artifact-hash.ts` | `WorkerMessage` | browser-local upload hashing progress and worker messages; not API data |
@@ -106,8 +106,8 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
-| `control/web/src/components/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
 | `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
@@ -119,9 +119,9 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/library/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
 | `control/web/src/components/library/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/library/library-workcell.tsx` | `LibraryWorkcellFilters` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/sort-header.tsx` | `Sort` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/toast.tsx` | `ToastItem` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/sort-header.tsx` | `Sort` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/toast.tsx` | `ToastItem` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/fleet-stream-state.ts` | `FleetStreamState` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/use-operation-observer.ts` | `Options` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/pages/activity.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
