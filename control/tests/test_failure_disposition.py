@@ -578,7 +578,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
     from vonk_control.recovery_policy import ROUTE_RECOVERY
 
-    from .test_recipe_routes import NOW, setup
+    from .recipe_routes_support import NOW, setup
 
     routes, _runtime, applied, run_id = setup(tmp_path)
     worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)

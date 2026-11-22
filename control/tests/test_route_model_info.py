@@ -365,7 +365,7 @@ def _published_entries(root: Path) -> dict[str, dict]:
 def test_the_published_route_carries_its_recipes_facts_and_never_depends_on_them(
     tmp_path: Path, stored: str
 ) -> None:
-    from .test_recipe_routes import setup
+    from .recipe_routes_support import setup
 
     service, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     _store_api(
@@ -406,7 +406,7 @@ def _choose_an_unknown_option(service) -> None:
 def test_unusable_facts_are_reported_and_the_route_still_publishes(
     tmp_path: Path,
 ) -> None:
-    from .test_recipe_routes import setup
+    from .recipe_routes_support import setup
 
     service, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     _store_api(service, _source_build_api())
@@ -421,7 +421,7 @@ def test_unusable_facts_are_reported_and_the_route_still_publishes(
 def test_a_bug_in_the_builder_is_not_swallowed_as_missing_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from .test_recipe_routes import setup
+    from .recipe_routes_support import setup
 
     service, _publisher, _applied, run_id = setup(tmp_path, ranks=1)
     _store_api(service, _source_build_api())
@@ -438,7 +438,7 @@ def test_a_serving_route_keeps_its_facts_until_it_changes(tmp_path: Path) -> Non
     """New facts never rewrite a running route's gateway entry (no restart)."""
     from vonk_agent_protocol import RouteState as RunRouteState
 
-    from .test_recipe_routes import (
+    from .recipe_routes_support import (
         NOW,
         MutableClock,
         add_running_run,
@@ -473,7 +473,7 @@ def test_the_bundle_is_never_read_inside_the_publication_transaction(
     from vonk_control.recipe_routes import publisher as publisher_module
     from vonk_control.recipe_routes.shared import _SQLITE_ROUTE_PUBLICATION_LOCK
 
-    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -500,7 +500,7 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     from vonk_agent_protocol import RouteState as RunRouteState
     from vonk_control.models import RecipeRun, RunNode
 
-    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -567,7 +567,7 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     policy: no count cap, pre-call checks off. That is the one LiteLLM restart
     the upgrade causes; the next pass finds the bundle current and does nothing.
     """
-    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -660,7 +660,7 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
     records ``api`` again; the route that serves with no facts takes them once
     (a frozen absence is not frozen), and real facts stay frozen after that.
     """
-    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+    from .recipe_routes_support import NOW, MutableClock, atomic_service, setup
 
     effort_api = _source_build_api()
     effort_api["api"]["reasoning"] = {
