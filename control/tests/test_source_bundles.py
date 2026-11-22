@@ -37,7 +37,7 @@ def archive(files: list[tuple[str, bytes]]) -> bytes:
     return output.getvalue()
 
 
-@pytest.mark.parametrize("name", ["/etc/passwd", "../escape", "a/../../escape"])
+@pytest.mark.parametrize("name", ["/etc/passwd", "../escape", "a/../../escape", "."])
 def test_bundle_rejects_paths_outside_context(name: str) -> None:
     with pytest.raises(Exception):  # noqa: B017 -- rejected ingress followed by valid admission
         inspect_source_bundle(io.BytesIO(archive([(name, b"x")])), LIMITS)
