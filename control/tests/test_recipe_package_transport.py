@@ -548,6 +548,44 @@ def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
     client.close()
 
 
+def test_a_failed_download_is_retried_next_cycle_despite_the_listing_etag(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    old = _release_for(index, package, tag=f"v{MAJOR}.1.0")
+    new = _Release(
+        f"v{MAJOR}.2.0",
+        {"catalog-index.json": index, "tiny-recipe.tar.gz": package, "NOTES": b"2"},
+    )
+    served = {"release": old, "download_fails": False}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        release = served["release"]
+        if request.url.path == RELEASES:
+            etag = f'"{release.tag}"'
+            if request.headers.get("if-none-match") == etag:
+                return httpx2.Response(304)
+            response = release.handler(request)
+            response.headers["etag"] = etag
+            return response
+        if served["download_fails"] and "recipe-library.tar" in request.url.path:
+            return httpx2.Response(503)
+        return release.handler(request)
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(handler),
+    )
+    assert client.list().version == f"{MAJOR}.0.0"
+    served.update(release=new, download_fails=True)
+    client.list()  # the new release's download is unavailable: the old stays
+    served["download_fails"] = False
+    client.list()
+    assert new.library_downloads == 1
+    client.close()
+
+
 @pytest.mark.parametrize("tamper", ["index", "redirect", "nested", "sums"])
 def test_only_the_signed_envelope_rejects_the_whole_bundle(
     tmp_path: Path, signed_releases: list[bytes], tamper: str

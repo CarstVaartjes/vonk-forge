@@ -342,6 +342,7 @@ class RecipePackageClient:
                     return persisted
             raw, publication, release = self._fetch_release(resolved)
         except (httpx2.HTTPError, OSError) as error:
+            self._listing_etag = None  # list again next cycle and retry
             persisted = self._offline_snapshot()
             if persisted is not None:
                 return persisted
@@ -352,6 +353,7 @@ class RecipePackageClient:
             # Only an unreachable publication falls back to the previous
             # verified generation; an integrity failure is always surfaced.
             if error.code == RecipePackageCode.UNAVAILABLE:
+                self._listing_etag = None  # an unreachable download is retried
                 persisted = self._offline_snapshot()
                 if persisted is not None:
                     return persisted
