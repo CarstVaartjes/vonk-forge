@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .. import agent_operation_states
-from ..catalog_revision_collection import GRACE
+from ..catalog.revision_collection import GRACE
 from ..failure_evidence import (
     AttemptPhase,
     FailedAttempt,

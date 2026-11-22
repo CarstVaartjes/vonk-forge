@@ -36,9 +36,22 @@ from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
 )
 
-from .admission_locking import ConstraintReplay, admitting
-from .auth import CursorCodec
-from .catalog_entities import (
+from ..admission_locking import ConstraintReplay, admitting
+from ..auth import CursorCodec
+from ..identity_insert import insert_identity
+from ..models import CatalogDocument, CatalogDocumentHead, RecipeSourceBundle
+from ..observed_run_memory import carry_measured_peaks
+from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from ..source_bundles import (
+    SourceBundleError,
+    SourceBundleIntegrityRefused,
+    SourceBundleRefused,
+    SourceBundleStoreProtocol,
+    SourceBundleUnknown,
+    parse_source_bundle_manifest,
+)
+from ..stored_states import CatalogRevisionState
+from .entities import (
     CatalogDocumentRevision,
     CatalogEntityService,
     CatalogValidationError,
@@ -46,8 +59,8 @@ from .catalog_entities import (
     _rederive_projection,
     display_title,
 )
-from .catalog_queries import active_head_revision
-from .catalog_revision_contract import (
+from .queries import active_head_revision
+from .revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -57,26 +70,9 @@ from .catalog_revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from .identity_insert import insert_identity
-from .models import (
-    CatalogDocument,
-    CatalogDocumentHead,
-    RecipeSourceBundle,
-)
-from .observed_run_memory import carry_measured_peaks
-from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
-from .source_bundles import (
-    SourceBundleError,
-    SourceBundleIntegrityRefused,
-    SourceBundleRefused,
-    SourceBundleStoreProtocol,
-    SourceBundleUnknown,
-    parse_source_bundle_manifest,
-)
-from .stored_states import CatalogRevisionState
 
 if TYPE_CHECKING:
-    from .catalog_sync_contract import ManagedCatalogSyncProblem
+    from .sync_contract import ManagedCatalogSyncProblem
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")

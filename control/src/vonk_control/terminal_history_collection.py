@@ -57,7 +57,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import EnrollmentRecordState, NodeIdentityState
 
-from .catalog_revision_collection import GRACE, INTERVAL, tokens
+from .catalog.revision_collection import GRACE, INTERVAL, tokens
 from .lifecycle.evidence import Residue
 from .logging import log_event
 from .model_cache_contract import ModelCacheSetState
@@ -209,27 +209,27 @@ RETAINED: dict[str, tuple[Retained, str]] = {
     ),
     "catalog_document_revisions": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "recipe_source_bundles": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "source_bundle_archives": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "recipe_builds": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "cluster_mappings": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "cluster_mapping_nodes": (
         Retained.OWNED_ELSEWHERE,
-        "catalog_revision_collection.CatalogRevisionCollector",
+        "catalog.revision_collection.CatalogRevisionCollector",
     ),
     "artifact_jobs": (Retained.OWNED_ELSEWHERE, "artifact_jobs.ArtifactJobService"),
     "artifact_job_files": (

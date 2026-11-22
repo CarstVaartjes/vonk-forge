@@ -9,7 +9,7 @@ from typing import Never
 import httpx2
 import pytest
 from vonk_agent_protocol import InvalidRequestError
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
@@ -225,8 +225,8 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import LifecycleState, SourceBundleCode
     from vonk_control.auth import CursorCodec
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import (
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import (
         ManagedRecipeCatalogSyncService,
         RecipeLibrarySyncReader,
     )
@@ -311,7 +311,7 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.auth import CursorCodec
-    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog.service import CatalogService
     from vonk_control.models import Base
     from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 

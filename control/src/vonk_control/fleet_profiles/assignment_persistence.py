@@ -16,7 +16,7 @@ from ..artifact_lifecycle import (
     require_reference_open,
 )
 from ..artifact_reference_scan import require_model_sets_open
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..model_cache.persistence import _operation_removal

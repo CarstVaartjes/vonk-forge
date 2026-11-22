@@ -13,12 +13,12 @@ from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
@@ -1536,9 +1536,9 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_api import _managed_sync
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.api import _managed_sync
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.library_projection import LibraryProjection
     from vonk_control.models import Base
     from vonk_control.source_bundles import SourceBundleStore

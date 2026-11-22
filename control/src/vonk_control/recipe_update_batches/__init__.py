@@ -78,9 +78,7 @@ from .. import (
 from ..auth import (
     MUTATION_ROLES as MUTATION_ROLES,
 )
-from ..catalog_queries import (
-    active_head_revision as active_head_revision,
-)
+from ..catalog.queries import active_head_revision as active_head_revision
 from ..categorized_errors import (
     InvalidValue as InvalidValue,
 )

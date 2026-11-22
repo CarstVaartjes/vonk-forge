@@ -31,7 +31,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     read_recipe_projection,
     write_catalog_projection,
 )

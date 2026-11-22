@@ -80,7 +80,7 @@ def test_control_wheel_packages_current_runtime_assets(tmp_path: Path) -> None:
                 "import json, sys\n"
                 "sys.path.insert(0, sys.argv[1])\n"
                 "from vonk_forge_contracts import read_recipe\n"
-                "from vonk_control import catalog_revision_contract, catalog_service\n"
+                "from vonk_control.catalog import revision_contract, service\n"
                 "read_recipe(json.load(open(sys.argv[2], encoding='utf-8')))\n"
             ),
             str(wheel),

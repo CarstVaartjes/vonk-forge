@@ -807,7 +807,7 @@ before a later operation consumes it:
 | Build requests | Protocol `RecipeBuildRequest`, reused by `recipe_execution_contract.py` |
 | Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
 | Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
-| Catalog projections | `catalog_revision_contract.py`, composed from public model/topology and protocol build-option types |
+| Catalog projections | `catalog/revision_contract.py`, composed from public model/topology and protocol build-option types |
 | Cache manifests, preparation/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
 
 A required nullable value remains present; unused optional fields are omitted.

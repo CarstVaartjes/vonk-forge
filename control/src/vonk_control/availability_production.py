@@ -41,7 +41,7 @@ from .admission_locking import (
     node_admission_key,
 )
 from .bounded_json import require_mapping
-from .catalog_revision_contract import read_catalog_document
+from .catalog.revision_contract import read_catalog_document
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text

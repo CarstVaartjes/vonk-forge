@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..content_identity import recipe_content_membership
 from ..library_assessment import unassessed
 from ..library_contract import (

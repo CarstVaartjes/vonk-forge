@@ -77,8 +77,8 @@ from ..auth import (
 from ..bounded_json import BoundedJSONError
 from ..browser_auth import BrowserAuthenticationError, BrowserAuthService
 from ..capabilities import CapabilityUnavailableError
-from ..catalog_api import CatalogProblem, install_catalog_routes
-from ..catalog_service import CatalogService
+from ..catalog.api import CatalogProblem, install_catalog_routes
+from ..catalog.service import CatalogService
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..download_contract import download_responses
 from ..failure_classification import disposition as failure_disposition

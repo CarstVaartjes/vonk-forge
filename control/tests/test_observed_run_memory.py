@@ -482,7 +482,7 @@ def _publish_measured(
     sessions, installation, now, peak, *, exceeds=False, declared=225
 ):
     """The signed catalog's measured steady peak for the installation's one role."""
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
     from vonk_control.models import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,

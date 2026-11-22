@@ -23,7 +23,7 @@ from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )

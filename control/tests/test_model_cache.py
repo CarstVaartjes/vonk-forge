@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
     ModelCacheObjectSource,

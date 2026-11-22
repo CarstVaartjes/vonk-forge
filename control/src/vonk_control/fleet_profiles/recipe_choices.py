@@ -15,8 +15,8 @@ from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
 
-from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
+from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from ..catalog.revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..content_identity import (
     cache_resolution_answers_revision,
     catalog_selector_membership,

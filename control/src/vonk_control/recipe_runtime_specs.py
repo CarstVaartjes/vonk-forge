@@ -26,7 +26,7 @@ from vonk_forge_contracts.resolver import (
     validate_recipe_package_paths,
 )
 
-from .catalog_revision_contract import read_model_set
+from .catalog.revision_contract import read_model_set
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision

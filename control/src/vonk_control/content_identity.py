@@ -215,7 +215,7 @@ def _chosen_runtime(execution: RecipeExecution) -> object | None:
 
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .catalog_revision_contract import shared_catalog_document
+    from .catalog.revision_contract import shared_catalog_document
     from .lifecycle.evidence import Residue, read_or_rebuild
     from .models import CatalogDocumentRevision
 

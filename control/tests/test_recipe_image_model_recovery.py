@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait

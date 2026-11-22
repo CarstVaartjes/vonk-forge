@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
 from ..inventory_items import runtime_value

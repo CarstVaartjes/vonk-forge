@@ -30,9 +30,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan, DistributionObject
 from vonk_control import recipe_packages
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,

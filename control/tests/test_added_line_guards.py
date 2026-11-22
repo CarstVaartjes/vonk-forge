@@ -873,7 +873,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
     # The catalog collector's fence: refused by every writer in flight, it kept
     # 1,708 of 2,348 revisions in production (2026-11-04).
     fence = 'session.execute(text("LOCK TABLE jobs IN EXCLUSIVE MODE NOWAIT"))\n'
-    collector = "control/src/vonk_control/catalog_revision_collection.py"
+    collector = "control/src/vonk_control/catalog/revision_collection.py"
     assert check_source(collector, fence, {1}, modes=("locks",))
     assert check_source(
         collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
@@ -1123,7 +1123,7 @@ def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
     assert check_source(PATH, source, {2}, modes=("identity",))
     assert not check_source(PATH, source, {1}, modes=("identity",))
     assert not check_source(
-        "control/src/vonk_control/catalog_service.py", source, {2}, modes=("identity",)
+        "control/src/vonk_control/catalog/service.py", source, {2}, modes=("identity",)
     )
 
 
@@ -2941,7 +2941,7 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
             "def run(s, now):\n    return _CollectorEvidence.read(s, now)\n",
         ),
         (
-            "control/src/vonk_control/catalog_revision_collection.py",
+            "control/src/vonk_control/catalog/revision_collection.py",
             "def run(s, now):\n    return live_tokens(s, now)\n",
         ),
         (
@@ -3280,7 +3280,7 @@ def test_a_two_step_rehash_is_flagged(source, expected):
 @pytest.mark.parametrize(
     "path",
     [
-        "control/src/vonk_control/catalog_sync_contract.py",
+        "control/src/vonk_control/catalog/sync_contract.py",
         "control/src/vonk_control/telemetry_maintenance.py",
         "control/src/vonk_control/model_cache/download_admission.py",
     ],

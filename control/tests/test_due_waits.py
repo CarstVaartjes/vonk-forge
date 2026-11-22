@@ -673,7 +673,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
     from vonk_agent_protocol import CatalogSyncCode, CatalogSyncState
-    from vonk_control.catalog_sync import (
+    from vonk_control.catalog.sync import (
         AutomaticCatalogSync,
         ManagedRecipeCatalogSyncService,
     )
@@ -697,7 +697,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
         jitter.append((low, high))
         return low if len(jitter) == 1 else high
 
-    monkeypatch.setattr("vonk_control.catalog_sync.random.randint", choose)
+    monkeypatch.setattr("vonk_control.catalog.sync.random.randint", choose)
 
     def construct():
         return ManagedRecipeCatalogSyncService(

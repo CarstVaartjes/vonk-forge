@@ -33,7 +33,7 @@ from vonk_forge_contracts import (
     RecipeDefinition,
 )
 
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog.revision_contract import read_catalog_document
 from ..installation_transitions import IN_FLIGHT
 from ..machine_states import (
     CertificateStateField,

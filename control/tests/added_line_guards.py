@@ -324,14 +324,14 @@ READINESS_READERS = frozenset(
 )
 REVISION_NUMBER_ALLOCATORS = frozenset(
     {
-        "control/src/vonk_control/catalog_entities.py",
-        "control/src/vonk_control/catalog_service.py",
+        "control/src/vonk_control/catalog/entities.py",
+        "control/src/vonk_control/catalog/service.py",
     }
 )
 # Readers that keep each document's newest revision_number, so an allocator
 # (max + 1) never hands one out twice; they never allocate.
 REVISION_NUMBER_KEEPERS = frozenset(
-    {"control/src/vonk_control/catalog_revision_collection.py"}
+    {"control/src/vonk_control/catalog/revision_collection.py"}
 )
 
 # The one owner of how a container's exit cause is spelled and read.
@@ -915,8 +915,8 @@ def _enum_member_lines(source: str) -> set[int]:
 # Where a document or payload arrives from outside, so its digest is verified
 # against the bytes: comparing it there is ingress, not a re-hash.
 REHASH_INGRESS = (
-    "control/src/vonk_control/catalog_entities.py",
-    "control/src/vonk_control/catalog_service.py",
+    "control/src/vonk_control/catalog/entities.py",
+    "control/src/vonk_control/catalog/service.py",
     "control/src/vonk_control/recipe_packages/",
     "control/src/vonk_control/inventory_repository.py",
     "control/src/vonk_control/telemetry.py",
@@ -2088,8 +2088,8 @@ def check_source(
             ingress = path.startswith(
                 "control/src/vonk_control/recipe_packages/"
             ) or path in {
-                "control/src/vonk_control/catalog_entities.py",
-                "control/src/vonk_control/catalog_service.py",
+                "control/src/vonk_control/catalog/entities.py",
+                "control/src/vonk_control/catalog/service.py",
             }
             if not ingress:
                 tree = ast.parse(source)
@@ -2113,7 +2113,7 @@ def check_source(
                     )
                 )
             # One definition of a recipe's current revision: the catalog head
-            # (catalog_queries.active_head_revision). Any use of revision_number
+            # (catalog.queries.active_head_revision). Any use of revision_number
             # (ordering, max, comparison, sorting) can pick a reverted revision
             # over the head. Only the revision-number allocators and the column
             # definition may name it.

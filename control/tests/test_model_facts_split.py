@@ -17,21 +17,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import vonk_control.catalog_service as catalog_service_module
+import vonk_control.catalog.service as catalog_service_module
 from sqlalchemy import select, update
-from vonk_control.catalog_entities import (
+from vonk_control.catalog.entities import (
     CatalogCode,
     CatalogEntityService,
     CatalogValidationError,
     _digest,
     _execution_projection,
 )
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
@@ -414,7 +414,7 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
 ) -> None:
     """The refresh re-validates what it wrote: an api block's required nullable
     member (max_input_tokens) must survive it, not be dropped as a None."""
-    from vonk_control.catalog_entities import CatalogEntityService as Entities
+    from vonk_control.catalog.entities import CatalogEntityService as Entities
     from vonk_forge_contracts import read_recipe_api
 
     sessions, _service, reader, item = _fixture(tmp_path)

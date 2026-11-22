@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..artifact_reference_scan import _selectors_revisions
-from ..catalog_queries import active_head_revision
-from ..catalog_revision_collection import GRACE, operation_tokens, plan_tokens, tokens
+from ..catalog.queries import active_head_revision
+from ..catalog.revision_collection import GRACE, operation_tokens, plan_tokens, tokens
 from ..content_identity import catalog_selector_membership
 from ..models import (
     ArtifactDistributionAssignment,

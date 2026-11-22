@@ -6,7 +6,7 @@ import json
 import uuid
 
 import pytest
-import vonk_control.catalog_revision_collection as collection
+import vonk_control.catalog.revision_collection as collection
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
 from vonk_agent_protocol import LifecycleState

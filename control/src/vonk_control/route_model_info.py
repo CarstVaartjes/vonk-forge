@@ -42,7 +42,7 @@ from vonk_forge_contracts.recipe import (
     Scalar,
 )
 
-from .catalog_revision_contract import (
+from .catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
     read_recipe_projection,

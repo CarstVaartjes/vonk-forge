@@ -68,9 +68,7 @@ from ..artifact_lifecycle import (
 from ..artifact_lifecycle import (
     lock_reference_gates as lock_reference_gates,
 )
-from ..catalog_revision_contract import (
-    read_catalog_document as read_catalog_document,
-)
+from ..catalog.revision_contract import read_catalog_document as read_catalog_document
 from ..categorized_errors import (
     InvalidValue as InvalidValue,
 )

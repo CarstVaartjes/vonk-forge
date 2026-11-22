@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from sqlalchemy import select
 
 from ..auth import cursor_key
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..library_contract import (
     _MAX_PAGE_RECIPES,
     _UUID_PATTERN,

@@ -323,7 +323,7 @@ def read_row_column(row: object, column: str) -> Any | Residue | None:
     from .models import CatalogDocumentRevision
 
     if isinstance(row, CatalogDocumentRevision) and column == "document":
-        from .catalog_revision_contract import cached_catalog_document
+        from .catalog.revision_contract import cached_catalog_document
 
         try:
             return cached_catalog_document(

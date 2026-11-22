@@ -50,7 +50,7 @@ from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_entities import _digest
+from vonk_control.catalog.entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (

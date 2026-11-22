@@ -27,7 +27,7 @@ from vonk_agent_protocol.error_response import (
 )
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
-from ..catalog_api import CatalogProblem
+from ..catalog.api import CatalogProblem
 
 """Versioned authenticated control API."""
 

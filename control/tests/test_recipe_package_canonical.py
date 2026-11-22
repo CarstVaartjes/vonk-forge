@@ -18,7 +18,7 @@ from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,

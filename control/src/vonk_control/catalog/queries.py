@@ -3,7 +3,7 @@
 from sqlalchemy import Exists, select
 from sqlalchemy.orm import defer
 
-from .models import CatalogDocumentHead, CatalogDocumentRevision
+from ..models import CatalogDocumentHead, CatalogDocumentRevision
 
 
 def active_head_revision() -> Exists:

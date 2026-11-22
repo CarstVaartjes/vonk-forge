@@ -33,7 +33,7 @@ from vonk_agent_protocol import LifecycleState, stored_words
 from vonk_agent_protocol.inventory import NetworkInterface
 
 from .agent_operation_states import ORDER
-from .catalog_revision_collection import GRACE
+from .catalog.revision_collection import GRACE
 from .models import AgentOperation, AgentOperationAttempt
 from .operation_progress import stored_progress
 

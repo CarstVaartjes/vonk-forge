@@ -171,7 +171,7 @@ def test_guard_rejects_an_unused_or_incomplete_clock_fixture() -> None:
             "from vonk_control import catalog_revision_collection as collector\ncollector.CatalogRevisionCollector(sessions, clock=now).collect()"
         ),
         budget_modules(ast.parse(support)),
-    ) == {"vonk_control.catalog_revision_collection"}
+    ) == {"vonk_control.catalog.revision_collection"}
 
 
 def test_deadline_scan_sees_new_literal_constant_and_injected_budgets() -> None:

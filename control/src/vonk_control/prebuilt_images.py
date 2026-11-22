@@ -52,7 +52,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
-from .catalog_revision_contract import BuildSecurityProjection
+from .catalog.revision_contract import BuildSecurityProjection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models import Job, RecipeBuild
@@ -153,7 +153,7 @@ def package_build_intent(
     :func:`executable_build_key` reads matter for a prebuilt image.
     """
 
-    from .catalog_entities import build_policy_projection
+    from .catalog.entities import build_policy_projection
     from .recipe_builds import (
         canonical_build,
         derive_build_input_identity,
@@ -277,7 +277,7 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     import io
     import tarfile
 
-    from .catalog_entities import build_policy_projection
+    from .catalog.entities import build_policy_projection
     from .runtime_adapters import (
         RUNTIME_ADAPTER_DIGEST_LABEL,
         RUNTIME_ADAPTER_LABEL,

@@ -34,10 +34,7 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
-from .catalog_revision_contract import (
-    ModelRevisionProjection,
-    RecipeRevisionProjection,
-)
+from .catalog.revision_contract import ModelRevisionProjection, RecipeRevisionProjection
 from .cursor_contract import MAX_CURSOR_LENGTH
 from .inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from .machine_states import (

@@ -13,7 +13,7 @@ from vonk_forge_contracts.qualification_status import QualificationStatus
 
 from .. import model_cache_states
 from ..auth import CursorCodec
-from ..catalog_revision_contract import (
+from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheCode, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-from ..catalog_queries import WITHOUT_DOCUMENT
-from ..catalog_revision_contract import (
+from ..catalog.queries import WITHOUT_DOCUMENT
+from ..catalog.revision_contract import (
     catalog_document_readable,
     read_shared_catalog_document,
 )

@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from ..bounded_retry import bounded_attempts
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..categorized_errors import InvalidValue
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache_contract import CacheManifest, ModelCacheSetState

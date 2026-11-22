@@ -95,11 +95,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
-from .agent_jobs import release_owned_reservations_in_session
-from .catalog_revision_contract import UnprojectedRevision, shared_catalog_document
-from .logging import log_event
-from .model_cache_contract import CacheManifest, CacheOperationKind
-from .models import (
+from ..agent_jobs import release_owned_reservations_in_session
+from ..logging import log_event
+from ..model_cache_contract import CacheManifest, CacheOperationKind
+from ..models import (
     AgentOperation,
     ArtifactJob,
     CatalogDocumentHead,
@@ -120,11 +119,12 @@ from .models import (
     RunNode,
     SourceBundleArchive,
 )
-from .owner_liveness import builds_in_flight
-from .revision_images import revision_images
-from .run_states import ENDED_RUN_STATES
-from .stored_json import binding_for
-from .wait_contract import WaitOwnerKind
+from ..owner_liveness import builds_in_flight
+from ..revision_images import revision_images
+from ..run_states import ENDED_RUN_STATES
+from ..stored_json import binding_for
+from ..wait_contract import WaitOwnerKind
+from .revision_contract import UnprojectedRevision, shared_catalog_document
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)

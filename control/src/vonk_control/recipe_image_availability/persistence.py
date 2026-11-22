@@ -21,7 +21,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..job_documents import (
     AvailabilityJobPayload,
 )

@@ -23,7 +23,7 @@ import pytest
 PASS_BUDGET_MODULES = (
     "vonk_control.due_waits",
     "vonk_control.terminal_history_collection",
-    "vonk_control.catalog_revision_collection",
+    "vonk_control.catalog.revision_collection",
     "vonk_control.model_cache.observation",
     "vonk_control.model_cache.partials_collection",
     "vonk_control.model_cache.removal_execution",

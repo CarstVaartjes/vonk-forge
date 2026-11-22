@@ -532,8 +532,8 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
 def shared_catalog_parses_unchanged() -> Iterator[None]:
     """Readers share one parse per catalog content identity; none may mutate it."""
     yield
-    from vonk_control import catalog_revision_contract as contract
     from vonk_control.bounded_json import require_mapping
+    from vonk_control.catalog import revision_contract as contract
     from vonk_forge_contracts import read_model, read_recipe
 
     changed = [

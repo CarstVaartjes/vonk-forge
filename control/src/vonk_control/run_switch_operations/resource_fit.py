@@ -21,7 +21,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import ModelDefinition
 
 from ..attempt_residues import unowned_never_installed
-from ..catalog_revision_contract import published_steady_peaks
+from ..catalog.revision_contract import published_steady_peaks
 from ..disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,

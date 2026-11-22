@@ -40,9 +40,18 @@ from vonk_forge_contracts.qualification_status import (
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from .admission_locking import ConstraintReplay, admitting
-from .auth import CursorCodec
-from .catalog_revision_contract import (
+from ..admission_locking import ConstraintReplay, admitting
+from ..auth import CursorCodec
+from ..identity_insert import insert_identity
+from ..models import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from ..stored_states import CatalogRevisionState
+from ..strict_json import serialize_json_value
+from .revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
     PublishedDocument,
@@ -53,18 +62,9 @@ from .catalog_revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from .identity_insert import insert_identity
-from .models import (
-    CatalogDocument,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
-)
-from .stored_states import CatalogRevisionState
-from .strict_json import serialize_json_value
 
 if TYPE_CHECKING:
-    from .catalog_sync_contract import ManagedCatalogSyncProblem
+    from .sync_contract import ManagedCatalogSyncProblem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ class CatalogEntityService:
         transaction.  A row another transaction holds is skipped and the next
         sync observes it again, so this never blocks admission.
         """
-        from .catalog_sync_contract import ManagedCatalogSyncProblem
+        from .sync_contract import ManagedCatalogSyncProblem
 
         problems: list[ManagedCatalogSyncProblem] = []
         with self._read() as session:
@@ -954,7 +954,7 @@ def _rederive_projection(
 def _build_policy_problem(
     revision: CatalogDocumentRevision, error: Exception
 ) -> ManagedCatalogSyncProblem:
-    from .catalog_sync_contract import ManagedCatalogSyncProblem
+    from .sync_contract import ManagedCatalogSyncProblem
 
     return ManagedCatalogSyncProblem(
         recipe_uri=(

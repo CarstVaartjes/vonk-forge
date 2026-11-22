@@ -31,12 +31,24 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 
-from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
-from .capabilities import CapabilityUnavailableError
-from .catalog_queries import active_head_revision
-from .catalog_revision_contract import catalog_document_readable
-from .catalog_service import CatalogService
-from .catalog_sync_contract import (
+from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
+from ..capabilities import CapabilityUnavailableError
+from ..models import CatalogDocumentRevision, RecipeLibrarySyncRun
+from ..owner_liveness import OwnerKind, OwnerRef, owner
+from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..recipe_library_types import (
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
+from ..recipe_packages.contracts import has_newer_major_note
+from ..source_bundles import SourceBundleUnknown
+from ..stored_states import LibrarySyncRunState
+from ..wait_contract import QueueWait
+from .queries import active_head_revision
+from .revision_contract import catalog_document_readable
+from .service import CatalogService
+from .sync_contract import (
     SEMVER_PATTERN,
     CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
@@ -46,18 +58,6 @@ from .catalog_sync_contract import (
     ManagedCatalogWithdrawnRecipe,
     reviewed_catalog_content,
 )
-from .models import CatalogDocumentRevision, RecipeLibrarySyncRun
-from .owner_liveness import OwnerKind, OwnerRef, owner
-from .persisted_waits import read_wait, schedule_wait, typed_wait_reason
-from .recipe_library_types import (
-    RecipeLibraryError,
-    RecipeLibraryItem,
-    RecipeLibrarySnapshot,
-)
-from .recipe_packages.contracts import has_newer_major_note
-from .source_bundles import SourceBundleUnknown
-from .stored_states import LibrarySyncRunState
-from .wait_contract import QueueWait
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256

@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.execution_plan_service import (
     compile_job_invocation,
 )

@@ -11,10 +11,10 @@ rejection before any effect. An error-class name or a retryable flag is not proo
 
 | Module / family | Decision and evidence |
 | --- | --- |
-| `catalog_entities.exact-reference-request` | Reclassify `resolve_reference`'s absent exact active target: the caller supplies the reference and the function only reads before rejecting it. |
-| `catalog_entities.bookkeeping-debt` | Retain missing persisted revision/head and model artifact/reference projections. `_head`, `revise`, and `_bind_recipe_models` consume stored state; their absence is not proof of invalid caller input. |
-| `catalog_service.bookkeeping-debt` | Retain unavailable bundle storage and missing imported document/head. `store_source_bundle` needs operational storage; `_select_imported_recipe_head` reads retained records inside an import that already upserted dependencies. |
-| `catalog_service.input-validation` | Existing canonical import document, digest, publication/release, actor and package-handle checks precede the import transaction. No additional debt site qualifies. Stored `_view` and retained-head checks are not newly credited by this review. |
+| `catalog.entities.exact-reference-request` | Reclassify `resolve_reference`'s absent exact active target: the caller supplies the reference and the function only reads before rejecting it. |
+| `catalog.entities.bookkeeping-debt` | Retain missing persisted revision/head and model artifact/reference projections. `_head`, `revise`, and `_bind_recipe_models` consume stored state; their absence is not proof of invalid caller input. |
+| `catalog.service.bookkeeping-debt` | Retain unavailable bundle storage and missing imported document/head. `store_source_bundle` needs operational storage; `_select_imported_recipe_head` reads retained records inside an import that already upserted dependencies. |
+| `catalog.service.input-validation` | Existing canonical import document, digest, publication/release, actor and package-handle checks precede the import transaction. No additional debt site qualifies. Stored `_view` and retained-head checks are not newly credited by this review. |
 | `compiled_execution_plan.receipt-request` | Reclassify `_verified_model_object` and `compile_verified_execution_plan` consistency rejection. The pure compiler checks supplied receipt values before returning a dispatch document, without storage, reservations or dispatch. It does not discover missing cache objects. |
 | `recipe_runtime_specs.bookkeeping-debt` | Retain both missing binding and missing telemetry after `compile_canonical_harness`. These are internally generated projection omissions, not malformed caller values. |
 | `recipe_runtime_specs.input-validation` | Existing role/rank/options/parameters/package-path validation checks supplied compile inputs before producing the runtime spec. No internal omission receives this credit. |
@@ -25,7 +25,7 @@ rejection before any effect. An error-class name or a retryable flag is not proo
 | `source_bundles` ingress families | Existing supplied digest, binary payload, size and archive-shape checks run before publication. Path safety and digest verification at ingress remain security fences. Shared stored-read failures do not move with them. |
 | `contract_graph.input-validation` | Already classified: supplied application route/schema declarations and wire exports are checked during pure discovery before a usable contract graph is returned. No remaining debt to reclassify. |
 | `operation_api` wiring | `admin_openapi_schema` validates the supplied app's operation IDs/component declarations before returning a schema. Its two builtin `RuntimeError` raises are outside the error-family inventory; no debt reduction is claimed for them. Runtime activation/publication/profile projection failures consume persisted/live evidence and are not request validation. The three listed projection debt raises remain. |
-| `catalog_sync._validate_request` | Already classified: UUID, trigger, actor and expected commit are supplied to `sync`, which invokes validation before creating the sync run or contacting the reader. The later repository-changed observation remains debt. |
+| `catalog.sync._validate_request` | Already classified: UUID, trigger, actor and expected commit are supplied to `sync`, which invokes validation before creating the sync run or contacting the reader. The later repository-changed observation remains debt. |
 
 Existing mixed input families are not newly promoted wholesale. Only the six
 explicit pre-effect sites above move from debt to validation; the registry gives
@@ -83,11 +83,11 @@ track does not access production or run local integration suites.
 ## Source anchors and verification
 
 Current source anchors (paths are under `control/src/vonk_control`):
-`catalog_entities.py:407`, `catalog_service.py:454`,
+`catalog/entities.py:407`, `catalog/service.py:454`,
 `compiled_execution_plan.py:440,467`, `recipe_runtime_specs.py:161`,
 `harnesses/canonical.py:149`, `harnesses/common.py:64`,
 `source_bundles.py:397,431`, `contract_graph.py:158`,
-`operation_api.py:2345`, `catalog_sync.py:735`, `recipe_builds.py:575`,
+`operation_api.py:2345`, `catalog/sync.py:735`, `recipe_builds.py:575`,
 `availability_production.py:777,895,953,961,1240`, and
 `prebuilt_images.py:304,444`.
 

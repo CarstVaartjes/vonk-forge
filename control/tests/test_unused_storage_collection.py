@@ -29,7 +29,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
-from vonk_control.catalog_revision_collection import operation_tokens
+from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileEffectProgress,

@@ -3,7 +3,7 @@
 from vonk_agent_protocol import InstallationState as InstallationState
 from vonk_agent_protocol import canonical_message as canonical_message
 
-from ..catalog_revision_collection import GRACE as GRACE
+from ..catalog.revision_collection import GRACE as GRACE
 from .common import _ASSIGNMENTS as _ASSIGNMENTS
 from .common import _DEAD_RUNS as _DEAD_RUNS
 from .common import _FINISHED_JOBS as _FINISHED_JOBS

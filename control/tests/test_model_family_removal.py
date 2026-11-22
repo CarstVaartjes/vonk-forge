@@ -19,15 +19,15 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_control.catalog_entities import CatalogEntityService, _digest
-from vonk_control.catalog_entities import _execution_projection as execution_of
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService, _digest
+from vonk_control.catalog.entities import _execution_projection as execution_of
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
 )
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )

@@ -41,15 +41,11 @@ from vonk_forge_contracts.recipe import (
     RecipeValidation,
 )
 
-from .bounded_json import require_mapping
-from .strict_json import (
-    StrictJSONModel,
-    serialize_json_value,
-    stored_document_detail,
-)
+from ..bounded_json import require_mapping
+from ..strict_json import StrictJSONModel, serialize_json_value, stored_document_detail
 
 if TYPE_CHECKING:
-    from .models import CatalogDocumentRevision
+    from ..models import CatalogDocumentRevision
 
 
 # A published document as JSON, before any contract has read it: the exact bytes
@@ -222,7 +218,7 @@ def rederive_projection(
     written under an earlier contract loses no valid recorded state and a stored
     value that is itself invalid is dropped, not carried over.
     """
-    from .catalog_entities import model_document_projection, recipe_document_projection
+    from .entities import model_document_projection, recipe_document_projection
 
     if isinstance(parsed, ModelDefinition):
         projection_type: type[ModelRevisionProjection | RecipeRevisionProjection] = (
@@ -334,7 +330,7 @@ def shared_catalog_document(
 ) -> ModelDefinition | RecipeDefinition:
     """The shared parse itself, uncopied: the caller must never mutate it."""
 
-    from .operator_receipt_contract import ReceiptOwner
+    from ..operator_receipt_contract import ReceiptOwner
 
     global _document_cache_size
     document = require_mapping(raw, "catalog document is not a JSON object")

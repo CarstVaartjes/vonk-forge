@@ -10,8 +10,8 @@ from vonk_agent_protocol import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
-from ..catalog_queries import active_head_revision
-from ..catalog_revision_contract import (
+from ..catalog.queries import active_head_revision
+from ..catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )

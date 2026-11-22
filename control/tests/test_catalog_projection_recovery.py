@@ -9,13 +9,13 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AssetAvailability, LifecycleState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.operation_api.contracts import OperationListPage, OperationProvider
@@ -237,7 +237,7 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations(clea
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_exact_ingress_restores_missing_root_and_selected_consumer():
     from sqlalchemy import delete
-    from vonk_control.catalog_queries import active_head_revision
+    from vonk_control.catalog.queries import active_head_revision
     from vonk_control.models import CatalogDocument, CatalogDocumentHead
 
     engine = create_engine("sqlite://")

@@ -311,7 +311,7 @@ def test_shared_content_is_retained_on_nas_and_spark(
 
 def _refreshed_model(sessions, document_id: str, stored: object, digest: str) -> str:
     """Publish a metadata-only revision of a model; returns the new head digest."""
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
     from vonk_forge_contracts import ModelDefinition, document_sha256
 
     definition = ModelDefinition.model_validate(stored)

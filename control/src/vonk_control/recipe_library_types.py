@@ -19,8 +19,8 @@ from vonk_forge_contracts.qualification_status import (
 )
 
 if TYPE_CHECKING:
-    from .catalog_revision_contract import PublishedDocument
-    from .catalog_sync_contract import ManagedCatalogSyncProblem
+    from .catalog.revision_contract import PublishedDocument
+    from .catalog.sync_contract import ManagedCatalogSyncProblem
     from .recipe_packages import RecipePackageHandle
 
 

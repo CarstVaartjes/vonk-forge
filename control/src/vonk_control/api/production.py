@@ -24,11 +24,8 @@ from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
-from ..catalog_service import CatalogService
-from ..catalog_sync import (
-    ManagedRecipeCatalogSyncService,
-    catalog_sync_failure_reason,
-)
+from ..catalog.service import CatalogService
+from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor

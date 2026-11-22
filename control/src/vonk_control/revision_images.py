@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .catalog_queries import WITHOUT_DOCUMENT
-from .catalog_revision_contract import (
+from .catalog.queries import WITHOUT_DOCUMENT
+from .catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
 )

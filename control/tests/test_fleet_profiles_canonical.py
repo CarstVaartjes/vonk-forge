@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
@@ -483,7 +483,7 @@ def _draft_input_as_save() -> FleetProfileInput:
 def test_a_draft_equal_to_the_stored_definition_is_reviewed_as_the_replayed_save() -> (
     None
 ):
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
 
     sessions = _sessions()
     _seed(sessions)
@@ -1270,12 +1270,12 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     """A save must not resolve and parse the same selector per assignment and view."""
     from collections import Counter, OrderedDict
 
-    import vonk_control.catalog_revision_contract as contract
+    import vonk_control.catalog.revision_contract as contract
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions.begin() as session:
@@ -1469,8 +1469,8 @@ def test_profile_read_observes_distinct_content_once(
     _seed(sessions)
     from collections import Counter, OrderedDict
 
-    from vonk_control import catalog_revision_contract as contract
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog import revision_contract as contract
+    from vonk_control.catalog.entities import CatalogEntityService
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions() as session:

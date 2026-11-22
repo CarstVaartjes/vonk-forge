@@ -39,7 +39,7 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from .catalog_revision_contract import published_steady_peaks
+from .catalog.revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason

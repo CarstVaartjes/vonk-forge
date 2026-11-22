@@ -31,7 +31,7 @@ from vonk_control.availability_production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (

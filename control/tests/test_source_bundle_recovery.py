@@ -14,8 +14,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
-from vonk_control.catalog_entities import recipe_document_projection
-from vonk_control.catalog_revision_contract import RecipeRevisionProjection
+from vonk_control.catalog.entities import recipe_document_projection
+from vonk_control.catalog.revision_contract import RecipeRevisionProjection
 from vonk_control.models import Base, RecipeSourceBundle
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.source_bundles import (

@@ -15,7 +15,7 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_control.catalog_revision_collection import (
+from vonk_control.catalog.revision_collection import (
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
@@ -68,7 +68,7 @@ def _model_partials(
 
 
 PROBES: dict[str, Probe] = {
-    "vonk_control.catalog_revision_collection": _catalog_revisions,
+    "vonk_control.catalog.revision_collection": _catalog_revisions,
     "vonk_control.model_cache.partials_collection": _model_partials,
 }
 

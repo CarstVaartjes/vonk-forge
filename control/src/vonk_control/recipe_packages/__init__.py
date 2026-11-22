@@ -37,7 +37,7 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from ..catalog_sync_contract import ManagedCatalogSyncProblem
+from ..catalog.sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import (
     CatalogModel,
     RecipeLibraryError,

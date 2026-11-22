@@ -21,7 +21,7 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import MUTATION_ROLES
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..models import CatalogDocumentRevision, Job, User
 from ..recipe_image_availability import (
     RecipeImageAvailabilityInvalid,

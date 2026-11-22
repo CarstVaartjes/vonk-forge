@@ -21,7 +21,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .admission_locking import is_admission_contention, label_transaction
-from .catalog_revision_collection import GRACE
+from .catalog.revision_collection import GRACE
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .inventory_items_contract import InventorySnapshotKind

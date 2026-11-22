@@ -54,12 +54,12 @@ from .agent_upgrade_contract import (
 )
 from .artifact_job_evidence import ArtifactJobResultEvidence
 from .ca_issuance_contract import CertificateIssuanceBinding
-from .catalog_revision_contract import (
+from .catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     UnprojectedRevision,
 )
-from .catalog_sync_contract import ManagedCatalogSyncResult
+from .catalog.sync_contract import ManagedCatalogSyncResult
 from .compiled_artifact_contract import (
     ArtifactOutputLimits,
     CompiledArtifactContract,

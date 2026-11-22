@@ -15,8 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ProjectionCode
 
-from .catalog_queries import active_head_revision
-from .catalog_revision_contract import shared_catalog_document
+from .catalog.queries import active_head_revision
+from .catalog.revision_contract import shared_catalog_document
 from .content_identity import RecipeExecution, runs_identically
 from .models import CatalogDocumentRevision
 from .stored_states import CatalogRevisionState

@@ -210,7 +210,7 @@ def catalog_model_files(
     """The files the catalog documents of ``contents`` list; ``None`` when one
     cannot be read (nothing may then be ruled out by files)."""
 
-    from ..catalog_revision_contract import read_catalog_document
+    from ..catalog.revision_contract import read_catalog_document
     from ..lifecycle.evidence import Residue, read_or_rebuild
 
     files: set[str] = set()

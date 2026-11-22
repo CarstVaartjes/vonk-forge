@@ -44,7 +44,7 @@ from .worker_healthcheck import (
 from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
-    from .catalog_sync import ManagedRecipeCatalogSyncService
+    from .catalog.sync import ManagedRecipeCatalogSyncService
     from .enrollment import EnrollmentService
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
@@ -700,7 +700,7 @@ def assemble_production_worker(
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
     from .attempt_residues import AttemptResidueReconciler
-    from .catalog_revision_collection import CatalogRevisionCollector
+    from .catalog.revision_collection import CatalogRevisionCollector
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import (
@@ -869,7 +869,7 @@ def assemble_production_worker(
     worker_background_services = tuple(background_services)
     automatic_catalog = None
     if catalog_sync is not None:
-        from .catalog_sync import AutomaticCatalogSync
+        from .catalog.sync import AutomaticCatalogSync
         from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
         # The one automatic catalog sync; the API only reads what it applied.
@@ -1249,8 +1249,8 @@ if __name__ == "__main__":
         return enrollment.reconcile_revocations()
 
     from .auth import TokenCodec
-    from .catalog_service import CatalogService
-    from .catalog_sync import ManagedRecipeCatalogSyncService
+    from .catalog.service import CatalogService
+    from .catalog.sync import ManagedRecipeCatalogSyncService
     from .recipe_packages import RecipePackageClient
     from .source_bundles import DatabaseSourceBundleStore
 

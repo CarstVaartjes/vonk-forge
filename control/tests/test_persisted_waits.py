@@ -348,7 +348,7 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
 ) -> None:
     """Catches a restarted loop losing its delay or attaching it to unrelated history."""
     from vonk_agent_protocol import CatalogSyncCode
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.models import RecipeLibrarySyncRun
     from vonk_control.persisted_waits import read_wait
 

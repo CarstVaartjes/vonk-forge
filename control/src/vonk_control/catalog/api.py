@@ -9,21 +9,19 @@ from pydantic import Field
 from starlette.responses import JSONResponse
 from vonk_agent_protocol import CatalogSyncCode
 
-from .auth import Actor
-from .catalog_service import (
-    CatalogService,
-)
-from .catalog_sync import CatalogSyncView
-from .catalog_sync_contract import (
+from ..auth import Actor
+from ..library_contract import UuidId
+from ..machine_states import CatalogSyncStateField
+from ..strict_json import StrictModel
+from ..wait_contract import QueueWait
+from .service import CatalogService
+from .sync import CatalogSyncView
+from .sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
     ManagedCatalogSyncProblem,
     ManagedCatalogWithdrawnRecipe,
 )
-from .library_contract import UuidId
-from .machine_states import CatalogSyncStateField
-from .strict_json import StrictModel
-from .wait_contract import QueueWait
 
 CATALOG_OPERATION_IDS = {
     (
@@ -138,7 +136,7 @@ def install_catalog_routes(
     service: CatalogService | None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
-    from .operation_api import _ADMIN_OPERATION_IDS
+    from ..operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(CATALOG_OPERATION_IDS)
     authenticated = actor_dependency

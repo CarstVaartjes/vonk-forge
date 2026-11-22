@@ -11,11 +11,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.catalog_entities import (
+from vonk_control.catalog.entities import (
     model_document_projection,
     recipe_document_projection,
 )
-from vonk_control.catalog_revision_contract import write_catalog_projection
+from vonk_control.catalog.revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision

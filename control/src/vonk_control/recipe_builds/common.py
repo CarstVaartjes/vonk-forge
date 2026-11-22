@@ -34,7 +34,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
-from ..catalog_revision_contract import (
+from ..catalog.revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
     BuildSecurityProjection,

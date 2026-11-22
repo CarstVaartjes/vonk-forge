@@ -21,10 +21,10 @@ from sqlalchemy import Engine, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync import _controller_marker as controller_marker
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync import _controller_marker as controller_marker
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )

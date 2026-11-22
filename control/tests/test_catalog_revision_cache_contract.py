@@ -6,8 +6,8 @@ from importlib.resources import files
 from pathlib import Path
 
 import pytest
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
@@ -114,7 +114,7 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
     from collections import OrderedDict
     from copy import deepcopy
 
-    import vonk_control.catalog_revision_contract as contract
+    import vonk_control.catalog.revision_contract as contract
     from vonk_control.fleet_profiles.persistence import _stored_recipe
     from vonk_control.stored_json import read_row_column
     from vonk_forge_contracts import document_sha256
@@ -176,8 +176,8 @@ def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_pat
     """The process cache cannot bypass the signed ingress content identity check."""
     from vonk_agent_protocol import CatalogCode
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_entities import CatalogValidationError
-    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog.entities import CatalogValidationError
+    from vonk_control.catalog.service import CatalogService
     from vonk_forge_contracts import document_sha256
 
     sessions = _database(tmp_path)

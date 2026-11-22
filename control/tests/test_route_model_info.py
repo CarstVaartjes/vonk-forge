@@ -312,7 +312,7 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
 def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> None:
     """Record the facts beside the run's revision the way the catalog sync does."""
     from sqlalchemy import select, update
-    from vonk_control.catalog_revision_contract import (
+    from vonk_control.catalog.revision_contract import (
         read_catalog_document,
         rederive_projection,
         write_catalog_projection,

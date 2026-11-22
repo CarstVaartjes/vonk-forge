@@ -26,7 +26,7 @@ from vonk_forge_contracts.api_checks import (
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from ..catalog_revision_contract import (
+from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_document,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from vonk_control.auth import Actor
-from vonk_control.catalog_api import install_catalog_routes
+from vonk_control.catalog.api import install_catalog_routes
 
 
 def _administrator() -> Actor:

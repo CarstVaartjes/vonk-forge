@@ -31,7 +31,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,

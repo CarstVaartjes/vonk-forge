@@ -38,8 +38,8 @@ from ..cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from ..catalog_queries import active_head_revision
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog.queries import active_head_revision
+from ..catalog.revision_contract import read_catalog_document
 from ..content_identity import installations_using_models, recipes_bound_to
 from ..fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,

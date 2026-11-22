@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
 
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
