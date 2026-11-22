@@ -80,33 +80,6 @@ def test_every_called_workflow_gets_the_permissions_its_jobs_request() -> None:
                 )
 
 
-def test_pr_acceptance_grants_permissions_through_reusable_calls() -> None:
-    """Catches a PR caller reducing grants needed by isolated candidate jobs."""
-    for caller_path, job_name, called_path in (
-        ("ci.yml", "lane-proof", "release-acceptance.yml"),
-        ("release-acceptance.yml", "candidate", "installer-candidate.yml"),
-        ("release-acceptance.yml", "acceptance", "release-acceptance-core.yml"),
-        ("release-acceptance.yml", "setups", "installer-setups.yml"),
-    ):
-        caller = load(WORKFLOWS / caller_path)
-        job = caller["jobs"][job_name]
-        granted = job.get("permissions", caller["permissions"])
-        called = load(WORKFLOWS / called_path)
-        for requested in (
-            called["permissions"],
-            *(
-                job.get("permissions", called["permissions"])
-                for job in called["jobs"].values()
-            ),
-        ):
-            for scope, level in requested.items():
-                assert LEVEL[granted.get(scope, "none")] >= LEVEL[level], (
-                    caller_path,
-                    job_name,
-                    scope,
-                )
-
-
 def test_publication_waits_for_every_producer_and_ci() -> None:
     jobs = load(RELEASE)["jobs"]
     authority = jobs["authority"]
@@ -318,7 +291,7 @@ def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None
     assert jobs["lane-proof"]["with"]["ref"] == "${{ github.sha }}"
 
 
-def test_every_ci_job_is_gated_and_its_result_reaches_the_verifier() -> None:
+def test_every_ci_job_is_gated() -> None:
     """Catches a job whose failure leaves the CI gate green."""
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
 
@@ -335,19 +308,6 @@ def test_every_ci_job_is_gated_and_its_result_reaches_the_verifier() -> None:
     gate_needs = set(needs("ci-gate"))
     for name in jobs:
         assert name == "ci-gate" or name in gate_needs or reaches_gate(name), name
-    step = next(
-        step
-        for step in jobs["ci-gate"]["steps"]
-        if step.get("name") == "Require selector and selected jobs"
-    )
-    for name in gate_needs - {"changes"}:
-        variables = [
-            key
-            for key, value in step["env"].items()
-            if value == f"${{{{ needs.{name}.result }}}}"
-        ]
-        assert variables, name
-        assert f"${variables[0]}" in step["run"], name
 
 
 def test_pr_candidates_cannot_acquire_production_publication_authority() -> None:
@@ -1429,3 +1389,42 @@ with pathlib.Path({str(requests)!r}).open("a") as output:
         "amd64",
         "arm64",
     ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "variables", "ref_type", "ref", "runs"),
+    [
+        ("success", "true", "tag", "v1.2.3", True),
+        ("failure", "true", "tag", "v1.2.3", False),
+        ("skipped", "true", "tag", "v1.2.3", False),
+        ("success", "", "tag", "v1.2.3", False),
+        ("success", "true", "branch", "main", False),
+    ],
+)
+def test_stable_release_call_runs_after_a_green_gate_with_skipped_upstream_jobs(
+    gate: str, variables: str, ref_type: str, ref: str, runs: bool
+) -> None:
+    """A skipped job upstream of ci-gate must not skip the stable channel.
+
+    GitHub skips a job whose upstream was skipped unless its `if` has a status
+    function, so the condition is evaluated with one and the gate result as
+    the only needs input.
+    """
+    call = load(WORKFLOWS / "ci.yml")["jobs"]["stable-release"]
+    expression = " ".join(call["if"].split())
+    assert re.search(r"\b(?:always|success|failure|cancelled)\(\)", expression)
+    expression = re.sub(r"\balways\(\)", "True", expression)
+    expression = expression.replace("needs.ci-gate.result", repr(gate))
+    expression = re.sub(r"vars\.[\w.-]+", repr(variables), expression)
+    expression = re.sub(
+        r"startsWith\(github\.ref_name, '(\w+)'\)",
+        lambda found: f"github.ref_name.startswith({found[1]!r})",
+        expression,
+    )
+    expression = expression.replace("github.ref_name.", "REF.")
+    context = {
+        "github.event_name": "push",
+        "github.ref_type": ref_type,
+    }
+    expression = expression.replace("REF.", repr(ref) + ".")
+    assert bool(evaluate(expression, context)) is runs

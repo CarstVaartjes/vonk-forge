@@ -435,6 +435,7 @@ def test_upgrade_inputs_carry_a_workload_on_the_pull_request(path: str) -> None:
         ["control/tests/test_run_switch_postgres.py", "tests/scripts/test_x.py"],
         ["tools/pytest_budget.py", ".github/workflows/ci.yml"],
         ["docs/testing-and-ci.md", "README.md"],
+        [".github/workflows/stable-release.yml"],
     ],
 )
 def test_changes_that_cannot_alter_the_upgrade_leave_the_carry_to_main(

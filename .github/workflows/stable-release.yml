@@ -1,0 +1,638 @@
+name: Stable release
+
+# Called by ci.yml (job `stable-release`) after `ci-gate`, only for a signed v*
+# tag pushed through the release workflow. The caller owns the condition, so
+# every job here runs whenever this workflow is called. The github context is
+# the caller's (same run id, artifacts, ref and sha), so the
+# supply-chain-evidence artifact of the same run is downloaded here.
+#
+# The keyless package signature identity in
+# .github/actions/agent-package-build/action.yml names this file: the
+# certificate carries job_workflow_ref, the path of the workflow holding the
+# signing job, at the tag ref. Moving the job moves the identity.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  UV_HTTP_TIMEOUT: "60"
+  UV_HTTP_RETRIES: "5"
+
+jobs:
+  release-metadata:
+    name: Validate container release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      next_version: ${{ steps.release.outputs.next_version }}
+      baseline_version: ${{ steps.release.outputs.baseline_version }}
+      arm64_package: ${{ steps.release.outputs.arm64_package }}
+      arm64_baseline_package: ${{ steps.release.outputs.arm64_baseline_package }}
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      baseline_artifact_name: ${{ steps.release.outputs.baseline_artifact_name }}
+      channel: ${{ steps.release.outputs.channel }}
+      image_version_tag: ${{ steps.release.outputs.image_version_tag }}
+      commit_tag: ${{ steps.release.outputs.commit_tag }}
+      dev_tag: ${{ steps.release.outputs.dev_tag }}
+      latest_alias: ${{ steps.release.outputs.latest_alias }}
+      api_image: ${{ steps.release.outputs.api_image }}
+      worker_image: ${{ steps.release.outputs.worker_image }}
+      api_dev_source: ${{ steps.release.outputs.api_dev_source }}
+      worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
+      litellm_image: ${{ steps.release.outputs.litellm_image }}
+      litellm_dev_source: ${{ steps.release.outputs.litellm_dev_source }}
+      tag_oid: ${{ steps.authority.outputs.tag_oid }}
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify signed accepted release tag
+        id: authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --force --tags origin
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          [[ $(git cat-file -t "$tag_ref") == tag ]]
+          allowed_signers="$RUNNER_TEMP/release-allowed-signers"
+          git show refs/remotes/origin/main:.github/release-allowed-signers \
+            > "$allowed_signers"
+          test -s "$allowed_signers"
+          git -c gpg.format=ssh \
+            -c gpg.ssh.allowedSignersFile="$allowed_signers" \
+            verify-tag "$tag_ref"
+          [[ $(git rev-list -n 1 "$tag_ref") == "$GITHUB_SHA" ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          tag_oid=$(git rev-parse --verify "$tag_ref")
+          scripts/verify-release-tag-authority \
+            "$GITHUB_REF_NAME" "$tag_oid" "$GITHUB_SHA"
+          printf 'tag_oid=%s\n' "$tag_oid" >> "$GITHUB_OUTPUT"
+      - name: Validate release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/container-release-metadata \
+            "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" "$GITHUB_SHA" \
+            >> "$GITHUB_OUTPUT"
+          scripts/agent-package-metadata \
+            production "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
+            "$GITHUB_SHA" 0 \
+            >> "$GITHUB_OUTPUT"
+
+  build-agent-package:
+    name: Build, attest, and lifecycle-test ARM64 Spark agent
+    if: needs.release-metadata.result == 'success'
+    needs: [release-metadata]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: agent-release
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      arm64_package: ${{ steps.package.outputs.arm64_package }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+      baseline_version: ${{ steps.package.outputs.baseline_version }}
+      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+      baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
+    steps:
+      - name: Check out exact package source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build and attest ARM64 release agent package
+        id: package
+        uses: ./.github/actions/agent-package-build
+        with:
+          channel: stable
+          publication_sequence: '0'
+          version: ${{ needs.release-metadata.outputs.version }}
+          next_version: ${{ needs.release-metadata.outputs.next_version }}
+          baseline_version: ${{ needs.release-metadata.outputs.baseline_version }}
+          arm64_package: ${{ needs.release-metadata.outputs.arm64_package }}
+          arm64_baseline_package: ${{ needs.release-metadata.outputs.arm64_baseline_package }}
+          artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
+          baseline_artifact_name: ${{ needs.release-metadata.outputs.baseline_artifact_name }}
+          environment: agent-release
+          source_sha: ${{ github.sha }}
+          tag_name: ${{ github.ref_name }}
+          tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+          expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
+          release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+          security_gate_mode: inline
+          binary_source_mode: compile
+          lifecycle_gate_mode: inline
+
+  validate-release-images:
+    name: Validate accepted release images
+    needs: [release-metadata, build-agent-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      attestations: read
+      contents: read
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      worker_digest: ${{ steps.worker.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download verified supply-chain evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: supply-chain-evidence-${{ github.run_id }}
+          path: release-output/supply-chain
+      - name: Restore verified protocol wheel for image build context
+        run: install -D -m 0644 "release-output/supply-chain/$(scripts/protocol-wheel-name)" "inventory/wheels/$(scripts/protocol-wheel-name)"
+      - name: Verify public image inputs
+        run: scripts/verify-public-image-inputs
+      - name: Rebuild and compare release supply-chain evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/supply-chain"
+          cp "inventory/wheels/$(scripts/protocol-wheel-name)" "$RUNNER_TEMP/supply-chain/"
+          scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json
+          diff -ru "$RUNNER_TEMP/supply-chain" release-output/supply-chain
+      - name: Require the preinstalled Docker Buildx plugin
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Install Skopeo from Ubuntu
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
+      - name: Validate accepted API image
+        id: api
+        shell: bash
+        env:
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.api_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$API_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/api-attestation.json"
+          scripts/verify-published-image api "$API_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
+          inspect_error="$RUNNER_TEMP/api-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable API release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "API release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Validate accepted worker image
+        id: worker
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.worker_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$WORKER_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/worker-attestation.json"
+          scripts/verify-published-image worker "$WORKER_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
+          inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable worker release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "worker release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Validate accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.litellm_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$LITELLM_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/litellm-attestation.json"
+          scripts/verify-published-image litellm "$LITELLM_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+  publish-images:
+    name: Publish public container images
+    needs: [validate-release-images, release-metadata]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: platform-release
+    concurrency:
+      group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      worker_digest: ${{ steps.worker.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free runner disk
+        uses: ./.github/actions/free-runner-disk
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version-file: .tool-versions
+          python-version: "3.14"
+          enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Require the preinstalled Docker Buildx plugin
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Install Skopeo from Ubuntu
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo
+      - name: Revalidate release authority before registry authentication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Revalidate release authority before API publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Promote accepted API image
+        id: api
+        shell: bash
+        env:
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          DIGEST: ${{ needs.validate-release-images.outputs.api_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/api-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable API release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$API_IMAGE:$IMAGE_VERSION_TAG" "$API_IMAGE@$DIGEST"
+          else
+            echo "API release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Revalidate release authority before worker publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Promote accepted worker image
+        id: worker
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.worker_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable worker release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$WORKER_IMAGE:$IMAGE_VERSION_TAG" "$WORKER_IMAGE@$DIGEST"
+          else
+            echo "worker release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Revalidate release authority before LiteLLM publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Promote accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.litellm_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$LITELLM_IMAGE:$IMAGE_VERSION_TAG" "$LITELLM_IMAGE@$DIGEST"
+          else
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Write digest-pinned image summary
+        shell: bash
+        run: |
+          {
+            echo '```dotenv'
+            printf '%s\n' \
+              "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+              "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+              "LITELLM_IMAGE=${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Render canonical production Compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0700 release-output
+          scripts/render-production-compose \
+            --output release-output/docker-compose.production.yml \
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+          scripts/render-production-compose --channel pinned \
+            --output release-output/docker-compose.pinned.yml \
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+      - name: Upload production Compose
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: platform-build-${{ needs.release-metadata.outputs.version }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            release-output/docker-compose.production.yml
+            release-output/docker-compose.pinned.yml
+
+  release-manifest:
+    name: Publish container release manifest
+    needs: [release-metadata, publish-images, build-agent-package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download platform publication evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: platform-build-${{ needs.release-metadata.outputs.version }}
+          path: release-output
+      - name: Download verified source supply-chain evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: supply-chain-evidence-${{ github.run_id }}
+          path: release-output/supply-chain
+      - name: Download verified agent package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build-agent-package.outputs.artifact_name }}
+          path: release-output/agent-package
+      - name: Create digest-pinned image environment
+        env:
+          CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
+          CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
+          CONTROL_API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
+          CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
+          LITELLM_DIGEST: ${{ needs.publish-images.outputs.litellm_digest }}
+        run: |
+          scripts/validate-container-release-digests
+          printf '%s\n' \
+            "CONTROL_API_IMAGE=$CONTROL_API_IMAGE@$CONTROL_API_DIGEST" \
+            "CONTROL_WORKER_IMAGE=$CONTROL_WORKER_IMAGE@$CONTROL_WORKER_DIGEST" \
+            "LITELLM_IMAGE=$LITELLM_IMAGE@$LITELLM_DIGEST" \
+            > vonk-forge-images.env
+          sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
+      - name: Revalidate release authority before GitHub Release
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Create public GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}
+          SOURCE_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.build-agent-package.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$ARM64_PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
+          release_assets=(
+            "release-output/supply-chain/manifest.json"
+            "release-output/supply-chain/agent-protocol.spdx.json"
+            "release-output/supply-chain/agent-rust.spdx.json"
+            "release-output/supply-chain/control-python.spdx.json"
+            "release-output/supply-chain/control-web.spdx.json"
+            "release-output/supply-chain/$(scripts/protocol-wheel-name)"
+            "release-output/agent-package/$ARM64_PACKAGE"
+            "release-output/agent-package/vonk-forge-systemd-security.json"
+          )
+          # One ARM64 package is intentionally represented as one list item.
+          # shellcheck disable=SC2066
+          for package in "$ARM64_PACKAGE"; do
+            architecture=${package%.deb}
+            architecture=${architecture##*_}
+            release_assets+=(
+              "release-output/agent-package/${package}.sha256"
+              "release-output/agent-package/${package}.host.sig"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.cdx.json"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.sbom.spdx.json"
+              "release-output/agent-package/vonk-forge-agent_${VERSION}_${architecture}.provenance.json"
+              "release-output/agent-package/${package}.sigstore.json"
+            )
+          done
+          for asset in "${release_assets[@]}"; do
+            [[ -f "$asset" && ! -L "$asset" ]]
+          done
+          scripts/reconcile-github-release \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$SOURCE_SHA" \
+            "Vonk Forge $VERSION" \
+            vonk-forge-images.env vonk-forge-images.env.sha256 \
+            release-output/docker-compose.production.yml \
+            release-output/docker-compose.pinned.yml \
+            "${release_assets[@]}"
+
+  publish-apt:
+    name: Publish verified ARM64 Spark agent package to apt
+    needs: [release-metadata, build-agent-package, release-manifest]
+    if: needs.release-manifest.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: apt-release
+    concurrency:
+      group: vonk-forge-agent-apt-stable
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    steps:
+      - name: Check out apt publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish verified ARM64 Spark agent package
+        uses: ./.github/actions/agent-apt-publish
+        with:
+          channel: stable
+          version: ${{ needs.build-agent-package.outputs.version }}
+          arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}
+          artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
+          environment: apt-release
+          source_sha: ${{ github.sha }}
+          tag_name: ${{ github.ref_name }}
+          tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+          apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          apt_repository_gpg_fingerprint: ${{ vars.APT_REPOSITORY_GPG_FINGERPRINT }}
+          apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}
+          r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}

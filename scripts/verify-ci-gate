@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 
 AREAS = (
@@ -40,14 +42,55 @@ AREA_JOBS = {
 # pull request runs no jobs besides the selector and this gate.
 
 
-def _pairs(values: list[str], label: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for value in values:
-        key, separator, item = value.partition("=")
-        if not separator or not key or not item or key in result:
-            raise ValueError(f"invalid {label}: {value!r}")
-        result[key] = item
-    return result
+# GitHub job ids whose verdict key differs from the id. Every other gated job
+# is keyed by its own id.
+JOB_KEYS = {
+    "repository-suite": "repository",
+    "control-suite": "control",
+    "web-suite": "web",
+    "generated-clients": "generated",
+    "compose-integration": "compose",
+}
+# Verdict keys that `verify` applies a rule to besides AREA_JOBS.
+RULED_JOBS = frozenset(
+    {
+        "lint",
+        "member-web",
+        "supply-chain",
+        "rust-quality",
+        "rust-tests",
+        "controller-spark-wire",
+        "repository-guards",
+        "consumer-probe",
+        "control-image-build",
+    }
+    | {job for jobs in AREA_JOBS.values() for job in jobs}
+)
+
+
+def from_needs(
+    document: str,
+) -> tuple[str, dict[str, str], dict[str, str], list[str]]:
+    """Read `toJSON(needs)`: selector result, selections, results, unruled jobs."""
+    needs = json.loads(document)
+    changes = needs["changes"]
+    selected = {
+        key.replace("_", "-"): value
+        for key, value in changes.get("outputs", {}).items()
+    }
+    results: dict[str, str] = {}
+    errors: list[str] = []
+    for job, need in needs.items():
+        if job == "changes":
+            continue
+        key = JOB_KEYS.get(job, job)
+        if key in results:
+            errors.append(f"{job} shares verdict key {key} with another gated job")
+        elif key in RULED_JOBS:
+            results[key] = need["result"]
+        else:
+            errors.append(f"{job} is gated but has no rule here")
+    return changes["result"], selected, results, errors
 
 
 def verify(
@@ -109,16 +152,12 @@ def verify(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--selector-result", required=True)
-    parser.add_argument("--selected", action="append", default=[])
-    parser.add_argument("--result", action="append", default=[])
+    parser.add_argument("--needs-env", required=True)
     args = parser.parse_args()
-    try:
-        selected = _pairs(args.selected, "selection")
-        results = _pairs(args.result, "result")
-    except ValueError as error:
-        parser.error(str(error))
-    errors = verify(args.selector_result, selected, results)
+    selector_result, selected, results, errors = from_needs(
+        os.environ.get(args.needs_env, "")
+    )
+    errors += verify(selector_result, selected, results)
     if errors:
         print("CI gate failed:", file=sys.stderr)
         for error in errors:

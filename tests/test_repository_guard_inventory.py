@@ -94,16 +94,6 @@ def test_ci_guards_run_on_full_runs_prepared_and_required() -> None:
     )
     gate = jobs["ci-gate"]
     assert "repository-guards" in gate["needs"]
-    [verify] = [
-        step
-        for step in gate["steps"]
-        if "scripts/verify-ci-gate" in step.get("run", "")
-    ]
-    assert (
-        verify["env"]["REPOSITORY_GUARDS_RESULT"]
-        == "${{ needs.repository-guards.result }}"
-    )
-    assert '--result "repository-guards=$REPOSITORY_GUARDS_RESULT"' in verify["run"]
 
 
 @pytest.mark.parametrize(
