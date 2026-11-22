@@ -8521,7 +8521,7 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path, fie
     from vonk_control.lifecycle.run_switch import RunSwitchAdapter
     from vonk_control.run_switch_operations import _read_progress
 
-    from .test_agent_jobs import distribution_payload
+    from .agent_jobs_support import distribution_payload
 
     switch = _probing_switch(tmp_path)
     probe = _probe_ids(switch)

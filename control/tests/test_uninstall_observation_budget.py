@@ -30,11 +30,11 @@ from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
 from vonk_control.models import AgentCertificate, AgentNode, Job
 
 from .agent_fences import fenced_operation
+from .agent_jobs_support import NODE_A, parent
+from .agent_jobs_support import service as service  # noqa: PLC0414
 from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import NODE_A, parent
-from .test_agent_jobs import service as service  # noqa: PLC0414
 from .test_agent_jobs_postgres import (
     service as pg_service,  # noqa: F401 - pytest fixture
 )
