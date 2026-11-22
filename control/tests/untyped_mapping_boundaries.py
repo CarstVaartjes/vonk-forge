@@ -10,9 +10,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (
-    REPO_ROOT / "control" / "src",
-    REPO_ROOT / "agent_protocol" / "src",
-    REPO_ROOT / "src" / "cluster_profiles",
+    REPO_ROOT / "control/src",
+    REPO_ROOT / "agent_protocol/src",
+    REPO_ROOT / "src/cluster_profiles",
     REPO_ROOT / "scripts",
 )
 

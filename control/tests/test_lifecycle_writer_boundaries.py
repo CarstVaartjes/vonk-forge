@@ -144,7 +144,7 @@ def test_other_tables_comparisons_and_protocol_enums_are_not_writes(
 def test_the_core_and_the_models_module_are_never_scanned() -> None:
     source = "from .models import Job\ndef f(job: Job):\n    job.state = 'x'\n"
     assert not scan_source(source, path=CORE_PREFIX + "core.py")
-    assert not scan_source(source, path="control/src/vonk_control/models.py")
+    assert not scan_source(source, path="control/src/vonk_control/models/jobs.py")
 
 
 def _write(function: str = "f", model: str = "Job", kind: str = ATTRIBUTE) -> Write:

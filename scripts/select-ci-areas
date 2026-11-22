@@ -115,7 +115,6 @@ CARRY_EXEMPT = (
     "tools/",
     "tests/",
     "docs/",
-    ".github/ISSUE_TEMPLATE/",
     ".github/workflows/ci.yml",
     ".github/workflows/stable-release.yml",
     ".github/workflows/ci-image-mirror.yml",
@@ -143,8 +142,7 @@ def carry_selected(paths: Iterable[str], event: str) -> bool:
 # never on a member pull request, and by these paths on a merge-queue commit.
 # Release accepts every merge: its Spark and refresh steps run when the tested
 # PR holds no candidate evidence (release-acceptance-core.yml).
-# The canary fixture feeds the Spark lane and the carry, so it accepts too.
-LANE_INPUTS = ("tests/acceptance/", "tests/fixtures/canonical-synthetic-canary/")
+LANE_INPUTS = ("tests/acceptance/",)
 
 
 def lane_selected(paths: Iterable[str], event: str) -> bool:
@@ -228,7 +226,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
         if _core_test_input(path):
             continue
         # README prose inside an executable dependency tree is conservative too.
-        documentation = path.startswith(("docs/", ".github/ISSUE_TEMPLATE/")) or (
+        documentation = path.startswith("docs/") or (
             "/" not in path and path.endswith((".md", ".mdx"))
         )
         if path.startswith(INTEGRATION_INPUTS) or not documentation:
