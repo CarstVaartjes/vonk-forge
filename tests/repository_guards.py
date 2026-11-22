@@ -42,6 +42,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_ci_member_tier.py",
     "tests/test_ci_cache_warm.py",
     "tests/test_workflow_cache_saves.py",
+    "tests/test_workflow_retry_commands.py",
     "tests/test_workflow_script_environments.py",
     "tests/test_reusable_workflow_permissions.py",
     "tests/test_release_workflow.py",
