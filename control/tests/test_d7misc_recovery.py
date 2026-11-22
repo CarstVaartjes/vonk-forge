@@ -15,7 +15,8 @@ from vonk_control.catalog.sync_contract import (
 )
 from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
-from vonk_control.recipe_packages import RecipePackageClient, RecipePackageError
+from vonk_control.recipe_packages.client import RecipePackageClient
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .display_fixtures import model_entry
 

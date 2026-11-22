@@ -28,7 +28,6 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan, DistributionObject
-from vonk_control import recipe_packages
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
@@ -50,6 +49,7 @@ from vonk_control.models import (
     ClusterMappingNode,
     RecipeBuild,
 )
+from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.source_bundles import SourceBundleStore

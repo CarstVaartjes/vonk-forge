@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_control import recipe_packages
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
@@ -44,11 +43,13 @@ from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import Base, CatalogDocumentRevision, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
-from vonk_control.recipe_packages import (
-    RecipePackageClient,
+from vonk_control.recipe_packages import archive
+from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.client import RecipePackageClient
+from vonk_control.recipe_packages.contracts import (
     RecipePackageError,
+    RecipePackageUnsettled,
 )
-from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
 from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
@@ -1587,7 +1588,7 @@ def test_library_tar_keeps_reading_a_long_flat_name(
 @example("a/../b")
 @example("/etc/passwd")
 def test_accepted_package_path_is_canonical_and_relative(raw: str) -> None:
-    if not recipe_packages._safe_path(raw):
+    if not archive._safe_path(raw):
         return
     parts = raw.split("/")
     assert raw and not raw.startswith("/")

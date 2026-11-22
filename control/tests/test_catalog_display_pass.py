@@ -36,7 +36,7 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_control.recipe_packages import RecipePackageClient
+from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import (
     ModelDisplay,

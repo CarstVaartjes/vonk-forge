@@ -45,7 +45,7 @@ from vonk_control.catalog.sync_contract import (
     reviewed_catalog_content,
 )
 from vonk_control.db import build_engine, session_factory
-from vonk_control.recipe_packages import RecipePackageClient, load_recipe_package
+from vonk_control.recipe_packages.client import RecipePackageClient, load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
 

@@ -2349,7 +2349,7 @@ def test_model_file_removal_belongs_to_the_removal_executor():
     assert not check_source(other, source, {1}, modes=("model-sets",))
 
 
-_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/__init__.py"
+_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/client.py"
 
 
 @pytest.mark.parametrize(

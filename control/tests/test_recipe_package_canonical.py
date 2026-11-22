@@ -35,7 +35,7 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     _source_policy_document,
 )
-from vonk_control.recipe_packages import RecipePackageError
+from vonk_control.recipe_packages.contracts import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
 

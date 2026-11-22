@@ -168,7 +168,7 @@ if __name__ == "__main__":
     from ..auth import TokenCodec
     from ..catalog.service import CatalogService
     from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..recipe_packages import RecipePackageClient
+    from ..recipe_packages.client import RecipePackageClient
     from ..source_bundles import DatabaseSourceBundleStore
 
     catalog_sync = capabilities.guard(

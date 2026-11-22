@@ -393,7 +393,7 @@ def _library_recipe(
 ) -> tuple[RecipeLibraryItem, GeneratedSourceBundle]:
     """Load one indexed recipe package with its verified build-context bundle."""
 
-    from .recipe_packages import load_recipe_package
+    from .recipe_packages.client import load_recipe_package
     from .source_bundles import parse_source_bundle
 
     document = entry["document"]

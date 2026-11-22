@@ -14,8 +14,9 @@ from pathlib import Path
 import httpx2
 import pytest
 from vonk_agent_protocol import RecipePackageCode
-from vonk_control import recipe_packages
-from vonk_control.recipe_packages import RecipePackageClient, RecipePackageError
+from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.client import RecipePackageClient
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .test_recipe_package_transport import (
     RELEASES,

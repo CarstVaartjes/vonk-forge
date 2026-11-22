@@ -28,7 +28,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_control.recipe_packages import load_recipe_package
+from vonk_control.recipe_packages.client import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import document_sha256, read_recipe_display
 

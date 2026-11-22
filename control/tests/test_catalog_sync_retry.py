@@ -11,7 +11,7 @@ from vonk_control.catalog.sync import (
     catalog_sync_failure_reason,
     catalog_sync_retry_delay,
 )
-from vonk_control.recipe_packages import RecipePackageError
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .signed_recipe_release import signed_recipe_releases
 
