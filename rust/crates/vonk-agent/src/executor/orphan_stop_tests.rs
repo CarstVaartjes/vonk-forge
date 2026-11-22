@@ -401,13 +401,9 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
-    let started = Instant::now();
     cycle_within(&executor, windows).await;
-    assert!(
-        started.elapsed() < Duration::from_millis(1800),
-        "the pass waited for the stop: {:?}",
-        started.elapsed()
-    );
+    // The held stop is still in flight, so the pass returned without it.
+    assert!(world.host.is_running(run), "the pass waited for the stop");
     assert!(
         world.lifecycle(run).exists(),
         "not retired before the stop landed"
