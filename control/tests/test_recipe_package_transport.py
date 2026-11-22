@@ -457,9 +457,20 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
 
 
 def _release_for(
-    index: bytes, package: bytes, *, tag: str = f"v{MAJOR}.1.0"
+    index: bytes, package: bytes, *, tag: str = f"v{MAJOR}.1.0", **envelope: str
 ) -> _Release:
-    return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
+    """A release whose signed index names its tag, unless a field says otherwise."""
+    document = json.loads(index)
+    document["contract_version"] = tag.removeprefix("v")
+    document.update(envelope)
+    return _Release(
+        tag, {"catalog-index.json": _canonical(document), "tiny-recipe.tar.gz": package}
+    )
+
+
+def _replace_with(served: _Release, other: _Release) -> None:
+    """Replace the served release asset in place, as a publisher does."""
+    served.tag, served.members = other.tag, other.members
 
 
 def _client(served: _Release, cache: Path, **options: object) -> RecipePackageClient:
@@ -503,7 +514,7 @@ def test_production_reader_downloads_one_signed_bundle(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
-    assert snapshot.version == f"{MAJOR}.0.0"
+    assert snapshot.version == f"{MAJOR}.1.0"
     assert snapshot.updated_at is not None
     assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
@@ -536,64 +547,141 @@ def test_production_reader_can_hold_an_exact_release_tag(
     client.close()
 
 
-def _ingest(tmp_path: Path, library: bytes) -> None:
-    path = tmp_path / "recipe-library.tar"
-    path.write_bytes(library)
-    client = _client(_release_for(b"{}", b""), tmp_path / "packages")
-    try:
-        client._ingest_library(f"v{MAJOR}.1.0", path)
-    finally:
-        client.close()
-
-
-def _ingest_refused_with_peak(
-    tmp_path: Path, library: bytes
-) -> tuple[int, RecipePackageError]:
-    tracemalloc.start()
-    try:
-        _ingest(tmp_path, library)
-    except RecipePackageError as refusal:
-        return tracemalloc.get_traced_memory()[1], refusal
-    finally:
-        tracemalloc.stop()
-    raise AssertionError("the library was not refused")
-
-
-def _extended_header_chain(count: int) -> bytes:
-    link = tarfile.TarInfo("././@LongLink")
-    link.type, link.size = tarfile.GNUTYPE_LONGNAME, 2
-    return (link.tobuf(tarfile.GNU_FORMAT) + b"a\0".ljust(512, b"\0")) * count
-
-
-def test_library_tar_with_an_oversized_extended_header_is_refused_unread(
-    tmp_path: Path,
+def test_a_signed_bundle_served_under_another_tag_is_refused(
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    info = tarfile.TarInfo("a.txt")
-    info.pax_headers = {"comment": "x" * 16_000_000}
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as tar:
-        tar.addfile(info)
-    library = stream.getvalue()
-    peak, refusal = _ingest_refused_with_peak(tmp_path, library)
-    assert refusal.code is RecipePackageCode.RESPONSE_INVALID
-    assert peak < 4_000_000  # the header body was never read into memory
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package, contract_version=f"{MAJOR}.0.0")
+    client = _client(release, tmp_path / "packages")
+    with pytest.raises(RecipePackageError) as refused:
+        client.list()
+    assert refused.value.code == RecipePackageCode.RELEASE_INVALID
+    client.close()
 
 
-def test_library_tar_with_a_chain_of_extended_headers_is_refused(
-    tmp_path: Path,
+def test_an_older_library_under_latest_is_refused_and_the_held_one_keeps_serving(
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    with pytest.raises(RecipePackageError) as raised:
-        _ingest(tmp_path, _extended_header_chain(2000))
-    assert raised.value.code is RecipePackageCode.RESPONSE_INVALID
+    index, _, package = _canonical_package_fixture()
+    newer = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    older = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    cache = tmp_path / "packages"
+    client = _client(newer, cache)
+    held = client.list()
+    client.prepare(held)
+    _replace_with(newer, older)
+    for _ in range(2):
+        with pytest.raises(RecipePackageError) as refused:
+            client.list()
+        assert refused.value.code == RecipePackageCode.RELEASE_INVALID
+    # The refusal is remembered: the refused bundle is downloaded only once.
+    assert newer.library_downloads == 2
+    assert client.fetch(held.items[0].uri).package_handle is not None
+    client.close()
+
+    # A restarted Controller holds only the persisted generation, and a
+    # refusal must leave it serving that one.
+    restarted = _client(newer, cache)
+    with pytest.raises(RecipePackageError):
+        restarted.list()
+    assert restarted.fetch(held.items[0].uri).package_handle is not None
+    restarted.close()
 
 
-def test_library_tar_keeps_reading_a_long_flat_name(
+def test_a_newer_publish_is_admitted_after_a_refusal(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    held = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    older = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    newer = _release_for(index, package, updated_at="2026-11-03T00:00:00Z")
+    client = _client(held, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(held, older)
+    with pytest.raises(RecipePackageError):
+        client.list()
+    _replace_with(held, newer)
+    assert client.list().updated_at == datetime(2026, 11, 3, tzinfo=UTC)
+    client.close()
+
+
+def test_a_forged_signature_is_remembered_and_the_held_library_survives_a_restart(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
     release = _release_for(index, package)
-    release.members["a" * 119 + ".txt"] = b"x"
-    _ingest(tmp_path, release.library)
+    cache = tmp_path / "packages"
+    client = _client(release, cache)
+    held = client.list()
+    client.prepare(held)
+    release.members["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
+    for _ in range(2):
+        with pytest.raises(RecipeReleaseError):
+            client.list()
+    assert release.library_downloads == 2  # the forged bundle only once
+    client.close()
+    restarted = _client(release, cache)
+    with pytest.raises(RecipeReleaseError):
+        restarted.list()
+    assert restarted.fetch(held.items[0].uri).package_handle is not None
+    restarted.close()
+
+
+def test_a_disk_fault_during_ingest_is_retried_not_remembered(
+    tmp_path: Path, signed_releases: list[bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    first = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    second = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    client = _client(first, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(first, second)
+    real = RecipePackageClient._store_package
+    full = [True]
+
+    def store(self: RecipePackageClient, *args: object) -> bool:
+        if full[0]:
+            raise OSError(28, "No space left on device")
+        return real(self, *args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(RecipePackageClient, "_store_package", store)
+    client.list()  # the held library serves meanwhile
+    full[0] = False
+    assert client.list().updated_at == datetime(2026, 11, 2, tzinfo=UTC)
+    client.close()
+
+
+def test_a_republish_with_the_same_updated_at_is_accepted(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    first = _release_for(index, package)
+    republished = _release_for(index, package, source_commit="b" * 40)
+    client = _client(first, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(first, republished)
+    client.list()
+    assert first.library_downloads == 2
+    client.close()
+
+
+def test_an_exact_tag_may_roll_back_to_an_older_release(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    newer = _release_for(
+        index, package, tag=f"v{MAJOR}.2.0", updated_at="2026-11-02T00:00:00Z"
+    )
+    older = _release_for(
+        index, package, tag=f"v{MAJOR}.1.0", updated_at="2026-11-01T00:00:00Z"
+    )
+    cache = tmp_path / "packages"
+    client = _client(newer, cache)
+    client.prepare(client.list())
+    client.close()
+    pinned = _client(older, cache, release=f"v{MAJOR}.1.0")
+    assert pinned.list().version == f"{MAJOR}.1.0"
+    pinned.close()
 
 
 def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
@@ -606,6 +694,41 @@ def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
     release.members["SHA256SUMS.sigstore.json"] = b'{"forged": true}'
     with pytest.raises(RecipeReleaseError):
         client.list()
+    client.close()
+
+
+def test_a_failed_download_is_retried_next_cycle_despite_the_listing_etag(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    old = _release_for(index, package, tag=f"v{MAJOR}.1.0")
+    new = _release_for(index, package, tag=f"v{MAJOR}.2.0")
+    served = {"release": old, "download_fails": False}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        release = served["release"]
+        if request.url.path == RELEASES:
+            etag = f'"{release.tag}"'
+            if request.headers.get("if-none-match") == etag:
+                return httpx2.Response(304)
+            response = release.handler(request)
+            response.headers["etag"] = etag
+            return response
+        if served["download_fails"] and "recipe-library.tar" in request.url.path:
+            return httpx2.Response(503)
+        return release.handler(request)
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(handler),
+    )
+    assert client.list().version == f"{MAJOR}.1.0"
+    served.update(release=new, download_fails=True)
+    client.list()  # the new release's download is unavailable: the old stays
+    served["download_fails"] = False
+    assert client.list().version == f"{MAJOR}.2.0"
+    assert new.library_downloads == 1
     client.close()
 
 
@@ -850,9 +973,8 @@ def test_one_bad_package_skips_only_its_recipe_and_names_it(
         del release.members["tiny-recipe.tar.gz"]
     else:
         release.members["SHA256SUMS"] = (
-            f"{hashlib.sha256(index).hexdigest()}  catalog-index.json\n"
-            + "0" * 64
-            + "  tiny-recipe.tar.gz\n"
+            f"{hashlib.sha256(release.members['catalog-index.json']).hexdigest()}"
+            "  catalog-index.json\n" + "0" * 64 + "  tiny-recipe.tar.gz\n"
         ).encode()
     client = _client(release, tmp_path / "packages")
     snapshot = client.list()
@@ -1205,7 +1327,7 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
             assert f"contract v{MAJOR}" in waiting.value.detail
         older_only = False
         snapshot = client.list()
-        assert snapshot.version == f"{MAJOR}.0.0" and snapshot.items
+        assert snapshot.version == f"{MAJOR}.1.0" and snapshot.items
     finally:
         client.close()
 
@@ -1390,3 +1512,63 @@ def test_adapter_only_publication_changes_accepted_build_identity(
         accepted = builds.persist_plan_in_session(session, fresh, now=now)
     assert accepted.build_id != old.build_id
     assert accepted.agent_payload["source_bundle_sha256"] == current
+
+
+def _ingest(tmp_path: Path, library: bytes) -> None:
+    path = tmp_path / "recipe-library.tar"
+    path.write_bytes(library)
+    client = _client(_release_for(b"{}", b""), tmp_path / "packages")
+    try:
+        client._ingest_library(f"v{MAJOR}.1.0", path)
+    finally:
+        client.close()
+
+
+def _ingest_refused_with_peak(
+    tmp_path: Path, library: bytes
+) -> tuple[int, RecipePackageError]:
+    tracemalloc.start()
+    try:
+        _ingest(tmp_path, library)
+    except RecipePackageError as refusal:
+        return tracemalloc.get_traced_memory()[1], refusal
+    finally:
+        tracemalloc.stop()
+    raise AssertionError("the library was not refused")
+
+
+def _extended_header_chain(count: int) -> bytes:
+    link = tarfile.TarInfo("././@LongLink")
+    link.type, link.size = tarfile.GNUTYPE_LONGNAME, 2
+    return (link.tobuf(tarfile.GNU_FORMAT) + b"a\0".ljust(512, b"\0")) * count
+
+
+def test_library_tar_with_an_oversized_extended_header_is_refused_unread(
+    tmp_path: Path,
+) -> None:
+    info = tarfile.TarInfo("a.txt")
+    info.pax_headers = {"comment": "x" * 16_000_000}
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        tar.addfile(info)
+    library = stream.getvalue()
+    peak, refusal = _ingest_refused_with_peak(tmp_path, library)
+    assert refusal.code is RecipePackageCode.RESPONSE_INVALID
+    assert peak < 4_000_000  # the header body was never read into memory
+
+
+def test_library_tar_with_a_chain_of_extended_headers_is_refused(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RecipePackageError) as raised:
+        _ingest(tmp_path, _extended_header_chain(2000))
+    assert raised.value.code is RecipePackageCode.RESPONSE_INVALID
+
+
+def test_library_tar_keeps_reading_a_long_flat_name(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    release.members["a" * 119 + ".txt"] = b"x"
+    _ingest(tmp_path, release.library)

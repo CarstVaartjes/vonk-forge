@@ -92,8 +92,12 @@ Sigstore bundle and every file `SHA256SUMS` lists, under flat names. Replacing
 that one asset makes the in-place update of a contract-version release atomic.
 The Controller follows the newest published release whose major version is its
 own contract major (drafts are skipped); set `VONK_RECIPE_LIBRARY_RELEASE` to
-an exact `v2.MINOR.PATCH` tag to hold one. A sync costs one conditional release
+an exact `vMAJOR.MINOR.PATCH` tag of that major to hold one. A sync costs one conditional release
 listing and, only when the bundle's digest changed, one bundle download.
+The signed index must name the release it is served under, and under `latest`
+it must not be older than the library already held: a refused bundle leaves the
+held library serving and is not downloaded again until the asset changes. An
+exact tag is the deliberate rollback route and only has to name its own tag.
 Sync status (`library_version`, `library_updated_at`), the Library page and
 `vonkctl recipe library` show the release version and when its recipes last
 changed. A release caught while its bundle is being replaced keeps the previous
