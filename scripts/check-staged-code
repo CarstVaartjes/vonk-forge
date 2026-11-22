@@ -46,6 +46,7 @@ def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
         f"timeout --kill-after={cleanup_budget / 2:.3f}s {cleanup_budget:.3f}s "
         f"python3 scripts/vm-cargo-cache {shlex.quote(str(ROOT))} "
         '"$HOME/target-vonk-ci" >/dev/null 2>&1 || true; '
+        'scripts/ensure-project-venv "$UV_PROJECT_ENVIRONMENT" && '
         f"exec {shlex.join(command)}"
     )
     script = (
@@ -57,8 +58,8 @@ def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
         "export CARGO_BUILD_RUSTC_WRAPPER= && "
         # The checkout is shared with the Mac; build.rs prepares the protocol
         # environment, so the VM keeps its own Linux venv, never the Mac .venv.
-        f'export UV_PROJECT_ENVIRONMENT="$HOME/venv-vonk-ci/{target_key}" && '
-        'scripts/ensure-project-venv "$UV_PROJECT_ENVIRONMENT" && '
+        # It lives in the target dir, so vm-cargo-cache reclaims both together.
+        f'export UV_PROJECT_ENVIRONMENT="$HOME/target-vonk-ci/{target_key}/venv" && '
         "export CARGO_BUILD_JOBS=2 && "
         f"exec timeout --signal=TERM --kill-after={grace:.3f}s "
         f"{remaining - grace:.3f}s "

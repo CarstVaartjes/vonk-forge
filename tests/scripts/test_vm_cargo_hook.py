@@ -40,6 +40,9 @@ def test_vm_shell_bounds_contention_and_preserves_caller_arguments(
     root = tmp_path / "worktree with spaces"
     (root / "scripts").mkdir(parents=True)
     shutil.copy2(ROOT / "scripts/vm-cargo-cache", root / "scripts/vm-cargo-cache")
+    venv_check = root / "scripts/ensure-project-venv"
+    venv_check.write_text("#!/bin/sh\nexit 0\n")
+    venv_check.chmod(0o755)
     lock = tmp_path / "cargo.lock"
     monkeypatch.setattr(module, "ROOT", root)
     monkeypatch.setattr(module, "VM_CARGO_LOCK", str(lock))
