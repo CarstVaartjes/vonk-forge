@@ -27,7 +27,7 @@ jobs:
   fuzz:
     name: Fuzz the parsers
     runs-on: ubuntu-24.04
-    # Budget: about 5 min build, 4 targets x 150 s, 5 min Hypothesis, corpus save.
+    # Budget: about 5 min build, 4 targets x 150 s, about 1 min Hypothesis, corpus save.
     timeout-minutes: 25
     steps:
       - name: Check out main
@@ -80,11 +80,14 @@ jobs:
         if: ${{ !cancelled() }}
         uses: ./.github/actions/python-env
       - name: Run the Hypothesis fuzz profile
-        # The profile draws 20000 examples per property, so the time box ends it
-        # (exit 124 is the budget, not a failure); a falsified property exits
-        # with its own status and prints the example to add.
+        # A falsified property stops the run (-x) and exits non-zero with its
+        # example. The run takes about a minute; hitting the time box means a
+        # hang and is red too. Only the property files are collected: the rest
+        # of control/tests needs the built recipe library at import time.
         if: ${{ !cancelled() }}
-        run: timeout 300 scripts/test control --markers property -- --hypothesis-profile=fuzz || [ $? -eq 124 ]
+        run: |
+          mapfile -t files < <(grep -rl "pytest.mark.property" control/tests tests --include='test_*.py')
+          timeout 300 uv run --project control --frozen pytest "${files[@]}" -m property -x --hypothesis-profile=fuzz
       - name: Minimize the corpus
         if: always()
         run: |

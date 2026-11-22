@@ -814,8 +814,9 @@ test's own tar builder), and no corpus file is committed. Reproduce locally with
 repository root.
 
 The same job then runs the Python Hypothesis properties under the `fuzz` profile
-(`pytest --hypothesis-profile=fuzz -m property`, 5 minutes at most). A falsified
-property prints its example; the fix PR adds it as an `@example(...)` on that
+(`pytest -x --hypothesis-profile=fuzz -m property` over the files that carry the
+marker; about a minute, killed at 5 minutes, which is red like any failure). A
+falsified property prints its example; the fix PR adds it as an `@example(...)` on that
 property.
 
 Follow-up: the build-egress parser target once its parser is a library.
