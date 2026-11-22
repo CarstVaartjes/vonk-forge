@@ -161,7 +161,9 @@ schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
 `OUT_DIR`, from the protocol alone: it reruns on `agent_protocol/src`,
-`agent_protocol/pyproject.toml`, the root `uv.lock` and the exporter, and the
+`agent_protocol/pyproject.toml`, the root `uv.lock` and the exporter (its Python call sets
+`PYTHONDONTWRITEBYTECODE`, because `__pycache__` files written into `agent_protocol/src`
+would make the next cargo invocation rerun it and recompile the dependent crates), and the
 Rust jobs (`rust-quality`, `rust-tests`, the agent package jobs) prepare only the
 protocol member (`.github/actions/protocol-env`, an inexact sync), not `python-env`. Pytest prepares missing or outdated inputs before collecting
 consumers: `tools/generated_contracts.py` stamps the fingerprint of the
@@ -779,13 +781,6 @@ tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.
-
-`installer-setups.yml` runs the NAS wheel build, the native Spark setup build and the
-uncached sudo recovery test (`sudo-recovery`) as parallel jobs, so the recovery proof
-no longer lengthens the build job on the candidate's critical path. Its caller
-(`setups` in the lane and in Release) still succeeds only when every one of them does,
-and `CI gate` reaches it through `candidate`. The two Spark jobs share their toolchain
-steps in `.github/actions/spark-setup-toolchain`.
 
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
