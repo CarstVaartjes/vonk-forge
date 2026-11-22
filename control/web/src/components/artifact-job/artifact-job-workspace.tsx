@@ -11,7 +11,7 @@ import type {
   LibraryApi,
   LibraryViewRecipeDetail,
   RecipeDefinition,
-} from "../api/types";
+} from "../../api/types";
 import {
   addWire,
   compareWire,
@@ -22,8 +22,8 @@ import {
   parseContractJson,
   stringifyContractJson,
   type WireNumber,
-} from "../api/contract-numeric";
-import { LifecycleState } from "../api/vocabulary.generated";
+} from "../../api/contract-numeric";
+import { LifecycleState } from "../../api/vocabulary.generated";
 import {
   createJobTitle,
   isTerminal,
@@ -31,12 +31,12 @@ import {
   jobInterfacesOf,
   phaseOf,
   type JobRecipeInterface,
-} from "../lib/artifact-job";
+} from "../../lib/artifact-job";
 
-import { formatBytes } from "../lib/fleet";
-import { humanizeIdentifier, TechnicalDetails } from "./library/library-technical-details";
-import { StatusPill } from "./status-pill";
-import { Time } from "./time";
+import { formatBytes } from "../../lib/fleet";
+import { humanizeIdentifier, TechnicalDetails } from "../library/library-technical-details";
+import { StatusPill } from "../status-pill";
+import { Time } from "../time";
 import { hashArtifactBlob } from "./artifact-hash";
 import "./artifact-job-workspace.css";
 

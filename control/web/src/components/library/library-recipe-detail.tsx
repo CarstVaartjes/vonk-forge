@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import type { ControlApi, LibraryViewRecipeDetail as RecipeDetail } from "../../api/types";
 import { recipeLibraryPath } from "../../lib/library-route";
-import { ArtifactJobWorkspace } from "../artifact-job-workspace";
+import { ArtifactJobWorkspace } from "../artifact-job/artifact-job-workspace";
 import { LibraryProfileComposer } from "./library-profile-composer";
 import { LibraryRecipeFit } from "./library-recipe-fit";
 import { LibraryRecipeLinks } from "./library-recipe-links";

@@ -97,15 +97,15 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/admin-menu.tsx` | `AdminMenuProps` | component props: UI-only, not API data |
 | `control/web/src/components/app-shell.tsx` | `AppShellProps` | component props: UI-only, not API data |
 | `control/web/src/components/app-shell.tsx` | `Operator` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-hash.ts` | `ArtifactHashProgress` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.ts` | `HashWorker` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.ts` | `WorkerMessage` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `ArtifactHashProgress` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `HashWorker` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `WorkerMessage` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
 | `control/web/src/components/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
 | `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |

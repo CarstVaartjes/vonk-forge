@@ -1,6 +1,6 @@
 import type { ArtifactJob, ArtifactJobInterface } from "../api/types";
 import { createJobTitle, jobElapsed, phaseOf } from "../lib/artifact-job";
-import { jobTone } from "./artifact-job-workspace";
+import { jobTone } from "./artifact-job/artifact-job-workspace";
 import { recipeLibraryPath } from "../lib/library-route";
 import { humanizeIdentifier } from "./library/library-technical-details";
 import { StatusPill } from "./status-pill";

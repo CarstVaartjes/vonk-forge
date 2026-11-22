@@ -78,47 +78,47 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "ArtifactHashProgress",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "HashWorker",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "WorkerMessage",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.worker.ts",
       "type": "HashRequest",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.worker.ts",
       "type": "WorkerScope",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "ActiveRun",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "CancelRecovery",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "ContractState",
       "reason": "UI-only discriminated union for one screen or hook; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "InputPayload",
       "reason": "UI-only state or form draft; never serialized to the API"
     },

@@ -8,9 +8,9 @@ import type {
   LibraryApi,
   LibraryViewRecipeDetail,
   RecipeDefinition,
-} from "../api/types";
+} from "../../api/types";
 import { LosslessNumber } from "lossless-json";
-import { formatWire, isWireNumber, stringifyContractJson } from "../api/contract-numeric";
+import { formatWire, isWireNumber, stringifyContractJson } from "../../api/contract-numeric";
 import { ArtifactJobWorkspace } from "./artifact-job-workspace";
 import { hashArtifactBlob } from "./artifact-hash";
 
