@@ -1752,6 +1752,28 @@ def test_every_image_build_on_an_x86_hosted_runner_first_frees_the_runner_disk()
     assert missing == []
 
 
+def test_a_background_disk_cleanup_is_awaited_before_the_first_image_build() -> None:
+    """Catches a build that races the toolchain deletion it depends on, and a
+    finish that waits for a deletion nobody started."""
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for name, body in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            steps = body.get("steps") or []
+            phases = [
+                (index, (step.get("with") or {}).get("phase", "run"))
+                for index, step in enumerate(steps)
+                if step.get("uses") == FREE_DISK_ACTION
+            ]
+            starts = [index for index, phase in phases if phase == "start"]
+            finishes = [index for index, phase in phases if phase == "finish"]
+            where = f"{path.name}:{name}"
+            assert all(any(s < f for s in starts) for f in finishes), where
+            if starts:
+                first_build = next(
+                    index for index, step in enumerate(steps) if _builds_images(step)
+                )
+                assert any(f < first_build for f in finishes), where
+
+
 LITELLM_DOCKERFILE = "deploy/compose/litellm/Dockerfile"
 LITELLM_VERIFY = "scripts/verify-litellm-base-signature"
 
