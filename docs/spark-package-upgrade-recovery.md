@@ -110,6 +110,21 @@ fault-injection fixtures, while adjacent recovery/repair shell lanes exercise
 the complete production maintainer scripts. This is Debian/systemd acceptance,
 not physical Spark, NVIDIA, or live Controller deployment evidence.
 
+`tests/nodes/test_agent_package_transition_systemd.py` starts from the promoted
+dev release package instead. It downloads the package named by the signed
+`release.json`, reseals it with a throwaway key, and drives the promoted
+helper's own units, sandbox and watchdog. Signed grants go over the real socket
+through `vonk-agent-helper`'s `package_grant_probe` example. The candidates are
+this tree's package: unmodified (today's path, which arms the capsule), and
+without a preinst, so the watchdog alone is the recovery. The no-preinst cases
+are a finisher upgrade with acknowledgement, a failing postinst, and three
+faults held during dpkg's payload extraction: the helper cgroup killed, dpkg
+alone killed, and a reboot stand-in. No capsule intent or arming breadcrumb may
+appear in any of them. A runner cannot reboot inside a job, so the stand-in
+kills and stops the package's units, waits past the activation deadline, and
+starts the units a boot starts. A kernel boot and lost unsynced writes are not
+reproduced.
+
 ## Retry behavior and diagnostics
 
 Package configuration first checks whether rollback service enablement already
