@@ -780,6 +780,13 @@ request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.
 
+The lane's `Candidate ARM64 agent packages` job is a two-leg matrix (candidate and
+lower lifecycle baseline) that builds both packages in parallel, as `agent-release.yml`
+does; each leg uploads its own artifact and `candidate` derives the package file names
+from the source's versions. The build stage's critical path is its slowest leg of
+package, setups and compose, so a leg shortened alone gains at most the slack to the
+next leg.
+
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
 
