@@ -18,7 +18,6 @@ from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_contract import (
     AgentUpgradePackage,
-    AgentUpgradeRepairManifest,
     AgentUpgradeRequestIntent,
 )
 from vonk_control.agent_upgrade_status import (
@@ -68,33 +67,7 @@ PACKAGE = {
     "target_binary_digest": "a" * 64,
     "target_build_digest": "sha256:" + "b" * 64,
 }
-REPAIR_AUTHORITY_SHA256 = "1" * 64
-REPAIR_PACKAGE_SHA256 = "2" * 64
-REPAIR_PACKAGE = {
-    "architecture": "linux-arm64",
-    "package_bytes": 6_000_000,
-    "package_sha256": REPAIR_PACKAGE_SHA256,
-    "package_signature": "3" * 128,
-    "package_url": (
-        f"https://install.vonkforge.ai/repair-capsules/{NODE_A}/"
-        f"{REPAIR_AUTHORITY_SHA256}/{REPAIR_PACKAGE_SHA256}/"
-        "vonk-forge-agent.deb"
-    ),
-    "package_version": "0.1.0~dev.382+gd1cef9c7d1ce",
-    "schema_version": 1,
-    "target_binary_digest": "4" * 64,
-    "target_build_digest": "sha256:" + "5" * 64,
-}
-REPAIR_MANIFEST = {
-    "schema_version": 2,
-    "kind": "agent-upgrade-repair",
-    "node_id": NODE_A,
-    "authority_sha256": REPAIR_AUTHORITY_SHA256,
-    "package": REPAIR_PACKAGE,
-}
 PACKAGE_MODEL = AgentUpgradePackage.model_validate(PACKAGE)
-REPAIR_PACKAGE_MODEL = AgentUpgradePackage.model_validate(REPAIR_PACKAGE)
-REPAIR_MANIFEST_MODEL = AgentUpgradeRepairManifest.model_validate(REPAIR_MANIFEST)
 OLD_IDENTITY = {
     "architecture": "linux-arm64",
     "binary_digest": "f" * 64,
@@ -164,167 +137,6 @@ class Clock:
 
     def advance(self, *, seconds: int) -> None:
         self.value += timedelta(seconds=seconds)
-
-
-def test_repair_plan_binds_manifest_but_dispatches_current_source_bound_package_payload(
-    tmp_path,
-) -> None:
-    now = datetime(2026, 8, 29, tzinfo=UTC)
-    engine = create_engine(f"sqlite:///{tmp_path / 'repair.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=NODE_A,
-                state="active",
-                inventory_snapshot=inventory_items_fixture(
-                    NODE_A,
-                    observed_at=now,
-                    identity=AgentRuntimeIdentity.model_validate(
-                        {
-                            **PACKAGED_RUNTIME_IDENTITY,
-                            "architecture": "linux-arm64",
-                            "semantic_version": "0.1.0",
-                            "build_digest": OLD_IDENTITY["build_digest"],
-                            "binary_digest": OLD_IDENTITY["binary_digest"],
-                        }
-                    ),
-                ),
-                contact=AgentNodeContact(last_seen_at=now),
-            )
-        )
-    operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions,
-        operations,
-        clock=lambda: now,
-    )
-
-    ordinary = upgrades.preview([NODE_A], REPAIR_PACKAGE_MODEL)
-    plan = upgrades.preview(
-        [NODE_A],
-        REPAIR_PACKAGE_MODEL,
-        repair_manifest=REPAIR_MANIFEST_MODEL,
-    )
-    assert plan.plan_digest != ordinary.plan_digest
-    assert plan.repair_manifest == REPAIR_MANIFEST_MODEL
-    job = upgrades.apply(
-        [NODE_A],
-        REPAIR_PACKAGE_MODEL,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-        repair_manifest=REPAIR_MANIFEST_MODEL,
-    )
-
-    assert job.payload["repair_manifest"] == REPAIR_MANIFEST
-    with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == job.id,
-                AgentOperation.node_id == NODE_A,
-            )
-        )
-        assert operation is not None
-        assert {key: operation.payload[key] for key in REPAIR_PACKAGE} == REPAIR_PACKAGE
-        assert set(operation.payload) == set(PACKAGE) | {
-            "rollback",
-            "source_package_bytes",
-            "source_package_url",
-        }
-
-
-@pytest.mark.parametrize("node_ids", [None, [NODE_A, NODE_B]])
-def test_repair_plan_requires_one_explicit_bound_spark(tmp_path, node_ids) -> None:
-    now = datetime(2026, 8, 29, tzinfo=UTC)
-    engine = create_engine(
-        f"sqlite:///{tmp_path / f'repair-{len(node_ids or [])}.sqlite'}"
-    )
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions,
-        operations,
-        clock=lambda: now,
-    )
-    with pytest.raises(AgentUpgradeConflict):
-        upgrades.preview(
-            node_ids,
-            REPAIR_PACKAGE_MODEL,
-            repair_manifest=REPAIR_MANIFEST_MODEL,
-        )
-
-
-def test_repair_manifest_requires_canonical_immutable_url_and_latest_request_leads(
-    tmp_path,
-) -> None:
-    now = datetime(2026, 8, 29, tzinfo=UTC)
-    engine = create_engine(f"sqlite:///{tmp_path / 'repair-stale.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    with sessions.begin() as session:
-        session.add(
-            AgentNode(
-                node_id=NODE_A,
-                state="active",
-                inventory_snapshot=inventory_items_fixture(
-                    NODE_A,
-                    observed_at=now,
-                    identity=AgentRuntimeIdentity.model_validate(
-                        {
-                            **PACKAGED_RUNTIME_IDENTITY,
-                            "architecture": "linux-arm64",
-                            "semantic_version": "0.1.0",
-                            "build_digest": OLD_IDENTITY["build_digest"],
-                            "binary_digest": OLD_IDENTITY["binary_digest"],
-                        }
-                    ),
-                ),
-                contact=AgentNodeContact(last_seen_at=now),
-            )
-        )
-    operations = AgentJobService(sessions, clock=lambda: now)
-    upgrades = AgentUpgradeService(
-        sessions,
-        operations,
-        clock=lambda: now,
-    )
-    mutable = json.loads(json.dumps(REPAIR_MANIFEST))
-    mutable["package"]["package_url"] = (
-        "https://install.vonkforge.ai/repair-capsules/latest/vonk-forge-agent.deb"
-    )
-    with pytest.raises(AgentUpgradeConflict):
-        upgrades.preview(
-            [NODE_A],
-            REPAIR_PACKAGE_MODEL,
-            repair_manifest=AgentUpgradeRepairManifest.model_validate(mutable),
-        )
-
-    legacy = json.loads(json.dumps(REPAIR_MANIFEST))
-    legacy["schema_version"] = 1
-    with pytest.raises(ValueError):
-        AgentUpgradeRepairManifest.model_validate(legacy)
-
-    plan = upgrades.preview(
-        [NODE_A], REPAIR_PACKAGE_MODEL, repair_manifest=REPAIR_MANIFEST_MODEL
-    )
-    changed = json.loads(json.dumps(REPAIR_MANIFEST))
-    changed["package"]["package_signature"] = "6" * 128
-    changed_package = {**REPAIR_PACKAGE, "package_signature": "6" * 128}
-    # A preview digest is advisory: the latest request's freshly validated
-    # plan is applied instead of refusing it as stale.
-    job = upgrades.apply(
-        [NODE_A],
-        AgentUpgradePackage.model_validate(changed_package),
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-        repair_manifest=AgentUpgradeRepairManifest.model_validate(changed),
-    )
-    assert job.payload_digest != plan.plan_digest
-    assert job.payload["package"] == changed_package
 
 
 def test_every_spark_upgrades_independently_of_a_busy_one(tmp_path) -> None:

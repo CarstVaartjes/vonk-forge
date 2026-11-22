@@ -922,12 +922,7 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
             &mut sources,
         );
     }
-    for package in [
-        "packaging/debian/postinst",
-        "packaging/debian/postinst-repair",
-    ] {
-        sources.push(repository.join(package));
-    }
+    sources.push(repository.join("packaging/debian/postinst"));
     // Shared store names have one owner in the protocol crate, visible to both.
     let mut protocol = Vec::new();
     collect_sources(

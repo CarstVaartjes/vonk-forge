@@ -2668,14 +2668,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vonk-repair-helper-probe"
-version = "0.1.1"
-dependencies = [
- "libc",
- "sha2",
-]
-
-[[package]]
 name = "vonk-spark-setup"
 version = "0.1.1"
 dependencies = [

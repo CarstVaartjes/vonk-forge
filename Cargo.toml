@@ -6,7 +6,6 @@ members = [
     "rust/crates/vonk-monitor",
     "rust/crates/vonk-agent-helper",
     "rust/crates/vonk-build-egress",
-    "rust/crates/vonk-repair-helper-probe",
     "rust/crates/vonk-spark-setup",
 ]
 resolver = "3"

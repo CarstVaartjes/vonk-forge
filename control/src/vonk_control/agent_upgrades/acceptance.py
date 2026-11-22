@@ -16,7 +16,6 @@ from ..admission_locking import ConstraintReplay, admitting
 from ..agent_package_source import load_package_source
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
-    AgentUpgradeRepairManifest,
     AgentUpgradeRequestIntent,
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 from .constants import _ALREADY_CURRENT
 from .errors import AgentUpgradeConflict, AgentUpgradeInvalid
 from .helpers import _summary
-from .intent import _plan_digest, _request_intent, _rollout_document
+from .intent import _plan_digest, _request_intent
 from .plan import AgentUpgradePlan
 
 
@@ -42,24 +41,11 @@ class AcceptanceMixin:
         node_ids: Sequence[str] | None,
         package: AgentUpgradePackage,
         *,
-        repair_manifest: AgentUpgradeRepairManifest | None = None,
         request_intent: AgentUpgradeRequestIntent | None = None,
     ) -> AgentUpgradePlan:
         service = cast("AgentUpgradeService", self)
         payload = package
         intent = _request_intent(request_intent, node_ids)
-        repair = (
-            None
-            if repair_manifest is None
-            else service._repair_manifest(repair_manifest, payload)
-        )
-        if repair is not None and (
-            node_ids is None or tuple(node_ids) != (repair.node_id,)
-        ):
-            raise AgentUpgradeInvalid(
-                "agent repair requires exactly its explicit Spark",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
         # The agent wire requires a 64-hex authority revision on every
         # upgrade operation; the signed package digest names what it installs.
         authority_revision = payload.package_sha256
@@ -127,9 +113,7 @@ class AcceptanceMixin:
                 node_ids=list(targets),
                 package=payload,
                 request_intent=intent,
-                repair_manifest=repair,
             ),
-            repair_manifest=repair,
             request_intent=intent,
             sources=sources,
             skipped=skipped,
@@ -189,7 +173,6 @@ class AcceptanceMixin:
         plan_digest: str,
         actor: str,
         request_id: str,
-        repair_manifest: AgentUpgradeRepairManifest | None = None,
         request_intent: AgentUpgradeRequestIntent | None = None,
     ) -> Job:
         service = cast("AgentUpgradeService", self)
@@ -200,7 +183,6 @@ class AcceptanceMixin:
         plan = service.preview(
             node_ids,
             package,
-            repair_manifest=repair_manifest,
             request_intent=intent,
         )
         # The latest request leads: a preview digest that no longer matches is
@@ -223,15 +205,12 @@ class AcceptanceMixin:
             authority_revision=plan.authority_revision,
             targets=list(plan.node_ids),
             payload_digest=plan.plan_digest,
-            payload=_rollout_document(
-                AgentUpgradeRolloutPayload(
-                    node_order=list(plan.node_ids),
-                    package=plan.package,
-                    request_intent=plan.request_intent,
-                    sources=plan.sources,
-                    repair_manifest=plan.repair_manifest,
-                )
-            ),
+            payload=AgentUpgradeRolloutPayload(
+                node_order=list(plan.node_ids),
+                package=plan.package,
+                request_intent=plan.request_intent,
+                sources=plan.sources,
+            ).model_dump(mode="json"),
             current_attempt=0,
             created_at=now,
             updated_at=now,
