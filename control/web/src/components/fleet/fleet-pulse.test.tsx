@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { FleetPulse } from "./fleet-pulse";
-import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
+import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
 
 const GIB = 1024 ** 3;
 

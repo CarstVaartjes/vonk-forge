@@ -1,7 +1,7 @@
 import "./spark.css";
 import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
-import { FleetFeedback } from "../components/fleet-feedback";
+import { FleetFeedback } from "../components/fleet/fleet-feedback";
 import { RangeSwitch } from "../components/range-switch";
 import { SparkLogs } from "../components/spark/spark-logs";
 import { SparkOverview } from "../components/spark/spark-overview";

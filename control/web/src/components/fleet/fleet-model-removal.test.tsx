@@ -4,10 +4,10 @@ import {
   LifecycleState,
   FleetRemovalDisposition,
   FleetRemovalReason,
-} from "../api/vocabulary.generated";
-import type { ControlApi } from "../api/types";
-import { cacheRemovalReview } from "../test-fixtures/cache-removal";
-import { LibraryCacheAction } from "./library/library-cache-action";
+} from "../../api/vocabulary.generated";
+import type { ControlApi } from "../../api/types";
+import { cacheRemovalReview } from "../../test-fixtures/cache-removal";
+import { LibraryCacheAction } from "../library/library-cache-action";
 
 test.each([LifecycleState.QUEUED, LifecycleState.SUCCEEDED])(
   "fleet removal binds its review and preserves the receipt (%s)",

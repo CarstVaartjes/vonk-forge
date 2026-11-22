@@ -5,7 +5,7 @@ import { CertificateNotice, expiringCertificates } from "../components/certifica
 import { EmptyState } from "../components/empty-state";
 import { EnginePanel } from "../components/engine-panel";
 import { ClusterUnit } from "../components/workload/workload-units";
-import { FleetFeedback } from "../components/fleet-feedback";
+import { FleetFeedback } from "../components/fleet/fleet-feedback";
 import { MetricsChart } from "../components/metrics-chart";
 import { PageHeader } from "../components/page-header";
 import { SparksTable } from "../components/spark/sparks-table";
