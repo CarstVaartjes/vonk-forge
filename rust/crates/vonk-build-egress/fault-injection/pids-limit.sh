@@ -12,7 +12,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'docker rm -f egress-fi >/dev/null 2>&1 || true; rm -rf "${work:?}"' EXIT
 source=${1:-$here/../src/main.rs}
-rustc --edition=2024 -C panic=abort -C opt-level=3 "$source" -o "$work/proxy"
+extern=()
+if [ -f "$(dirname "$source")/lib.rs" ]; then
+  rustc --edition=2024 -C panic=abort -C opt-level=3 --crate-type rlib \
+    --crate-name vonk_build_egress "$(dirname "$source")/lib.rs" --out-dir "$work"
+  extern=(--extern "vonk_build_egress=$work/libvonk_build_egress.rlib")
+fi
+rustc --edition=2024 -C panic=abort -C opt-level=3 "${extern[@]}" "$source" -o "$work/proxy"
 cat > "$work/client.py" <<'PY'
 import socket, sys, time
 ip, count = sys.argv[1], int(sys.argv[2])
