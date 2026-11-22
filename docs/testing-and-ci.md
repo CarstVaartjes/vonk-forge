@@ -771,6 +771,12 @@ local command `scripts/test guards` runs them in parallel (`-n auto`; they share
 `python3 scripts/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
 
+`tests/test_guard_paths_exist.py` fails when a repository path literal in a guard
+module (`added_line_guards.py`, `principle_guards.py`, the boundary and reader
+tables, `repository_guards.py`), in `scripts/select-ci-areas` or in a `tools/*.json`
+allowlist names nothing. A prefix passes when it matches at least one path. There is
+no allowlist: move the literal with the code it guards, or delete it.
+
 ### Cross-repo nightly
 
 Every other lane pins `vonk-forge-recipes` to a reviewed revision.

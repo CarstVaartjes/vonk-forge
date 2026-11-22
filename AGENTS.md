@@ -331,6 +331,7 @@ quality evidence still requires its designated lane.
 The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
+A path literal in a guard module, `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); move or delete the literal with the code.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
