@@ -244,12 +244,6 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if let [operation, version, agent, helper] = arguments.as_slice()
-        && operation == "--validate-package-rollback"
-    {
-        return vonk_agent_helper::package_rollback::Store::system()
-            .validate_maintainer_rollback(version, agent, helper);
-    }
     if let Some(("--package-hook", hook)) = arguments.split_first().map(|(a, r)| (a.as_str(), r)) {
         return vonk_agent_helper::package_hooks::run_arguments(
             hook,

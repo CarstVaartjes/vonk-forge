@@ -9,15 +9,6 @@ use wait_timeout::ChildExt;
 use super::PATH;
 
 pub(super) fn command(path: &str, arguments: &[&str], offline: bool) -> Result<String, String> {
-    command_with_nonce(path, arguments, offline, None)
-}
-
-pub(super) fn command_with_nonce(
-    path: &str,
-    arguments: &[&str],
-    offline: bool,
-    nonce: Option<&str>,
-) -> Result<String, String> {
     let capture = path == "/usr/bin/dpkg-query"
         || (path == "/usr/bin/systemctl" && arguments.contains(&"show"))
         || (path == "/usr/bin/dpkg-deb" && arguments.first() == Some(&"--field"));
@@ -37,9 +28,6 @@ pub(super) fn command_with_nonce(
         });
     if offline {
         cmd.env("SYSTEMD_OFFLINE", "1");
-    }
-    if let Some(nonce) = nonce {
-        cmd.env("VONK_FORGE_PACKAGE_ROLLBACK_NONCE", nonce);
     }
     if path == "/usr/bin/dpkg" {
         let output = crate::package_command::run(&mut cmd, Duration::from_secs(180))?;
@@ -83,55 +71,21 @@ pub(super) fn command_with_nonce(
 
 pub fn prerequisites() -> Result<(), String> {
     // Probe before dpkg invokes prerm and stops the healthy source agent. This
-    // set is the actual current maintainer-script and watchdog executable set.
+    // set is what the maintainer shims, the package hooks and the watchdog run.
     for executable in [
         "/bin/sh",
-        "/usr/bin/awk",
-        "/usr/bin/base64",
-        "/usr/bin/cat",
-        "/usr/bin/chmod",
-        "/usr/bin/chown",
-        "/usr/bin/cp",
-        "/usr/bin/cmp",
         "/usr/bin/deb-systemd-helper",
         "/usr/bin/deb-systemd-invoke",
-        "/usr/bin/dirname",
-        "/usr/bin/getent",
-        "/usr/bin/ln",
-        "/usr/bin/loginctl",
-        "/usr/bin/openssl",
-        "/usr/bin/sleep",
-        "/usr/bin/tail",
-        "/usr/sbin/addgroup",
-        "/usr/sbin/nologin",
-        "/usr/bin/cut",
-        "/usr/bin/date",
         "/usr/bin/dpkg",
         "/usr/bin/dpkg-deb",
         "/usr/bin/dpkg-query",
-        "/usr/bin/find",
-        "/usr/bin/flock",
-        "/usr/bin/grep",
-        "/usr/bin/id",
-        "/usr/bin/install",
-        "/usr/bin/logger",
-        "/usr/bin/mkdir",
-        "/usr/bin/mktemp",
-        "/usr/bin/mv",
-        "/usr/bin/readlink",
-        "/usr/bin/rm",
-        "/usr/bin/rmdir",
-        "/usr/bin/sed",
-        "/usr/bin/sha256sum",
-        "/usr/bin/stat",
-        "/usr/bin/sync",
+        "/usr/bin/loginctl",
         "/usr/bin/systemctl",
         "/usr/bin/systemd-run",
-        "/usr/bin/tr",
-        "/usr/bin/wc",
+        "/usr/sbin/addgroup",
         "/usr/sbin/adduser",
-        "/usr/sbin/ldconfig",
-        "/usr/sbin/start-stop-daemon",
+        "/usr/sbin/nologin",
+        "/usr/sbin/usermod",
     ] {
         let m = fs::metadata(executable)
             .map_err(|_| format!("missing package prerequisite: {executable}"))?;

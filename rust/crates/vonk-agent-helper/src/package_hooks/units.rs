@@ -56,23 +56,6 @@ pub(super) const UNITS: [Unit; 6] = [
     },
 ];
 
-/// Staged by a retired forward-recovery package; dpkg never owned them, and a
-/// leftover would keep gating the agent on a runner nothing maintains.
-/// Temporary: deleted once both Sparks are verified clean.
-const CAPSULE_UNIT: &str = "/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service";
-const CAPSULE_FILES: [&str; 5] = [
-    CAPSULE_UNIT,
-    "/lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
-    "/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
-    "/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
-    "/lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf",
-];
-const CAPSULE_DIRECTORIES: [&str; 3] = [
-    "/lib/systemd/system/vonk-forge-agent.service.d",
-    "/lib/systemd/system/vonk-forge-package-upgrade-recover.service.d",
-    "/lib/systemd/system/vonk-forge-package-helper.socket.d",
-];
-
 pub(super) fn enable(host: &mut impl Host) -> Result<(), String> {
     for unit in &UNITS {
         match unit.enablement {
@@ -90,28 +73,6 @@ pub(super) fn enable(host: &mut impl Host) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Best effort: a leftover only costs a retry at the next configure.
-pub(super) fn retire_forward_capsule(host: &mut impl Host) {
-    if host.systemd_live() && host.lstat(CAPSULE_UNIT).is_some() {
-        best_effort(
-            host,
-            SYSTEMCTL,
-            &[
-                "--system",
-                "stop",
-                "vonk-forge-package-upgrade-recover-capsule.service",
-            ],
-        );
-    }
-    for path in CAPSULE_FILES.iter().chain(&CAPSULE_DIRECTORIES) {
-        if host.lstat(path).is_some()
-            && let Err(error) = host.remove(path)
-        {
-            eprintln!("vonk-forge-agent: {error}");
-        }
-    }
 }
 
 /// Reload systemd, and on an upgrade hand the helper and agent restart to a

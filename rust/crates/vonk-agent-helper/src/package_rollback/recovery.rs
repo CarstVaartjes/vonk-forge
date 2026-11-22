@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use vonk_agent_protocol::PackageActivationPhase as Phase;
 use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
 
-use super::commands::{command, command_with_nonce};
+use super::commands::command;
 use super::custody::{digest, digest_file, now, safe};
 use super::{
     AGENT, HELPER, PROCESS_PROOF_INTERVAL, PROCESS_PROOF_TIMEOUT, ROLLBACK_RETRY_TIMEOUT, Store,
@@ -127,7 +127,7 @@ impl Store {
                 command("/usr/bin/systemctl", &["--system", "stop", unit], false)?;
             }
         }
-        command_with_nonce(
+        command(
             "/usr/bin/dpkg",
             &[
                 "--install",
@@ -135,7 +135,6 @@ impl Store {
                 source.to_str().ok_or("source path")?,
             ],
             true,
-            Some(&tx.rollback.attempt_nonce),
         )?;
         if digest(Path::new(AGENT))? != tx.rollback.source.binary_sha256
             || digest(Path::new(HELPER))? != tx.rollback.source.helper_sha256

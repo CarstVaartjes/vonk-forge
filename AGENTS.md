@@ -89,7 +89,9 @@ maintainer scripts (`packaging/debian/{postinst,prerm,postrm}`) are shims that
 exec it, and `scripts/verify-agent-deb` requires them to equal the packaged
 shim sources. A new dpkg action is a new `Hook` variant (the `match` is
 exhaustive), never new shell. `packaging/systemd` units run binaries, not
-`/bin/sh -c`. The `maintainershim` added-line guard enforces both.
+`/bin/sh -c`. The `maintainershim` added-line guard enforces both. The rollback
+preflight `prerequisites()` lists exactly the executables the shims, the hooks
+and the watchdog run: a hook that runs a new program adds it there.
 
 ## Shared decisions and operator visibility
 

@@ -335,24 +335,6 @@ fn an_upgrade_schedules_the_new_helper_as_the_finisher_after_the_reload() {
 }
 
 #[test]
-fn a_leftover_capsule_is_retired_before_the_reload() {
-    let mut fake = Fake::machine();
-    let capsule = "/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf";
-    for path in [
-        "/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service",
-        capsule,
-    ] {
-        fake.put(path, "", node(Kind::File, 0, 0, 0o644));
-    }
-    configure(None, &mut fake).unwrap();
-    assert!(fake.lstat(capsule).is_none());
-    assert!(
-        fake.position("stop vonk-forge-package-upgrade-recover-capsule")
-            < fake.position("daemon-reload")
-    );
-}
-
-#[test]
 fn a_missing_subordinate_range_fails_the_configure() {
     let mut fake = Fake::machine();
     fake.put(

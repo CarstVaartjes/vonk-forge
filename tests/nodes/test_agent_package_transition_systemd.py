@@ -7,11 +7,7 @@ throwaway release key so baseline and candidates share one key. Its own helper
 runs under its own units and sandbox and receives signed grants on its real
 socket; its own rollback watchdog is the only recovery under test.
 
-The candidates come from this tree's package, which ships no preinst, so no
-forward recovery capsule can arm: the capsule's intent and its arming
-breadcrumbs are watched throughout and must never appear. A last case starts
-from the staged files a promoted package's capsule leaves (none of them
-dpkg-owned) and asserts the candidate retires them. Each fault holds dpkg in
+The candidates come from this tree's package. Each fault holds dpkg in
 its payload extraction or its postinst (a pass-through dpkg-deb on dpkg's PATH,
 or a held configure), then kills the helper's cgroup, dpkg alone, or every
 package unit (the reboot stand-in). A runner cannot reboot inside a job, so that stand-in kills and
@@ -57,43 +53,6 @@ HOLD_CONFIGURE = Path("/run/vonk-transition-hold-configure")
 HOLD_WRAPPER = Path("/usr/local/sbin/dpkg-deb")
 # The probe runs as the agent account, which cannot traverse a build workspace.
 PROBE = Path("/usr/local/bin/vonk-transition-grant-probe")
-UNITS = Path("/lib/systemd/system")
-# What the promoted package's capsule stages outside dpkg's ownership, and
-# the package-owned recovery files a candidate without a capsule drops.
-STAGED_CAPSULE = {
-    UNITS / "vonk-forge-package-upgrade-recover-capsule.service": (
-        "[Service]\nType=oneshot\nExecStart=/bin/true\n[Install]\n"
-        "WantedBy=multi-user.target\n"
-    ),
-    UNITS / "vonk-forge-agent.service.d/10-package-upgrade-capsule.conf": (
-        "[Service]\nExecCondition=+/var/lib/vonk-forge/package-upgrade/"
-        "recovery-capsule/runner allow-agent-start\n"
-    ),
-    UNITS / "vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf": (
-        "[Unit]\nConditionPathExists=!/var/lib/vonk-forge/package-upgrade/intent\n"
-    ),
-    UNITS / "vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf": (
-        "[Unit]\nDescription=Vonk Forge privileged agent-helper socket\n"
-    ),
-}
-STAGED_WANTS = (
-    UNITS / "multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service"
-)
-RETIRED_PACKAGE_FILES = (
-    UNITS / "vonk-forge-package-upgrade-recover.service",
-    UNITS / "vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
-    Path("/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"),
-)
-# Everything a forward capsule leaves when it arms, including the breadcrumb
-# that outlives the capsule's own retirement.
-ARMING = (
-    STATE / "package-upgrade",
-    STATE / "package-upgrade.preflight.trace",
-    STATE / "package-upgrade.preflight.status",
-    STATE / "package-upgrade.status",
-    *STAGED_CAPSULE,
-    STAGED_WANTS,
-)
 
 
 def run(
@@ -254,28 +213,6 @@ def seal(unsealed: Path, key: Path, output: Path) -> Package:
     return package
 
 
-class ArmingWatch:
-    """Record any forward-capsule state that appears while the watch runs."""
-
-    def __init__(self) -> None:
-        self.seen: set[str] = set()
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._poll, daemon=True)
-
-    def _poll(self) -> None:
-        while not self._stop.is_set():
-            self.seen.update(str(path) for path in ARMING if os.path.lexists(path))
-            time.sleep(0.05)
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *_):
-        self._stop.set()
-        self._thread.join()
-
-
 class Lane:
     def __init__(self, probe: Path, promoted: Package) -> None:
         self.probe = probe
@@ -356,8 +293,6 @@ class Lane:
             confirmed
         )
         assert receipt(nonce, "acknowledged"), f"{label}: not acknowledged"
-        left = [str(path) for path in RETIRED_PACKAGE_FILES if os.path.lexists(path)]
-        assert not left, f"{label}: the candidate still has recovery files: {left}"
         self.evidence.append(
             {
                 "case": label,
@@ -388,15 +323,6 @@ class Lane:
         )
 
 
-def stage_capsule() -> None:
-    """Leave what the promoted package's capsule stages, then load it."""
-    for path, text in STAGED_CAPSULE.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    STAGED_WANTS.symlink_to(next(iter(STAGED_CAPSULE)))
-    run("/usr/bin/systemctl", "daemon-reload")
-
-
 def held_dpkg(marker: bytes) -> int | None:
     """The dpkg whose child's command line contains the marker."""
     for entry in Path("/proc").iterdir():
@@ -424,12 +350,6 @@ def prepare_host(probe: Path, promoted: Package) -> None:
         'exec /usr/bin/dpkg-deb "$@"\n'
     )
     HOLD_WRAPPER.chmod(0o755)
-    # Earlier lanes on this disposable runner may leave capsule history behind.
-    for path in ARMING:
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        else:
-            path.unlink(missing_ok=True)
     offline_install(promoted.path)
     temporary = Path(tempfile.mkdtemp(prefix="pki-", dir="/var/tmp"))
     openssl = "/usr/bin/openssl"
@@ -587,122 +507,111 @@ def main() -> None:
         prepare_host(PROBE, promoted)
         lane = Lane(PROBE, promoted)
 
-        with ArmingWatch() as watch:
-            lane.baseline(packages)
-            lane.activates("finisher-and-acknowledgement", tree, 120)
+        lane.baseline(packages)
+        lane.activates("finisher-and-acknowledgement", tree, 120)
 
-            lane.baseline(packages)
-            nonce, _, operation = lane.install(failing, deadline=600)
-            reply = lane.send(operation)
-            assert reply is None or reply.get("status") != "package-installed", reply
-            lane.restored("failed-postinst", nonce)
+        lane.baseline(packages)
+        nonce, _, operation = lane.install(failing, deadline=600)
+        reply = lane.send(operation)
+        assert reply is None or reply.get("status") != "package-installed", reply
+        lane.restored("failed-postinst", nonce)
 
-            # (fault, hold point, dpkg state there). dpkg alone killed fails the
-            # install at once; a killed helper cgroup and the reboot stand-in
-            # leave the transaction armed, so the deadline restore runs.
-            faults = (
-                ("dpkg-killed", HOLD_EXTRACTION, f"iHR|{promoted.version}"),
-                ("helper-cgroup-killed", HOLD_CONFIGURE, f"iF |{held.version}"),
-                ("reboot", HOLD_CONFIGURE, f"iF |{held.version}"),
+        # (fault, hold point, dpkg state there). dpkg alone killed fails the
+        # install at once; a killed helper cgroup and the reboot stand-in
+        # leave the transaction armed, so the deadline restore runs.
+        faults = (
+            ("dpkg-killed", HOLD_EXTRACTION, f"iHR|{promoted.version}"),
+            ("helper-cgroup-killed", HOLD_CONFIGURE, f"iF |{held.version}"),
+            ("reboot", HOLD_CONFIGURE, f"iF |{held.version}"),
+        )
+        for fault, hold, expected_state in faults:
+            lane.baseline(packages)
+            hold.touch()
+            nonce, deadline, operation = lane.install(held, deadline=40)
+            replies: list = []
+
+            def client_send(operation=operation, replies=replies) -> None:
+                try:
+                    replies.append(lane.send(operation))
+                except (
+                    AssertionError,
+                    subprocess.SubprocessError,
+                    ValueError,
+                ) as error:
+                    # Raised in the main thread after the join below.
+                    replies.append(error)
+
+            client = threading.Thread(target=client_send)
+            client.start()
+            marker = (
+                f"{HOLD_WRAPPER}\0--fsys-tarfile\0"
+                if hold == HOLD_EXTRACTION
+                else "vonk-forge-agent.postinst\0configure\0"
+            ).encode()
+            dpkg = wait(
+                lambda marker=marker: held_dpkg(marker),
+                f"{fault}: dpkg not held at {hold.name}",
+                35,
             )
-            for fault, hold, expected_state in faults:
-                lane.baseline(packages)
-                hold.touch()
-                nonce, deadline, operation = lane.install(held, deadline=40)
-                replies: list = []
-
-                def client_send(operation=operation, replies=replies) -> None:
-                    try:
-                        replies.append(lane.send(operation))
-                    except (
-                        AssertionError,
-                        subprocess.SubprocessError,
-                        ValueError,
-                    ) as error:
-                        # Raised in the main thread after the join below.
-                        replies.append(error)
-
-                client = threading.Thread(target=client_send)
-                client.start()
-                marker = (
-                    f"{HOLD_WRAPPER}\0--fsys-tarfile\0"
-                    if hold == HOLD_EXTRACTION
-                    else "vonk-forge-agent.postinst\0configure\0"
-                ).encode()
-                dpkg = wait(
-                    lambda marker=marker: held_dpkg(marker),
-                    f"{fault}: dpkg not held at {hold.name}",
-                    35,
+            assert time.time() < deadline, f"{fault}: held only after the deadline"
+            held_state = installed()
+            assert held_state == expected_state, (fault, held_state)
+            if fault == "dpkg-killed":
+                os.kill(dpkg, signal.SIGKILL)
+            elif fault == "helper-cgroup-killed":
+                run(
+                    "/usr/bin/systemctl",
+                    "kill",
+                    "--kill-whom=all",
+                    "--signal=SIGKILL",
+                    HELPER,
                 )
-                assert time.time() < deadline, f"{fault}: held only after the deadline"
-                held_state = installed()
-                assert held_state == expected_state, (fault, held_state)
-                if fault == "dpkg-killed":
-                    os.kill(dpkg, signal.SIGKILL)
-                elif fault == "helper-cgroup-killed":
+                # No daemon-reload ran: the loaded agent unit still has the
+                # drop-in whose runner the unpack removed. The deadline
+                # restore must heal whatever that start does.
+                run("/usr/bin/systemctl", "stop", AGENT, check=False)
+                run("/usr/bin/systemctl", "start", "--no-block", AGENT, check=False)
+            else:
+                units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
+                for unit in units:
                     run(
                         "/usr/bin/systemctl",
                         "kill",
                         "--kill-whom=all",
                         "--signal=SIGKILL",
-                        HELPER,
+                        unit,
+                        check=False,
                     )
-                    # No daemon-reload ran: the loaded agent unit still has the
-                    # drop-in whose runner the unpack removed. The deadline
-                    # restore must heal whatever that start does.
-                    run("/usr/bin/systemctl", "stop", AGENT, check=False)
-                    run("/usr/bin/systemctl", "start", "--no-block", AGENT, check=False)
-                else:
-                    units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
-                    for unit in units:
-                        run(
-                            "/usr/bin/systemctl",
-                            "kill",
-                            "--kill-whom=all",
-                            "--signal=SIGKILL",
-                            unit,
-                            check=False,
-                        )
-                    run("/usr/bin/systemctl", "stop", SOCKET, *units, check=False)
-                    run("/usr/bin/systemctl", "reset-failed", *units, check=False)
-                hold.unlink()
-                client.join(timeout=60)
-                assert not client.is_alive(), f"{fault}: probe still waiting"
-                (reply,) = replies
-                if isinstance(reply, Exception):
-                    raise reply
-                assert reply is None or reply.get("status") != "package-installed", (
-                    fault,
-                    reply,
-                )
-                if fault == "reboot":
-                    run("/usr/bin/systemctl", "daemon-reload")
-                    time.sleep(max(0.0, deadline - time.time() + 2))
-                    enabled = run(
-                        "/usr/bin/systemctl",
-                        "list-unit-files",
-                        "--state=enabled",
-                        "--no-legend",
-                        "vonk-forge-*",
-                    ).stdout.split()
-                    boot = [name for name in enabled if name.startswith("vonk-forge-")]
-                    assert WATCHDOG in boot, boot
-                    run("/usr/bin/systemctl", "start", "--no-block", *boot)
-                lane.restored(
-                    f"{fault}-at-{hold.name.removeprefix('vonk-transition-hold-')}",
-                    nonce,
-                    held_state=held_state,
-                )
-        assert not watch.seen, f"a forward capsule armed: {sorted(watch.seen)}"
-
-        # The staged files of an old capsule gate the agent's start on a runner
-        # nothing keeps; the candidate retires them before it reloads systemd.
-        lane.baseline(packages)
-        stage_capsule()
-        lane.activates("stale-capsule-files-retired", tree, 120)
-        left = [str(path) for path in ARMING if os.path.lexists(path)]
-        assert not left, f"the candidate left capsule state: {left}"
-
+                run("/usr/bin/systemctl", "stop", SOCKET, *units, check=False)
+                run("/usr/bin/systemctl", "reset-failed", *units, check=False)
+            hold.unlink()
+            client.join(timeout=60)
+            assert not client.is_alive(), f"{fault}: probe still waiting"
+            (reply,) = replies
+            if isinstance(reply, Exception):
+                raise reply
+            assert reply is None or reply.get("status") != "package-installed", (
+                fault,
+                reply,
+            )
+            if fault == "reboot":
+                run("/usr/bin/systemctl", "daemon-reload")
+                time.sleep(max(0.0, deadline - time.time() + 2))
+                enabled = run(
+                    "/usr/bin/systemctl",
+                    "list-unit-files",
+                    "--state=enabled",
+                    "--no-legend",
+                    "vonk-forge-*",
+                ).stdout.split()
+                boot = [name for name in enabled if name.startswith("vonk-forge-")]
+                assert WATCHDOG in boot, boot
+                run("/usr/bin/systemctl", "start", "--no-block", *boot)
+            lane.restored(
+                f"{fault}-at-{hold.name.removeprefix('vonk-transition-hold-')}",
+                nonce,
+                held_state=held_state,
+            )
         # Removal is the newest request: an armed, unacknowledged upgrade must
         # not be undone by the watchdog's deadline restore.
         lane.baseline(packages)
@@ -763,8 +672,6 @@ if __name__ == "__main__":
                 AGENT,
                 "-u",
                 "vonk-forge-package-helper-upgrade-finish.service",
-                "-u",
-                "vonk-forge-package-upgrade-recover-capsule.service",
                 check=False,
             ).stdout
         )
