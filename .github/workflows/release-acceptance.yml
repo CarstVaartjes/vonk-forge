@@ -406,7 +406,6 @@ jobs:
           set -euo pipefail
           directory="$RUNNER_TEMP/security/$ROLE/$DIGEST"
           mkdir -p "$directory"
-          cp "trivy-results/development-$ROLE.sarif" "$directory/"
           printf '%s:%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$directory/verified"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

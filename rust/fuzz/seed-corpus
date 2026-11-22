@@ -22,7 +22,7 @@ VECTORS = ROOT / "agent_protocol/src/vonk_agent_protocol/vectors"
 def put(target: str, data: bytes) -> None:
     directory = CORPUS / target
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / hashlib.sha1(data).hexdigest()).write_bytes(data)  # noqa: S324
+    (directory / hashlib.sha1(data).hexdigest()).write_bytes(data)
 
 
 def bundle(entries: list[tuple[str, bytes | None, int]]) -> bytes:
@@ -38,6 +38,20 @@ def bundle(entries: list[tuple[str, bytes | None, int]]) -> bytes:
             else:
                 info.size = len(content)
                 archive.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def hostile(kind: bytes, name: str, link: str) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.GNU_FORMAT) as archive:
+        good = tarfile.TarInfo("Dockerfile")
+        good.size = 5
+        archive.addfile(good, io.BytesIO(b"FROM\n"))
+        bad = tarfile.TarInfo(name)
+        bad.type = kind
+        bad.linkname = link
+        bad.size = 1 if kind == tarfile.REGTYPE else 0
+        archive.addfile(bad, io.BytesIO(b"x") if bad.size else None)
     return buffer.getvalue()
 
 
@@ -62,7 +76,9 @@ def main() -> None:
         put("image_store_head", head)
 
     # engine_metrics: the captured engine bodies of the shared vectors.
-    for sample in json.loads((VECTORS / "engine-metrics-v1.json").read_text())["samples"]:
+    for sample in json.loads((VECTORS / "engine-metrics-v1.json").read_text())[
+        "samples"
+    ]:
         put("engine_metrics", sample["metrics"].encode())
     capture = json.loads((VECTORS / "telemetry-sample-v2.json").read_text())["captures"]
     put("engine_metrics", capture["tensorfold_metrics"].encode())
@@ -81,6 +97,16 @@ def main() -> None:
             ]
         ),
     )
+
+    # Hostile shapes: link, fifo and parent-directory entries beside a good file.
+    for kind, name, link in (
+        (tarfile.SYMTYPE, "link", "/etc/passwd"),
+        (tarfile.LNKTYPE, "hard", "Dockerfile"),
+        (tarfile.FIFOTYPE, "pipe", ""),
+        (tarfile.REGTYPE, "../escape", ""),
+        (tarfile.REGTYPE, "sub/../../escape", ""),
+    ):
+        put("source_bundle", hostile(kind, name, link))
 
     # wire: every JSON fixture and vector the protocol tests already read.
     for pattern in (

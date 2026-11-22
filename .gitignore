@@ -20,7 +20,7 @@ logs/
 __pycache__/
 .state/
 /.cli-dependencies/
-/trivy-results/
+.cache/trivy
 
 # Generated from the canonical Pydantic contracts at build/test time.
 /control/openapi.json

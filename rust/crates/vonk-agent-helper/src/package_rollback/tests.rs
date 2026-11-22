@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::time::{Duration, Instant};
@@ -10,6 +11,7 @@ use vonk_agent_protocol::{
 };
 
 use super::activation::Observed;
+use super::custody::now;
 use super::recovery::{retry_process_proof, rollback_retry_budget};
 use super::{ROLLBACK_RETRY_TIMEOUT, Store, Transaction};
 fn transaction() -> Transaction {
@@ -404,4 +406,42 @@ fn retiring_leaves_finished_and_missing_transactions_alone() {
             .join("package-activation.receipt.json")
             .exists()
     );
+}
+
+fn watch_outcome(tx: Transaction, restore: Result<(), String>) -> (Phase, u32, u32) {
+    let temporary = tempfile::tempdir().unwrap();
+    let store = tempdir_store(&temporary);
+    drop(store.lock().unwrap());
+    store.write(&tx).unwrap();
+    let (attempts, heals) = (Cell::new(0), Cell::new(0));
+    // A failed restore is also the watchdog's own error; the journal carries it.
+    let _ = store.watch_with(
+        |_, _| {
+            attempts.set(attempts.get() + 1);
+            restore.clone()
+        },
+        || heals.set(heals.get() + 1),
+    );
+    (store.read().unwrap().phase, attempts.get(), heals.get())
+}
+
+#[test]
+fn a_failed_restore_ends_rollback_failed_and_starts_the_agent_again() {
+    // Armed and due: the deadline is the current second.
+    let mut due = transaction();
+    due.rollback.activation_deadline = now().unwrap();
+    let (phase, attempts, heals) = watch_outcome(due, Err("dpkg failed".into()));
+    assert_eq!((phase, attempts, heals), (Phase::RollbackFailed, 1, 1));
+    // The retry budget is spent (a restart after the failure): no attempt, and
+    // the agent is still started again.
+    let (phase, attempts, heals) = watch_outcome(transaction(), Err("dpkg failed".into()));
+    assert_eq!((phase, attempts, heals), (Phase::RollbackFailed, 0, 1));
+}
+
+#[test]
+fn a_successful_restore_starts_nothing_extra() {
+    let mut due = transaction();
+    due.rollback.activation_deadline = now().unwrap();
+    let (phase, attempts, heals) = watch_outcome(due, Ok(()));
+    assert_eq!((phase, attempts, heals), (Phase::RolledBack, 1, 0));
 }

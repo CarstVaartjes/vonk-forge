@@ -18,7 +18,15 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SHELL_DIRECTORIES = ("scripts", "tools", "install", "packaging", "deploy", ".githooks")
+SHELL_DIRECTORIES = (
+    "scripts",
+    "tools",
+    "install",
+    "packaging",
+    "deploy",
+    ".githooks",
+    "rust/fuzz",
+)
 _SHEBANG = re.compile(rb"^#!.*\b(?:ba|da|z)?sh\b")
 # A recursive remove (``rm -rf``, ``rm -fr``, ``rm -r``), also through a path.
 _RECURSIVE_REMOVE = re.compile(

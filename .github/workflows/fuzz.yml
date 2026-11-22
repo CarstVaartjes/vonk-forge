@@ -4,7 +4,7 @@ name: Fuzz
 # the hand-written parsers that untrusted bytes reach (rust/fuzz). A crash turns
 # the run red; that is the alarm. The corpus lives in the Actions cache, never in
 # git. The fix PR adds one case to an existing test (docs/testing-and-ci.md).
-# The Python Hypothesis `fuzz` profile joins this job once #2751 lands.
+# It also runs the Python Hypothesis `fuzz` profile over the property tests.
 
 on:
   schedule:
@@ -27,7 +27,7 @@ jobs:
   fuzz:
     name: Fuzz the parsers
     runs-on: ubuntu-24.04
-    # Budget: about 5 min build, 4 targets x 150 s, corpus restore/save.
+    # Budget: about 5 min build, 4 targets x 150 s, 5 min Hypothesis, corpus save.
     timeout-minutes: 25
     steps:
       - name: Check out main
@@ -54,12 +54,15 @@ jobs:
         with:
           path: ~/.cargo/bin/cargo-fuzz
           key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ env.FUZZ_NIGHTLY }}
+      - name: Use the shipped dependency set
+        run: cp Cargo.lock rust/fuzz/Cargo.lock
       - name: Restore the dependency cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust/fuzz
           shared-key: fuzz
           add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Restore the corpus
         # Fuzz corpora are not proof evidence: the newest by prefix is right.
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -73,6 +76,15 @@ jobs:
         run: cargo "+$FUZZ_NIGHTLY" fuzz build --fuzz-dir rust/fuzz
       - name: Run the targets
         run: rust/fuzz/run-targets "$FUZZ_NIGHTLY" 150
+      - name: Prepare the locked Python environment
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/python-env
+      - name: Run the Hypothesis fuzz profile
+        # The profile draws 20000 examples per property, so the time box ends it
+        # (exit 124 is the budget, not a failure); a falsified property exits
+        # with its own status and prints the example to add.
+        if: ${{ !cancelled() }}
+        run: timeout 300 scripts/test control --markers property -- --hypothesis-profile=fuzz || [ $? -eq 124 ]
       - name: Minimize the corpus
         if: always()
         run: |
