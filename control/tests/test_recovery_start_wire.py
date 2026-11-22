@@ -26,7 +26,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

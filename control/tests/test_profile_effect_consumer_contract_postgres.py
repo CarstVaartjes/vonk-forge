@@ -40,7 +40,7 @@ from .subprocess_environment import install_cli_wheel, isolated_environment
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_profile_stop_effect_adoption_postgres import _claims
-from .test_recipe_operations import _issue_exact_stop_grant
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 pytest_plugins = ("tests.test_profile_stop_effect_adoption_postgres",)

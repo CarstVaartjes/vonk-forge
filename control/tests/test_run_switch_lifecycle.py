@@ -55,7 +55,7 @@ from vonk_control.run_switch_operations import (
     _read_progress,
 )
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

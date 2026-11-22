@@ -40,8 +40,8 @@ from vonk_control.persisted_waits import read_wait
 from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import NOW, setup_services
 from .runtime_identity_support import set_inventory_fingerprint
-from .test_recipe_operations import NOW, setup_services
 
 
 def _pending(checkpoint):
@@ -664,7 +664,7 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
 ):
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
-    from .test_recipe_operations import installed_recipe
+    from .recipe_operations_support import installed_recipe
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,

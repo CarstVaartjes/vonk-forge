@@ -278,7 +278,7 @@ def test_target_copy_to_a_spark_holding_the_model_needs_no_nas_copy(
     from vonk_control.models import AgentNode, Job, RecipeInstallation
     from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 
-    from .test_recipe_operations import NOW, installed_recipe, setup_services
+    from .recipe_operations_support import NOW, installed_recipe, setup_services
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     install = installed_recipe(

@@ -64,6 +64,13 @@ from .agent_jobs_support import (  # noqa: F401 -- pytest fixture
     parent,
     service,
 )
+from .recipe_operations_support import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import refresh_inventory
@@ -73,13 +80,6 @@ from .test_host_helper_authority import (
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
-)
-from .test_recipe_operations import (
-    ConcurrentPublisher,
-    bind_route_publications,
-    installed_recipe,
-    setup_services,
-    started_recipe,
 )
 
 NODE = "spk_" + "1" * 32
@@ -656,7 +656,7 @@ def _lost_job_run(tmp_path):
         running_artifact_service,
         submitted_artifact_job,
     )
-    from .test_recipe_operations import NOW as RECIPE_NOW
+    from .recipe_operations_support import NOW as RECIPE_NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path

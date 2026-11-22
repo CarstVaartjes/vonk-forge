@@ -29,7 +29,7 @@ from vonk_control.models import (
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"

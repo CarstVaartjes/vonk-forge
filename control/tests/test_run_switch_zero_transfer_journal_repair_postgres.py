@@ -43,6 +43,7 @@ from vonk_control.run_switch_operations import advance as advance_owner
 from vonk_control.stored.json_values import write_guard_mode
 
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .recipe_operations_support import setup_services
 from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import hold_image_through_another_recipe
 from .test_fleet_profile_api import _client, _headers
@@ -56,7 +57,6 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
 )
-from .test_recipe_operations import setup_services
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

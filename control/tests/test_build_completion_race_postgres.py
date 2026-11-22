@@ -14,8 +14,8 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .recipe_operations_support import setup_services
 from .runtime_identity_support import set_inventory_identity
-from .test_recipe_operations import setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

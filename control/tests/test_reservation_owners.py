@@ -35,14 +35,14 @@ from vonk_control.reservation_owners import (
     reservation_owner,
 )
 
-from .test_attempt_residues import _load, _loop
-from .test_disk_reservations import _record_disk
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     installed_recipe,
     setup_services,
     started_recipe,
 )
+from .test_attempt_residues import _load, _loop
+from .test_disk_reservations import _record_disk
 from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 

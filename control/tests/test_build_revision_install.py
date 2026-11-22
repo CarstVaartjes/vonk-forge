@@ -47,11 +47,11 @@ from vonk_forge_contracts import read_model
 from .display_fixtures import reword
 from .preflight_fixtures import record_passing_preflight
 from .recipe_builds_support import RecordingQueue, _json_object, setup
+from .recipe_operations_support import complete_started_recipe
 from .runtime_identity_support import set_inventory_identity
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_builds_part1 import _write_controller_build_receipt
 from .test_recipe_builds_part2 import _json_array
-from .test_recipe_operations import complete_started_recipe
 
 
 def _prepared_successor(tmp_path, *, change="runtime"):

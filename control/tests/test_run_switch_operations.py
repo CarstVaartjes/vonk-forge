@@ -156,14 +156,14 @@ from .runtime_image_fixtures import install_image_of_replaced_source, place_test
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .display_fixtures import reword
-from .test_lifecycle_preflight import _clear, _finish
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     _CanonicalModelCache,
     installed_recipe,
     setup_services,
     started_recipe,
 )
+from .test_lifecycle_preflight import _clear, _finish
 
 
 @pytest.mark.parametrize(

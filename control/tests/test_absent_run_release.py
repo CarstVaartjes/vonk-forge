@@ -15,7 +15,7 @@ from vonk_control.models import (
     RunNode,
 )
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

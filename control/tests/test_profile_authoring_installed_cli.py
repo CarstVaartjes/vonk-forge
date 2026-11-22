@@ -326,9 +326,9 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
     action: str,
 ) -> None:
     """Catches a global removal-reference scan blocking ordinary profile edits."""
+    from .recipe_operations_support import setup_services
     from .test_fleet_profile_api import _client, _headers
     from .test_profile_installed_execution import _profile_service
-    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1
@@ -486,9 +486,9 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
     postgres_engine, tmp_path
 ):
     """Catches an untyped reference-scan exception escaping the save boundary."""
+    from .recipe_operations_support import setup_services
     from .test_fleet_profile_api import _client, _headers
     from .test_profile_installed_execution import _profile_service
-    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _, _, _, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1

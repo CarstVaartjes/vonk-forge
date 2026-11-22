@@ -53,17 +53,17 @@ from vonk_control.source_bundles import SourceBundleStore
 
 from tests.wire_probes import prebuilt_probe
 
+from .agent_fences import fenced_operation
 from .node_contacts import contact_row
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     RecordingQueue,
-    _issue_exact_stop_grant,
     bind_route_publications,
-    fenced_operation,
     installed_recipe,
     setup_services,
 )
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 
 
 class _UnusedJobs:

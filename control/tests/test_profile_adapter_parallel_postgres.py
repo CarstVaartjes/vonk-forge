@@ -50,18 +50,14 @@ from .fleet_profiles_support import (
     _uuid,
 )
 from .node_contacts import contact_row
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
-from .test_recipe_operations import (
-    _issue_exact_stop_grant,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 

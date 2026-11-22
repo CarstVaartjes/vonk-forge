@@ -41,8 +41,8 @@ from vonk_control.recipe_operations.observation_helpers import (
 from vonk_control.recovery_policy import FailureKind
 from vonk_control.runtime.preflight import mandatory_capabilities
 
+from ..recipe_operations_support import start_evidence
 from ..runtime_identity_support import PACKAGED_RUNTIME_IDENTITY
-from ..test_recipe_operations import start_evidence
 from .reach_world import ReachWorld
 from .sparks import Spark, Sparks
 from .world import World

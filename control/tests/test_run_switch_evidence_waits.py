@@ -35,7 +35,7 @@ from vonk_control.run_switch_operations.evidence_waits import (
     RunSwitchPostStopInventoryPending,
 )
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
 from .test_run_switch_operations import (
     RecordingArtifactExecutor,

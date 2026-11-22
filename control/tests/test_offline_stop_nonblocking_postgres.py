@@ -36,17 +36,17 @@ from .agent_fences import fenced_operation
 from .fleet_profiles_support import _uuid
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
-from .test_profile_continuity_postgres import (
-    _assessment_with_promises,
-    _SQLCancellationAdapter,
-)
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
-    _issue_exact_stop_grant,
     installed_recipe,
     setup_services,
     started_recipe,
 )
+from .test_profile_continuity_postgres import (
+    _assessment_with_promises,
+    _SQLCancellationAdapter,
+)
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 

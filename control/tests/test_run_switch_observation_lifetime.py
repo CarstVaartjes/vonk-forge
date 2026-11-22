@@ -34,7 +34,7 @@ from vonk_control.run_switch_operations.image_receipts import (
 from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import installed_recipe, setup_services
+from .recipe_operations_support import installed_recipe, setup_services
 from .test_run_switch_operations import (
     NOW,
     CompleteArtifactInspector,

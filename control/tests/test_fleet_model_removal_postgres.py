@@ -37,6 +37,12 @@ from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .model_cache_support import _artifact, _download
+from .recipe_operations_support import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_model_removal_reference_lifecycle import (
     _one_model,
@@ -44,12 +50,6 @@ from .test_model_removal_reference_lifecycle import (
     _removal_service,
 )
 from .test_model_removal_worker_postgres import _prepare_removal_target
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
 
 
 def submit_model_download(cache: ModelCacheService, tmp_path: Path) -> None:

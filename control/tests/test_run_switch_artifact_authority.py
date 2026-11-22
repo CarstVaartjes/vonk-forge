@@ -37,8 +37,8 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 
+from .recipe_operations_support import NOW, installed_recipe
 from .runtime_image_fixtures import hold_image_through_another_recipe
-from .test_recipe_operations import NOW, installed_recipe
 from .test_run_switch_operations import (
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,

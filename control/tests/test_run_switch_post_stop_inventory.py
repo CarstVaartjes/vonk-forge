@@ -19,8 +19,8 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
 
+from .recipe_operations_support import started_recipe
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import started_recipe
 from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 

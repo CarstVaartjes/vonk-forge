@@ -71,8 +71,8 @@ from vonk_control.unused_storage_collection import (
 
 from cluster_profiles.control_client import validate_control_document
 
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .runtime_image_fixtures import copy_as_another_recipe
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 from .test_run_switch_operations import (
     MODEL_ARTIFACT,
     CompleteArtifactInspector,

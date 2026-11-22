@@ -18,7 +18,7 @@ from vonk_control.failure_classification import error_detail, is_definite
 from vonk_control.models import AgentNodeContact, Job, RecipeRun
 
 from .artifact_jobs_support import _configure_artifact_recipe
-from .test_recipe_operations import installed_recipe, setup_services
+from .recipe_operations_support import installed_recipe, setup_services
 
 
 def test_unbuildable_start_payload_ends_with_node_and_cause(tmp_path):

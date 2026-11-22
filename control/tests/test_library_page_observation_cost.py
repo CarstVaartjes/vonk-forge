@@ -27,12 +27,12 @@ from vonk_control.library.contract import (
 from vonk_control.library_projection import LibraryProjection, common
 from vonk_control.strict_json import serialize_json_value
 
+from .recipe_operations_support import NOW
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
     assessed_library,
 )
 from .test_library_canonical_projection import _insert_canonical_rows
 from .test_library_listing_budget import _seed_recipes_with_images
-from .test_recipe_operations import NOW
 
 _ENTRIES = 40
 
