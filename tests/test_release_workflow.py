@@ -1195,7 +1195,7 @@ def test_a_failed_payload_match_says_why_the_lanes_run_here(
 )
 def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     """Catches skipping scans for another digest/attempt or stale PR evidence,
-    losing main's SARIF, and treating denied evidence access as permission."""
+    and treating denied evidence access as permission."""
     from datetime import UTC, datetime, timedelta
 
     roles = ("api", "worker", "litellm")
@@ -1212,14 +1212,7 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
         if step.get("name", "").startswith("Bind successful")
     )
     evidence = tmp_path / "security"
-    sarif = tmp_path / "trivy-results"
-    sarif.mkdir()
     for role in roles:
-        (sarif / f"development-{role}.sarif").write_text(
-            json.dumps(
-                {"version": "2.1.0", "runs": [{"tool": {"driver": {"name": "Trivy"}}}]}
-            )
-        )
         subprocess.run(
             ["bash", "-c", proof["run"]],
             cwd=tmp_path,
@@ -1233,7 +1226,6 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
                 "GITHUB_RUN_ATTEMPT": "1",
             },
         )
-        (sarif / f"development-{role}.sarif").unlink()
     age = (
         timedelta(hours=24)
         if fault == "stale"
@@ -1310,17 +1302,35 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     )
     if reused:
         assert "reused from pull request run 42" in summary.read_text()
-        uploads = [
-            step
-            for step in _image_steps()
-            if step.get("name", "").startswith("Upload reused")
-        ]
-        assert {step["with"]["category"] for step in uploads} == {
-            f"trivy-development-{role}" for role in roles
-        }
-        for step in uploads:
-            assert evaluate(step["if"], context)
-            assert (tmp_path / step["with"]["sarif_file"]).is_file()
+
+
+def test_only_shipped_api_and_worker_images_are_scanned_and_promotion_follows_the_gate():
+    """Catches scanning the upstream LiteLLM image again, or promoting a stable
+    digest before the api and worker digests passed the gate."""
+    action = load(ROOT / ".github/actions/image-security/action.yml")
+    scan = next(
+        step
+        for step in action["runs"]["steps"]
+        if step.get("uses") == "./.github/actions/image-scan"
+    )
+    scanned = {
+        role
+        for role in ("api", "worker", "litellm")
+        if evaluate(scan["if"], {"inputs.role": role})
+    }
+    assert scanned == {"api", "worker"}
+    steps = load(WORKFLOWS / "stable-release.yml")["jobs"]["publish-images"]["steps"]
+    gates = [
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses") == "./.github/actions/image-scan"
+    ]
+    promotions = [
+        index for index, step in enumerate(steps) if step.get("id") in ("api", "worker")
+    ]
+    assert len(gates) == 2 and gates[-1] < min(promotions)
+    gated = " ".join(steps[index]["with"]["image"] for index in gates)
+    assert "api_digest" in gated and "worker_digest" in gated
 
 
 def test_candidate_litellm_smoke_uses_digest_only_registry_references(tmp_path):

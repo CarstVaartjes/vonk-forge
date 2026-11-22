@@ -296,7 +296,6 @@ jobs:
       contents: read
       id-token: write
       packages: write
-      security-events: write
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
@@ -339,6 +338,24 @@ jobs:
           set -euo pipefail
           scripts/verify-release-tag-authority \
             "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      # The digests promoted below are the shipped images: gate them, not a
+      # fresh build of the tag's tree. A finding heals with the next dev
+      # release (new DEPENDENCY_DAY), which the next tag promotes.
+      - name: Gate the accepted API image on fixable vulnerabilities
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ${{ needs.release-metadata.outputs.api_image }}@${{ needs.validate-release-images.outputs.api_digest }}
+          skip-dirs: /usr/local/lib/skopeo
+      - name: Gate the accepted worker image on fixable vulnerabilities
+        uses: ./.github/actions/image-scan
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image: ${{ needs.release-metadata.outputs.worker_image }}@${{ needs.validate-release-images.outputs.worker_digest }}
+          skip-dirs: /usr/local/lib/skopeo
 
       - name: Log in to GHCR
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0

@@ -27,7 +27,6 @@ jobs:
       contents: read
       id-token: write
       packages: write
-      security-events: write
     # Keep runner steps serial: parallel groups race on the shared
     # GITHUB_EVENT_PATH, including readers immediately after group completion.
     # @actions/github parses it during Context construction (attest/upload and
@@ -303,36 +302,18 @@ jobs:
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-api@${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}
           role: api
-      - name: Upload reused api findings under main's category
-        if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          sarif_file: trivy-results/development-api.sarif
-          category: trivy-development-api
       - name: Scan the worker image and smoke its runtime
         if: steps.pr_security.outputs.reused != 'true'
         uses: ./.github/actions/image-security
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-worker@${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}
           role: worker
-      - name: Upload reused worker findings under main's category
-        if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          sarif_file: trivy-results/development-worker.sarif
-          category: trivy-development-worker
       - name: Scan the litellm image and smoke its runtime
         if: steps.pr_security.outputs.reused != 'true' && steps.reuse_litellm.outputs.digest == ''
         uses: ./.github/actions/image-security
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
           role: litellm
-      - name: Upload reused litellm findings under main's category
-        if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          sarif_file: trivy-results/development-litellm.sarif
-          category: trivy-development-litellm
 
       - name: Accept the pull request images by their verified digests
         id: pr_acceptance
