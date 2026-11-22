@@ -72,7 +72,6 @@ from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.pki import IssuedCertificate
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables
@@ -681,48 +680,50 @@ def _live_distribution_grant(tmp_path: Path, engine: Engine) -> None:
 def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
     """A renewal the agent keeps asking for survives the revocation sweep.
 
-    The provider's issuance is pending; the agent asks again within the
-    issuance window each time. The sweep runs long after the intent was
+    The CA is busy; the agent asks again within the issuance window each time. The sweep runs long after the intent was
     created, but while its renewal is still touching it.
     """
 
     from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+    from vonk_control.step_ca import StepCAIssuancePending
 
     from .test_enrollment import (
         NODE_ID,
         Clock,
         RecordingAuthority,
-        _fixture_certificate,
         csr,
         enroll,
     )
 
-    class PendingAuthority(RecordingAuthority):
-        def renew_node(self, node_id, public_key_pem, now, *, request):
-            self.renew_request_ids.append(request.request_id)
-            self._begin(request)
-            raise StepCAIssuancePending("certificate.issuance_in_progress")
+    class BusyAuthority(RecordingAuthority):
+        """The CA journal stays busy for the whole first request."""
+
+        busy = False
+
+        def observe_node(self, csr_pem, now, *, request):
+            if self.busy:
+                raise StepCAIssuancePending("local CA journal is busy")
+            return super().observe_node(csr_pem, now, request=request)
 
     sessions = _sessions(engine)
     clock = Clock()
-    authority = PendingAuthority()
+    authority = BusyAuthority()
     service = EnrollmentService(sessions, authority, clock=clock)
     source = enroll(service)
+    authority.busy = True
     request = csr()
-    for _poll in range(3):
-        assert not isinstance(
-            service.renew(NODE_ID, source.serial, request), IssuedCertificate
-        )
-        clock.advance(seconds=200)
-
+    assert not isinstance(
+        service.renew(NODE_ID, source.serial, request), IssuedCertificate
+    )
+    clock.advance(seconds=200)
     service.reconcile_revocations()
 
     with sessions() as session:
         intent = session.get(AgentCertificateRotation, NODE_ID)
         assert intent is not None
         binding = CertificateIssuanceBinding.model_validate(intent.provider_request)
-        pending_csr = intent.csr_pem.encode("ascii")
-    authority._finish(binding, _fixture_certificate(NODE_ID, pending_csr, binding))
+    # Once the CA is free the next request finishes the kept claim unaided.
+    authority.busy = False
     renewed = service.renew(NODE_ID, source.serial, request)
     assert isinstance(renewed, IssuedCertificate)
     assert set(authority.renew_request_ids) == {binding.request_id}

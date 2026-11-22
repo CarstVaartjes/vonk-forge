@@ -3308,7 +3308,7 @@ def test_enrollment_evidence_verdicts_answer_422_with_the_real_message(
         assert message in response.text
 
 
-def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
+def test_lost_enrollment_provider_write_heals_without_reissuing(
     agent_system, monkeypatch
 ) -> None:
     client, services, _, _ = agent_system
@@ -3332,11 +3332,8 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     first = client.post("/agent/enroll", json=body)
     replay = client.post("/agent/enroll", json=body)
 
-    assert first.status_code == replay.status_code == 503
-    for response in (first, replay):
-        EnrollmentObservationReply.model_validate_json(response.content)
-        assert 0 < int(response.headers["Retry-After"]) <= 300
-        assert response.headers["Cache-Control"] == "no-store"
+    # The retry observes the begun journal row and finishes it: no second issue.
+    assert first.status_code == replay.status_code == 200
     assert calls == 1
 
 
@@ -3431,12 +3428,12 @@ def _csr_fingerprint(csr_pem: bytes) -> str:
     return hashlib.sha256(public_key).hexdigest()
 
 
-def test_fresh_rotation_follower_receives_canonical_retryable_response(
+def test_rotation_follower_heals_a_begun_journal_row_after_a_busy_reply(
     agent_system,
     monkeypatch,
 ) -> None:
     from vonk_agent_protocol.enrollment import IssuedCertificateResponse
-    from vonk_control.models import AgentCertificateRotation
+    from vonk_control.step_ca import StepCAIssuancePending
 
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:
@@ -3455,15 +3452,16 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
     authority = services.enrollment._authority
     authority._begin(claim.provider_request)
     attempts = []
-
     observe = authority.observe_node
 
     def observed(*args, request, **kwargs):
         attempts.append(request)
+        if len(attempts) == 1:
+            raise StepCAIssuancePending("local CA journal is busy")
         return observe(*args, request=request, **kwargs)
 
     def forbidden_issue(*_args, **_kwargs):
-        pytest.fail("a pending observation cannot become another issuance call")
+        pytest.fail("observing the begun row finishes it; no second issue call")
 
     monkeypatch.setattr(authority, "observe_node", observed)
     monkeypatch.setattr(authority, "renew_node", forbidden_issue)
@@ -3474,27 +3472,9 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
         json={"node_id": NODE_A, "csr": request.decode()},
     )
 
-    assert attempts == [claim.provider_request] * 4
-    assert response.status_code == 503
-    assert response.content == canonical_message(response.json())
-    EnrollmentObservationReply.model_validate_json(response.content)
-    assert 0 < int(response.headers["Retry-After"]) <= 300
-
-    with services.sessions() as session:
-        assert session.get(AgentCertificateRotation, NODE_A) is not None
-        assert session.get(AgentCertificate, "101").revoked_at is None
-    clock.now += timedelta(seconds=301)
-    services.enrollment.reconcile_revocations()
-    with services.sessions() as session:
-        assert session.get(AgentCertificateRotation, NODE_A) is None
-    monkeypatch.undo()
-    fresh = client.post(
-        "/agent/renew",
-        headers=agent_headers(NODE_A, "101"),
-        json={"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()},
-    )
-    assert fresh.status_code == 200
-    IssuedCertificateResponse.model_validate_json(fresh.content)
+    assert attempts == [claim.provider_request] * 2
+    assert response.status_code == 200
+    IssuedCertificateResponse.model_validate_json(response.content)
 
 
 def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after_response_loss(

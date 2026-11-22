@@ -389,12 +389,8 @@ def test_damage_during_ca_observation_repairs_both_committed_projections(
     assert len(authority.calls) == 1
 
 
-def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_admitted(
-    service,
-):
-    """Catches a pending journal keeping a same-node owner forever after restart."""
-    from datetime import timedelta
-
+def test_busy_ca_observation_heals_on_the_next_attempt(service):
+    """Catches a busy CA journal stranding an accepted enrollment."""
     from vonk_control.enrollment import EnrollmentService
     from vonk_control.step_ca import StepCAIssuancePending
 
@@ -402,52 +398,26 @@ def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_ad
     from .test_enrollment import RecordingAuthority
 
     _, sessions, _, _ = service
-    timestamp = NOW
 
-    class PendingFirstAuthority(RecordingAuthority):
-        old = None
-        observations = 0
-
-        def _owned_by_old(self, request):
-            if self.old is None:
-                self.old = request
-            return request == self.old
+    class BusyOnceAuthority(RecordingAuthority):
+        busy = True
 
         def observe_node(self, csr_pem, now, *, request):
-            if self._owned_by_old(request):
-                self.observations += 1
-                raise StepCAIssuancePending("certificate.issuance_in_progress")
+            if self.busy:
+                self.busy = False
+                raise StepCAIssuancePending("local CA journal is busy")
             return super().observe_node(csr_pem, now, request=request)
 
-    provider = PendingFirstAuthority()
-    enrollment = EnrollmentService(sessions, provider, clock=lambda: timestamp)
+    provider = BusyOnceAuthority()
+    enrollment = EnrollmentService(sessions, provider, clock=lambda: NOW)
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
-    enrollment.submit(grant.token, request, evidence(request))
-    assert provider.observations >= 1
-    with sessions() as session:
-        accepted = session.scalar(select(AgentEnrollment))
-        assert accepted.state == EnrollmentRecordState.ISSUING
-        original_created = accepted.created_at
-        assert session.scalar(select(AgentCertificate)) is None
-    timestamp += timedelta(seconds=301)
-    restarted = EnrollmentService(sessions, provider, clock=lambda: timestamp)
-    restarted.reconcile_revocations()
-    with sessions() as session:
-        accepted = session.scalar(select(AgentEnrollment))
-        assert accepted.state == EnrollmentRecordState.ENDED
-        assert accepted.created_at == original_created
-    fresh = restarted.create(NODE_ID, "admin", 600)
-    assert isinstance(fresh, EnrollmentGrant)
-    issued = restarted.submit(fresh.token, request, evidence(request))
+    issued = enrollment.submit(grant.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
-    old = provider.old
-    assert old is not None
-    assert issued.serial != old.serial
     with sessions() as session:
-        assert session.get(AgentCertificate, old.serial) is None
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+        accepted = session.scalar(select(AgentEnrollment))
+        assert accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED
 
 
 def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(

@@ -61,6 +61,7 @@ from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
+from .ca_test_authority import fixture_certificate as _fixture_certificate
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
@@ -77,42 +78,6 @@ class Clock:
 
     def advance(self, *, seconds: int) -> None:
         self.now += timedelta(seconds=seconds)
-
-
-def _fixture_certificate(
-    node_id: str, public_key_pem: bytes, request: CertificateIssuanceBinding
-) -> IssuedCertificate:
-    csr_request = x509.load_pem_x509_csr(public_key_pem)
-    issuer_key = ed25519.Ed25519PrivateKey.generate()
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(csr_request.subject)
-        .issuer_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test issuer")])
-        )
-        .public_key(csr_request.public_key())
-        .serial_number(int(request.serial))
-        .not_valid_before(datetime.fromisoformat(request.not_before))
-        .not_valid_after(datetime.fromisoformat(request.not_after))
-        .add_extension(
-            csr_request.extensions.get_extension_for_class(
-                x509.SubjectAlternativeName
-            ).value,
-            critical=False,
-        )
-        .sign(issuer_key, algorithm=None)
-    )
-    pem = certificate.public_bytes(serialization.Encoding.PEM)
-    return IssuedCertificate(
-        node_id=node_id,
-        certificate_pem=pem,
-        chain_pem=pem,
-        serial=request.serial,
-        fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
-        not_before=certificate.not_valid_before_utc,
-        not_after=certificate.not_valid_after_utc,
-        generation=request.generation,
-    )
 
 
 class RecordingAuthority(FixtureCertificateAuthority):
@@ -1192,16 +1157,17 @@ def test_sqlite_simultaneous_exact_renewal_issues_one_staged_generation(
     first = threading.Thread(target=renew)
     first.start()
     assert authority.entered.wait(timeout=30)
-    follower.renew(NODE_ID, issued.serial, renewed_csr)
+    # The follower observes the begun journal row and finishes it by exact replay.
+    healed = follower.renew(NODE_ID, issued.serial, renewed_csr)
+    assert isinstance(healed, IssuedCertificate)
     with sessions() as session:
-        assert session.get(AgentCertificateRotation, NODE_ID) is not None
         source = session.get(AgentCertificate, issued.serial)
         assert source is not None and source.revoked_at is None
     authority.release.set()
     first.join(timeout=30)
 
     assert len(results) == 1
-    assert isinstance(results[0], IssuedCertificate)
+    assert results[0] == healed
     assert follower.renew(NODE_ID, issued.serial, renewed_csr) == results[0]
     assert len(authority.calls) == 1
 
@@ -1673,9 +1639,10 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     thread.start()
     assert authority.entered.wait(timeout=30)
 
-    follower.renew(NODE_ID, issued.serial, request)
+    # The follower observes the begun journal row and finishes it by exact replay.
+    healed = follower.renew(NODE_ID, issued.serial, request)
+    assert isinstance(healed, IssuedCertificate)
     with sessions() as session:
-        assert session.get(AgentCertificateRotation, NODE_ID) is not None
         source = session.get(AgentCertificate, issued.serial)
         assert source is not None and source.revoked_at is None
     assert len(authority.calls) == 1
@@ -1683,7 +1650,7 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     authority.release.set()
     thread.join(timeout=30)
     assert not thread.is_alive()
-    assert len(results) == 1
+    assert results == [healed]
     assert follower.renew(NODE_ID, issued.serial, request) == results[0]
     assert len(authority.calls) == 1
 

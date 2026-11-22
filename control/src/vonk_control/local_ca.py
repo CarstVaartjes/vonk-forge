@@ -306,10 +306,8 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
                 if session.get(AgentCertificate, request.serial) is not None:
                     self._refuse(CertificateCode.SERIAL_ALREADY_ISSUED)
             self._source(session, request)
-            if mode == CertificateRequestMode.OBSERVE:
-                if row is None:
-                    return None
-                raise StepCAIssuancePending(CertificateCode.ISSUANCE_IN_PROGRESS)
+            if mode == CertificateRequestMode.OBSERVE and row is None:
+                return None
             if row is None:
                 session.add(
                     LocalCertificateIssuance(
@@ -318,7 +316,8 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
                         binding=request.model_dump(mode="json"),
                     )
                 )
-        # A crash here leaves PENDING. Replaying signs precisely the same bytes.
+        # A crash here leaves PENDING. Any observer or issuer that finds the row
+        # finishes it: replaying signs precisely the same bytes.
         pem = (
             self._certificate(request, csr)
             .public_bytes(serialization.Encoding.PEM)

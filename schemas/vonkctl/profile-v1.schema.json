@@ -221,7 +221,6 @@
         "certificate.binding_refused",
         "certificate.source_revoked",
         "certificate.source_identity_refused",
-        "certificate.issuance_in_progress",
         "certificate.issuance_unavailable",
         "certificate.request_binding_mismatch",
         "certificate.serial_already_reserved",
