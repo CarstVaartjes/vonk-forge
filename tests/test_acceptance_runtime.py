@@ -15,6 +15,7 @@ pytestmark = pytest.mark.linux_only
 
 from tests.acceptance.runtime import (
     AcceptanceError,
+    PhaseTimings,
     assert_bundle_contract,
     assert_compose_compatibility,
     assert_compose_services_healthy,
@@ -591,3 +592,22 @@ def test_bundle_contract_rejects_a_group_readable_secret_with_another_group(
     (bundle / "secrets" / "shared").chmod(0o660)
     with pytest.raises(AcceptanceError):
         assert_bundle_contract(bundle)
+
+
+def test_phase_timings_summarise_every_phase_even_when_one_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    timings = PhaseTimings()
+    with timings.phase("bring-up"):
+        pass
+    with pytest.raises(RuntimeError), timings.phase("install"):
+        raise RuntimeError("boom")
+    timings.emit("harness")
+    line = next(
+        row for row in capsys.readouterr().out.splitlines() if "phase-timings" in row
+    )
+    assert list(json.loads(line.split(" ", 1)[1])["seconds"]) == ["bring-up", "install"]
+    text = summary.read_text(encoding="utf-8")
+    assert "| bring-up |" in text and "| install |" in text
