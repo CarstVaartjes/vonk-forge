@@ -329,6 +329,13 @@ if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
         # The one digest read: the running helper must be this installed file.
         expected_helper_digest=$(/usr/bin/sha256sum \
             /usr/lib/vonk-forge/vonk-agent-helper | /usr/bin/cut -d' ' -f1)
+        case "$expected_helper_digest" in
+            *[!0-9a-f]*|'')
+                echo 'vonk-forge-agent: cannot read the installed helper digest' >&2
+                exit 1
+                ;;
+        esac
+        [ "${#expected_helper_digest}" -eq 64 ] || exit 1
         # PID 1 waits for dpkg to exit, proves the helper restarted under
         # the permanent sandbox, and only then restarts the agent. Seeing
         # the new agent identity therefore proves helper activation too.
