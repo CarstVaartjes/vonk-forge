@@ -456,9 +456,20 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
 
 
 def _release_for(
-    index: bytes, package: bytes, *, tag: str = f"v{MAJOR}.1.0"
+    index: bytes, package: bytes, *, tag: str = f"v{MAJOR}.1.0", **envelope: str
 ) -> _Release:
-    return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
+    """A release whose signed index names its tag, unless a field says otherwise."""
+    document = json.loads(index)
+    document["contract_version"] = tag.removeprefix("v")
+    document.update(envelope)
+    return _Release(
+        tag, {"catalog-index.json": _canonical(document), "tiny-recipe.tar.gz": package}
+    )
+
+
+def _replace_with(served: _Release, other: _Release) -> None:
+    """Replace the served release asset in place, as a publisher does."""
+    served.tag, served.members = other.tag, other.members
 
 
 def _client(served: _Release, cache: Path, **options: object) -> RecipePackageClient:
@@ -502,7 +513,7 @@ def test_production_reader_downloads_one_signed_bundle(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
-    assert snapshot.version == f"{MAJOR}.0.0"
+    assert snapshot.version == f"{MAJOR}.1.0"
     assert snapshot.updated_at is not None
     assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
@@ -533,6 +544,80 @@ def test_production_reader_can_hold_an_exact_release_tag(
         ),
     ]
     client.close()
+
+
+def test_a_signed_bundle_served_under_another_tag_is_refused(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package, contract_version=f"{MAJOR}.0.0")
+    client = _client(release, tmp_path / "packages")
+    with pytest.raises(RecipePackageError) as refused:
+        client.list()
+    assert refused.value.code == RecipePackageCode.RELEASE_INVALID
+    client.close()
+
+
+def test_an_older_library_under_latest_is_refused_and_the_held_one_keeps_serving(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    newer = _release_for(index, package, updated_at="2026-11-02T00:00:00Z")
+    older = _release_for(index, package, updated_at="2026-11-01T00:00:00Z")
+    cache = tmp_path / "packages"
+    client = _client(newer, cache)
+    held = client.list()
+    client.prepare(held)
+    _replace_with(newer, older)
+    for _ in range(2):
+        with pytest.raises(RecipePackageError) as refused:
+            client.list()
+        assert refused.value.code == RecipePackageCode.RELEASE_INVALID
+    # The refusal is remembered: the refused bundle is downloaded only once.
+    assert newer.library_downloads == 2
+    assert client.fetch(held.items[0].uri).package_handle is not None
+    client.close()
+
+    # A restarted Controller holds only the persisted generation, and a
+    # refusal must leave it serving that one.
+    restarted = _client(newer, cache)
+    with pytest.raises(RecipePackageError):
+        restarted.list()
+    assert restarted.fetch(held.items[0].uri).package_handle is not None
+    restarted.close()
+
+
+def test_a_republish_with_the_same_updated_at_is_accepted(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    first = _release_for(index, package)
+    republished = _release_for(index, package, source_commit="b" * 40)
+    client = _client(first, tmp_path / "packages")
+    client.prepare(client.list())
+    _replace_with(first, republished)
+    client.list()
+    assert first.library_downloads == 2
+    client.close()
+
+
+def test_an_exact_tag_may_roll_back_to_an_older_release(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    newer = _release_for(
+        index, package, tag=f"v{MAJOR}.2.0", updated_at="2026-11-02T00:00:00Z"
+    )
+    older = _release_for(
+        index, package, tag=f"v{MAJOR}.1.0", updated_at="2026-11-01T00:00:00Z"
+    )
+    cache = tmp_path / "packages"
+    client = _client(newer, cache)
+    client.prepare(client.list())
+    client.close()
+    pinned = _client(older, cache, release=f"v{MAJOR}.1.0")
+    assert pinned.list().version == f"{MAJOR}.1.0"
+    pinned.close()
 
 
 def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
@@ -789,9 +874,8 @@ def test_one_bad_package_skips_only_its_recipe_and_names_it(
         del release.members["tiny-recipe.tar.gz"]
     else:
         release.members["SHA256SUMS"] = (
-            f"{hashlib.sha256(index).hexdigest()}  catalog-index.json\n"
-            + "0" * 64
-            + "  tiny-recipe.tar.gz\n"
+            f"{hashlib.sha256(release.members['catalog-index.json']).hexdigest()}"
+            "  catalog-index.json\n" + "0" * 64 + "  tiny-recipe.tar.gz\n"
         ).encode()
     client = _client(release, tmp_path / "packages")
     snapshot = client.list()
@@ -1144,7 +1228,7 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
             assert f"contract v{MAJOR}" in waiting.value.detail
         older_only = False
         snapshot = client.list()
-        assert snapshot.version == f"{MAJOR}.0.0" and snapshot.items
+        assert snapshot.version == f"{MAJOR}.1.0" and snapshot.items
     finally:
         client.close()
 
