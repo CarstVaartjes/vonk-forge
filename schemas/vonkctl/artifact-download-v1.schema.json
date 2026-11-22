@@ -1,89 +1,9 @@
 {
-  "$defs": {
-    "DownloadedFile": {
-      "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        },
-        "size_bytes": {
-          "minimum": 0,
-          "title": "Size Bytes",
-          "type": "integer"
-        },
-        "state": {
-          "enum": [
-            "downloaded",
-            "reused"
-          ],
-          "title": "State",
-          "type": "string"
-        },
-        "transfer": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TransferReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "name",
-        "path",
-        "size_bytes",
-        "sha256",
-        "state"
-      ],
-      "title": "DownloadedFile",
-      "type": "object"
-    },
-    "TransferReceipt": {
-      "description": "What one verified result download reports: where it landed and what it is.",
-      "properties": {
-        "destination": {
-          "title": "Destination",
-          "type": "string"
-        },
-        "media_type": {
-          "title": "Media Type",
-          "type": "string"
-        },
-        "sha256": {
-          "title": "Sha256",
-          "type": "string"
-        },
-        "size_bytes": {
-          "title": "Size Bytes",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "destination",
-        "media_type",
-        "size_bytes",
-        "sha256"
-      ],
-      "title": "TransferReceipt",
-      "type": "object"
-    }
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "files": {
       "items": {
-        "$ref": "#/$defs/DownloadedFile"
+        "$ref": "definitions.schema.json#/$defs/DownloadedFile"
       },
       "title": "Files",
       "type": "array"
