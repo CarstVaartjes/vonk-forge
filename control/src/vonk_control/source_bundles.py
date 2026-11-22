@@ -613,7 +613,7 @@ def _safe_path(value: str) -> str:
             SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )
     path = PurePosixPath(value)
-    if any(part in {"", ".", ".."} for part in path.parts):
+    if not path.parts or any(part in {"", ".", ".."} for part in path.parts):
         raise SourceBundleError(
             SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )
