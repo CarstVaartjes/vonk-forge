@@ -732,7 +732,7 @@ all other test files under `tests/`. The inventory test rejects new or stale
 unclassified files, including scans delegated to helpers. A new whole-tree guard
 belongs in `GUARDS`; a narrower test needs its owning boundary in `SCOPED`.
 Mixed integration files select their cross-area guard nodes individually. The
-local command `scripts/test guards` runs them. The runner
+local command `scripts/test guards` runs them in parallel (`-n auto`; they share no state). The runner
 `python3 scripts/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
 
