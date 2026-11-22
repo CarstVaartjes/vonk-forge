@@ -41,8 +41,8 @@ from vonk_control.run_switch_operations import (
     _validate_artifact_execution,
 )
 
+from .recipe_builds_support import RecordingQueue
 from .test_build_revision_install import _prepared_successor
-from .test_recipe_builds import RecordingQueue
 from .test_recipe_operations import complete_started_recipe
 
 

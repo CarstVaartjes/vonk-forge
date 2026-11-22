@@ -72,9 +72,9 @@ from vonk_control.recipe_operations import (
 from vonk_control.recipe_operations import action_plans as recipe_action_plans
 from vonk_control.run_admission import RunAdmissionService
 
+from .recipe_builds_support import RecordingQueue as BuildQueue
+from .recipe_builds_support import setup as build_setup
 from .recipe_stop_fixtures import recipe_stop_payload
-from .test_recipe_builds import RecordingQueue as BuildQueue
-from .test_recipe_builds import setup as build_setup
 from .test_recipe_operations import (
     NOW,
     _required,

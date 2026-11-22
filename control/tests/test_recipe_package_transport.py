@@ -70,8 +70,8 @@ from vonk_forge_contracts.unrecognised import read_context
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
+from .recipe_builds_support import setup
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
-from .test_recipe_builds import setup
 
 # Release tags of the contract major this Controller reads, and its neighbours.
 MAJOR = CONTRACT_MAJOR

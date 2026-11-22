@@ -10,7 +10,8 @@ from types import SimpleNamespace
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .test_recipe_builds import _write_controller_build_receipt, setup
+from .recipe_builds_support import setup
+from .test_recipe_builds_part1 import _write_controller_build_receipt
 
 
 def test_an_incomplete_cached_receipt_resolves_as_stale_so_a_fresh_build_replaces_it(

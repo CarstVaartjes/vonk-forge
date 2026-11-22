@@ -11,7 +11,7 @@ from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.source_bundles import SourceBundleRefused, SourceBundleUnknown
 
 from .non_blocking import assert_no_orphaned_holds
-from .test_recipe_builds import setup
+from .recipe_builds_support import setup
 
 
 @pytest.mark.parametrize("action", ["check_source", "resolve", "prepare_plan"])
