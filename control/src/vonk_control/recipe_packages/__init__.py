@@ -14,6 +14,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -289,6 +290,9 @@ class RecipePackageClient:
         self._listing: tuple[str, frozenset[str], str | None] | None = None
         # The GitHub digest of the library bundle last ingested.
         self._library_digest: str | None = None
+        # The asset digest of a bundle refused at ingress and why: while the
+        # listing still shows it, the refusal stands without a new download.
+        self._refused: tuple[str, RecipeLibraryError] | None = None
         self._listing_unchanged = False
         # The highest contract major the last release listing showed.
         self._newest_major: int | None = None
@@ -349,8 +353,14 @@ class RecipePackageClient:
         )
 
     def _list_snapshot(self) -> RecipeLibrarySnapshot:
+        resolved: tuple[str, frozenset[str], str | None] | None = None
         try:
             resolved = self._resolve_release()
+            refused = self._refused
+            if refused is not None:
+                if resolved[2] == refused[0]:
+                    raise type(refused[1])(refused[1].code, refused[1].detail)
+                self._refused = None
             if (
                 (
                     self._listing_unchanged
@@ -372,23 +382,37 @@ class RecipePackageClient:
                     self._library_digest = resolved[2]
                     return persisted
             raw, publication, release = self._fetch_release(resolved)
+            try:
+                snapshot, packages = self._parse_index(
+                    raw, publication_commit=publication
+                )
+                snapshot, packages = _bind_release(snapshot, packages, release)
+                self._refuse_replay(snapshot, release)
+            except RecipeLibraryError as error:
+                self._remember_refusal(resolved[2], error)
+                raise
         except (httpx2.HTTPError, OSError) as error:
+            self._listing_etag = None  # list again next cycle and retry
             persisted = self._offline_snapshot()
             if persisted is not None:
                 return persisted
             raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE, "recipe package index is unavailable"
             ) from error
-        except RecipePackageError as error:
+        except RecipeLibraryError as error:
             # Only an unreachable publication falls back to the previous
-            # verified generation; an integrity failure is always surfaced.
+            # verified generation; an integrity failure is always surfaced,
+            # and the generation held before it keeps serving afterwards.
             if error.code == RecipePackageCode.UNAVAILABLE:
+                self._listing_etag = None  # an unreachable download is retried
                 persisted = self._offline_snapshot()
                 if persisted is not None:
                     return persisted
+            elif self._snapshot is None:
+                # A refusal never leaves a restarted Controller without its
+                # library: the persisted generation serves meanwhile.
+                self._read_persisted_snapshot()
             raise
-        snapshot, packages = self._parse_index(raw, publication_commit=publication)
-        snapshot, packages = _bind_release(snapshot, packages, release)
         self._candidate = _persisted_payload(
             raw,
             publication_commit=publication,
@@ -402,11 +426,68 @@ class RecipePackageClient:
         self._prepared = {}
         return snapshot
 
+    def _refuse_replay(
+        self, snapshot: RecipeLibrarySnapshot, release: _VerifiedRelease
+    ) -> None:
+        """Refuse a signed library that is not the release asked for or newer.
+
+        The signature covers the library, not the tag it is served under, so
+        an older signed bundle could otherwise stand in for the newest one.
+        An exact tag is the deliberate rollback route and only has to match.
+        """
+        if f"v{snapshot.version}" != release.tag:
+            raise RecipePackageError(
+                RecipePackageCode.RELEASE_INVALID,
+                f"signed library is contract {snapshot.version}, not {release.tag}",
+            )
+        if self._release_selector != "latest":
+            return
+        held = self._held_updated_at()
+        if (
+            held is not None
+            and snapshot.updated_at is not None
+            and snapshot.updated_at < held
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.RELEASE_INVALID,
+                f"signed library {snapshot.commit} at {snapshot.updated_at} "
+                f"is older than the held one at {held}",
+            )
+
+    def _held_updated_at(self) -> datetime | None:
+        """When the held library's recipes last changed.
+
+        After a restart this reads the persisted index envelope only: it was
+        verified when stored and is verified again before it is served.
+        """
+        if self._snapshot is not None:
+            return self._snapshot.updated_at
+        try:
+            payload = json.loads(self._snapshot_path.read_bytes())
+            envelope = json.loads(payload["index"])
+            if str(envelope["contract_version"]).split(".")[0] != str(CONTRACT_MAJOR):
+                return None
+            return datetime.fromisoformat(envelope["updated_at"])
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+            # An unreadable envelope: the full verified read decides.
+            persisted = self._read_persisted_snapshot()
+            return persisted.updated_at if persisted is not None else None
+
+    def _remember_refusal(self, digest: str | None, error: RecipeLibraryError) -> None:
+        """Keep a content refusal standing while the listing shows that asset."""
+        if error.code == RecipePackageCode.UNAVAILABLE:
+            return
+        if digest is not None:
+            self._refused = (digest, error)
+        else:
+            # Nothing names the asset: ask the listing again in full.
+            self._listing_etag = None
+
     def _fetch_release(
         self, resolved: tuple[str, frozenset[str], str | None]
     ) -> tuple[bytes, str, _VerifiedRelease]:
         """Download the one library bundle and verify it once, at ingress."""
-        tag, assets, _digest = resolved
+        tag, assets, digest = resolved
         if RELEASE_LIBRARY not in assets:
             # A release mid-update (or before its first bundle) is a transient
             # absence: the previous verified generation stays in use.
@@ -423,7 +504,11 @@ class RecipePackageClient:
         partial = Path(name)
         try:
             self._download_library(tag, partial)
-            return self._ingest_library(tag, partial)
+            try:
+                return self._ingest_library(tag, partial)
+            except RecipeLibraryError as error:
+                self._remember_refusal(digest, error)
+                raise
         finally:
             partial.unlink(missing_ok=True)
 
@@ -538,8 +623,10 @@ class RecipePackageClient:
                         continue
                     if self._store_package(tar, member, digest):
                         verified.add(name)
-        # A long chain of tiny extended headers recurses inside tarfile.
-        except (OSError, tarfile.TarError, RecursionError) as error:
+        # A long chain of tiny extended headers recurses inside tarfile. A local
+        # disk fault (OSError) is not about the bytes: it propagates to the
+        # retry path and is never remembered.
+        except (tarfile.TarError, RecursionError) as error:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID,
                 f"{RELEASE_LIBRARY} is not a readable tar archive",
