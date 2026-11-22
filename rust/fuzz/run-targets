@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Run every target for a fixed time. Usage: run-targets <nightly> <seconds> [target...]
+# A crash is minimized and reported in the step summary; the other targets still
+# run, and the exit status says whether any crashed.
+set -uo pipefail
+cd "$(dirname "$0")" || exit 1
+# The shipped dependency set, not a fuzz-only resolution.
+cp ../../Cargo.lock Cargo.lock
+fuzz_dir=$PWD
+nightly=$1
+seconds=$2
+shift 2
+targets=("$@")
+[ ${#targets[@]} -gt 0 ] || targets=(image_store_head engine_metrics source_bundle wire)
+summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+failed=0
+for target in "${targets[@]}"; do
+  dictionary=()
+  [ -f "dictionaries/$target.dict" ] && dictionary=("-dict=dictionaries/$target.dict")
+  mkdir -p "corpus/$target"
+  if ! cargo "+$nightly" fuzz run --fuzz-dir "$fuzz_dir" "$target" -- "-max_total_time=$seconds" "${dictionary[@]}"; then
+    failed=1
+    crash=$(ls -t "artifacts/$target"/{crash,oom,timeout,leak}-* 2>/dev/null | head -n 1)
+    if [ -n "$crash" ]; then
+      cargo "+$nightly" fuzz tmin --fuzz-dir "$fuzz_dir" "$target" "$crash" || true
+      crash=$(ls -t "artifacts/$target"/minimized-* "$crash" 2>/dev/null | head -n 1)
+      {
+        echo "### Crash in \`$target\`"
+        echo "Add one case to the existing test that covers this parser (docs/testing-and-ci.md, Fuzzing). Input, base64:"
+        echo '```'
+        base64 -w0 "$crash"
+        echo
+        echo '```'
+      } >>"$summary"
+    fi
+  fi
+done
+exit $failed

@@ -1,0 +1,109 @@
+name: Fuzz
+
+# Scheduled only, never part of a pull request or batch: libFuzzer targets for
+# the hand-written parsers that untrusted bytes reach (rust/fuzz). A crash turns
+# the run red; that is the alarm. The corpus lives in the Actions cache, never in
+# git. The fix PR adds one case to an existing test (docs/testing-and-ci.md).
+# It also runs the Python Hypothesis `fuzz` profile over the property tests.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The one owner of both pins (tool pin policy): bump here, nowhere else.
+  FUZZ_NIGHTLY: nightly-2026-11-10
+  CARGO_FUZZ_VERSION: 0.13.2
+
+jobs:
+  fuzz:
+    name: Fuzz the parsers
+    runs-on: ubuntu-24.04
+    # Budget: about 5 min build, 4 targets x 150 s, about 1 min Hypothesis, corpus save.
+    timeout-minutes: 25
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the locked protocol environment
+        uses: ./.github/actions/protocol-env
+      - name: Install the pinned nightly toolchain
+        run: |
+          scripts/retry-dependency-fetch rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal --component rustfmt
+      - name: Restore the cargo-fuzz binary
+        id: tool
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ env.FUZZ_NIGHTLY }}
+      - name: Install cargo-fuzz
+        if: steps.tool.outputs.cache-hit != 'true'
+        run: scripts/retry-dependency-fetch cargo "+$FUZZ_NIGHTLY" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+      - name: Save the cargo-fuzz binary
+        if: steps.tool.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ env.FUZZ_NIGHTLY }}
+      - name: Use the shipped dependency set
+        run: cp Cargo.lock rust/fuzz/Cargo.lock
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust/fuzz
+          shared-key: fuzz
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Restore the corpus
+        # Fuzz corpora are not proof evidence: the newest by prefix is right.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Seed the corpus from the repository fixtures
+        run: rust/fuzz/seed-corpus
+      - name: Build the targets
+        run: cargo "+$FUZZ_NIGHTLY" fuzz build --fuzz-dir rust/fuzz
+      - name: Run the targets
+        run: rust/fuzz/run-targets "$FUZZ_NIGHTLY" 150
+      - name: Prepare the locked Python environment
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/python-env
+      - name: Run the Hypothesis fuzz profile
+        # A falsified property stops the run (-x) and exits non-zero with its
+        # example. The run takes about a minute; hitting the time box means a
+        # hang and is red too. Only the property files are collected: the rest
+        # of control/tests needs the built recipe library at import time.
+        if: ${{ !cancelled() }}
+        run: |
+          mapfile -t files < <(grep -rl "pytest.mark.property" control/tests tests --include='test_*.py')
+          timeout 300 uv run --project control --frozen pytest "${files[@]}" -m property -x --hypothesis-profile=fuzz
+      - name: Minimize the corpus
+        if: always()
+        run: |
+          for target in image_store_head engine_metrics source_bundle wire; do
+            [ -d "rust/fuzz/corpus/$target" ] && cargo "+$FUZZ_NIGHTLY" fuzz cmin --fuzz-dir rust/fuzz "$target" || true
+          done
+      - name: Save the corpus
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+      - name: Keep the crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash
+          path: rust/fuzz/artifacts
+          if-no-files-found: ignore
