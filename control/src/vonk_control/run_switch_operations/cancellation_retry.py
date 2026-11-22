@@ -40,7 +40,7 @@ from ..models import (
     Job,
 )
 from ..persisted_waits import schedule_wait
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )

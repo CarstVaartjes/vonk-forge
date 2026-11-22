@@ -78,10 +78,10 @@ from vonk_control.operation_contract import (
 )
 from vonk_control.operation_item_contract import OperationItem, operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
-from vonk_control.recipe_build_cancellation import (
+from vonk_control.recipe_builds import RecipeBuildPlan
+from vonk_control.recipe_builds.cancellation import (
     lock_build_dependency,
 )
-from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
     RecipeOperationConflict,

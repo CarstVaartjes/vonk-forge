@@ -21,7 +21,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.recipe_availability_intent import RecipeBuildDependency
-from vonk_control.recipe_build_cancellation import (
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_build_dependency,
 )

@@ -53,7 +53,7 @@ from .profile_stop_authority import (
     ProfileStopOwnerBinding,
 )
 from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
-from .recipe_build_cancellation import RecipeBuildIntent
+from .recipe_builds.cancellation import RecipeBuildIntent
 from .recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
     RecipeImageAvailabilityState,

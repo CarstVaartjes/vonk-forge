@@ -55,7 +55,7 @@ from ..profile_capacity import (
     reserve_profile_memory,
     reserve_profile_ports,
 )
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )

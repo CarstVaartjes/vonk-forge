@@ -58,9 +58,7 @@ from ..models import (
 )
 from ..offline_stops import deferred_stop_nodes
 from ..persisted_waits import schedule_wait
-from ..recipe_build_cancellation import (
-    build_cancellation,
-)
+from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     run_endpoint_document,

@@ -28,7 +28,7 @@ from ..models import (
     ModelCacheOperation,
     RecipeBuild,
 )
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     current_build_consumers,
     lock_build_dependency,

@@ -45,10 +45,8 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
-from ..recipe_build_cancellation import (
-    needs_container_build,
-)
 from ..recipe_builds import RecipeBuildAdmissionBusy
+from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_operations import (
     RecipeOperationView,
 )

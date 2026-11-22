@@ -34,13 +34,10 @@ from ..models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from ..recipe_build_cancellation import (
-    RecipeBuildIntent,
-    build_cancellation,
-)
 from ..recipe_builds import (
     RecipeBuildPlan,
 )
+from ..recipe_builds.cancellation import RecipeBuildIntent, build_cancellation
 from ..recipe_execution_contract import (
     build_plan_document,
     parse_stored_build_plan,

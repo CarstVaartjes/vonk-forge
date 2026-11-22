@@ -32,10 +32,7 @@ from ..models import (
     AgentOperation,
     Job,
 )
-from ..recipe_build_cancellation import (
-    BuildConsumerError,
-    build_cancellation,
-)
+from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
 from ..recipe_lifecycle_contract import (
     RecipeOperationCancellationResult,
 )

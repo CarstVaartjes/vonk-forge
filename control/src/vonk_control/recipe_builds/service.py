@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from ..models import RecipeBuild
-from ..recipe_build_receipts import PreparedBuildLookup
 from ..source_bundles import SourceBundleStoreProtocol
 from ..storage_demands import StorageDemands
 from .common import (
@@ -31,6 +30,7 @@ from .planning import (
     prepare_plan,
     reusable_build_id,
 )
+from .receipts import PreparedBuildLookup
 from .source import (
     _check_source_once,
     _heal_source_bundle,

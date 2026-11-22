@@ -51,9 +51,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
-from ..recipe_build_cancellation import (
-    build_cancellation,
-)
+from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_execution_contract import parse_stored_run_plan
 from ..recipe_lifecycle_contract import (
     LifecycleNodeResult,

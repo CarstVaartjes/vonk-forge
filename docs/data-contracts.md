@@ -221,7 +221,7 @@ module defines its own.
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
-| `control/src/vonk_control/recipe_build_cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
+| `control/src/vonk_control/recipe_builds/cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
 | `control/src/vonk_control/recipe_execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
 | `control/src/vonk_control/recipe_image_availability_api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
 | `control/src/vonk_control/recipe_image_availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |

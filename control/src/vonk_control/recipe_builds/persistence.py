@@ -31,7 +31,6 @@ from ..models import (
     RecipeBuild,
     ResourceReservation,
 )
-from ..recipe_build_receipts import CompletedRecipeBuild
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -57,6 +56,7 @@ from .common import (
     _valid_succeeded_receipt,
     _validate_builder,
 )
+from .receipts import CompletedRecipeBuild
 
 if TYPE_CHECKING:
     from .service import RecipeBuildService

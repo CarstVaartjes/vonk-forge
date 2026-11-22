@@ -40,7 +40,7 @@ from ..models import (
 )
 from ..owner_liveness import OwnerKind, issued_for
 from ..prebuilt_images import prebuilt_reference
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     build_cancellation,
     current_build_consumers,

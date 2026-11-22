@@ -58,13 +58,13 @@ from .models import (
 from .operation_blockers import OperationBlocker, make_blocker
 from .prebuilt_images import PrebuiltDecision
 from .recipe_availability_intent import RecipeBuildDependency
-from .recipe_build_cancellation import BuildConsumerError, lock_build_dependency
 from .recipe_builds import (
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,
     _valid_succeeded_receipt,
 )
+from .recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,

@@ -9,7 +9,7 @@ import vonk_control.recipe_image_availability.requests as availability_requests
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
-from vonk_control.recipe_build_cancellation import current_build_consumers
+from vonk_control.recipe_builds.cancellation import current_build_consumers
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityUnknown
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_operations import build_cancellation as operations_module

@@ -362,7 +362,7 @@ def test_invalid_availability_dependency_is_pre_effect_input(payload):
     from unittest.mock import Mock
 
     from sqlalchemy.orm import Session
-    from vonk_control.recipe_build_cancellation import (
+    from vonk_control.recipe_builds.cancellation import (
         lock_availability_build_dependency,
     )
 

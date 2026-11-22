@@ -674,7 +674,7 @@ class PrebuiltImageImporter:
         )
 
     def _claim(self, job_id: str | None = None) -> str | None:
-        from .recipe_build_cancellation import build_cancellation
+        from .recipe_builds.cancellation import build_cancellation
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -725,7 +725,7 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
-        from .recipe_build_cancellation import build_cancellation
+        from .recipe_builds.cancellation import build_cancellation
 
         with self._sessions() as session:
             job = session.get(Job, job_id)

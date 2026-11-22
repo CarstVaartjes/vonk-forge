@@ -51,7 +51,7 @@ from ..recipe_availability_intent import (
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
 )

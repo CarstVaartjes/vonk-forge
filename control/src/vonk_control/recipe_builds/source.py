@@ -25,7 +25,6 @@ from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from ..operator_receipt_contract import ReceiptOwner
 from ..profile_read_observation import observing_profile
-from ..recipe_build_receipts import BuildCandidate, PreparedBuildReceipt
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
@@ -66,6 +65,7 @@ from .common import (
     _source_policy_document,
     derive_build_input_identity,
 )
+from .receipts import BuildCandidate, PreparedBuildReceipt
 
 if TYPE_CHECKING:
     from .service import RecipeBuildService

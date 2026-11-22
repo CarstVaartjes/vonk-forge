@@ -42,7 +42,7 @@ from ..models import (
     AgentNode,
     Job,
 )
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )

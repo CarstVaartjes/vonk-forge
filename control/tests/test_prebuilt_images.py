@@ -906,7 +906,7 @@ def test_prebuilt_import_observes_cancellation_between_claim_and_io(
     """Catches a restarted importer pulling after a newer durable cancel won."""
     from uuid import uuid4
 
-    from vonk_control.recipe_build_cancellation import request_build_cancellation
+    from vonk_control.recipe_builds.cancellation import request_build_cancellation
 
     sessions, revision_id = _published_library(tmp_path)
     builds, operations = _services(sessions, tmp_path)
