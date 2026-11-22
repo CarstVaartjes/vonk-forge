@@ -3,7 +3,13 @@
 import pytest
 from vonk_agent_protocol import LifecycleState
 
-from .added_line_guards import AGENT_REQUESTS, added_lines, changed_lines, check_source
+from .added_line_guards import (
+    AGENT_REQUESTS,
+    added_lines,
+    changed_lines,
+    check_patch,
+    check_source,
+)
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -4582,3 +4588,51 @@ def test_maintainer_scripts_stay_shims_and_units_run_no_shell(path, source, flag
         assert not check_source(
             path, source, {len(lines) + 5}, modes=("maintainershim",)
         )
+
+
+def _move_patch(old: str, old_text: str, new: str, new_text: str) -> str:
+    """A patch deleting ``old_text`` from ``old`` and adding ``new_text`` to ``new``."""
+    gone, came = old_text.splitlines(), new_text.splitlines()
+    return (
+        f"diff --git a/{old} b/{old}\n--- a/{old}\n+++ b/{old}\n"
+        f"@@ -1,{len(gone)} +0,0 @@\n"
+        + "".join(f"-{line}\n" for line in gone)
+        + f"diff --git a/{new} b/{new}\n--- /dev/null\n+++ b/{new}\n"
+        f"@@ -0,0 +1,{len(came)} @@\n" + "".join(f"+{line}\n" for line in came)
+    )
+
+
+OPENER_BLOCK = (
+    "def fetch(spec):\n    handle = provider_for(spec).open(spec)\n    return handle\n"
+)
+
+
+def test_a_block_moved_out_of_an_exempt_owner_is_still_new_where_it_is_judged():
+    owner = "control/src/vonk_control/model_cache/providers.py"
+    target = "control/src/vonk_control/other.py"
+    patch = _move_patch(owner, OPENER_BLOCK, target, OPENER_BLOCK)
+    assert check_patch(patch, {target: OPENER_BLOCK}.get, modes=("openers",))
+
+
+def test_a_block_moved_between_judged_files_adds_nothing():
+    old = "control/src/vonk_control/first.py"
+    target = "control/src/vonk_control/second.py"
+    patch = _move_patch(old, OPENER_BLOCK, target, OPENER_BLOCK)
+    assert not check_patch(patch, {target: OPENER_BLOCK}.get, modes=("openers",))
+
+
+def test_old_calls_wrapped_in_a_new_lock_are_flagged():
+    old = "rows = s.execute(select(R).with_for_update()).all()\nstat(path)\nuse(rows)\n"
+    new = (
+        "with session_scope() as s:\n"
+        "    rows = s.execute(select(R).with_for_update()).all()\n"
+        "    stat(path)\n"
+        "    use(rows)\n"
+    )
+    patch = (
+        f"diff --git a/{PATH} b/{PATH}\n--- a/{PATH}\n+++ b/{PATH}\n"
+        "@@ -1,3 +1,4 @@\n"
+        + "".join(f"-{line}\n" for line in old.splitlines())
+        + "".join(f"+{line}\n" for line in new.splitlines())
+    )
+    assert check_patch(patch, {PATH: new}.get, modes=("locked-io",))

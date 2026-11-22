@@ -6,7 +6,7 @@ import ast
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from difflib import SequenceMatcher
 from functools import cache
 from itertools import pairwise
@@ -135,6 +135,16 @@ MODES = (
     "printed-output",
     "maintainershim",
 )
+# Modes whose verdict depends on a surrounding statement, with the statements
+# that count: a call inside a new loop, lock or function is new work even when
+# its own line only moved or was re-indented. A mode not listed reports the
+# statement's own line (a loop, handler or call) or does not read its context.
+CONTEXT_MODES: dict[str, tuple[type[ast.stmt], ...]] = {
+    # I/O is judged inside the locking ``with``, not by its own line.
+    "locked-io": (ast.With,),
+    # A call is judged by the async function around it.
+    "sync-in-async": (ast.AsyncFunctionDef,),
+}
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
 # the request's own bytes may say it; a clock, a race or an owner still
@@ -654,16 +664,25 @@ def added_lines(patch: str) -> dict[str, set[int]]:
 
 
 def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]]:
+    files, deleted, _ = _relocated_lines(patch)
+    return files, deleted
+
+
+def _relocated_lines(
+    patch: str,
+) -> tuple[dict[str, set[int]], dict[str, list[str]], dict[str, dict[str, set[int]]]]:
     """Parse hunks, carrying unchanged relocated blocks without duplicating debt.
 
     A deleted block may account for one identical added block in the same
     language. Copies and changed lines remain additions. Matching preserves
     context and permits a uniform extraction indentation shift, so a common isolated line cannot hide new work.
     All evidence comes from the supplied patch, never repository history.
-    Returns each file's added line numbers and its removed text; a deleted line
-    that a relocated block spent is no longer in the removed text.
+    Returns each file's added line numbers and its removed text (a deleted line
+    that a relocated block spent is no longer in the removed text), and for each
+    target file the lines each other owner's deletion paid for.
     """
     files: dict[str, set[int]] = {}
+    paid: dict[str, dict[str, set[int]]] = {}
     additions: list[tuple[str, list[tuple[int, str]]]] = []
     deletions: list[tuple[str, list[str]]] = []
     path = ""
@@ -786,6 +805,9 @@ def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]
                 )
                 for offset in range(new_indices[0], new_end):
                     files[target].discard(lines[offset][0])
+                    paid.setdefault(target, {}).setdefault(owner, set()).add(
+                        lines[offset][0]
+                    )
                 for offset in range(old_indices[0], old_end):
                     # A second copy cannot spend the same deleted occurrence.
                     removed[offset] = f"\0consumed:{offset}"
@@ -804,8 +826,11 @@ def changed_lines(patch: str) -> tuple[dict[str, set[int]], dict[str, list[str]]
                     break
                 for offset in range(match.size):
                     files[target].discard(lines[match.b + offset][0])
+                    paid.setdefault(target, {}).setdefault(owner, set()).add(
+                        lines[match.b + offset][0]
+                    )
                     removed[match.a + offset] = f"\0consumed:{match.a + offset}"
-    return files, deleted_by_file
+    return files, deleted_by_file, paid
 
 
 _QUOTED = re.compile(r"""(["'])([^"'\n]*)\1""")
@@ -1681,13 +1706,48 @@ def check_source(
     modes: Sequence[str] = MODES,
     words: frozenset[str] | None = None,
     removed: Sequence[str] = (),
+    context: bool = True,
 ) -> list[str]:
     """Old findings cannot fail the change; only a reported added line can.
 
-    ``removed`` is the file's removed text from the same patch.
+    ``removed`` is the file's removed text from the same patch. A mode whose
+    verdict depends on a surrounding statement (``CONTEXT_MODES``) also judges
+    every line inside such a statement whose own header line was added.
     """
     if not added or "generated_control" in path or "/generated/" in path:
         return []
+    if context and path.endswith(".py"):
+        found = set(
+            check_source(
+                path,
+                source,
+                added,
+                modes=modes,
+                words=words,
+                removed=removed,
+                context=False,
+            )
+        )
+        tree = ast.parse(source)
+        for mode in modes:
+            kinds = CONTEXT_MODES.get(mode, ())
+            widened = set(added)
+            for node in ast.walk(tree):
+                if isinstance(node, kinds) and node.lineno in added:
+                    widened.update(range(node.lineno, (node.end_lineno or 0) + 1))
+            if widened != added:
+                found.update(
+                    check_source(
+                        path,
+                        source,
+                        widened,
+                        modes=(mode,),
+                        words=words,
+                        removed=removed,
+                        context=False,
+                    )
+                )
+        return sorted(found)
     is_test = (
         "/tests/" in path
         # Browser fixtures (control/web/e2e) hold the wire documents, like the .spec files.
@@ -2568,10 +2628,9 @@ def check_source(
         python
         and not is_test
         and "model-sets" in modes
-        and re.fullmatch(
-            r"control/src/vonk_control/model_cache/(?:removal_\w+|fleet_removal)\.py",
-            path,
-        )
+        and path.startswith("control/src/vonk_control/model_cache/")
+        and re.fullmatch(r"(?:removal_\w+|fleet_removal)\.py", path.rpartition("/")[2])
+        and path.count("/") == 4
     ):
         # Removal takes a model's sets from the one resolver the Library shares
         # (model_cache/lineage.py). Choosing them by the first requester's
@@ -2942,12 +3001,16 @@ def check_source(
 # helpers sleep inside the caller. Known residue, not an allowlist:
 # core.py `_stored_manifest.rebuild` still calls resolve_artifact_set.
 BACKGROUND_OWNERS = frozenset(
-    f"control/src/vonk_control/model_cache/{name}.py"
-    for name in ("revisions", "inventory", "observation", "storage", "repair")
-) | {
-    f"control/src/vonk_control/recipe_routes/{name}.py"
-    for name in ("withdrawal", "service")
-}
+    {
+        "control/src/vonk_control/model_cache/revisions.py",
+        "control/src/vonk_control/model_cache/inventory.py",
+        "control/src/vonk_control/model_cache/observation.py",
+        "control/src/vonk_control/model_cache/storage.py",
+        "control/src/vonk_control/model_cache/repair.py",
+        "control/src/vonk_control/recipe_routes/withdrawal.py",
+        "control/src/vonk_control/recipe_routes/service.py",
+    }
+)
 BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
 
 
@@ -3195,21 +3258,60 @@ def planner_defect_waits(source: str) -> list[int]:
     return sites
 
 
+def _unpathed(messages: Iterable[str], path: str) -> set[str]:
+    return {message.removeprefix(f"{path}:") for message in messages}
+
+
+def check_patch(
+    patch: str,
+    read: Callable[[str], str | None],
+    *,
+    modes: Sequence[str] = MODES,
+) -> list[str]:
+    """Findings on a patch's added lines; ``read`` gives a path's current source.
+
+    A block another file deleted pays only where the mode judges the file it left
+    as well as the file it entered: the paid lines are checked at the target and
+    again as if they sat in the owner, and a finding only the target's own scope
+    reports is new work there. The gates are the modes' own, so an exempt owner
+    or an out-of-scope file never hides a judged addition.
+    """
+    files, removed, paid = _relocated_lines(patch)
+    messages: list[str] = []
+    for path, lines in files.items():
+        source = read(path)
+        if source is None:
+            continue
+        own_removed = removed.get(path, ())
+        messages.extend(
+            check_source(path, source, lines, modes=modes, removed=own_removed)
+        )
+        for owner, credited in paid.get(path, {}).items():
+            if owner == path:
+                continue
+            judged_here = check_source(
+                path, source, credited, modes=modes, removed=own_removed
+            )
+            judged_there = _unpathed(
+                check_source(owner, source, credited, modes=modes, removed=own_removed),
+                owner,
+            )
+            messages.extend(
+                message
+                for message in judged_here
+                if message.removeprefix(f"{path}:") not in judged_there
+            )
+    return sorted(set(messages))
+
+
 def main(*, modes: Sequence[str] = MODES) -> int:
-    messages = []
-    changes, removed = changed_lines(sys.stdin.read())
-    for path, lines in changes.items():
+    def read(path: str) -> str | None:
         target = ROOT / path
         if target.is_file() and target.resolve().is_relative_to(ROOT):
-            messages.extend(
-                check_source(
-                    path,
-                    target.read_text(),
-                    lines,
-                    modes=modes,
-                    removed=removed.get(path, ()),
-                )
-            )
+            return target.read_text()
+        return None
+
+    messages = check_patch(sys.stdin.read(), read, modes=modes)
     for message in messages:
         print(message, file=sys.stderr)
     return int(bool(messages))

@@ -570,6 +570,16 @@ that carries it. Python keeps reporting every added line the scanner flags: its
 scanner also reports reason codes that are not words and skips comments and
 docstrings the removed text would count.
 
+A block deleted in one file and re-added unchanged elsewhere (a verbatim move or
+split, with at most a uniform indentation shift) adds nothing, but only where the
+mode judges both files: the paid lines are checked at the new file and again as
+if they stayed in the old one, and a finding only the new file's own scope or
+exempt-owner gate reports is new work (`check_patch`). A mode that reads the
+statement around a finding (`CONTEXT_MODES`: `locked-io`, `sync-in-async`) also
+judges every line inside a lock or async function whose own header line was added,
+so wrapping old calls in place is new work. Each other mode reports the
+statement's own line, so a wrapper it cares about is itself an added line.
+
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
@@ -770,6 +780,15 @@ Mixed integration files select their cross-area guard nodes individually. The
 local command `scripts/test guards` runs them in parallel (`-n auto`; they share no state). The runner
 `python3 scripts/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
+
+`tests/test_guard_paths_exist.py` fails when a plain repository path string literal names
+nothing. It reads `added_line_guards.py`, `principle_guards.py`, `repository_guards.py`,
+`scripts/select-ci-areas`, the boundary and reader tables (`document_read_boundaries.py`,
+`untyped_mapping_boundaries.py`, `whole_collection_readers.py`,
+`deterministic_retries.py`, `lifecycle_writer_boundaries.py`) and `tools/*.json`. A prefix
+passes when it matches at least one path. There is no allowlist. It cannot see a scope
+that is composed (`Path / "a" / "b"`, an f-string, a regex), so write a scope as a plain
+full-path literal; move or delete the literal with the code it guards.
 
 ### Cross-repo nightly
 

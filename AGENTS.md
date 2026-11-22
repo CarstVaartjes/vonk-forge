@@ -325,12 +325,13 @@ worktree-local environments, OrbStack setup, lane selection, pinned lint/type/
 generation checks, and added-line principle guards. Use those instructions from the
 active task worktree. In Rust and TypeScript the contract-literal guard reports a
 word only when the change adds it to a file more often than it removes it there
-(a reflow is not new). On macOS, check the intended OrbStack engine before
+(a reflow is not new). A block moved verbatim between files adds nothing only where each mode judges both files, and a call inside a new lock or async function is new work (`docs/testing-and-ci.md`). On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 The pre-commit hook (`scripts/check-staged-code`) also runs the CI added-line
 guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
+A plain path literal in a guard module, `scripts/select-ci-areas` or a `tools/*.json` allowlist must name a path or the prefix of one (`tests/test_guard_paths_exist.py`); write guard scopes as plain full-path literals (composed or regex scopes are invisible to it), and move or delete the literal with the code.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
 `fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
