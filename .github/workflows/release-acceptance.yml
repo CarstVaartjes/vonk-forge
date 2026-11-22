@@ -406,13 +406,24 @@ jobs:
           if-no-files-found: error
 
   package:
-    name: Candidate ARM64 agent packages
+    name: Candidate ARM64 agent packages (${{ matrix.kind }})
     needs: source
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
-    outputs:
-      arm64_package: ${{ steps.package.outputs.arm64_package }}
-      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: candidate
+            version: ${{ needs.source.outputs.version }}
+            domain: vonk-agent-build-v2
+            artifact: acceptance-agent-package
+            flags: ''
+          - kind: baseline
+            version: ${{ needs.source.outputs.baseline_version }}
+            domain: vonk-agent-acceptance-baseline-v1
+            artifact: acceptance-agent-baseline
+            flags: --acceptance-baseline
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -430,12 +441,12 @@ jobs:
           shared-key: linux-arm64-candidate
           add-job-id-key: 'false'
           save-if: 'false'
-      - name: Build signed candidate and lower lifecycle baseline
-        id: package
+      - name: Build signed ${{ matrix.kind }} package
         shell: bash
         env:
-          VERSION: ${{ needs.source.outputs.version }}
-          BASELINE_VERSION: ${{ needs.source.outputs.baseline_version }}
+          VERSION: ${{ matrix.version }}
+          DOMAIN: ${{ matrix.domain }}
+          FLAGS: ${{ matrix.flags }}
           SOURCE: ${{ needs.source.outputs.sha }}
           VONK_SOURCE_REVISION: ${{ needs.source.outputs.sha }}
           VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
@@ -449,36 +460,19 @@ jobs:
           openssl genpkey -algorithm ED25519 -out "$key"
           epoch=$(git show -s --format=%ct "$SOURCE")
           lock=$(sha256sum Cargo.lock | cut -d' ' -f1)
-          for kind in candidate baseline; do
-            flags=()
-            version=$VERSION
-            domain=vonk-agent-build-v2
-            out=packages
-            if [[ "$kind" == baseline ]]; then
-              flags=(--acceptance-baseline)
-              version=$BASELINE_VERSION
-              domain=vonk-agent-acceptance-baseline-v1
-              out=baseline-packages
-            fi
-            digest="sha256:$(printf '%s\0%s\0%s\0%s\0%s' \
-              "$domain" "$SOURCE" linux-arm64 "$lock" "$version" | sha256sum | cut -d' ' -f1)"
-            scripts/build-agent-deb "${flags[@]}" --version "$version" \
-              --architecture linux-arm64 --build-digest "$digest" \
-              --release-private-key "$key" --source-date-epoch "$epoch" \
-              --output-dir "$RUNNER_TEMP/$out"
-            scripts/verify-agent-deb --json "$RUNNER_TEMP/$out/vonk-forge-agent_${version}_arm64.deb"
-          done
-          printf 'arm64_package=vonk-forge-agent_%s_arm64.deb\n' "$VERSION" >> "$GITHUB_OUTPUT"
-          printf 'arm64_baseline_package=vonk-forge-agent_%s_arm64.deb\n' "$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
+          flags=()
+          [[ -z "$FLAGS" ]] || flags=("$FLAGS")
+          digest="sha256:$(printf '%s\0%s\0%s\0%s\0%s' \
+            "$DOMAIN" "$SOURCE" linux-arm64 "$lock" "$VERSION" | sha256sum | cut -d' ' -f1)"
+          scripts/build-agent-deb "${flags[@]}" --version "$VERSION" \
+            --architecture linux-arm64 --build-digest "$digest" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir "$RUNNER_TEMP/packages"
+          scripts/verify-agent-deb --json "$RUNNER_TEMP/packages/vonk-forge-agent_${VERSION}_arm64.deb"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: acceptance-agent-package
+          name: ${{ matrix.artifact }}
           path: ${{ runner.temp }}/packages
-          if-no-files-found: error
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: acceptance-agent-baseline
-          path: ${{ runner.temp }}/baseline-packages
           if-no-files-found: error
 
   setups:
@@ -538,8 +532,8 @@ jobs:
       compose_artifact: acceptance-compose
       compose_run_id: ${{ github.run_id }}
       compose_source_sha: ${{ needs.source.outputs.sha }}
-      arm64_package: ${{ needs.package.outputs.arm64_package }}
-      arm64_baseline_package: ${{ needs.package.outputs.arm64_baseline_package }}
+      arm64_package: vonk-forge-agent_${{ needs.source.outputs.version }}_arm64.deb
+      arm64_baseline_package: vonk-forge-agent_${{ needs.source.outputs.baseline_version }}_arm64.deb
 
   acceptance:
     name: Release acceptance
