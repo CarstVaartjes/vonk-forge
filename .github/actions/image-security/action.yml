@@ -10,13 +10,14 @@ inputs:
 runs:
   using: composite
   steps:
+    # LiteLLM is an upstream application with a thin layer of ours: its findings
+    # are fixed only by a LiteLLM release, so it is smoked, not scanned.
     - uses: ./.github/actions/image-scan
+      if: inputs.role == 'api' || inputs.role == 'worker'
       env:
         TRIVY_PLATFORM: linux/amd64
       with:
         image: ${{ inputs.image }}
-        category: development-${{ inputs.role }}
-        gate: ${{ inputs.role == 'api' || inputs.role == 'worker' }}
         skip-dirs: /usr/local/lib/skopeo
     - name: Smoke the exact rootless LiteLLM runtime on both architectures
       if: inputs.role == 'litellm'

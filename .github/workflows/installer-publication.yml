@@ -192,7 +192,6 @@ jobs:
       id-token: write
       packages: write
       pull-requests: write
-      security-events: write
     # A newer main push queues behind a running release; the supersede job
     # cancels an obsolete one that is neither the oldest nor committed.
     concurrency:
@@ -273,7 +272,6 @@ jobs:
       contents: read
       id-token: write
       packages: write
-      security-events: write
     concurrency:
       group: vonk-forge-release-images-${{ github.ref }}
       cancel-in-progress: false

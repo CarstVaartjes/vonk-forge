@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, settings
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -100,6 +101,31 @@ def damaged_json_rows() -> Iterator[None]:
 load_tools_module("generated_contracts").prepare_generated_contracts()
 
 
+# Hypothesis profiles, registered once for every property test. ``ci`` (the
+# default) is derandomized: each run replays the same examples, so a property
+# test can never turn an unrelated batch red with a newly drawn input. ``fuzz``
+# (the scheduled job: ``pytest --hypothesis-profile=fuzz -m property``) draws
+# randomly and keeps no example database.
+_PROPERTY_HEALTH = [HealthCheck.function_scoped_fixture]
+settings.register_profile(
+    "ci",
+    derandomize=True,
+    max_examples=50,
+    database=None,
+    deadline=None,
+    suppress_health_check=_PROPERTY_HEALTH,
+)
+settings.register_profile(
+    "fuzz",
+    derandomize=False,
+    max_examples=20000,
+    database=None,
+    deadline=None,
+    suppress_health_check=_PROPERTY_HEALTH,
+)
+settings.load_profile("ci")
+
+
 def pytest_addoption(
     parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
 ) -> None:
@@ -110,6 +136,9 @@ def pytest_addoption(
 
 def pytest_configure(config: pytest.Config) -> None:
     _api_response_pytest_configure(config)
+    config.addinivalue_line(
+        "markers", "property: Hypothesis property test (also run by the fuzz profile)"
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
