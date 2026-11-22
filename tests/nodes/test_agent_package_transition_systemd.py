@@ -647,6 +647,11 @@ def main() -> None:
                         "--signal=SIGKILL",
                         HELPER,
                     )
+                    # No daemon-reload ran: the loaded agent unit still has the
+                    # drop-in whose runner the unpack removed. The deadline
+                    # restore must heal whatever that start does.
+                    run("/usr/bin/systemctl", "stop", AGENT, check=False)
+                    run("/usr/bin/systemctl", "start", "--no-block", AGENT, check=False)
                 else:
                     units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
                     for unit in units:
