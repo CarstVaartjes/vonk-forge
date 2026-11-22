@@ -63,8 +63,10 @@ helper restarts, and the new one starts after the helper is proven. If the
 helper restart or its proof fails while the candidate's activation is armed,
 the agent stays stopped, so nothing can acknowledge the candidate, and the
 watchdog restores the source at the deadline. With no armed candidate (an
-installer upgrade) the agent is started again; it is never left stopped
-there. Docker containers belong to dockerd and are untouched.
+installer upgrade) the agent is started again on any failure, and the
+transient unit carries an `ExecStopPost` that starts it whenever the finisher
+ends, a kill by `RuntimeMaxSec` (600 s: 120 s for dpkg, then at most six
+commands of 60 s) included. Docker containers belong to dockerd and are untouched.
 
 The reference for the `/proc/<pid>/exe` comparison is the candidate's ingress
 digest, read from the armed rollback transaction (`candidate_helper_sha256`);

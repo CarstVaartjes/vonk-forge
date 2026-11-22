@@ -967,10 +967,12 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
         }
     }
     // The package hooks name their paths as plain absolute strings.
-    for hook in ["directories.rs", "machine_evidence.rs"] {
-        let source = repository
-            .join("rust/crates/vonk-agent-helper/src/package_hooks/")
-            .join(hook);
+    let hooks = repository.join("rust/crates/vonk-agent-helper/src/package_hooks");
+    for entry in fs::read_dir(&hooks).unwrap() {
+        let source = entry.unwrap().path();
+        if source.file_name().is_some_and(|name| name == "tests.rs") {
+            continue;
+        }
         for (root, name) in
             super::source_guard::package_stores(&fs::read_to_string(&source).unwrap())
         {

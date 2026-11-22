@@ -1,16 +1,14 @@
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use sha2::{Digest, Sha256};
-
 use crate::package_command;
 use crate::package_rollback::Store;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const PAUSE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,12 +182,7 @@ impl Host for SystemHost {
         after_name.split_whitespace().nth(19)?.parse().ok()
     }
     fn exe_sha256(&self, pid: u32) -> Result<String, String> {
-        let mut file = fs::File::open(format!("/proc/{pid}/exe"))
-            .map_err(|error| format!("process {pid} executable: {error}"))?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|error| format!("process {pid} executable: {error}"))?;
-        Ok(hex::encode(Sha256::digest(&bytes)))
+        crate::package_rollback::digest_process(pid)
     }
     fn armed_helper_sha256(&self, installed_version: &str) -> Option<String> {
         Store::system().armed_helper_sha256(installed_version)

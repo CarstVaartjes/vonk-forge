@@ -35,7 +35,8 @@ const DIRECTORIES: &[(&str, Owner, u32)] = &[
     ("/var/lib/vonk-forge/incoming", Owner::Agent, 0o700),
 ];
 
-/// Create or correct only what differs: an already-converged directory is not
+/// Create or correct only what differs (permission bits only: a setgid or
+/// sticky bit an operator set is left, as `install -d` left it): an already-converged directory is not
 /// written, which an upgrade inside the helper's read-only sandbox relies on.
 pub(super) fn ensure(host: &mut impl Host, ids: &Ids) -> Result<(), String> {
     for (path, owner, mode) in DIRECTORIES {
@@ -47,7 +48,7 @@ pub(super) fn ensure(host: &mut impl Host, ids: &Ids) -> Result<(), String> {
             Some(entry) if entry.kind != super::Kind::Dir => {
                 return Err(format!("{path} is not a directory"));
             }
-            Some(entry) if (entry.uid, entry.gid, entry.mode) == (uid, gid, *mode) => {}
+            Some(entry) if (entry.uid, entry.gid, entry.mode & 0o777) == (uid, gid, *mode) => {}
             _ => host.make_dir(path, uid, gid, *mode)?,
         }
     }

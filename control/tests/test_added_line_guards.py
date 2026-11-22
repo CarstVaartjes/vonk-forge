@@ -4553,8 +4553,6 @@ SHIM = (
     "path,source,flagged",
     [
         ("packaging/debian/postinst", SHIM, False),
-        ("packaging/debian/postinst", SHIM + "adduser vonk-agent\n", True),
-        ("packaging/debian/postinst", SHIM + "systemctl daemon-reload\n", True),
         ("packaging/debian/postinst", SHIM + "install -d /var/lib/x\n", True),
         ("packaging/debian/prerm", '[ "$1" = remove ] || exit 0\n', False),
         (

@@ -391,7 +391,7 @@ fn without_an_armed_candidate_a_failed_restart_never_leaves_the_agent_stopped() 
     fake.dpkg_alive = false;
     fake.failing.push("restart vonk-forge-package-helper");
     assert!(finish(&mut fake).is_err());
-    assert!(fake.ran("restart vonk-forge-agent"));
+    assert!(fake.ran(" start vonk-forge-agent"));
 }
 
 #[test]
@@ -401,4 +401,29 @@ fn an_installer_upgrade_has_no_reference_to_prove() {
     fake.helper_exe = "anything".into();
     finish(&mut fake).unwrap();
     assert!(fake.ran("restart vonk-forge-agent"));
+}
+
+#[test]
+fn only_an_unarmed_finisher_restarts_the_agent_when_it_ends() {
+    for (armed, expected) in [(None, true), (Some(NEW_HELPER.to_owned()), false)] {
+        let mut fake = Fake::machine();
+        fake.armed = armed;
+        configure(Some("1.0"), &mut fake).unwrap();
+        let scheduled = fake
+            .commands
+            .iter()
+            .find(|command| command.contains("systemd-run"))
+            .unwrap();
+        assert_eq!(scheduled.contains("ExecStopPost="), expected, "{scheduled}");
+    }
+}
+
+#[test]
+fn a_special_mode_bit_on_an_existing_directory_is_not_a_difference() {
+    let mut fake = Fake::machine();
+    configure(None, &mut fake).unwrap();
+    fake.put(AGENT_DIR, "", node(Kind::Dir, 991, 990, 0o2700));
+    fake.commands.clear();
+    configure(None, &mut fake).unwrap();
+    assert!(!fake.ran(&format!("mkdir {AGENT_DIR}")));
 }

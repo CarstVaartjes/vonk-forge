@@ -1,5 +1,6 @@
 use vonk_agent_protocol::generated::OperatorActionName;
 
+use super::finish::{self, AGENT_UNITS, FINISHER_RUNTIME_SECONDS};
 use super::{Host, best_effort};
 
 const SYSTEMCTL: &str = "/usr/bin/systemctl";
@@ -108,34 +109,38 @@ fn schedule_finisher(host: &mut impl Host) -> Result<(), String> {
     {
         return Ok(());
     }
-    // A failed earlier finisher still holds the unit name.
-    best_effort(
-        host,
-        SYSTEMCTL,
-        &["--system", "reset-failed", FINISHER_UNIT],
-    );
+    // A failed earlier finisher still holds the unit name. Not loaded is the
+    // usual answer and needs no report.
+    host.run(SYSTEMCTL, &["--system", "reset-failed", FINISHER_UNIT])
+        .unwrap_or_default();
     let (pid, start) = (dpkg.to_string(), dpkg_start.to_string());
-    host.run(
-        "/usr/bin/systemd-run",
-        &[
-            "--quiet",
-            "--collect",
-            &format!("--unit={FINISHER_UNIT}"),
-            "--property=Type=exec",
-            "--property=RuntimeMaxSec=240s",
-            "--property=NoNewPrivileges=yes",
-            "--property=PrivateTmp=yes",
-            "--property=ProtectHome=yes",
-            "--property=ProtectSystem=strict",
-            "--property=IPAddressDeny=any",
-            "--property=RestrictAddressFamilies=AF_UNIX",
-            HELPER,
-            "--package-hook",
-            "finish",
-            &pid,
-            &start,
-        ],
-    )
-    .map(|_| ())
-    .map_err(|error| format!("cannot schedule the package finisher: {error}"))
+    let runtime = format!("--property=RuntimeMaxSec={FINISHER_RUNTIME_SECONDS}s");
+    let unit = format!("--unit={FINISHER_UNIT}");
+    let mut arguments = vec![
+        "--quiet",
+        "--collect",
+        &unit,
+        "--property=Type=exec",
+        &runtime,
+        "--property=NoNewPrivileges=yes",
+        "--property=PrivateTmp=yes",
+        "--property=ProtectHome=yes",
+        "--property=ProtectSystem=strict",
+        "--property=IPAddressDeny=any",
+        "--property=RestrictAddressFamilies=AF_UNIX",
+    ];
+    // With no armed candidate nothing else restores the agent, so systemd
+    // starts it whenever the finisher ends, however it ends (a kill included).
+    // An armed candidate's agent stays stopped until proven; the watchdog heals.
+    let agent_start = format!(
+        "--property=ExecStopPost={SYSTEMCTL} --no-block start {}",
+        AGENT_UNITS.join(" ")
+    );
+    if finish::reference_digest(host).is_none() {
+        arguments.push(&agent_start);
+    }
+    arguments.extend([HELPER, "--package-hook", "finish", &pid, &start]);
+    host.run("/usr/bin/systemd-run", &arguments)
+        .map(|_| ())
+        .map_err(|error| format!("cannot schedule the package finisher: {error}"))
 }

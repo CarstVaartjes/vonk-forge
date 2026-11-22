@@ -23,6 +23,7 @@ mod recovery;
 mod store;
 
 pub use commands::prerequisites;
+pub(crate) use recovery::digest_process;
 pub use store::Store;
 
 #[cfg(test)]
