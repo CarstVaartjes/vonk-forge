@@ -118,9 +118,11 @@ through `vonk-agent-helper`'s `package_grant_probe` example. The candidates are
 this tree's package: unmodified (today's path, which arms the capsule), and
 without a preinst, so the watchdog alone is the recovery. The no-preinst cases
 are a finisher upgrade with acknowledgement, a failing postinst, and three
-faults held during dpkg's payload extraction: the helper cgroup killed, dpkg
-alone killed, and a reboot stand-in. No capsule intent or arming breadcrumb may
-appear in any of them. A runner cannot reboot inside a job, so the stand-in
+faults. dpkg alone is killed while its payload extraction is held (`iHR`, no
+candidate file on disk). The helper cgroup is killed, and separately a reboot
+stand-in runs, while the candidate's postinst is held (`iF`, every candidate
+file and script unpacked), so the deadline restore runs. No capsule intent or
+arming breadcrumb may appear in any of them. A runner cannot reboot inside a job, so the stand-in
 kills and stops the package's units, waits past the activation deadline, and
 starts the units a boot starts. A kernel boot and lost unsynced writes are not
 reproduced.

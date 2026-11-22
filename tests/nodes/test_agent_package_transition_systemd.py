@@ -47,7 +47,11 @@ WATCHDOG = "vonk-forge-package-rollback.service"
 FIREWALL = Path("/run/systemd/system/vonk-forge-docker-firewall.service")
 # The helper runs dpkg with /usr/local/sbin first on PATH, and dpkg finds
 # dpkg-deb on PATH for the payload extraction. Nothing else resolves it there.
-HOLD = Path("/run/vonk-transition-hold")
+# A fault holds dpkg at one of two points while its marker exists: the payload
+# extraction (nothing of the candidate on disk yet) or the candidate's postinst
+# configure (every candidate file and script unpacked).
+HOLD_EXTRACTION = Path("/run/vonk-transition-hold-extraction")
+HOLD_CONFIGURE = Path("/run/vonk-transition-hold-configure")
 HOLD_WRAPPER = Path("/usr/local/sbin/dpkg-deb")
 # The probe runs as the agent account, which cannot traverse a build workspace.
 PROBE = Path("/usr/local/bin/vonk-transition-grant-probe")
@@ -355,8 +359,8 @@ class Lane:
         )
 
 
-def held_extraction() -> int | None:
-    """The dpkg whose payload extraction the wrapper holds."""
+def held_dpkg(marker: bytes) -> int | None:
+    """The dpkg whose child's command line contains the marker."""
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
@@ -365,7 +369,7 @@ def held_extraction() -> int | None:
             parent = int((entry / "stat").read_text().rsplit(")", 1)[1].split()[1])
         except (FileNotFoundError, ProcessLookupError, IndexError, ValueError):
             continue
-        if f"{HOLD_WRAPPER}\0--fsys-tarfile\0".encode() in command:
+        if marker in command:
             return parent
     return None
 
@@ -378,7 +382,7 @@ def prepare_host(probe: Path, promoted: Package) -> None:
     )
     HOLD_WRAPPER.write_text(
         "#!/bin/sh\n"
-        f'if [ "$1" = --fsys-tarfile ]; then while [ -e {HOLD} ]; do sleep 0.2; done; fi\n'
+        f'if [ "$1" = --fsys-tarfile ]; then while [ -e {HOLD_EXTRACTION} ]; do sleep 0.2; done; fi\n'
         'exec /usr/bin/dpkg-deb "$@"\n'
     )
     HOLD_WRAPPER.chmod(0o755)
@@ -514,17 +518,25 @@ def main() -> None:
         tree_unsealed = unseal(args.candidate, variants["tree"])
         tree = seal(tree_unsealed, key, variants["tree"])
 
-        def drop_preinst(debian: Path) -> None:
-            (debian / "preinst").unlink()
-
-        def failing_postinst(debian: Path) -> None:
-            drop_preinst(debian)
+        def prepend_postinst(debian: Path, line: str) -> None:
+            # A tree without a preinst (after the capsule goes) is the same case.
+            (debian / "preinst").unlink(missing_ok=True)
             postinst = debian / "postinst"
             shebang, rest = postinst.read_text().split("\n", 1)
-            postinst.write_text(f"{shebang}\nexit 44\n{rest}")
+            postinst.write_text(f"{shebang}\n{line}\n{rest}")
+
+        def held_postinst(debian: Path) -> None:
+            prepend_postinst(
+                debian,
+                f'[ "${{1:-}}" != configure ] || while [ -e {HOLD_CONFIGURE} ]; '
+                "do sleep 0.2; done",
+            )
+
+        def failing_postinst(debian: Path) -> None:
+            prepend_postinst(debian, "exit 44")
 
         no_preinst = seal(
-            repack(tree_unsealed, variants["no-preinst"], drop_preinst),
+            repack(tree_unsealed, variants["no-preinst"], held_postinst),
             key,
             variants["no-preinst"],
         )
@@ -549,16 +561,49 @@ def main() -> None:
             assert reply is None or reply.get("status") != "package-installed", reply
             lane.restored("failed-postinst", nonce)
 
-            for fault in ("helper-cgroup-killed", "dpkg-killed", "reboot"):
+            # (fault, hold point, dpkg state there). dpkg alone killed fails the
+            # install at once; a killed helper cgroup and the reboot stand-in
+            # leave the transaction armed, so the deadline restore runs.
+            faults = (
+                ("dpkg-killed", HOLD_EXTRACTION, f"iHR|{promoted.version}"),
+                ("helper-cgroup-killed", HOLD_CONFIGURE, f"iF |{no_preinst.version}"),
+                ("reboot", HOLD_CONFIGURE, f"iF |{no_preinst.version}"),
+            )
+            for fault, hold, expected_state in faults:
                 lane.baseline(packages)
-                HOLD.touch()
-                nonce, deadline, operation = lane.install(no_preinst, deadline=30)
-                client = threading.Thread(target=lane.send, args=(operation,))
+                hold.touch()
+                nonce, deadline, operation = lane.install(no_preinst, deadline=40)
+                replies: list = []
+
+                def client_send(operation=operation, replies=replies) -> None:
+                    try:
+                        replies.append(lane.send(operation))
+                    except (
+                        AssertionError,
+                        subprocess.SubprocessError,
+                        ValueError,
+                    ) as error:
+                        # Raised in the main thread after the join below.
+                        replies.append(error)
+
+                client = threading.Thread(target=client_send)
                 client.start()
-                dpkg = wait(held_extraction, f"{fault}: extraction not held", 25)
+                marker = (
+                    f"{HOLD_WRAPPER}\0--fsys-tarfile\0"
+                    if hold == HOLD_EXTRACTION
+                    else "vonk-forge-agent.postinst\0configure\0"
+                ).encode()
+                dpkg = wait(
+                    lambda marker=marker: held_dpkg(marker),
+                    f"{fault}: dpkg not held at {hold.name}",
+                    35,
+                )
                 assert time.time() < deadline, f"{fault}: held only after the deadline"
                 held_state = installed()
-                if fault == "helper-cgroup-killed":
+                assert held_state == expected_state, (fault, held_state)
+                if fault == "dpkg-killed":
+                    os.kill(dpkg, signal.SIGKILL)
+                elif fault == "helper-cgroup-killed":
                     run(
                         "/usr/bin/systemctl",
                         "kill",
@@ -566,8 +611,6 @@ def main() -> None:
                         "--signal=SIGKILL",
                         HELPER,
                     )
-                elif fault == "dpkg-killed":
-                    os.kill(dpkg, signal.SIGKILL)
                 else:
                     units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
                     for unit in units:
@@ -581,8 +624,16 @@ def main() -> None:
                         )
                     run("/usr/bin/systemctl", "stop", SOCKET, *units, check=False)
                     run("/usr/bin/systemctl", "reset-failed", *units, check=False)
-                HOLD.unlink()
+                hold.unlink()
                 client.join(timeout=60)
+                assert not client.is_alive(), f"{fault}: probe still waiting"
+                (reply,) = replies
+                if isinstance(reply, Exception):
+                    raise reply
+                assert reply is None or reply.get("status") != "package-installed", (
+                    fault,
+                    reply,
+                )
                 if fault == "reboot":
                     run("/usr/bin/systemctl", "daemon-reload")
                     time.sleep(max(0.0, deadline - time.time() + 2))
@@ -597,10 +648,9 @@ def main() -> None:
                     assert WATCHDOG in boot, boot
                     run("/usr/bin/systemctl", "start", "--no-block", *boot)
                 lane.restored(
-                    f"{fault}-mid-unpack",
+                    f"{fault}-at-{hold.name.removeprefix('vonk-transition-hold-')}",
                     nonce,
                     held_state=held_state,
-                    killed_pid=dpkg if fault == "dpkg-killed" else None,
                 )
             assert not watch.seen, f"a forward capsule armed: {sorted(watch.seen)}"
 
@@ -608,9 +658,8 @@ def main() -> None:
         lane.baseline(packages)
         lane.activates("tree-candidate-with-preinst", tree, 300)
         trace = STATE / "package-upgrade.preflight.trace"
-        lane.evidence[-1]["capsule_preflight"] = (
-            trace.read_text().splitlines()[1] if trace.is_file() else None
-        )
+        assert trace.is_file(), "the unmodified candidate did not arm its capsule"
+        assert "stage=arm-complete" in trace.read_text().splitlines(), trace.read_text()
         print(
             json.dumps(
                 {
@@ -623,7 +672,8 @@ def main() -> None:
             )
         )
     finally:
-        HOLD.unlink(missing_ok=True)
+        HOLD_EXTRACTION.unlink(missing_ok=True)
+        HOLD_CONFIGURE.unlink(missing_ok=True)
         HOLD_WRAPPER.unlink(missing_ok=True)
         PROBE.unlink(missing_ok=True)
         shutil.rmtree(work, ignore_errors=True)
