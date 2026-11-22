@@ -5,7 +5,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import shlex
 import stat
 import struct
@@ -22,8 +21,6 @@ pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
-POSTINST = ROOT / "packaging/debian/postinst"
-PRERM = ROOT / "packaging/debian/prerm"
 POSTRM = ROOT / "packaging/debian/postrm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 PACKAGE_BINARIES = (
@@ -170,113 +167,6 @@ VONK_RENDEZVOUS_PORT=29500"""
     return path
 
 
-def _allocate_subid_range(
-    tmp_path: Path,
-    entries: str,
-    *,
-    minimum: int = 100_000,
-    maximum: int = 600_100_000,
-    count: int = 65_536,
-) -> subprocess.CompletedProcess[str]:
-    source = POSTINST.read_text()
-    functions = source[source.index("login_value() {") : source.index("sub_uid_min=")]
-    script = tmp_path / "allocate-subid-range"
-    script.write_text(
-        "#!/bin/sh\nset -eu\n"
-        + functions
-        + '\nallocate_subid_range "$1" "$2" "$3" "$4"\n'
-    )
-    script.chmod(0o755)
-    ranges = tmp_path / "subuid"
-    ranges.write_text(entries)
-    return subprocess.run(
-        [script, ranges, str(minimum), str(maximum), str(count)],
-        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def _run_discard_own_state(
-    tmp_path: Path, script: Path, target: Path
-) -> subprocess.CompletedProcess[str]:
-    source = script.read_text()
-    start = source.index("discard_own_state() {")
-    end = source.index("\n}\n", start) + 3
-    runner = tmp_path / f"discard-{script.name}"
-    runner.write_text(
-        "#!/bin/sh\nset -eu\n"
-        + source[start:end]
-        + '\ndiscard_own_state "$1" "test state"\n'
-    )
-    runner.chmod(0o755)
-    return subprocess.run(
-        [runner, target],
-        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
-def test_malformed_own_state_is_discarded_without_following_symlinks(
-    tmp_path: Path,
-) -> None:
-    script = POSTINST
-    # Catches maintainer scripts that exit on malformed package-owned state
-    # instead of regenerating it, and a discard that follows a planted symlink.
-    malformed = tmp_path / "state"
-    malformed.write_text("not a valid record\n")
-    assert _run_discard_own_state(tmp_path, script, malformed).returncode == 0
-    assert not malformed.exists()
-
-    victim = tmp_path / "victim"
-    victim.write_text("keep\n")
-    link = tmp_path / "link"
-    link.symlink_to(victim)
-    assert _run_discard_own_state(tmp_path, script, link).returncode == 0
-    assert not link.is_symlink()
-    assert victim.read_text() == "keep\n"
-
-    directory = tmp_path / "directory"
-    directory.mkdir()
-    assert _run_discard_own_state(tmp_path, script, directory).returncode != 0
-    assert directory.is_dir()
-
-    absent = tmp_path / "absent"
-    assert _run_discard_own_state(tmp_path, script, absent).returncode == 0
-
-
-@pytest.mark.parametrize(
-    ("entries", "expected"),
-    (
-        ("", "100000-165535"),
-        ("carst:100000:65536\n", "165536-231071"),
-        ("first:165536:65536\nlast:100000:65536\n", "231072-296607"),
-        ("first:100000:32768\nsecond:198304:65536\n", "132768-198303"),
-    ),
-)
-def test_postinst_allocates_first_nonoverlapping_subid_range(
-    tmp_path: Path, entries: str, expected: str
-) -> None:
-    result = _allocate_subid_range(tmp_path, entries)
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == expected
-
-
-def test_postinst_rejects_exhausted_subid_space(tmp_path: Path) -> None:
-    result = _allocate_subid_range(
-        tmp_path,
-        "first:100000:65536\nsecond:165536:65536\n",
-        maximum=231071,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
-
-
 @pytest.mark.parametrize("action", ("remove", "purge"))
 def test_postrm_forgets_unit_enablement_on_purge_only(
     tmp_path: Path, action: str
@@ -301,148 +191,16 @@ def test_postrm_forgets_unit_enablement_on_purge_only(
     if action == "remove":
         assert calls == []
     else:
-        enabled = re.findall(
-            r"deb-systemd-helper enable (vonk-forge-[\w.-]+)", POSTINST.read_text()
+        assert sorted(calls) == sorted(
+            f"purge {unit}"
+            for unit in (
+                "vonk-forge-agent.service",
+                "vonk-forge-monitor.service",
+                "vonk-forge-package-helper.socket",
+                "vonk-forge-docker-firewall.service",
+                "vonk-forge-package-rollback.service",
+            )
         )
-        assert enabled
-        assert sorted(calls) == sorted(f"purge {unit}" for unit in enabled)
-
-
-def test_prerm_disables_every_unit_the_package_enables_on_removal() -> None:
-    prerm = PRERM.read_text()
-    postinst = POSTINST.read_text()
-    enabled = set(
-        re.findall(r"deb-systemd-helper enable (vonk-forge-[\w.-]+)", postinst)
-    )
-    assert enabled
-    for unit in enabled:
-        assert f"deb-systemd-helper disable {unit}" in prerm
-
-
-def test_package_manages_the_rootless_podman_user_manager() -> None:
-    postinst = POSTINST.read_text()
-    prerm = PRERM.read_text()
-
-    assert "/usr/bin/loginctl enable-linger vonk-agent" in postinst
-    assert "if [ ! -e /var/lib/systemd/linger/vonk-agent ]; then" in postinst
-    assert "/usr/bin/loginctl disable-linger vonk-agent" in prerm
-
-
-def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure() -> (
-    None
-):
-    postinst = POSTINST.read_text()
-
-    assert "deb-systemd-invoke restart vonk-forge-agent.service" not in postinst
-    helper_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
-    )
-    agent_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
-        helper_restart,
-    )
-    assert helper_restart < agent_restart
-    assert "post_restart_self_test" not in postinst
-    assert "/run/vonk-forge-agent" not in postinst
-    assert "self-test" not in postinst
-    for forbidden in (
-        "verify-readiness",
-        "is-active",
-        "readiness.json",
-        "/usr/bin/sleep",
-        "curl",
-        "wget",
-    ):
-        assert forbidden not in postinst
-
-
-def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
-    postinst = POSTINST.read_text()
-    agent_unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
-    helper_unit = (
-        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
-    ).read_text()
-    agent_timeout = int(
-        next(
-            line.removeprefix("TimeoutStopSec=").removesuffix("s")
-            for line in agent_unit.splitlines()
-            if line.startswith("TimeoutStopSec=")
-        )
-    )
-    helper_timeout = int(
-        next(
-            line.removeprefix("TimeoutStopSec=").removesuffix("s")
-            for line in helper_unit.splitlines()
-            if line.startswith("TimeoutStopSec=")
-        )
-    )
-
-    assert agent_timeout == 30
-    assert helper_timeout == 15
-    assert "RuntimeMaxSec=240s" in postinst
-    assert 'attempts" -lt 1200' in postinst
-    helper_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
-    )
-    agent_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
-        helper_restart,
-    )
-    assert helper_restart < agent_restart
-    assert 240 >= 120 + helper_timeout + agent_timeout + 60
-
-
-def test_package_helper_restart_waits_for_verified_exec_identity() -> None:
-    helper_unit = (
-        ROOT / "packaging/systemd/vonk-forge-package-helper.service"
-    ).read_text()
-    postinst = POSTINST.read_text()
-
-    assert "Type=exec" in helper_unit.splitlines()
-    assert "Type=simple" not in helper_unit.splitlines()
-    assert "ExecStart=/usr/lib/vonk-forge/vonk-agent-helper" in helper_unit.splitlines()
-    assert (
-        "/usr/bin/systemctl --system restart \\\n"
-        "                vonk-forge-package-helper.service"
-    ) in postinst
-    assert '"/proc/$new_helper_pid/exe"' in postinst
-
-
-def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None:
-    postinst = POSTINST.read_text()
-
-    helper_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
-    )
-    running_digest = postinst.index('"/proc/$new_helper_pid/exe"', helper_restart)
-    agent_restart = postinst.index(
-        "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
-        helper_restart,
-    )
-    schedule_call = postinst.index(
-        'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
-    )
-
-    assert helper_restart < running_digest < agent_restart < schedule_call
-
-
-def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
-    postinst = POSTINST.read_text()
-
-    assert "umask 077" in postinst
-    assert "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence" in postinst
-    assert "openssl rand -hex 32" in postinst
-    assert "install -o root -g vonk-agent -m 0640" in postinst
-    assert "ssh_host_" not in postinst
-
-
-def test_agent_uses_package_managed_private_temp_directory() -> None:
-    postinst = POSTINST.read_text()
-    unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
-
-    assert "install -d -o vonk-agent -g vonk-agent -m 0700 \\" in postinst
-    assert "/var/lib/vonk-forge-agent/tmp" in postinst
-    assert "Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp" in unit
 
 
 def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None:
@@ -455,6 +213,15 @@ def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None
         path.chmod(0o755 if name in {"postinst", "postrm", "prerm"} else 0o644)
 
     VERIFY_MODULE._verify_control(control)
+
+    # A maintainer script that differs from its source is refused.
+    original = (control / "postinst").read_bytes()
+    (control / "postinst").write_bytes(original + b"adduser x\n")
+    with pytest.raises(
+        VERIFY_MODULE.VerificationError, match="differs from its source"
+    ):
+        VERIFY_MODULE._verify_control(control)
+    (control / "postinst").write_bytes(original)
 
     (control / "preinst").write_bytes(b"#!/bin/sh\n")
     (control / "preinst").chmod(0o755)
@@ -815,11 +582,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         check=False,
     )
     assert extracted.returncode == 0, extracted.stderr
-    postinst = (control / "postinst").read_text()
     assert not (control / "preinst").exists()
-    assert "python" not in postinst
-    assert "curl" not in postinst
-    assert "wget" not in postinst
     fields = subprocess.run(
         ["/usr/bin/dpkg-deb", "--field", first_deb, "Depends"],
         capture_output=True,
@@ -999,14 +762,6 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     )
     assert "ReadWritePaths=/usr/share" not in helper_unit.splitlines()
     assert "ReadWritePaths=/usr" not in helper_unit.splitlines()
-    assert "usermod --add-subuids" in postinst
-    assert "usermod --add-subgids" in postinst
-    assert "SUB_UID_MIN" in postinst
-    assert "SUB_GID_MIN" in postinst
-    assert "sed -i '/^vonk-agent:/d' /etc/subuid" not in postinst
-    assert "sed -i '/^vonk-agent:/d' /etc/subgid" not in postinst
-    assert "supervisor" not in postinst
-    assert "/var/lib/vonk-forge/slots" not in postinst
     assert (
         "ignore_chown_errors"
         not in (payload / "etc/vonk-forge-agent/containers-storage.conf").read_text()

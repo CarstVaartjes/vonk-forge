@@ -41,29 +41,37 @@ and proceeds; maintainer scripts do not refuse a downgrade.
 The old helper runs `dpkg --install --force-confold` on the custodied
 candidate inside its own unit sandbox. The candidate has no `preinst`, so
 nothing arms before unpack. The old package's `prerm upgrade` and `postrm
-upgrade` do nothing. The candidate's `postinst configure` converges the
+upgrade` do nothing. The candidate's `postinst` is a shim that execs its own
+helper binary (`vonk-agent-helper --package-hook`, `package_hooks`), inside the
+old helper's sandbox. `configure` converges the
 account, directories, machine evidence and unit enablement, retires any
 forward-capsule files an older package staged (the old capsule unit, its
-drop-ins, its wants link; they are not dpkg-owned), reloads systemd, and
+drop-ins, its wants link; they are not dpkg-owned), reloads systemd (a failed reload fails the configure), and
 schedules the finisher. A `postinst` failure leaves the package `iF`, the
 install fails, and the helper moves the transaction to `activation_failed`, so
 the watchdog restores at once.
 
 ## 4. Finisher
 
-On every upgrade `postinst` starts the transient
+On every upgrade `configure` starts the transient
 `vonk-forge-package-helper-upgrade-finish.service`, run by PID 1 so it outlives
 the helper it restarts. It waits for the dpkg process to exit, stops the agent
 and monitor, restarts the helper, proves from `/proc/<pid>/exe` that the
 running helper is the candidate's, and then restarts the agent and monitor.
 No agent talks to a helper of another release: the old agent stops before the
-helper restarts, and the new one starts after the helper is proven. Whatever
-happens in between, the finisher's exit starts the agent again; it never stays
-stopped. Docker containers belong to dockerd and are untouched.
+helper restarts, and the new one starts after the helper is proven. If the
+helper restart or its proof fails while the candidate's activation is armed,
+the agent stays stopped, so nothing can acknowledge the candidate, and the
+watchdog restores the source at the deadline. With no armed candidate (an
+installer upgrade) the agent is started again on any failure, and the
+transient unit carries an `ExecStopPost` that starts it whenever the finisher
+ends, a kill by `RuntimeMaxSec` (600 s: 120 s for dpkg, then at most six
+commands of 60 s) included. Docker containers belong to dockerd and are untouched.
 
-`postinst` reads the installed helper's digest once and hands it to the
-finisher; the `/proc/<pid>/exe` comparison is the only proof of the running
-helper (the agent's own identity gate covers the agent). Nothing else is
+The reference for the `/proc/<pid>/exe` comparison is the candidate's ingress
+digest, read from the armed rollback transaction (`candidate_helper_sha256`);
+the installed file is not hashed again. The comparison is the only proof of the
+running helper (the agent's own identity gate covers the agent). Nothing else is
 hashed or re-validated here: there is no pending fence, no receipt, no
 `vonk-agent --version` check and no unit-text check. A `helper-upgrade.pending`
 or `helper-upgrade.receipt` an older package left is never read; the helper's

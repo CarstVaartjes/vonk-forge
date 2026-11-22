@@ -42,8 +42,8 @@ The package's `prerm` stops and disables `vonk-forge-agent`,
 account. Purge deletes the package files (`/usr/lib/vonk-forge`, the unit files
 under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 `/usr/share/doc/vonk-forge-agent`) and the package conffile
-`/etc/vonk-forge-agent/containers-storage.conf`. The package has no `postrm`, so
-everything below is cleaned up by hand.
+`/etc/vonk-forge-agent/containers-storage.conf`. Its `postrm` only forgets the
+units' enablement state on purge, so everything below is cleaned up by hand.
 
 If a package upgrade is mid-recovery, `dpkg --purge` normally retires that
 recovery intent first (an explicit removal is the latest request); if it refuses,

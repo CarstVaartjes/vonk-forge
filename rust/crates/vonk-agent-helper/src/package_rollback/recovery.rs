@@ -216,7 +216,7 @@ pub(super) fn prove_running_process(service: &str, expected_digest: &str) -> Res
     )
 }
 
-fn digest_process(pid: u32) -> Result<String, String> {
+pub(crate) fn digest_process(pid: u32) -> Result<String, String> {
     // /proc/PID/exe is a kernel-owned symlink to the actual running executable.
     let mut process = File::open(format!("/proc/{pid}/exe")).map_err(|e| e.to_string())?;
     digest_file(&mut process)
