@@ -18,7 +18,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import AgentCertificate
 from vonk_control.run_admission import RunAdmissionService, require_admissible
 
-from .test_agent_api import NODE_A, Jobs, agent_headers, make_agent_system
+from .agent_api_support import NODE_A, Jobs, agent_headers, make_agent_system
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_run_admission import setup
 from .wire_probes import prebuilt_probe

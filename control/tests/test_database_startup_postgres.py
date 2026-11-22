@@ -394,7 +394,7 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
     from vonk_control.inventory.items import inventory_items
     from vonk_control.models import AgentNode, NodeInventoryItemsSnapshot
 
-    from .test_agent_api import NODE_A, agent_headers, make_agent_system
+    from .agent_api_support import NODE_A, agent_headers, make_agent_system
 
     client, services, _, _ = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
@@ -446,8 +446,8 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
     from vonk_agent_protocol.inventory import InventoryRequest
     from vonk_control.inventory.repository import InventoryRepository
 
+    from .agent_api_support import NODE_A, agent_headers, make_agent_system
     from .test_agent_acceptance_postgres import _inventory
-    from .test_agent_api import NODE_A, agent_headers, make_agent_system
 
     # Every injected field is optional evidence declared by the single wire
     # contract; no parser or admission fallback is used for the damaged bytes.

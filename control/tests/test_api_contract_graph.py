@@ -13,8 +13,8 @@ from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.distribution import DistributionService, MemoryObjectSource
 from vonk_control.jobs.queue import JobService
 
-from .test_agent_api import NODE_A, agent_headers
-from .test_agent_api import agent_system as _agent_system
+from .agent_api_support import NODE_A, agent_headers
+from .agent_api_support import agent_system as _agent_system
 from .test_distribution import _assignment
 
 agent_system = _agent_system

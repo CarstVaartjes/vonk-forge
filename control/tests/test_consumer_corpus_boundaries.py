@@ -46,6 +46,7 @@ from cluster_profiles.generated_control.models.job_detail_response import (
     JobDetailResponse as GeneratedJobDetailResponse,
 )
 
+from .agent_api_support import NODE_A, agent_headers, make_agent_system, parent
 from .cross_language_consumer_corpus import (
     FENCE,
     MODELS,
@@ -57,7 +58,6 @@ from .cross_language_consumer_corpus import (
     job_envelope,
 )
 from .recipe_stop_fixtures import recipe_stop_payload
-from .test_agent_api import NODE_A, agent_headers, make_agent_system, parent
 from .test_agent_restart_recovery_wire_bridge import _certificate_files
 from .test_operation_api import EnqueuedJob, Jobs, _client
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
