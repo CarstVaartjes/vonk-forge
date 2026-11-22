@@ -61,13 +61,13 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.workload_intent import allocate_workload_intent
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     MutableClock,
     finalized_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
+from .runtime_identity_support import claim_agent
 from .test_recipe_operations import NOW
 
 _REASON = "job output delivery remains unobserved"

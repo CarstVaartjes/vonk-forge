@@ -30,16 +30,16 @@ from vonk_control.recipe_operations import (
     RecipeRetryLater,
 )
 
-from .runtime_identity_support import claim_agent
-from .test_api import Jobs
-from .test_artifact_job_api import JOB_ID, REQUEST_ID, _TransferService
-from .test_artifact_jobs import (
-    _agent_queue,
+from .artifact_jobs_support import (
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
+from .runtime_identity_support import claim_agent
+from .test_api import Jobs
+from .test_artifact_job_api import JOB_ID, REQUEST_ID, _TransferService
+from .test_artifact_jobs_part1 import _agent_queue
 from .test_operator_acceptance_postgres import _api
 
 

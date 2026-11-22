@@ -340,7 +340,7 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
 def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     tmp_path: Path,
 ) -> None:
-    from .test_artifact_jobs import artifact_create_request, running_artifact_service
+    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
@@ -482,7 +482,7 @@ def test_capacity_unknown_releases_upload_and_fresh_draft_is_admitted(tmp_path):
     """Catches translating storage shortage into a conflict at the HTTP boundary."""
     from vonk_control.artifact_blob_store import ArtifactBlobStore
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         artifact_create_request,
         create_artifact_job,
         running_artifact_service,
@@ -547,7 +547,7 @@ def test_library_upload_reobserves_capacity_after_releasing_holds(
     from vonk_control.artifact_jobs import inputs
     from vonk_control.bounded_retry import bounded_attempts
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         artifact_create_request,
         create_artifact_job,
         running_artifact_service,

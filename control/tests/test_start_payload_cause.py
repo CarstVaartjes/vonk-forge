@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 from vonk_control.failure_classification import error_detail, is_definite
 from vonk_control.models import AgentNodeContact, Job, RecipeRun
 
-from .test_artifact_jobs import _configure_artifact_recipe
+from .artifact_jobs_support import _configure_artifact_recipe
 from .test_recipe_operations import installed_recipe, setup_services
 
 

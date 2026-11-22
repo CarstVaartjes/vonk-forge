@@ -18,9 +18,9 @@ from vonk_control.models import FleetProfileApplication, Job, RecipeRun, RunNode
 from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
 from vonk_control.recipe_routes import RecipeRouteService
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, build_world
-from .test_artifact_jobs import _configure_artifact_recipe
 from .test_profile_job_member import _ACTIVATION, _load
 
 

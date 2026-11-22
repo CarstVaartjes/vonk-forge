@@ -17,7 +17,7 @@ def test_precommit_retry_refuses_changed_execution_effects(
     method, tmp_path, monkeypatch
 ):
     """Catch a retry that quietly substitutes another image or endpoint port."""
-    from .test_artifact_jobs import _configure_artifact_recipe
+    from .artifact_jobs_support import _configure_artifact_recipe
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,

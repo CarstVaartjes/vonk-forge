@@ -6,7 +6,7 @@ import pytest
 from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError
 from vonk_control.artifact_jobs import ArtifactJobInvalid
 
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     _mapping,
     artifact_create_request,
     create_artifact_job,

@@ -10,7 +10,7 @@ from vonk_agent_protocol import AgentResultState
 from vonk_control import artifact_job_states
 from vonk_control.models import ArtifactJob, ArtifactJobFile, RecipeRun
 
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,

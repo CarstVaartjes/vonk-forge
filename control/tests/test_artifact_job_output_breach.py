@@ -31,12 +31,12 @@ from vonk_control.artifact_job_evidence import (
     OutputContractBreach,
 )
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     MutableClock,
     running_artifact_service,
     submitted_artifact_job,
 )
+from .runtime_identity_support import claim_agent
 from .test_recipe_operations import NOW
 
 PNG = "image/png"

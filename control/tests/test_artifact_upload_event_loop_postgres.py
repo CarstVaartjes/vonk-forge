@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import pytest
 from vonk_control.artifact_jobs.contracts import ArtifactJobView
 
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,

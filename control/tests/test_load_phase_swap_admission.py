@@ -622,7 +622,7 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     each job loads again while they run; two such runs counted on the same
     free swap.
     """
-    from .test_artifact_jobs import _configure_artifact_recipe
+    from .artifact_jobs_support import _configure_artifact_recipe
     from .test_recipe_operations import NOW, installed_recipe, setup_services
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(

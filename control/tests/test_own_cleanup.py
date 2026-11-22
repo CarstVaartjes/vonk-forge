@@ -651,7 +651,7 @@ def _lost_job_run(tmp_path):
     operator: its container may remain, so the run's Stop must remove it."""
     from vonk_control import artifact_job_states as ajs
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         MutableClock,
         running_artifact_service,
         submitted_artifact_job,
