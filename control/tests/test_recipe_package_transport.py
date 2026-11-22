@@ -6,6 +6,7 @@ import io
 import json
 import os
 import tarfile
+import tracemalloc
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -533,6 +534,66 @@ def test_production_reader_can_hold_an_exact_release_tag(
         ),
     ]
     client.close()
+
+
+def _ingest(tmp_path: Path, library: bytes) -> None:
+    path = tmp_path / "recipe-library.tar"
+    path.write_bytes(library)
+    client = _client(_release_for(b"{}", b""), tmp_path / "packages")
+    try:
+        client._ingest_library(f"v{MAJOR}.1.0", path)
+    finally:
+        client.close()
+
+
+def _ingest_refused_with_peak(
+    tmp_path: Path, library: bytes
+) -> tuple[int, RecipePackageError]:
+    tracemalloc.start()
+    try:
+        _ingest(tmp_path, library)
+    except RecipePackageError as refusal:
+        return tracemalloc.get_traced_memory()[1], refusal
+    finally:
+        tracemalloc.stop()
+    raise AssertionError("the library was not refused")
+
+
+def _extended_header_chain(count: int) -> bytes:
+    link = tarfile.TarInfo("././@LongLink")
+    link.type, link.size = tarfile.GNUTYPE_LONGNAME, 2
+    return (link.tobuf(tarfile.GNU_FORMAT) + b"a\0".ljust(512, b"\0")) * count
+
+
+def test_library_tar_with_an_oversized_extended_header_is_refused_unread(
+    tmp_path: Path,
+) -> None:
+    info = tarfile.TarInfo("a.txt")
+    info.pax_headers = {"comment": "x" * 16_000_000}
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        tar.addfile(info)
+    library = stream.getvalue()
+    peak, refusal = _ingest_refused_with_peak(tmp_path, library)
+    assert refusal.code is RecipePackageCode.RESPONSE_INVALID
+    assert peak < 4_000_000  # the header body was never read into memory
+
+
+def test_library_tar_with_a_chain_of_extended_headers_is_refused(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RecipePackageError) as raised:
+        _ingest(tmp_path, _extended_header_chain(2000))
+    assert raised.value.code is RecipePackageCode.RESPONSE_INVALID
+
+
+def test_library_tar_keeps_reading_a_long_flat_name(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index, _, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    release.members["a" * 119 + ".txt"] = b"x"
+    _ingest(tmp_path, release.library)
 
 
 def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
