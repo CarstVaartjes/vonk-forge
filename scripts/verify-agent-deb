@@ -254,28 +254,14 @@ def _verify_control(control: Path) -> None:
         "deb-systemd-helper enable vonk-forge-agent.service",
         "daemon-reload",
         "schedule_permanent_helper_restart",
-        "activate_permanent_helper_unit",
-        "helper-upgrade.pending",
-        "helper-upgrade.receipt",
-        "agent_sha256=$expected_agent_digest",
-        "schema_version=2",
-        "package_sha256=[0-9a-f]{64}",
-        "intent_sha256=[0-9a-f]{64}",
         '"/proc/$new_helper_pid/exe"',
-        "helper_sha256=$expected_helper_digest",
-        "installed_helper_digest",
-        "confirmed_helper_digest",
-        "/usr/bin/sync -f /var/lib/vonk-forge",
         "vonk-forge-agent.service vonk-forge-monitor.service >/dev/null",
         "vonk-forge-package-helper-upgrade-finish.service",
         "RuntimeMaxSec=240s",
         "/proc/$wait_pid/stat",
-        "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
     ):
         if required not in postinst:
             raise VerificationError("postinst lifecycle is incomplete")
-    if "schema_version=1" in postinst:
-        raise VerificationError("postinst accepts obsolete helper evidence")
     if any(
         forbidden in postinst
         for forbidden in (
@@ -292,16 +278,6 @@ def _verify_control(control: Path) -> None:
         raise VerificationError("postinst contains obsolete agent lifecycle state")
     if "/usr/bin/python" in postinst or "python3" in postinst:
         raise VerificationError("postinst has an undeclared interpreter dependency")
-    prerm = (control / "prerm").read_text(encoding="utf-8")
-    for required in (
-        "helper-upgrade.pending",
-        "helper-upgrade.receipt",
-        "safe_pending",
-        "safe_receipt",
-        "/usr/bin/sync -f /var/lib/vonk-forge",
-    ):
-        if required not in prerm:
-            raise VerificationError("prerm helper evidence cleanup is incomplete")
 
 
 def _verify_payload(payload: Path, control: Path, architecture: str) -> None:

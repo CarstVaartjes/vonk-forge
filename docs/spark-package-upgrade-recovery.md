@@ -61,6 +61,14 @@ helper restarts, and the new one starts after the helper is proven. Whatever
 happens in between, the finisher's exit starts the agent again; it never stays
 stopped. Docker containers belong to dockerd and are untouched.
 
+`postinst` reads the installed helper's digest once and hands it to the
+finisher; the `/proc/<pid>/exe` comparison is the only proof of the running
+helper (the agent's own identity gate covers the agent). Nothing else is
+hashed or re-validated here: there is no pending fence, no receipt, no
+`vonk-agent --version` check and no unit-text check. A `helper-upgrade.pending`
+or `helper-upgrade.receipt` an older package left is never read; the helper's
+periodic store-retention pass removes it.
+
 ## 5. Acknowledgement or deadline restore
 
 The new agent contacts the Controller, which issues the signed fixed

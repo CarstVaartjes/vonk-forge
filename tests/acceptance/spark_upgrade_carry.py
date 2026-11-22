@@ -64,6 +64,7 @@ from tests.acceptance.ephemeral import (
     test_mode,
 )
 from tests.acceptance.runtime import (
+    TIMINGS,
     AcceptanceError,
     assert_compose_services_healthy,
 )
@@ -860,30 +861,32 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def observe(self) -> dict[str, object]:
         if self.control is None or self.bundle is None or self.temporary_root is None:
             raise LifecycleError("previous-release controller is not ready")
-        grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
-        del grant_id
-        try:
-            _run_spark_bootstrap(
-                self._spark_bootstrap_url(self.baseline),
-                cwd=self.temporary_root,
-                environment=self._release_environment(self.baseline),
-                enrollment_url=enrollment_url,
-                ca_sha256=ca_sha256,
-                pairing_token=pairing_token,
+        with TIMINGS.phase("install"):
+            grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
+            del grant_id
+            try:
+                _run_spark_bootstrap(
+                    self._spark_bootstrap_url(self.baseline),
+                    cwd=self.temporary_root,
+                    environment=self._release_environment(self.baseline),
+                    enrollment_url=enrollment_url,
+                    ca_sha256=ca_sha256,
+                    pairing_token=pairing_token,
+                )
+            except AcceptanceError as error:
+                raise self._installation_failure(
+                    "previous-release Spark installation", error
+                ) from error
+            finally:
+                del pairing_token
+            self.agent_installed = True
+            self._prepare_podman_apparmor_profile()
+            identity = self._wait_for_agent_identity(
+                package_version=self.baseline.package_version, timeout=180
             )
-        except AcceptanceError as error:
-            raise self._installation_failure(
-                "previous-release Spark installation", error
-            ) from error
-        finally:
-            del pairing_token
-        self.agent_installed = True
-        self._prepare_podman_apparmor_profile()
-        identity = self._wait_for_agent_identity(
-            package_version=self.baseline.package_version, timeout=180
-        )
         node_id = str(identity["node_id"])
-        canary = self._run_synthetic_canary(node_id, carry=self._carry)
+        with TIMINGS.phase("canary"):
+            canary = self._run_synthetic_canary(node_id, carry=self._carry)
         self._after_canary(node_id)
         refused = self._require_no_result_refusals()
         return {
@@ -1623,23 +1626,24 @@ def main() -> int:
     workspace = Path(os.environ.get("VONK_ACCEPTANCE_WORKSPACE", "."))
     try:
         inputs = workspace / "upgrade-carry-releases"
-        candidate = resolve_release(
-            origin, arguments.channel, arguments.candidate_generation, inputs
-        )
-        # Recipe refresh installs the candidate itself: nothing is upgraded.
-        baseline = (
-            candidate
-            if refresh
-            else resolve_release(
-                origin,
-                arguments.channel,
-                arguments.candidate_generation
-                if test_mode()
-                else arguments.baseline_generation,
-                inputs,
-                acceptance_baseline=test_mode(),
+        with TIMINGS.phase("resolve-releases"):
+            candidate = resolve_release(
+                origin, arguments.channel, arguments.candidate_generation, inputs
             )
-        )
+            # Recipe refresh installs the candidate itself: nothing is upgraded.
+            baseline = (
+                candidate
+                if refresh
+                else resolve_release(
+                    origin,
+                    arguments.channel,
+                    arguments.candidate_generation
+                    if test_mode()
+                    else arguments.baseline_generation,
+                    inputs,
+                    acceptance_baseline=test_mode(),
+                )
+            )
         lane = argparse.Namespace(
             channel=arguments.channel,
             generation=candidate.generation,
@@ -1676,6 +1680,11 @@ def main() -> int:
             },
         )
         return 1
+    finally:
+        # The harness's own steps (carry, refresh) ran inside the canary.
+        for step in getattr(getattr(lifecycle_run, "evidence", None), "phases", []):
+            TIMINGS.rows.append((f"step: {step['phase']}", step["seconds"]))
+        TIMINGS.emit(f"Spark {arguments.scenario}")
     _atomic_write(
         arguments.output,
         {"schema_version": 1, "status": "passed", "proof": proof},
