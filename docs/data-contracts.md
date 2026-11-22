@@ -108,17 +108,17 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/components/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
 | `control/web/src/components/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
 | `control/web/src/components/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
-| `control/web/src/components/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
-| `control/web/src/components/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library-workcell.tsx` | `LibraryWorkcellFilters` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
+| `control/web/src/components/library/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-workcell.tsx` | `LibraryWorkcellFilters` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/sort-header.tsx` | `Sort` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/toast.tsx` | `ToastItem` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/components/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |

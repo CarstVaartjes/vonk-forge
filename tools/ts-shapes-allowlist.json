@@ -153,67 +153,67 @@
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/library-availability-feedback.tsx",
+      "file": "control/web/src/components/library/library-availability-feedback.tsx",
       "type": "AvailabilityFailure",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-availability-progress.tsx",
+      "file": "control/web/src/components/library/library-availability-progress.tsx",
       "type": "AvailabilityProgress",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-models-view.tsx",
+      "file": "control/web/src/components/library/library-models-view.tsx",
       "type": "LibraryModelsViewProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "AssignmentDraft",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "FleetEntry",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "PendingProfileLoad",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "ProfileDraft",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-recipe-files.ts",
+      "file": "control/web/src/components/library/library-recipe-files.ts",
       "type": "SelectedRecipeFiles",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-setup.tsx",
+      "file": "control/web/src/components/library/library-setup.tsx",
       "type": "FacetOption",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-setup.tsx",
+      "file": "control/web/src/components/library/library-setup.tsx",
       "type": "Option",
       "reason": "UI-only select option (value, label, disabled) built from generated library types; not an API document"
     },
     {
-      "file": "control/web/src/components/library-technical-details.tsx",
+      "file": "control/web/src/components/library/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-workcell.tsx",
+      "file": "control/web/src/components/library/library-workcell.tsx",
       "type": "LibraryRecipeRecord",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-workcell.tsx",
+      "file": "control/web/src/components/library/library-workcell.tsx",
       "type": "LibraryWorkcellFilters",
       "reason": "UI-only state or form draft; never serialized to the API"
     },

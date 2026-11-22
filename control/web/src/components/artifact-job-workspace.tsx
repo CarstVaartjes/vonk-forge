@@ -34,7 +34,7 @@ import {
 } from "../lib/artifact-job";
 
 import { formatBytes } from "../lib/fleet";
-import { humanizeIdentifier, TechnicalDetails } from "./library-technical-details";
+import { humanizeIdentifier, TechnicalDetails } from "./library/library-technical-details";
 import { StatusPill } from "./status-pill";
 import { Time } from "./time";
 import { hashArtifactBlob } from "./artifact-hash";

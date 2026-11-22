@@ -18,11 +18,14 @@ import { Time } from "../components/time";
 import { formatDate } from "../lib/time";
 import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
-import { LibraryBrowser } from "../components/library-browser";
-import type { LibrarySubview } from "../components/library-browser";
-import { LibraryNodeNamesProvider } from "../components/library-node-names";
-import { LibraryVocabularyProvider } from "../components/library-vocabulary";
-import { libraryFiltersFromSearch, libraryRecencySince } from "../components/library-workcell";
+import { LibraryBrowser } from "../components/library/library-browser";
+import type { LibrarySubview } from "../components/library/library-browser";
+import { LibraryNodeNamesProvider } from "../components/library/library-node-names";
+import { LibraryVocabularyProvider } from "../components/library/library-vocabulary";
+import {
+  libraryFiltersFromSearch,
+  libraryRecencySince,
+} from "../components/library/library-workcell";
 import { nodeDisplayName } from "../lib/fleet";
 import { libraryRoute, modelKey } from "../lib/library-route";
 import { LibraryPath, type LibraryRoute } from "../lib/library-route";

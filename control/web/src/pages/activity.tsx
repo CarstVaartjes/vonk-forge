@@ -9,11 +9,11 @@ import { ApiError } from "../api/errors";
 import {
   availabilityProgress,
   LibraryAvailabilityProgress,
-} from "../components/library-availability-progress";
+} from "../components/library/library-availability-progress";
 import {
   availabilityFailure,
   LibraryAvailabilityFeedback,
-} from "../components/library-availability-feedback";
+} from "../components/library/library-availability-feedback";
 import { LifecycleState } from "../api/vocabulary.generated";
 
 /** A wait for a person. */
