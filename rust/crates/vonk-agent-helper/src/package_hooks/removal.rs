@@ -15,6 +15,14 @@ pub(super) fn run(host: &mut impl Host) {
     for unit in UNITS.iter().filter(|unit| unit.stopped_on_removal) {
         best_effort(host, INVOKE, &["stop", unit.name]);
     }
+    // Removal is the newest request, so it supersedes an armed upgrade. Stop
+    // the watchdog first: with no process left that could restore, retiring
+    // the transaction cannot race it (its lock is free), and a reboot finds no
+    // transaction. If the stop failed, the watchdog still ends at its next
+    // check, which finds no transaction.
+    if let Err(error) = host.retire_rollback() {
+        eprintln!("vonk-forge-agent: {error}");
+    }
     for unit in UNITS.iter().filter(|unit| unit.enablement.is_some()) {
         best_effort(host, ENABLE, &["disable", unit.name]);
     }

@@ -17,6 +17,7 @@ struct Fake {
     dpkg_alive: bool,
     dpkg_exits_after: u32,
     armed: Option<String>,
+    rollback_pending: bool,
     helper_exe: String,
     active: Vec<String>,
     show: BTreeMap<String, String>,
@@ -186,6 +187,11 @@ impl Host for Fake {
         (installed_version == "2.0")
             .then(|| self.armed.clone())
             .flatten()
+    }
+    fn retire_rollback(&mut self) -> Result<(), String> {
+        self.commands.push("retire-rollback".into());
+        self.rollback_pending = false;
+        Ok(())
     }
     fn pause(&mut self) {
         if self.dpkg_exits_after > 0 {
@@ -500,10 +506,30 @@ fn removal_stops_the_consumers_first_and_disables_exactly_what_install_enabled()
     assert!(fake.ran("stop vonk-forge-docker-firewall.service"));
     assert!(fake.ran("stop vonk-forge-package-helper-upgrade-finish.service"));
     assert!(fake.ran("loginctl disable-linger vonk-agent"));
+}
+
+#[test]
+fn removal_stops_the_watchdog_before_retiring_the_armed_transaction() {
+    let mut fake = Fake::machine();
+    fake.rollback_pending = true;
+    remove(&mut fake);
     assert!(
-        !fake.ran("stop vonk-forge-package-rollback.service"),
-        "the watchdog keeps its own deadline in this step"
+        fake.position("deb-systemd-invoke stop vonk-forge-package-rollback.service")
+            < fake.position("retire-rollback")
     );
+    assert!(!fake.rollback_pending);
+}
+
+#[test]
+fn an_upgrade_never_retires_the_transaction() {
+    let mut fake = Fake::machine();
+    fake.rollback_pending = true;
+    run_arguments(
+        &["prerm".into(), "upgrade".into(), "0.2.0".into()],
+        &mut fake,
+    )
+    .unwrap();
+    assert!(fake.commands.is_empty() && fake.rollback_pending);
 }
 
 #[test]

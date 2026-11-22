@@ -56,12 +56,11 @@ pub(super) const UNITS: [Unit; 6] = [
         enablement: Some(Enablement::WhenFirewallConfigured),
         stopped_on_removal: true,
     },
-    // The rollback watchdog is not stopped by removal yet: it keeps its own
-    // deadline.
+    // Last: nothing can arm a transaction once the helper is stopped.
     Unit {
         name: "vonk-forge-package-rollback.service",
         enablement: Some(Enablement::BootRecovery),
-        stopped_on_removal: false,
+        stopped_on_removal: true,
     },
 ];
 

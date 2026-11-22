@@ -357,3 +357,50 @@ fn acknowledgement_requires_the_candidate_installed() {
         assert_eq!(phase, Phase::Armed);
     }
 }
+
+fn tempdir_store(root: &tempfile::TempDir) -> Store {
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    Store {
+        root: root.path().join("rollback"),
+        owner: fs::metadata(root.path()).unwrap().uid(),
+    }
+}
+
+#[test]
+fn retiring_an_armed_transaction_ends_the_watchdog_without_a_restore() {
+    let temporary = tempfile::tempdir().unwrap();
+    let store = tempdir_store(&temporary);
+    drop(store.lock().unwrap());
+    store.write(&transaction()).unwrap();
+    store.retire().unwrap();
+    assert!(!store.root.join("transaction.json").exists());
+    assert!(
+        !temporary
+            .path()
+            .join("package-activation.receipt.json")
+            .exists()
+    );
+    // Past its deadline the transaction would have been restored; now the
+    // watchdog finds no authority and ends.
+    assert!(store.watch().is_ok());
+}
+
+#[test]
+fn retiring_leaves_finished_and_missing_transactions_alone() {
+    let temporary = tempfile::tempdir().unwrap();
+    let store = tempdir_store(&temporary);
+    store.retire().unwrap();
+    assert!(!store.root.exists(), "no store is created");
+    drop(store.lock().unwrap());
+    let mut tx = transaction();
+    tx.phase = Phase::Acknowledged;
+    store.write(&tx).unwrap();
+    store.retire().unwrap();
+    assert_eq!(store.read().unwrap().phase, Phase::Acknowledged);
+    assert!(
+        temporary
+            .path()
+            .join("package-activation.receipt.json")
+            .exists()
+    );
+}
