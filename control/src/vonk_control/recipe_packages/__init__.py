@@ -360,6 +360,7 @@ class RecipePackageClient:
                 self._remember_refusal(resolved[2], error)
                 raise
         except (httpx2.HTTPError, OSError) as error:
+            self._listing_etag = None  # list again next cycle and retry
             persisted = self._offline_snapshot()
             if persisted is not None:
                 return persisted
@@ -371,6 +372,7 @@ class RecipePackageClient:
             # verified generation; an integrity failure is always surfaced,
             # and the generation held before it keeps serving afterwards.
             if error.code == RecipePackageCode.UNAVAILABLE:
+                self._listing_etag = None  # an unreachable download is retried
                 persisted = self._offline_snapshot()
                 if persisted is not None:
                     return persisted
