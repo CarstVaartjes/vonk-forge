@@ -72,7 +72,6 @@ from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.pki import IssuedCertificate
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables
@@ -692,37 +691,35 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
         NODE_ID,
         Clock,
         RecordingAuthority,
-        _fixture_certificate,
         csr,
         enroll,
     )
 
-    class PendingAuthority(RecordingAuthority):
+    class LostResponseAuthority(RecordingAuthority):
+        """The journal row is begun, then the signer dies before its result."""
+
         def renew_node(self, node_id, public_key_pem, now, *, request):
             self.renew_request_ids.append(request.request_id)
             self._begin(request)
-            raise StepCAIssuancePending("certificate.issuance_in_progress")
+            raise OSError("signer died after the claim commit")
 
     sessions = _sessions(engine)
     clock = Clock()
-    authority = PendingAuthority()
+    authority = LostResponseAuthority()
     service = EnrollmentService(sessions, authority, clock=clock)
     source = enroll(service)
     request = csr()
-    for _poll in range(3):
-        assert not isinstance(
-            service.renew(NODE_ID, source.serial, request), IssuedCertificate
-        )
-        clock.advance(seconds=200)
-
+    assert not isinstance(
+        service.renew(NODE_ID, source.serial, request), IssuedCertificate
+    )
+    clock.advance(seconds=200)
     service.reconcile_revocations()
 
     with sessions() as session:
         intent = session.get(AgentCertificateRotation, NODE_ID)
         assert intent is not None
         binding = CertificateIssuanceBinding.model_validate(intent.provider_request)
-        pending_csr = intent.csr_pem.encode("ascii")
-    authority._finish(binding, _fixture_certificate(NODE_ID, pending_csr, binding))
+    # The next request replays the begun journal row unaided.
     renewed = service.renew(NODE_ID, source.serial, request)
     assert isinstance(renewed, IssuedCertificate)
     assert set(authority.renew_request_ids) == {binding.request_id}

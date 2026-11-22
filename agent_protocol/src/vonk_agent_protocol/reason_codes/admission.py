@@ -18,7 +18,6 @@ class CertificateCode(WireEnum):
     BINDING_REFUSED = "certificate.binding_refused"
     SOURCE_REVOKED = "certificate.source_revoked"
     SOURCE_IDENTITY_REFUSED = "certificate.source_identity_refused"
-    ISSUANCE_IN_PROGRESS = "certificate.issuance_in_progress"
     ISSUANCE_UNAVAILABLE = "certificate.issuance_unavailable"
     REQUEST_BINDING_MISMATCH = "certificate.request_binding_mismatch"
     SERIAL_ALREADY_RESERVED = "certificate.serial_already_reserved"
