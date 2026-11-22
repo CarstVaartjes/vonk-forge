@@ -92,6 +92,9 @@ fn unused_helper_records_leave_without_another_request_but_live_owners_stay() {
     );
     let exit = file(data, "job-exits/completed.json");
     let replay = file(data, "helper/requests/expired-request");
+    // The retired forward capsule's state is unused scratch now.
+    let capsule = file(data, "package-upgrade/intent");
+    let capsule_status = file(data, "package-upgrade.status");
     let scratch = file(data, "gpu-clock/.interrupted.tmp");
     let checkpoint = file(
         data,
@@ -124,6 +127,7 @@ fn unused_helper_records_leave_without_another_request_but_live_owners_stay() {
         assert!(path.exists(), "{} was in use", path.display());
     }
     assert!(!exit.exists() && !replay.exists() && !scratch.exists() && !damaged.exists());
+    assert!(!capsule.exists() && !capsule_status.exists());
     // A failed inventory is unknown. Once it recovers, the same pass collects.
     let compile_cache = file(data, "compile-cache/unused/data/kernel");
     fs::set_permissions(

@@ -7,12 +7,15 @@ throwaway release key so baseline and candidates share one key. Its own helper
 runs under its own units and sandbox and receives signed grants on its real
 socket; its own rollback watchdog is the only recovery under test.
 
-The candidates come from this tree's package. The fault candidates ship no
-preinst, so no forward recovery capsule can arm: the capsule's intent and its
-arming breadcrumbs are watched throughout and must never appear. Each fault
-holds dpkg in its payload extraction (a pass-through dpkg-deb on dpkg's PATH),
-then kills the helper's cgroup, dpkg alone, or every package unit (the reboot
-stand-in). A runner cannot reboot inside a job, so that stand-in kills and
+The candidates come from this tree's package, which ships no preinst, so no
+forward recovery capsule can arm: the capsule's intent and its arming
+breadcrumbs are watched throughout and must never appear. A last case starts
+from the staged files a promoted package's capsule leaves (none of them
+dpkg-owned) and asserts the candidate retires them. Each fault holds dpkg in
+its payload extraction or its postinst (a pass-through dpkg-deb on dpkg's PATH,
+or a held configure), then kills the helper's cgroup, dpkg alone, or every
+package unit (the reboot stand-in). The helper-cgroup fault also starts the
+agent while its loaded ExecCondition still names the removed runner. A runner cannot reboot inside a job, so that stand-in kills and
 stops the package's units, waits past the activation deadline and starts the
 units a boot starts; a kernel boot and unsynced writes are not reproduced.
 No Controller or GPU acceptance is claimed.
@@ -55,6 +58,33 @@ HOLD_CONFIGURE = Path("/run/vonk-transition-hold-configure")
 HOLD_WRAPPER = Path("/usr/local/sbin/dpkg-deb")
 # The probe runs as the agent account, which cannot traverse a build workspace.
 PROBE = Path("/usr/local/bin/vonk-transition-grant-probe")
+UNITS = Path("/lib/systemd/system")
+# What the promoted package's capsule stages outside dpkg's ownership, and
+# the package-owned recovery files a candidate without a capsule drops.
+STAGED_CAPSULE = {
+    UNITS / "vonk-forge-package-upgrade-recover-capsule.service": (
+        "[Service]\nType=oneshot\nExecStart=/bin/true\n[Install]\n"
+        "WantedBy=multi-user.target\n"
+    ),
+    UNITS / "vonk-forge-agent.service.d/10-package-upgrade-capsule.conf": (
+        "[Service]\nExecCondition=+/var/lib/vonk-forge/package-upgrade/"
+        "recovery-capsule/runner allow-agent-start\n"
+    ),
+    UNITS / "vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf": (
+        "[Unit]\nConditionPathExists=!/var/lib/vonk-forge/package-upgrade/intent\n"
+    ),
+    UNITS / "vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf": (
+        "[Unit]\nDescription=Vonk Forge privileged agent-helper socket\n"
+    ),
+}
+STAGED_WANTS = (
+    UNITS / "multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service"
+)
+RETIRED_PACKAGE_FILES = (
+    UNITS / "vonk-forge-package-upgrade-recover.service",
+    UNITS / "vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
+    Path("/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"),
+)
 # Everything a forward capsule leaves when it arms, including the breadcrumb
 # that outlives the capsule's own retirement.
 ARMING = (
@@ -62,10 +92,8 @@ ARMING = (
     STATE / "package-upgrade.preflight.trace",
     STATE / "package-upgrade.preflight.status",
     STATE / "package-upgrade.status",
-    Path("/lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service"),
-    Path(
-        "/lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf"
-    ),
+    *STAGED_CAPSULE,
+    STAGED_WANTS,
 )
 
 
@@ -329,6 +357,8 @@ class Lane:
             confirmed
         )
         assert receipt(nonce, "acknowledged"), f"{label}: not acknowledged"
+        left = [str(path) for path in RETIRED_PACKAGE_FILES if os.path.lexists(path)]
+        assert not left, f"{label}: the candidate still has recovery files: {left}"
         self.evidence.append(
             {
                 "case": label,
@@ -357,6 +387,15 @@ class Lane:
                 **observed,
             }
         )
+
+
+def stage_capsule() -> None:
+    """Leave what the promoted package's capsule stages, then load it."""
+    for path, text in STAGED_CAPSULE.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    STAGED_WANTS.symlink_to(next(iter(STAGED_CAPSULE)))
+    run("/usr/bin/systemctl", "daemon-reload")
 
 
 def held_dpkg(marker: bytes) -> int | None:
@@ -508,7 +547,7 @@ def main() -> None:
         key = work / "release.pem"
         run("/usr/bin/openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key))
         variants = {
-            name: work / name for name in ("promoted", "tree", "no-preinst", "failing")
+            name: work / name for name in ("promoted", "tree", "held", "failing")
         }
         for directory in variants.values():
             directory.mkdir()
@@ -519,8 +558,6 @@ def main() -> None:
         tree = seal(tree_unsealed, key, variants["tree"])
 
         def prepend_postinst(debian: Path, line: str) -> None:
-            # A tree without a preinst (after the capsule goes) is the same case.
-            (debian / "preinst").unlink(missing_ok=True)
             postinst = debian / "postinst"
             shebang, rest = postinst.read_text().split("\n", 1)
             postinst.write_text(f"{shebang}\n{line}\n{rest}")
@@ -535,17 +572,17 @@ def main() -> None:
         def failing_postinst(debian: Path) -> None:
             prepend_postinst(debian, "exit 44")
 
-        no_preinst = seal(
-            repack(tree_unsealed, variants["no-preinst"], held_postinst),
+        held = seal(
+            repack(tree_unsealed, variants["held"], held_postinst),
             key,
-            variants["no-preinst"],
+            variants["held"],
         )
         failing = seal(
             repack(tree_unsealed, variants["failing"], failing_postinst),
             key,
             variants["failing"],
         )
-        packages = [promoted, tree, no_preinst, failing]
+        packages = [promoted, tree, held, failing]
         shutil.copyfile(args.probe, PROBE)
         PROBE.chmod(0o755)
         prepare_host(PROBE, promoted)
@@ -553,7 +590,7 @@ def main() -> None:
 
         with ArmingWatch() as watch:
             lane.baseline(packages)
-            lane.activates("no-preinst-finisher-and-acknowledgement", no_preinst, 120)
+            lane.activates("finisher-and-acknowledgement", tree, 120)
 
             lane.baseline(packages)
             nonce, _, operation = lane.install(failing, deadline=600)
@@ -566,13 +603,13 @@ def main() -> None:
             # leave the transaction armed, so the deadline restore runs.
             faults = (
                 ("dpkg-killed", HOLD_EXTRACTION, f"iHR|{promoted.version}"),
-                ("helper-cgroup-killed", HOLD_CONFIGURE, f"iF |{no_preinst.version}"),
-                ("reboot", HOLD_CONFIGURE, f"iF |{no_preinst.version}"),
+                ("helper-cgroup-killed", HOLD_CONFIGURE, f"iF |{held.version}"),
+                ("reboot", HOLD_CONFIGURE, f"iF |{held.version}"),
             )
             for fault, hold, expected_state in faults:
                 lane.baseline(packages)
                 hold.touch()
-                nonce, deadline, operation = lane.install(no_preinst, deadline=40)
+                nonce, deadline, operation = lane.install(held, deadline=40)
                 replies: list = []
 
                 def client_send(operation=operation, replies=replies) -> None:
@@ -593,6 +630,7 @@ def main() -> None:
                     if hold == HOLD_EXTRACTION
                     else "vonk-forge-agent.postinst\0configure\0"
                 ).encode()
+                observed: dict[str, str] = {}
                 dpkg = wait(
                     lambda marker=marker: held_dpkg(marker),
                     f"{fault}: dpkg not held at {hold.name}",
@@ -611,6 +649,15 @@ def main() -> None:
                         "--signal=SIGKILL",
                         HELPER,
                     )
+                    # No daemon-reload ran: the loaded agent unit still has the
+                    # drop-in whose runner the unpack removed. Whatever systemd
+                    # does with that start, the deadline restore must heal it.
+                    run("/usr/bin/systemctl", "stop", AGENT, check=False)
+                    run("/usr/bin/systemctl", "start", "--no-block", AGENT, check=False)
+                    time.sleep(3)
+                    observed["agent_start_before_reload"] = run(
+                        "/usr/bin/systemctl", "is-active", AGENT, check=False
+                    ).stdout.strip()
                 else:
                     units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
                     for unit in units:
@@ -651,15 +698,17 @@ def main() -> None:
                     f"{fault}-at-{hold.name.removeprefix('vonk-transition-hold-')}",
                     nonce,
                     held_state=held_state,
+                    **observed,
                 )
-            assert not watch.seen, f"a forward capsule armed: {sorted(watch.seen)}"
+        assert not watch.seen, f"a forward capsule armed: {sorted(watch.seen)}"
 
-        # Today's production path: the unmodified candidate arms its capsule.
+        # The staged files of an old capsule gate the agent's start on a runner
+        # nothing keeps; the candidate retires them before it reloads systemd.
         lane.baseline(packages)
-        lane.activates("tree-candidate-with-preinst", tree, 300)
-        trace = STATE / "package-upgrade.preflight.trace"
-        assert trace.is_file(), "the unmodified candidate did not arm its capsule"
-        assert "stage=arm-complete" in trace.read_text().splitlines(), trace.read_text()
+        stage_capsule()
+        lane.activates("stale-capsule-files-retired", tree, 120)
+        left = [str(path) for path in ARMING if os.path.lexists(path)]
+        assert not left, f"the candidate left capsule state: {left}"
         print(
             json.dumps(
                 {

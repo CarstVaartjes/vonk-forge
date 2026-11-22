@@ -432,8 +432,6 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert '"archive_sha256":' in materializer
     assert '"binary_sha256":' in materializer
     assert "scripts/test-agent-package-native-lifecycle" in text
-    assert "tests/nodes/test_agent_upgrade_recovery_systemd.sh" in text
-    assert "CRASH_MODE=full-cgroup" in text
     assert "STALE_PENDING_FORMAT" not in text
     assert "CANDIDATE_CUSTODY" not in text
     for architecture in ("linux-arm64",):
@@ -1020,7 +1018,7 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     assert "needs: [changes, ci, agent, apt, images, setups, producers]" in authority
 
 
-def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:
+def test_development_arm64_lifecycle_gate_is_external_parallel_and_unchanged() -> None:
     text = WORKFLOW.read_text()
     lifecycle = workflow_job(text, "native-arm64-lifecycle")
 
@@ -1028,45 +1026,11 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "Revalidate main ARM64 acceptance source" in lifecycle
     assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
-    assert (
-        "Install pinned Rust toolchain for the historical helper fixture" in lifecycle
-    )
-    assert "rustup toolchain install 1.98.1" in lifecycle
-    assert lifecycle.index("rustup toolchain install 1.98.1") < lifecycle.index(
-        "actions/download-artifact@"
-    )
-    assert 'compatibility_cargo_dir=$(dirname "$(command -v cargo)")' in lifecycle
-    assert "compatibility_rustup_home=$(rustup show home)" in lifecycle
-    assert 'CARGO_HOME="$compatibility_cargo_home"' in lifecycle
-    assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
-    assert "RUSTFLAGS='-C target-feature=+crt-static'" in lifecycle
-    assert "cargo build --locked --release --package vonk-build-egress" in lifecycle
-    assert 'BUILD_EGRESS_BINARY="$build_egress"' in lifecycle
-    recovery_invocations = re.findall(
-        r"sudo env (?P<environment>.*?)\n\s+"
-        r"tests/nodes/test_agent_upgrade_recovery_systemd\.sh",
-        lifecycle,
-        re.DOTALL,
-    )
-    assert recovery_invocations
-    assert all(
-        'BUILD_EGRESS_BINARY="$build_egress"' in environment
-        for environment in recovery_invocations
-    )
-    assert "sudo install -o root -g root -m 0755" in lifecycle
-    assert 'test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1' in lifecycle
     assert "actions/download-artifact@" in lifecycle
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
     assert "scripts/test-agent-package-native-lifecycle" in lifecycle
-    assert "tests/nodes/test_agent_upgrade_recovery_systemd.sh" in lifecycle
-    for exact_gate in (
-        "CRASH_MODE=full-cgroup",
-        "CRASH_MODE=dpkg-only",
-        "CRASH_MODE=post-remove",
-    ):
-        assert exact_gate in lifecycle
     assert "STALE_PENDING_FORMAT" not in lifecycle
     assert "CANDIDATE_CUSTODY" not in lifecycle
     for forbidden in (

@@ -147,15 +147,17 @@ display manager. On a desktop host, restore the graphical session with:
 sudo systemctl set-default graphical.target
 ```
 
-### If a purge ran during a package upgrade
+### Files an older package's upgrade recovery left behind
 
-`prerm` can refuse with exit 1 ("cannot remove package during durable upgrade
-recovery"). Recovery fails closed on the same check, so waiting does not help:
-remove `/var/lib/vonk-forge/package-upgrade` (step 1f), then re-run step 1b, or
-remove the files below by hand. The preinst recovery writes `/var/lib/vonk-forge/package-upgrade/`
-(`intent`, `lock`, `agent-blocked`, `recovery-capsule/`) and
-`/var/lib/vonk-forge/helper-upgrade.pending`, which 1f removes, and these
-systemd files, which it does not:
+Packages before the one-recovery-path release staged a forward recovery
+capsule during Controller upgrades, and removal could refuse while one was
+armed. The current package stages none of it and removes what an older one
+left when it is configured. If a Spark never reached the current package, remove
+`/var/lib/vonk-forge/package-upgrade` (step 1f), then re-run step 1b, or remove
+the files below by hand. The old preinst recovery wrote
+`/var/lib/vonk-forge/package-upgrade/` (`intent`, `lock`, `agent-blocked`,
+`recovery-capsule/`) and `/var/lib/vonk-forge/helper-upgrade.pending`, which 1f
+removes, and these systemd files, which it does not:
 
 ```sh
 sudo rm -f /lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service \

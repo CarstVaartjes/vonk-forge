@@ -36,27 +36,23 @@ REPAIR_ELF_REMOVALS = {
 REQUIRED_EXECUTABLE = {
     *REQUIRED_ELF,
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
 }
+REPAIR_RUNNER = "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
 REPAIR_STANDARD_RUNNER = (
     "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard"
 )
 REPAIR_AUTHORITY = "usr/lib/vonk-forge/repair-authority"
-REPAIR_PAYLOAD_ADDITIONS = {REPAIR_STANDARD_RUNNER, REPAIR_AUTHORITY}
+REPAIR_PAYLOAD_ADDITIONS = {REPAIR_RUNNER, REPAIR_STANDARD_RUNNER, REPAIR_AUTHORITY}
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
     "etc/vonk-forge-agent/containers-storage.conf",
     "lib/systemd/system/vonk-forge-agent.service",
     "lib/systemd/system/vonk-forge-monitor.service",
-    "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf",
     "lib/systemd/system/vonk-forge-docker-firewall.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
     "lib/systemd/system/vonk-forge-package-rollback.service",
-    "lib/systemd/system/vonk-forge-package-upgrade-recover.service",
-    "lib/systemd/system/vonk-forge-package-upgrade-alert@.service",
     "usr/lib/vonk-forge/vonk-forge-docker-firewall",
-    "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
     "usr/lib/vonk-forge/release/artifact.sig",
     "usr/share/doc/vonk-forge-agent/sbom.cdx.json",
     "usr/share/doc/vonk-forge-agent/sbom.spdx.json",
@@ -65,6 +61,8 @@ REQUIRED_PAYLOAD = {
     "usr/share/keyrings/vonk-forge-release.pub",
 }
 REQUIRED_CONTROL = {"control", "conffiles", "md5sums", "postinst", "preinst", "prerm"}
+#: The ordinary package has no preinst; only the pinned repair package does.
+ORDINARY_FORBIDDEN_CONTROL = {"preinst"}
 #: The pinned repair package ships none of these; only an ordinary package does.
 ORDINARY_ONLY_CONTROL = {"postrm"}
 REPAIR_PROBE_CONTROL = "vonk-repair-helper.probe"
@@ -122,9 +120,6 @@ NORMAL_SYSTEMD_PAYLOAD = {
     "lib/systemd/system/vonk-forge-monitor.service": (
         "packaging/systemd/vonk-forge-monitor.service"
     ),
-    "lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf": (
-        "packaging/systemd/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf"
-    ),
     "lib/systemd/system/vonk-forge-docker-firewall.service": (
         "packaging/systemd/vonk-forge-docker-firewall.service"
     ),
@@ -133,12 +128,6 @@ NORMAL_SYSTEMD_PAYLOAD = {
     ),
     "lib/systemd/system/vonk-forge-package-helper.socket": (
         "packaging/systemd/vonk-forge-package-helper.socket"
-    ),
-    "lib/systemd/system/vonk-forge-package-upgrade-recover.service": (
-        "packaging/systemd/vonk-forge-package-upgrade-recover.service"
-    ),
-    "lib/systemd/system/vonk-forge-package-upgrade-alert@.service": (
-        "packaging/systemd/vonk-forge-package-upgrade-alert@.service"
     ),
 }
 
@@ -385,7 +374,7 @@ def _verify_members(
     ) | (REPAIR_PAYLOAD_ADDITIONS if repair else set())
     required_executable = (
         REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())
-    ) | ({REPAIR_STANDARD_RUNNER} if repair else set())
+    ) | ({REPAIR_RUNNER, REPAIR_STANDARD_RUNNER} if repair else set())
     missing = required_payload - files
     if missing:
         raise VerificationError(f"package payload is incomplete: {sorted(missing)}")
@@ -446,7 +435,10 @@ def _verify_control(
 ) -> None:
     entries = {path.name: path for path in control.iterdir()}
     names = set(entries)
-    if not REQUIRED_CONTROL.issubset(names) or (
+    required_control = (
+        REQUIRED_CONTROL if repair else REQUIRED_CONTROL - ORDINARY_FORBIDDEN_CONTROL
+    )
+    if not required_control.issubset(names) or (
         not repair and not ORDINARY_ONLY_CONTROL.issubset(names)
     ):
         raise VerificationError("Debian control archive is incomplete")
@@ -501,16 +493,21 @@ def _verify_control(
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
     if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
         raise VerificationError("package conffile set is invalid")
-    for name in ("postinst", "preinst", "prerm", *(() if repair else ("postrm",))):
+    if not repair and ORDINARY_FORBIDDEN_CONTROL & names:
+        raise VerificationError("ordinary package ships a preinst")
+    for name in (
+        "postinst",
+        "prerm",
+        *(("preinst",) if repair else ("postrm",)),
+    ):
         raw = (control / name).read_bytes()
         mode = stat.S_IMODE((control / name).stat().st_mode)
         if mode != 0o755 or FORBIDDEN_MAINTAINER.search(raw):
             raise VerificationError(f"maintainer script is unsafe: {name}")
-    preinst_raw = (control / "preinst").read_bytes()
     postinst_raw = (control / "postinst").read_bytes()
     if repair:
         if (
-            REPAIR_DISPATCH_MARKER not in preinst_raw
+            REPAIR_DISPATCH_MARKER not in (control / "preinst").read_bytes()
             or REPAIR_POSTINST_MARKER not in postinst_raw
         ):
             raise VerificationError("repair maintainer scripts are incomplete")
@@ -525,9 +522,7 @@ def _verify_control(
         )
         if (control / "prerm").read_bytes() != expected_prerm:
             raise VerificationError("repair prerm bytes are not exact")
-    elif (
-        REPAIR_DISPATCH_MARKER in preinst_raw or REPAIR_POSTINST_MARKER in postinst_raw
-    ):
+    elif REPAIR_POSTINST_MARKER in postinst_raw:
         raise VerificationError("ordinary package contains repair behavior")
     postinst = (control / "postinst").read_text(encoding="utf-8")
     if repair:
@@ -584,7 +579,6 @@ def _verify_control(
             )
         ):
             raise VerificationError("postinst contains obsolete agent lifecycle state")
-        _verify_standard_preinst((control / "preinst").read_text(encoding="utf-8"))
     if "/usr/bin/python" in postinst or "python3" in postinst:
         raise VerificationError("postinst has an undeclared interpreter dependency")
     prerm = (control / "prerm").read_text(encoding="utf-8")
@@ -651,25 +645,6 @@ def _verify_payload(
     expected_binary_source_revision: str | None = None,
     expected_packaging_source_revision: str | None = None,
 ) -> dict[str, str] | None:
-    if (
-        not repair
-        and (
-            payload / "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover"
-        ).read_bytes()
-        != (control / "preinst").read_bytes()
-    ):
-        raise VerificationError("preinst and durable recovery runner differ")
-    for forbidden in (
-        "lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service",
-        "lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service",
-        "lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf",
-        "lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf",
-    ):
-        forbidden_path = payload / forbidden
-        if forbidden_path.exists() or forbidden_path.is_symlink():
-            raise VerificationError(
-                f"durable recovery capsule must not be package-owned: {forbidden}"
-            )
     for name in REQUIRED_ELF - (REPAIR_ELF_REMOVALS if repair else set()):
         path = payload / name
         binary = path.read_bytes()
@@ -708,7 +683,6 @@ def _verify_payload(
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
-            "vonk-forge-package-upgrade-recover.service",
         )
     }
     if "User=vonk-agent" not in units["vonk-forge-agent.service"]:
@@ -775,30 +749,6 @@ def _verify_payload(
         raise VerificationError("rootless container storage is invalid")
     if "SocketGroup=vonk-agent" not in units["vonk-forge-package-helper.socket"]:
         raise VerificationError("helper socket group is invalid")
-    agent_gate = (
-        payload / "lib/systemd/system/vonk-forge-agent.service.d/"
-        "20-package-upgrade-recovery.conf"
-    ).read_text(encoding="utf-8")
-    if agent_gate.splitlines() != [
-        "[Service]",
-        (
-            "ExecCondition=+/usr/lib/vonk-forge/"
-            "vonk-forge-package-upgrade-recover allow-agent-start"
-        ),
-    ]:
-        raise VerificationError("durable recovery agent-start gate is invalid")
-    recovery = units["vonk-forge-package-upgrade-recover.service"]
-    if (
-        "ConditionPathExists=/var/lib/vonk-forge/package-upgrade/intent"
-        not in recovery.splitlines()
-        or "IPAddressDeny=any" not in recovery.splitlines()
-        or any(
-            line.startswith("RestartPreventExitStatus=")
-            for line in recovery.splitlines()
-        )
-        or "RestrictAddressFamilies=AF_UNIX" not in recovery.splitlines()
-    ):
-        raise VerificationError("package recovery unit is unsafe")
     helper = units["vonk-forge-package-helper.service"]
     if "PrivateNetwork=yes" in helper:
         raise VerificationError("helper cannot inspect host firewall addresses")
@@ -1558,7 +1508,7 @@ def _verify_package_signature(public_key: bytes, deb: Path, digest: str) -> str:
 
 def _evidence_executables(*, repair: bool) -> set[str]:
     return (REQUIRED_EXECUTABLE - (REPAIR_ELF_REMOVALS if repair else set())) | (
-        {REPAIR_STANDARD_RUNNER} if repair else set()
+        {REPAIR_RUNNER, REPAIR_STANDARD_RUNNER} if repair else set()
     )
 
 

@@ -514,7 +514,7 @@ fn later() { state.expect("bookkeeping"); }
         ("packaging/systemd/new.service", "StartLimitBurst=5\n", 1),
         ("packaging/systemd/new.service", "TimeoutStartSec=0\n", 1),
         ("packaging/systemd/new.service", "Restart=no\n", 1),
-        ("packaging/debian/preinst", "exit 78\n", 1),
+        ("packaging/debian/postinst", "exit 78\n", 1),
         ("rust/crates/vonk-agent/src/main.rs", 'state.expect("bookkeeping");\n', 1),
         ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n", 1),
         ("rust/crates/vonk-agent/src/main.rs", "ExitCode::from(78)\n", 1),

@@ -1175,67 +1175,6 @@ def build(
             firewall_helper,
             0o555,
         )
-        recovery_unit = source(
-            "packaging/systemd/vonk-forge-package-upgrade-recover.service"
-        )
-        recovery_unit_digest = hashlib.sha256(recovery_unit).hexdigest()
-        recovery_unit_base64 = base64.b64encode(recovery_unit)
-        recovery_capsule_unit = source(
-            "packaging/systemd/vonk-forge-package-upgrade-recover-capsule.service"
-        )
-        recovery_capsule_unit_digest = hashlib.sha256(recovery_capsule_unit).hexdigest()
-        recovery_capsule_unit_base64 = base64.b64encode(recovery_capsule_unit)
-        recovery_capsule_gate = source(
-            "packaging/systemd/vonk-forge-agent.service.d/"
-            "10-package-upgrade-capsule.conf"
-        )
-        recovery_capsule_gate_digest = hashlib.sha256(recovery_capsule_gate).hexdigest()
-        recovery_capsule_suppression = source(
-            "packaging/systemd/vonk-forge-package-upgrade-recover.service.d/"
-            "10-capsule-owner.conf"
-        )
-        recovery_capsule_suppression_digest = hashlib.sha256(
-            recovery_capsule_suppression
-        ).hexdigest()
-        agent_gate = source(
-            "packaging/systemd/vonk-forge-agent.service.d/"
-            "20-package-upgrade-recovery.conf"
-        )
-        agent_gate_digest = hashlib.sha256(agent_gate).hexdigest()
-        agent_gate_base64 = base64.b64encode(agent_gate)
-        preinst = (
-            source("packaging/debian/preinst")
-            .replace(b"@VERSION@", version.encode())
-            .replace(b"@ARCHITECTURE@", debian_architecture.encode())
-            .replace(b"@AGENT_SHA256@", binary_digest.encode())
-            .replace(b"@HELPER_SHA256@", helper_digest.encode())
-            .replace(b"@RECOVERY_UNIT_SHA256@", recovery_unit_digest.encode())
-            .replace(b"@RECOVERY_UNIT_BASE64@", recovery_unit_base64)
-            .replace(
-                b"@RECOVERY_CAPSULE_UNIT_SHA256@",
-                recovery_capsule_unit_digest.encode(),
-            )
-            .replace(b"@RECOVERY_CAPSULE_UNIT_BASE64@", recovery_capsule_unit_base64)
-            .replace(
-                b"@RECOVERY_CAPSULE_GATE_SHA256@",
-                recovery_capsule_gate_digest.encode(),
-            )
-            .replace(
-                b"@RECOVERY_CAPSULE_GATE_BASE64@",
-                base64.b64encode(recovery_capsule_gate),
-            )
-            .replace(
-                b"@RECOVERY_CAPSULE_SUPPRESSION_SHA256@",
-                recovery_capsule_suppression_digest.encode(),
-            )
-            .replace(
-                b"@RECOVERY_CAPSULE_SUPPRESSION_BASE64@",
-                base64.b64encode(recovery_capsule_suppression),
-            )
-            .replace(b"@AGENT_GATE_SHA256@", agent_gate_digest.encode())
-            .replace(b"@AGENT_GATE_BASE64@", agent_gate_base64)
-        )
-        standard_runner = preinst
         repair_preinst = None
         repair_postinst = None
         if repair_authority_raw is not None:
@@ -1337,14 +1276,14 @@ def build(
                 or re.search(rb"@[A-Z0-9_]+@", repair_postinst) is not None
             ):
                 raise BuildError("repair capsule postinst is incomplete")
-        install_file(
-            stage,
-            "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
-            (standard_runner if repair_preinst is not None else preinst),
-            0o555,
-        )
         if repair_preinst is not None:
             assert repair_authority_raw is not None
+            install_file(
+                stage,
+                "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover",
+                standard_runner,
+                0o555,
+            )
             install_file(
                 stage,
                 "usr/lib/vonk-forge/vonk-forge-package-upgrade-recover.standard",
@@ -1364,8 +1303,6 @@ def build(
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
             "vonk-forge-package-rollback.service",
-            "vonk-forge-package-upgrade-recover.service",
-            "vonk-forge-package-upgrade-alert@.service",
         ):
             install_file(
                 stage,
@@ -1373,17 +1310,9 @@ def build(
                 source(f"packaging/systemd/{name}"),
                 0o644,
             )
-        install_file(
-            stage,
-            "lib/systemd/system/vonk-forge-agent.service.d/"
-            "20-package-upgrade-recovery.conf",
-            agent_gate,
-            0o644,
-        )
         evidence_binaries = {
             **binaries,
             "vonk-forge-docker-firewall": firewall_helper,
-            "vonk-forge-package-upgrade-recover": preinst,
         }
         if repair_preinst is not None:
             evidence_binaries["vonk-forge-package-upgrade-recover"] = standard_runner
@@ -1431,12 +1360,8 @@ def build(
                 repair_probe,
                 0o755,
             )
-        install_file(
-            stage,
-            "DEBIAN/preinst",
-            repair_preinst if repair_preinst is not None else preinst,
-            0o755,
-        )
+        if repair_preinst is not None:
+            install_file(stage, "DEBIAN/preinst", repair_preinst, 0o755)
         package = finish_package(
             stage, Path(temporary), output, package_name, epoch, private_key
         )

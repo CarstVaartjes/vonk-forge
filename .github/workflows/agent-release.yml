@@ -296,8 +296,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Prepare the protocol environment for Cargo builds
-        uses: ./.github/actions/protocol-env
       - name: Revalidate main ARM64 acceptance source
         shell: bash
         run: |
@@ -307,14 +305,6 @@ jobs:
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
-      - name: Install pinned Rust toolchain for the historical helper fixture
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = aarch64
-          rustup set profile minimal
-          rustup toolchain install 1.98.1
-          rustup default 1.98.1
       - name: Download accepted ARM64 package set
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -343,37 +333,9 @@ jobs:
             packaging/bin/vonk-forge-docker-firewall \
             scripts/test-agent-package-native-lifecycle \
             tests/scripts/test_docker_firewall.sh \
-            tests/nodes/test_agent_package_native_lifecycle.sh \
-            tests/nodes/test_agent_upgrade_recovery_systemd.sh
+            tests/nodes/test_agent_package_native_lifecycle.sh
           sudo tests/scripts/test_docker_firewall.sh
           tests/nodes/test_agent_package_native_lifecycle.sh
-          RUSTFLAGS='-C target-feature=+crt-static' \
-            cargo build --locked --release --package vonk-build-egress
-          build_egress=$(realpath target/release/vonk-build-egress)
-          build_egress_staged="$build_egress.root-owned"
-          sudo install -o root -g root -m 0755 \
-            "$build_egress" "$build_egress_staged"
-          sudo mv -f "$build_egress_staged" "$build_egress"
-          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
-          compatibility_cargo_dir=$(dirname "$(command -v cargo)")
-          compatibility_cargo_home=$(dirname "$compatibility_cargo_dir")
-          compatibility_rustup_home=$(rustup show home)
-          sudo env \
-            PATH="$compatibility_cargo_dir:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-            CARGO_HOME="$compatibility_cargo_home" \
-            RUSTUP_HOME="$compatibility_rustup_home" \
-            BUILD_EGRESS_BINARY="$build_egress" \
-            VERSION="$VERSION" \
-            CRASH_MODE=full-cgroup \
-            tests/nodes/test_agent_upgrade_recovery_systemd.sh
-          sudo env BUILD_EGRESS_BINARY="$build_egress" \
-            VERSION="$VERSION" \
-            CRASH_MODE=dpkg-only \
-            tests/nodes/test_agent_upgrade_recovery_systemd.sh
-          sudo env BUILD_EGRESS_BINARY="$build_egress" \
-            VERSION="$VERSION" \
-            CRASH_MODE=post-remove \
-            tests/nodes/test_agent_upgrade_recovery_systemd.sh
           sudo scripts/test-agent-package-native-lifecycle \
             linux-arm64 \
             "$(realpath "baseline/$ARM64_BASELINE_PACKAGE")" \
