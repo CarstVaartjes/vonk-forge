@@ -59,7 +59,7 @@ from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..run_switch_operations.evidence_waits import wake_evidence_waits
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
-from ..telemetry import TelemetryRepository
+from ..telemetry.samples import TelemetryRepository
 from ..untracked_installations import (
     run_wanted_here,
     untracked_installations,

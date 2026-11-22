@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.reason_codes import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
@@ -25,7 +24,8 @@ from vonk_control.models import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry import (
+from vonk_control.telemetry import maintenance as telemetry_maintenance
+from vonk_control.telemetry.samples import (
     TelemetryRepository,
 )
 

@@ -46,7 +46,7 @@ from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
 from ..stored.states import CatalogRevisionState
-from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
+from ..telemetry.samples import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
     _LOW_CLOCK_LOOKBACK_SLACK,
@@ -185,7 +185,7 @@ class FleetProjection:
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
             layout_notices = model_layout_notices(session, node_ids)
-            from ..gpu_clock import selected_gpu_clocks
+            from ..gpu.clock import selected_gpu_clocks
 
             try:
                 clocks = selected_gpu_clocks(session, node_ids)

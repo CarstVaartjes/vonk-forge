@@ -14,7 +14,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState
 from .. import agent_operation_states
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
-from ..gpu_health import GPU_HEALTH_CODES
+from ..gpu.health import GPU_HEALTH_CODES
 from ..jobs.agent_contract import ClaimFacts
 from ..logging import redact_text
 from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job

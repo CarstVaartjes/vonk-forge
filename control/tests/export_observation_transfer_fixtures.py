@@ -20,7 +20,7 @@ from vonk_control.observation.transfer import (
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
-from vonk_control.telemetry import TelemetryRepository
+from vonk_control.telemetry.samples import TelemetryRepository
 
 from tests.test_fleet_stream import (
     NODE_ID,

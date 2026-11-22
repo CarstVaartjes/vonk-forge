@@ -39,7 +39,7 @@ from vonk_control.run_admission import (
     RunAdmissionService,
     require_admissible,
 )
-from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
 from .test_run_admission import setup
 

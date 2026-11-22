@@ -20,13 +20,13 @@ from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .admission_locking import is_admission_contention, label_transaction
-from .catalog.revision_collection import GRACE
-from .fleet_event_contract import NodeTelemetryPayload
-from .fleet_events import FleetEventDraft, FleetEventRepository
-from .inventory.items_contract import InventorySnapshotKind
-from .inventory.repository import newest_snapshot_ids
-from .models import (
+from ..admission_locking import is_admission_contention, label_transaction
+from ..catalog.revision_collection import GRACE
+from ..fleet_event_contract import NodeTelemetryPayload
+from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..inventory.items_contract import InventorySnapshotKind
+from ..inventory.repository import newest_snapshot_ids
+from ..models import (
     AgentCertificate,
     AgentNode,
     FleetStreamEvent,
@@ -36,12 +36,12 @@ from .models import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from .models.fleet import (
+from ..models.fleet import (
     AgentIssuedCertificateRevocation,
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
-from .step_ca import CERTIFICATE_LIFETIME
+from ..step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows

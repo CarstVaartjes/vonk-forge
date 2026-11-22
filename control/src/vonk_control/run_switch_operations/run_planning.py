@@ -586,7 +586,7 @@ class RunPlanningMixin:
                     ),
                 )
             if request.gpu_clock is not None:
-                from ..gpu_clock_validation import assess_gpu_clock
+                from ..gpu.clock_validation import assess_gpu_clock
 
                 clock_blockers, clock_warnings = assess_gpu_clock(
                     session, node_ids, request.gpu_clock

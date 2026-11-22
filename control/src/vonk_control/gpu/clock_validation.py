@@ -10,7 +10,7 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.gpu_clock import GPU_CLOCK_POLICY, GpuClockRange
 
-from .run_switch_contract import RunSwitchReason
+from ..run_switch_contract import RunSwitchReason
 
 
 def assess_gpu_clock(

@@ -33,7 +33,7 @@ from vonk_control.models import (
     Base,
     NodeTelemetryLatest,
 )
-from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
 NODE = "spk_" + "a" * 32
 BOOT = uuid.UUID("00000000-0000-4000-8000-000000000001")

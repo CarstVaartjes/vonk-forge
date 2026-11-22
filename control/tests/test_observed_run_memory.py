@@ -24,7 +24,7 @@ from vonk_control.models import (
 )
 from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
 from .test_load_phase_swap_admission import _FREE as _LIVE_FREE
 from .test_load_phase_swap_admission import (

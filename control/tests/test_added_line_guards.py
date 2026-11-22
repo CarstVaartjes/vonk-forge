@@ -1251,7 +1251,7 @@ def test_agent_stamp_guard_ignores_controller_written_progress_timestamps():
     ("path", "name"),
     [
         ("control/src/vonk_control/agent_api/observations.py", "inventory"),
-        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+        ("control/src/vonk_control/telemetry/samples.py", "_canonical_sample"),
     ],
 )
 def test_ingress_handlers_may_judge_an_agent_stamp_by_location(path, name):
@@ -3281,7 +3281,7 @@ def test_a_two_step_rehash_is_flagged(source, expected):
     "path",
     [
         "control/src/vonk_control/catalog/sync_contract.py",
-        "control/src/vonk_control/telemetry_maintenance.py",
+        "control/src/vonk_control/telemetry/maintenance.py",
         "control/src/vonk_control/model_cache/download_admission.py",
     ],
 )

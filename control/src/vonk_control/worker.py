@@ -724,10 +724,7 @@ def assemble_production_worker(
     from .runtime_image_preparation import FilesystemRuntimeImageStorage
     from .source_bundles import DatabaseSourceBundleStore
     from .storage_demands import StorageDemands
-    from .telemetry_maintenance import (
-        TelemetryMaintenance,
-        TelemetryMaintenanceCadence,
-    )
+    from .telemetry.maintenance import TelemetryMaintenance, TelemetryMaintenanceCadence
     from .terminal_history_collection import TerminalHistoryCollector
     from .unused_storage_collection import UnusedStorageCollector
     from .wait_redrive import wait_sources

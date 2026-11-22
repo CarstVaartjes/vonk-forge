@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from ..fleet_projection import FleetSnapshot, TelemetryPoint
-    from ..telemetry import LiveEngineReading
+    from ..telemetry.samples import LiveEngineReading
 
 
 class Reading(NamedTuple):

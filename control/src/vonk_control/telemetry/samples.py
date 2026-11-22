@@ -21,12 +21,12 @@ from vonk_agent_protocol.telemetry import (
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
-from .categorized_errors import InvalidValue
-from .dialect_insert import dialect_insert
-from .fleet_event_contract import NodeTelemetryPayload
-from .fleet_events import FleetEventDraft, FleetEventRepository
-from .lifecycle.evidence import Residue
-from .models import (
+from ..categorized_errors import InvalidValue
+from ..dialect_insert import dialect_insert
+from ..fleet_event_contract import NodeTelemetryPayload
+from ..fleet_events import FleetEventDraft, FleetEventRepository
+from ..lifecycle.evidence import Residue
+from ..models import (
     AgentNode,
     NodeEngineSample,
     NodeInventoryResourceSnapshot,
@@ -34,9 +34,9 @@ from .models import (
     NodeTelemetrySample,
     RecipeRun,
 )
-from .observed_run_memory import record_observed_run_memory
-from .strict_json import warn_unreadable_once
-from .warn_once import warn_once
+from ..observed_run_memory import record_observed_run_memory
+from ..strict_json import warn_unreadable_once
+from ..warn_once import warn_once
 
 #: A sample is accepted only within this long of its observation time.
 TELEMETRY_ACCEPTANCE_WINDOW = timedelta(minutes=5)

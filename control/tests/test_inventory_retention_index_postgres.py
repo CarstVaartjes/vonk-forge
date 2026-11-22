@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 from vonk_control.db import reconcile_schema
 from vonk_control.models import Base
-from vonk_control.telemetry_maintenance import (
+from vonk_control.telemetry.maintenance import (
     _expired_inventory_statement,
     _raw_candidate_statement,
 )

@@ -47,7 +47,7 @@ from .readings import (
 
 if TYPE_CHECKING:
     from ..fleet_projection import FleetSnapshot
-    from ..telemetry import LiveEngineReading
+    from ..telemetry.samples import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})

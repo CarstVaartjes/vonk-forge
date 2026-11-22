@@ -41,7 +41,7 @@ from .admission_locking import (
 )
 from .catalog.revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
-from .gpu_health import gpu_health_reason
+from .gpu.health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .install_admission.contracts import reason_documents
 from .inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository

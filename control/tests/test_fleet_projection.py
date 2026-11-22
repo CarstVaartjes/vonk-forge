@@ -3210,7 +3210,7 @@ def test_system_memory_is_everything_in_use_outside_gpu_processes(
     changes: dict[str, int | None], expected: int | None
 ) -> None:
     from vonk_control.fleet_projection import telemetry_point
-    from vonk_control.telemetry import TelemetrySampleView
+    from vonk_control.telemetry.samples import TelemetrySampleView
 
     vector = json.loads(
         (

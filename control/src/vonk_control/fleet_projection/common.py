@@ -54,7 +54,7 @@ from ..models import (
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel
-from ..telemetry import TelemetrySampleView
+from ..telemetry.samples import TelemetrySampleView
 from .host_checks import HostCheck, HostCheckAdvice, Text1024
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""

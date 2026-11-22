@@ -36,7 +36,7 @@ from .models import (
     RunNode,
 )
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
-from .telemetry import _same_sample
+from .telemetry.samples import _same_sample
 
 if TYPE_CHECKING:
     from .operator_acceptance import AcceptanceArguments, OperatorReceiptResolver

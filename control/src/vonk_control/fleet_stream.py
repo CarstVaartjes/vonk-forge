@@ -31,7 +31,7 @@ from .fleet_stream_contract import (
     FleetTelemetryEvent,
 )
 from .strict_json import serialize_json_value
-from .telemetry import TelemetryRepository, TelemetrySampleView
+from .telemetry.samples import TelemetryRepository, TelemetrySampleView
 
 MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 POLL_INTERVAL_SECONDS = 1.0

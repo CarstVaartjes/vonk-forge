@@ -365,7 +365,7 @@ class HostRuntimeAuthorityService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .gpu_clock import selected_gpu_clock
+        from .gpu.clock import selected_gpu_clock
 
         with self._sessions() as session:
             desired = selected_gpu_clock(session, node_id)

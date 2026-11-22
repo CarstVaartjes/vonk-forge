@@ -283,7 +283,7 @@ class StartMixin:
                     canonical_message(payload)
                 )
                 if profile_application_id is not None or gpu_clock is not None:
-                    from ..gpu_clock import gpu_clock_start_intent
+                    from ..gpu.clock import gpu_clock_start_intent
 
                     try:
                         desired_clock = gpu_clock_start_intent(session, node_id)

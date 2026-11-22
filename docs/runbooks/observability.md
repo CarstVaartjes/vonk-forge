@@ -79,7 +79,7 @@ same alias on both Sparks. There is no `kv_pool_memory`: no agent reports the
 pool size yet.
 
 Spark metrics (one series per `node_id`): `gpu_power`, `models_memory` (memory
-held by GPU processes), `system_memory`, `gpu_clock`, `swap_used`, `disk_used`
+held by GPU processes), `system_memory`, `gpu.clock`, `swap_used`, `disk_used`
 (swap and disk come with the inventory, so they move every few minutes),
 `cpu_utilization`, `load_average`, `board_temperature` (the hottest unlabelled
 board sensor, never called the CPU), `nvme_temperature`, `nic_temperature`,

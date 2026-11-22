@@ -919,7 +919,7 @@ REHASH_INGRESS = (
     "control/src/vonk_control/catalog/service.py",
     "control/src/vonk_control/recipe_packages/",
     "control/src/vonk_control/inventory/repository.py",
-    "control/src/vonk_control/telemetry.py",
+    "control/src/vonk_control/telemetry/samples.py",
     "control/src/vonk_control/cached_file_verification.py",
     "control/src/vonk_control/model_cache/download.py",
     "control/src/vonk_control/model_cache/transfer.py",
@@ -1043,7 +1043,7 @@ _AGENT_FACTS = (
 _INGRESS = frozenset(
     {
         ("control/src/vonk_control/agent_api/observations.py", "inventory"),
-        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+        ("control/src/vonk_control/telemetry/samples.py", "_canonical_sample"),
     }
 )
 

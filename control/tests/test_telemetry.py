@@ -20,7 +20,7 @@ from vonk_control.models import (
     NodeTelemetrySample,
     RecipeRun,
 )
-from vonk_control.telemetry import (
+from vonk_control.telemetry.samples import (
     ENGINE_LIVE_WINDOW,
     TelemetryRepository,
     TelemetrySample,

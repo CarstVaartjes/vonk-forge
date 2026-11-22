@@ -19,7 +19,7 @@ from vonk_control.fleet_projection import (
 )
 from vonk_control.metrics.registry import MetricsRegistry, runnable_job_ages
 from vonk_control.models import NodeEngineSample
-from vonk_control.telemetry import LiveEngineReading
+from vonk_control.telemetry.samples import LiveEngineReading
 
 NODE = "spk_00000000000000000000000000000001"
 NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)

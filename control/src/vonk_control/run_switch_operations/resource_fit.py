@@ -27,7 +27,7 @@ from ..disk_reservations import (
     model_sets_stored_on_node,
     outstanding_disk_charges,
 )
-from ..gpu_health import gpu_health_reason
+from ..gpu.health import gpu_health_reason
 from ..install_admission import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
     IMAGE_PULL_CAPABILITY,

@@ -23,7 +23,7 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..disk_reservations import outstanding_disk_reservation_bytes
-from ..gpu_health import gpu_health_reason
+from ..gpu.health import gpu_health_reason
 from ..inventory.items import runtime_value
 from ..models import (
     AgentNode,

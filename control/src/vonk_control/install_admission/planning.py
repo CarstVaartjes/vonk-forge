@@ -32,7 +32,7 @@ from ..disk_reservations import (
     outstanding_disk_charges,
     runtime_images_named_on_nodes,
 )
-from ..gpu_health import gpu_health_reason
+from ..gpu.health import gpu_health_reason
 from ..inventory.items import inventory_items
 from ..inventory.repository import (
     INVENTORY_MAX_AGE_SECONDS,
