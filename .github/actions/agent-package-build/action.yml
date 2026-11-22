@@ -541,7 +541,7 @@ runs:
             identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/agent-release\.yml@refs/heads/main$"
             ;;
           stable)
-            identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/tags/v${VERSION//./\\.}$"
+            identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/stable-release\.yml@refs/tags/v${VERSION//./\\.}$"
             ;;
         esac
         for architecture in arm64; do

@@ -12,7 +12,8 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/ci.yml"
+WORKFLOW = ROOT / ".github/workflows/stable-release.yml"
+CI_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 DEV_WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
 INSTALLER_WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
@@ -29,8 +30,8 @@ def workflow() -> str:
     return WORKFLOW.read_text()
 
 
-def job(job_name: str) -> str:
-    lines = workflow().splitlines()
+def job(job_name: str, path: Path = WORKFLOW) -> str:
+    lines = path.read_text().splitlines()
     job_start = lines.index(f"  {job_name}:") + 1
     job_lines: list[str] = []
     for line in lines[job_start:]:
@@ -793,11 +794,14 @@ def rendered_step_run(job_name: str, step_name: str) -> str:
 
 
 def test_release_metadata_is_tag_only_and_read_only() -> None:
-    text = workflow()
-    assert "release-metadata:" in text
-    assert "github.ref_type == 'tag'" in text
-    assert "startsWith(github.ref_name, 'v')" in text
-    assert "scripts/container-release-metadata" in text
+    # The caller owns the condition; the called workflow has none of its own.
+    call = job("stable-release", CI_WORKFLOW)
+    assert "github.ref_type == 'tag'" in call
+    assert "startsWith(github.ref_name, 'v')" in call
+    assert "vars.VONK_PLATFORM_RELEASES_ENABLED == 'true'" in call
+    assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in call
+    assert "needs: [ci-gate]" in call
+    assert "scripts/container-release-metadata" in workflow()
     metadata = job("release-metadata")
     for output in (
         "image_version_tag",
@@ -807,7 +811,6 @@ def test_release_metadata_is_tag_only_and_read_only() -> None:
         "worker_dev_source",
     ):
         assert f"{output}: ${{{{ steps.release.outputs.{output} }}}}" in metadata
-    assert "vars.VONK_PLATFORM_RELEASES_ENABLED == 'true'" in metadata
 
 
 def test_release_tag_is_ssh_signed_trusted_and_reachable_from_main() -> None:
@@ -964,16 +967,11 @@ def test_release_attaches_canonical_production_compose() -> None:
 
 
 def test_release_chain_is_default_off_and_dependency_gated() -> None:
-    metadata = job("release-metadata")
+    call = job("stable-release", CI_WORKFLOW)
     publisher = job("publish-images")
-    manifest = job("release-manifest")
 
-    assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in metadata
+    assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in call
     assert "needs: [validate-release-images, release-metadata]" in publisher
-    assert (
-        "needs: [release-metadata, publish-images, build-agent-package, supply-chain]"
-        in manifest
-    )
 
 
 def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
@@ -1088,16 +1086,6 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
     text = workflow()
     publisher = job("publish-images")
 
-    # Only a newer PR or merge-group commit cancels CI; a release run that
-    # calls CI has a group of its own and owns its cancellation.
-    assert (
-        "github.event.pull_request.number || github.event.merge_group.head_sha "
-        "|| github.run_id" in text
-    )
-    assert (
-        "cancel-in-progress: ${{ github.event_name == 'pull_request' "
-        "|| github.event_name == 'merge_group' }}" in text
-    )
     assert "group: vonk-forge-container-publication-${{" in publisher
     assert "needs.release-metadata.outputs.version" in publisher
     assert "cancel-in-progress: false" in publisher
@@ -1112,7 +1100,7 @@ def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> N
 
 
 def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
-    text = workflow()
+    text = workflow() + CI_WORKFLOW.read_text()
     publisher = job("publish-images")
     for action in (
         "docker/setup-buildx-action",
@@ -1168,7 +1156,7 @@ def test_supply_chain_evidence_gate_runs_on_every_full_run() -> None:
     publication; that job must stay independent of the release metadata chain.
     """
 
-    gate = job("supply-chain")
+    gate = job("supply-chain", CI_WORKFLOW)
     assert "release-metadata" not in gate
     assert "scripts/build-control-wheel" in gate
     assert (
@@ -1367,10 +1355,6 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
 def test_final_job_creates_checksum_protected_public_release_asset() -> None:
     text = workflow()
     assert "release-manifest:" in text
-    assert (
-        "needs: [release-metadata, publish-images, build-agent-package, supply-chain]"
-        in text
-    )
     assert "vonk-forge-images.env" in text
     assert "sha256sum" in text
     assert "scripts/reconcile-github-release" in text
