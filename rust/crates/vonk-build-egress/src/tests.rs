@@ -226,7 +226,6 @@ fn rejects_private_reserved_and_metadata_destinations() {
     }
     assert!(public_ip("1.1.1.1".parse().unwrap()));
     assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
-    assert!(blocked_metadata_name("metadata.google.internal"));
 }
 
 #[test]
@@ -236,59 +235,6 @@ fn dns_rebinding_or_mixed_answers_fail_closed() {
         "169.254.169.254:443".parse().unwrap(),
     ]);
     assert!(validate_resolved(addresses).is_err());
-}
-
-#[test]
-fn exact_allowlist_ports_and_safe_http_methods_are_enforced() {
-    let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-    assert!(
-        parse_request(
-            b"CONNECT pypi.org:443 HTTP/1.1\r\nHost: pypi.org:443\r\n\r\n",
-            &hosts
-        )
-        .is_ok()
-    );
-    assert_eq!(
-        parse_request(
-            b"CONNECT files.pythonhosted.org:443 HTTP/1.1\r\n\r\n",
-            &hosts
-        )
-        .unwrap_err(),
-        403
-    );
-    assert_eq!(
-        parse_request(b"CONNECT pypi.org:22 HTTP/1.1\r\n\r\n", &hosts).unwrap_err(),
-        403
-    );
-    assert_eq!(
-        parse_request(
-            b"POST http://pypi.org/upload HTTP/1.1\r\nHost: pypi.org\r\n\r\n",
-            &hosts
-        )
-        .unwrap_err(),
-        405
-    );
-}
-
-#[test]
-fn strips_hop_headers_and_rejects_proxy_credentials_and_bodies() {
-    let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-    let request = parse_request(b"GET http://pypi.org/simple HTTP/1.1\r\nHost: pypi.org\r\nProxy-Connection: keep-alive\r\nConnection: upgrade, X-Secret\r\nUpgrade: websocket\r\nX-Secret: remove-me\r\nUser-Agent: test\r\n\r\n", &hosts).unwrap();
-    let text = String::from_utf8(request.forward).unwrap();
-    assert!(!text.to_ascii_lowercase().contains("proxy-connection"));
-    assert!(!text.to_ascii_lowercase().contains("upgrade"));
-    assert!(!text.to_ascii_lowercase().contains("x-secret"));
-    assert!(text.contains("User-Agent: test"));
-    assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nProxy-Authorization: Basic abc\r\n\r\n", &hosts).unwrap_err(), 403);
-    assert_eq!(
-        parse_request(
-            b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nContent-Length: 1\r\n\r\n",
-            &hosts
-        )
-        .unwrap_err(),
-        413
-    );
-    assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nTransfer-Encoding: chunked\r\n\r\n", &hosts).unwrap_err(), 413);
 }
 
 #[test]

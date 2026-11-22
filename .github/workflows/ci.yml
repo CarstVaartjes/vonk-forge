@@ -488,7 +488,13 @@ jobs:
           # without rebuilding the agent dependency graph for a second target.
           # Match the release profile: abort on panic, optimised.
           rustc --edition=2024 -C panic=abort -C opt-level=3 \
+            -C target-feature=+crt-static --crate-type rlib \
+            --crate-name vonk_build_egress \
+            rust/crates/vonk-build-egress/src/lib.rs \
+            --out-dir "$RUNNER_TEMP"
+          rustc --edition=2024 -C panic=abort -C opt-level=3 \
             -C target-feature=+crt-static \
+            --extern vonk_build_egress="$RUNNER_TEMP/libvonk_build_egress.rlib" \
             rust/crates/vonk-build-egress/src/main.rs \
             -o "$RUNNER_TEMP/vonk-build-egress"
           rustc --edition=2024 -C target-feature=+crt-static \
