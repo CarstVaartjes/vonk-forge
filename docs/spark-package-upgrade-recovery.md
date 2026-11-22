@@ -89,7 +89,10 @@ itself restarts and proves the source process afterwards.
 The Controller issues the signed fixed `confirm-package-activation` operation
 only for the candidate that has met the contact/readiness gate. It binds the
 candidate package digest and original attempt nonce; the host grant binds the
-node. The helper also checks the installed candidate executable hashes. A
+node. The helper also checks the installed candidate executable hashes, that dpkg
+reports the package `install ok installed` at the candidate version, and that its own
+running executable is the candidate helper. Any other or unreadable state refuses, the
+transaction stays armed and the watchdog restores at the deadline. A
 successful contact alone does not cancel the watchdog or advance the canary.
 The acknowledged root receipt is the final activation gate.
 
