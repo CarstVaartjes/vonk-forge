@@ -161,7 +161,9 @@ schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
 `OUT_DIR`, from the protocol alone: it reruns on `agent_protocol/src`,
-`agent_protocol/pyproject.toml`, the root `uv.lock` and the exporter, and the
+`agent_protocol/pyproject.toml`, the root `uv.lock` and the exporter (its Python call sets
+`PYTHONDONTWRITEBYTECODE`, because `__pycache__` files written into `agent_protocol/src`
+would make the next cargo invocation rerun it and recompile the dependent crates), and the
 Rust jobs (`rust-quality`, `rust-tests`, the agent package jobs) prepare only the
 protocol member (`.github/actions/protocol-env`, an inexact sync), not `python-env`. Pytest prepares missing or outdated inputs before collecting
 consumers: `tools/generated_contracts.py` stamps the fingerprint of the
@@ -779,6 +781,20 @@ tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.
+
+The lane's `Candidate ARM64 agent packages` job is a two-leg matrix (candidate and
+lower lifecycle baseline) that builds both packages in parallel, as `agent-release.yml`
+does; each leg uploads its own artifact and `candidate` derives the package file names
+from the source's versions. The build stage's critical path is its slowest leg of
+package, setups and compose, so a leg shortened alone gains at most the slack to the
+next leg.
+
+The lane's amd64 Controller leaf starts the runner-disk cleanup in the background
+(`free-runner-disk` with `phase: start`) and waits for it (`phase: finish`, bounded to
+300 s, reporting the margin and warning when it is low) right before the image build,
+so the 76-117 s deletion overlaps the Python environment and mirror steps (about 0.7-1 min gained; errors from the deletion are written to a file and printed, with a warning, at the wait). The Controller api leaf's per-pull-request
+registry cache (both platforms) is exported with `mode=min` (final-image layers; main's cache still
+supplies the intermediate stages) instead of `mode=max`.
 
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.

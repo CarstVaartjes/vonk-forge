@@ -151,6 +151,11 @@ jobs:
       - name: Exercise uncached sudo recovery in a disposable ARM64 terminal
         if: matrix.platform == 'linux-arm64'
         shell: bash
+        env:
+          # The build step's compiler wrapper is part of cargo's fingerprint;
+          # without it this step recompiled the whole setup crate chain.
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64

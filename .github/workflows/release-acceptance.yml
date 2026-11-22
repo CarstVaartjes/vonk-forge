@@ -144,18 +144,22 @@ jobs:
           - {role: api, context: '.', file: control/Dockerfile, target: api, cache: 'type=registry,ref=ghcr.io/carstvaartjes/vonk-forge-api:buildcache'}
           - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: '', cache: 'type=gha,scope=vonk-forge-litellm'}
     env:
-      # Pull requests keep their own Controller build cache so a later push
-      # reuses the layers of the previous one; main's cache stays read-only
-      # here. CI base image mirrors prunes the caches of closed pull requests.
+      # Pull requests keep their own Controller build cache (final-image layers
+      # only, mode=min, exported by the api leaf on both platforms) so a later
+      # push reuses the previous one's layers; main's cache, which holds the
+      # intermediate stages, stays read-only here. CI base image mirrors prune
+      # the caches of closed pull requests.
       PR_CACHE: ghcr.io/carstvaartjes/vonk-forge-api:buildcache-pr-${{ github.event.pull_request.number || 'dispatch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
-      - name: Free runner disk
+      - name: Free runner disk in the background
         if: matrix.platform == 'amd64'
         uses: ./.github/actions/free-runner-disk
+        with:
+          phase: start
       - uses: ./.github/actions/python-env
       - name: Build the protocol wheel the Controller image carries
         run: scripts/build-control-wheel
@@ -184,6 +188,11 @@ jobs:
       - name: Name the dependency layer day
         id: day
         run: echo "value=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Wait for the runner disk to be freed
+        if: matrix.platform == 'amd64'
+        uses: ./.github/actions/free-runner-disk
+        with:
+          phase: finish
       - name: Build the native candidate leaf
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -209,7 +218,7 @@ jobs:
           cache-from: |
             ${{ matrix.cache }}
             ${{ matrix.role == 'api' && format('type=registry,ref={0}', env.PR_CACHE) || '' }}
-          cache-to: ${{ matrix.role == 'api' && format('type=registry,ref={0},mode=max', env.PR_CACHE) || '' }}
+          cache-to: ${{ matrix.role == 'api' && format('type=registry,ref={0},mode=min', env.PR_CACHE) || '' }}
       - name: Build the native candidate worker leaf on the shared Controller builder
         if: matrix.role == 'api'
         id: worker
@@ -406,13 +415,24 @@ jobs:
           if-no-files-found: error
 
   package:
-    name: Candidate ARM64 agent packages
+    name: Candidate ARM64 agent packages (${{ matrix.kind }})
     needs: source
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
-    outputs:
-      arm64_package: ${{ steps.package.outputs.arm64_package }}
-      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: candidate
+            version: ${{ needs.source.outputs.version }}
+            domain: vonk-agent-build-v2
+            artifact: acceptance-agent-package
+            flags: ''
+          - kind: baseline
+            version: ${{ needs.source.outputs.baseline_version }}
+            domain: vonk-agent-acceptance-baseline-v1
+            artifact: acceptance-agent-baseline
+            flags: --acceptance-baseline
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -430,12 +450,12 @@ jobs:
           shared-key: linux-arm64-candidate
           add-job-id-key: 'false'
           save-if: 'false'
-      - name: Build signed candidate and lower lifecycle baseline
-        id: package
+      - name: Build signed ${{ matrix.kind }} package
         shell: bash
         env:
-          VERSION: ${{ needs.source.outputs.version }}
-          BASELINE_VERSION: ${{ needs.source.outputs.baseline_version }}
+          VERSION: ${{ matrix.version }}
+          DOMAIN: ${{ matrix.domain }}
+          FLAGS: ${{ matrix.flags }}
           SOURCE: ${{ needs.source.outputs.sha }}
           VONK_SOURCE_REVISION: ${{ needs.source.outputs.sha }}
           VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
@@ -449,36 +469,19 @@ jobs:
           openssl genpkey -algorithm ED25519 -out "$key"
           epoch=$(git show -s --format=%ct "$SOURCE")
           lock=$(sha256sum Cargo.lock | cut -d' ' -f1)
-          for kind in candidate baseline; do
-            flags=()
-            version=$VERSION
-            domain=vonk-agent-build-v2
-            out=packages
-            if [[ "$kind" == baseline ]]; then
-              flags=(--acceptance-baseline)
-              version=$BASELINE_VERSION
-              domain=vonk-agent-acceptance-baseline-v1
-              out=baseline-packages
-            fi
-            digest="sha256:$(printf '%s\0%s\0%s\0%s\0%s' \
-              "$domain" "$SOURCE" linux-arm64 "$lock" "$version" | sha256sum | cut -d' ' -f1)"
-            scripts/build-agent-deb "${flags[@]}" --version "$version" \
-              --architecture linux-arm64 --build-digest "$digest" \
-              --release-private-key "$key" --source-date-epoch "$epoch" \
-              --output-dir "$RUNNER_TEMP/$out"
-            scripts/verify-agent-deb --json "$RUNNER_TEMP/$out/vonk-forge-agent_${version}_arm64.deb"
-          done
-          printf 'arm64_package=vonk-forge-agent_%s_arm64.deb\n' "$VERSION" >> "$GITHUB_OUTPUT"
-          printf 'arm64_baseline_package=vonk-forge-agent_%s_arm64.deb\n' "$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
+          flags=()
+          [[ -z "$FLAGS" ]] || flags=("$FLAGS")
+          digest="sha256:$(printf '%s\0%s\0%s\0%s\0%s' \
+            "$DOMAIN" "$SOURCE" linux-arm64 "$lock" "$VERSION" | sha256sum | cut -d' ' -f1)"
+          scripts/build-agent-deb "${flags[@]}" --version "$VERSION" \
+            --architecture linux-arm64 --build-digest "$digest" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir "$RUNNER_TEMP/packages"
+          scripts/verify-agent-deb --json "$RUNNER_TEMP/packages/vonk-forge-agent_${VERSION}_arm64.deb"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: acceptance-agent-package
+          name: ${{ matrix.artifact }}
           path: ${{ runner.temp }}/packages
-          if-no-files-found: error
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: acceptance-agent-baseline
-          path: ${{ runner.temp }}/baseline-packages
           if-no-files-found: error
 
   setups:
@@ -538,8 +541,8 @@ jobs:
       compose_artifact: acceptance-compose
       compose_run_id: ${{ github.run_id }}
       compose_source_sha: ${{ needs.source.outputs.sha }}
-      arm64_package: ${{ needs.package.outputs.arm64_package }}
-      arm64_baseline_package: ${{ needs.package.outputs.arm64_baseline_package }}
+      arm64_package: vonk-forge-agent_${{ needs.source.outputs.version }}_arm64.deb
+      arm64_baseline_package: vonk-forge-agent_${{ needs.source.outputs.baseline_version }}_arm64.deb
 
   acceptance:
     name: Release acceptance

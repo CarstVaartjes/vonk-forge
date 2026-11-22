@@ -4,17 +4,55 @@ description: >-
   (.NET, Android SDK, GHC, CodeQL) before an image build, and report the free
   disk before and after. A runner that fills its disk dies without a log, so
   the margin is visible in every run and a low margin raises a warning.
+  `phase: start` begins the deletion in the background and `phase: finish`,
+  placed before the first image build, waits for it (bounded) and reports.
+inputs:
+  phase:
+    description: run (delete and report now), start (delete in the background) or finish (wait and report)
+    default: run
 runs:
   using: composite
   steps:
     - name: Free preinstalled toolchains and report the margin
       shell: bash
+      env:
+        PHASE: ${{ inputs.phase }}
       run: |
         set -euo pipefail
-        df -h /
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        df -h /
-        free_kib=$(df --output=avail -k / | tail -1)
-        if ((free_kib < 10 * 1024 * 1024)); then
-          echo "::warning title=Runner disk margin::$((free_kib / 1024)) MiB free before the image build; the runner dies when the disk fills"
-        fi
+        marker="$RUNNER_TEMP/free-runner-disk.done"
+        paths=(/usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL)
+        report() {
+          df -h /
+          free_kib=$(df --output=avail -k / | tail -1)
+          if ((free_kib < 10 * 1024 * 1024)); then
+            echo "::warning title=Runner disk margin::$((free_kib / 1024)) MiB free before the image build; the runner dies when the disk fills"
+          fi
+        }
+        case "$PHASE" in
+          run)
+            df -h /
+            sudo rm -rf "${paths[@]}"
+            report
+            ;;
+          start)
+            df -h /
+            rm -f "$marker" "$marker.err"
+            setsid nohup bash -c 'sudo rm -rf "${@:2}" 2> "$1.err" || echo failed >> "$1.err"; touch "$1"' _ "$marker" "${paths[@]}" > /dev/null 2>&1 &
+            ;;
+          finish)
+            for _ in $(seq 1 300); do
+              [[ -e "$marker" ]] && break
+              sleep 1
+            done
+            [[ -e "$marker" ]] || echo "::warning title=Runner disk::toolchain deletion still running after 300 s; building anyway"
+            if [[ -s "$marker.err" ]]; then
+              cat "$marker.err"
+              echo "::warning title=Runner disk::toolchain deletion reported errors; the margin below is what the build gets"
+            fi
+            report
+            ;;
+          *)
+            echo "unknown phase: $PHASE" >&2
+            exit 1
+            ;;
+        esac

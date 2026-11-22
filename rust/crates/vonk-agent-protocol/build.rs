@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg(root.join("scripts/export-agent-wire-schema"))
         .arg("--output")
         .arg(&schema)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .current_dir(&root)
         .status()?;
     if !status.success() {
