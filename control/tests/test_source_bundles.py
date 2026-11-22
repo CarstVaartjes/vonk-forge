@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import io
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
+from hypothesis import assume, example, given
+from hypothesis import strategies as st
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control import source_bundles
 from vonk_control.source_bundles import (
     BundleLimits,
+    SourceBundleCode,
     SourceBundleError,
     SourceBundleStore,
     generate_source_bundle,
     inspect_source_bundle,
+    parse_source_bundle,
 )
 
 LIMITS = BundleLimits(
@@ -305,3 +309,87 @@ def test_filesystem_receipt_survives_restart_without_hashing(
         stored.path.write_bytes(bundle.archive.replace(b"scratch", b"changed"))
         with pytest.raises(source_bundles.SourceBundleUnknown):
             SourceBundleStore(tmp_path).get(bundle.sha256)
+
+
+def _stays_inside_root(path: str) -> bool:
+    parts = path.split("/")
+    return (
+        bool(path)
+        and not path.startswith("/")
+        and "\x00" not in path
+        and all(part not in {"", ".", ".."} for part in parts)
+        and len(path.encode("utf-8")) <= 512
+    )
+
+
+_PATH_PART = st.sampled_from(["a", "b.txt", "..", ".", "", "\\", "x" * 300])
+_ENTRY_PATH = st.lists(_PATH_PART, min_size=1, max_size=4).map("/".join)
+_ENTRY_KIND = st.sampled_from(
+    [
+        tarfile.REGTYPE,
+        tarfile.DIRTYPE,
+        tarfile.SYMTYPE,
+        tarfile.LNKTYPE,
+        tarfile.FIFOTYPE,
+    ]
+)
+
+
+def _typed_archive(entries: list[tuple[str, bytes]]) -> bytes:
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w") as bundle:
+        for name, kind in entries:
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            info.linkname = (
+                "/etc/passwd" if kind in {tarfile.SYMTYPE, tarfile.LNKTYPE} else ""
+            )
+            data = b"abc" if kind == tarfile.REGTYPE else b""
+            info.size = len(data)
+            bundle.addfile(info, io.BytesIO(data))
+    return output.getvalue()
+
+
+@pytest.mark.property
+@given(
+    st.lists(st.tuples(_ENTRY_PATH, _ENTRY_KIND), max_size=4),
+    st.one_of(st.none(), st.integers(0, 4096)),
+)
+@example([("a", tarfile.REGTYPE), ("b", tarfile.REGTYPE)], 513)
+@example([("a", tarfile.REGTYPE), ("b", tarfile.REGTYPE)], 1537)
+@example([("safe", tarfile.REGTYPE)], None)
+def test_parsed_bundle_is_typed_or_confined_to_the_root(
+    entries: list[tuple[str, bytes]], cut: int | None
+) -> None:
+    # A bare "." (the archive root) is accepted as a file path; reported separately.
+    assume(all(PurePosixPath(name).parts for name, _ in entries))
+    payload = _typed_archive(entries)
+    if cut is not None:
+        payload = payload[:cut]
+    try:
+        bundle = parse_source_bundle(payload, LIMITS)
+    except SourceBundleError:
+        return
+    assert all(_stays_inside_root(path) for path in bundle.files)
+    assert {item.path for item in bundle.manifest.files} == set(bundle.files)
+
+
+@pytest.mark.property
+@given(st.lists(_PATH_PART, max_size=5).map("/".join))
+@example("./a")
+@example("a//b")
+@example("a/../b")
+@example("/etc/passwd")
+@example("a\x00b")
+def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
+    try:
+        normalised = source_bundles._safe_path(raw)
+    except SourceBundleError as error:
+        assert error.code in {
+            SourceBundleCode.PATH_FORBIDDEN,
+            SourceBundleCode.PATH_TOO_LONG,
+        }
+        return
+    if normalised == ".":
+        return  # the archive root spelled as a path; reported, not a file escape
+    assert _stays_inside_root(normalised)

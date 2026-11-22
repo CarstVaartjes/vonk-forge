@@ -24,6 +24,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
+from hypothesis import example, given
+from hypothesis import strategies as st
 from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
@@ -69,7 +71,9 @@ from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
     _bounded_enrollment_body,
+    _scan_enrollment_grants,
 )
+from vonk_control.agent_api.common import _ENROLLMENT_TOKEN
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -5948,3 +5952,95 @@ def test_expired_renewal_internal_error_waits_and_heals(tmp_path, monkeypatch) -
         "/agent/renew/expired", content=proof.model_dump_json(), headers=headers
     )
     assert again.status_code == 200
+
+
+_GRANT_KEYS = [
+    '"grant_token"',
+    '"gr\\u0061nt_token"',
+    '"grant\\u005ftoken"',
+    '"csr"',
+    '"grant_tokens"',
+]
+_TOKEN_TEXT = st.text("ABCxyz019_-", min_size=43, max_size=43).map(json.dumps)
+_JSON_LEAF = st.one_of(
+    _TOKEN_TEXT,
+    st.text(max_size=5).map(json.dumps),
+    st.just("null"),
+    st.integers().map(str),
+    st.just('"\\\\"'),
+)
+_WHITESPACE = st.sampled_from(["", " ", "\n"])
+
+
+def _json_containers(inner):
+    array = st.lists(inner, max_size=3).map(lambda items: "[" + ",".join(items) + "]")
+    obj = st.lists(
+        st.tuples(st.sampled_from(_GRANT_KEYS), _WHITESPACE, inner), max_size=4
+    ).map(
+        lambda pairs: (
+            "{" + ",".join(f"{key}{ws}:{ws}{value}" for key, ws, value in pairs) + "}"
+        )
+    )
+    return st.one_of(array, obj)
+
+
+_ENROLLMENT_JSON = st.recursive(_JSON_LEAF, _json_containers, max_leaves=12)
+
+
+def _grant_pairs(text: str) -> list[list[tuple[str, object]]] | None:
+    """Every object's key/value pairs as json.loads sees them; the root is last."""
+    objects: list[list[tuple[str, object]]] = []
+
+    def collect(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        objects.append(pairs)
+        return dict(pairs)
+
+    try:
+        body = json.loads(text, object_pairs_hook=collect)
+    except (ValueError, RecursionError):
+        return None
+    return objects if isinstance(body, dict) else None
+
+
+@pytest.mark.property
+@given(
+    _ENROLLMENT_JSON,
+    st.one_of(
+        st.none(), st.tuples(st.integers(0, 200), st.sampled_from('",:{}[]\\ a'))
+    ),
+)
+@example(
+    '{"grant_token":"' + "A" * 43 + '","gr\\u0061nt_token":"' + "B" * 43 + '"}', None
+)
+@example('[{"grant_token":"' + "A" * 43 + '"}]', None)
+def test_enrollment_scan_agrees_with_json_loads(text: str, mutation) -> None:
+    if mutation is not None and text:
+        index = mutation[0] % len(text)
+        text = text[:index] + mutation[1] + text[index + 1 :]
+    scan = _scan_enrollment_grants(text.encode("utf-8"))
+    assert len(set(scan.tokens)) == len(scan.tokens)
+    assert all(_ENROLLMENT_TOKEN.fullmatch(token) for token in scan.tokens)
+    objects = _grant_pairs(text)
+    if objects is None:
+        return
+    # The caller refuses a body unless this count is exactly one, so it must
+    # equal the root-level grant_token pairs json.loads collapses to one.
+    assert scan.top_level_keys == sum(key == "grant_token" for key, _ in objects[-1])
+    discovered = {
+        value
+        for pairs in objects
+        for key, value in pairs
+        if key == "grant_token"
+        and isinstance(value, str)
+        and _ENROLLMENT_TOKEN.fullmatch(value)
+    }
+    assert set(scan.tokens) == discovered
+
+
+@pytest.mark.property
+@given(st.binary(max_size=2048))
+@example(b"")
+@example(b'{"grant_token":"')
+def test_enrollment_scan_never_raises_on_arbitrary_bytes(raw: bytes) -> None:
+    scan = _scan_enrollment_grants(raw)
+    assert all(_ENROLLMENT_TOKEN.fullmatch(token) for token in scan.tokens)

@@ -403,6 +403,13 @@ probe named by `VONK_CONSUMER_CORPUS_PROBE`; the `control` suite leaves that
 file out, and CI runs it in the job that builds the probe so the Controller
 shards never wait for a Cargo build.
 
+Property tests (Hypothesis) carry `@pytest.mark.property` and pin their known
+cases with `@example`. `control/tests/conftest.py` registers two profiles once:
+`ci` (the default) is derandomized with 50 examples, so every batch replays the
+same inputs and a property can never turn an unrelated batch red; `fuzz`
+(`pytest -m property --hypothesis-profile=fuzz`) draws randomly with 20000
+examples and is for the scheduled fuzz job and local runs.
+
 Prerequisites have one registry and one policy, `tools/pytest_prereqs.py`,
 shared by every suite. A test that needs something beyond the locked Python
 environment carries a prerequisite marker (`postgres`, `needs_docker`,

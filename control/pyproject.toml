@@ -44,6 +44,7 @@ dev = [
     "vonk-cluster-profiles",
     "vonk-nas-setup",
     "hatchling>=1.32.4",
+    "hypothesis>=6.170.17",
     # The official OpenAI SDK is the client the gateway audio proof speaks with.
     "openai>=3.46.0",
     "openapi-python-client>=0.29.1",
