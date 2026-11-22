@@ -58,7 +58,7 @@ class CertificateAuthority(ABC):
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate | None:
-        """Read exact journal evidence; None means authenticated journal absence."""
+        """Observe the exact journal entry, finishing a begun one; None means no entry."""
 
     @abstractmethod
     def issue_node(

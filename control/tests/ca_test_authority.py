@@ -6,10 +6,49 @@ import threading
 from datetime import datetime, timedelta
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import NameOID
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.step_ca import StepCAIssuancePending
+
+
+def fixture_certificate(
+    node_id: str, public_key_pem: bytes, request: CertificateIssuanceBinding
+) -> IssuedCertificate:
+    csr_request = x509.load_pem_x509_csr(public_key_pem)
+    # Ed25519 is deterministic: an exact replay yields the same bytes, as in LocalCA.
+    issuer_key = ed25519.Ed25519PrivateKey.from_private_bytes(b"\x01" * 32)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(csr_request.subject)
+        .issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test issuer")])
+        )
+        .public_key(csr_request.public_key())
+        .serial_number(int(request.serial))
+        .not_valid_before(datetime.fromisoformat(request.not_before))
+        .not_valid_after(datetime.fromisoformat(request.not_after))
+        .add_extension(
+            csr_request.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value,
+            critical=False,
+        )
+        .sign(issuer_key, algorithm=None)
+    )
+    pem = certificate.public_bytes(serialization.Encoding.PEM)
+    return IssuedCertificate(
+        node_id=node_id,
+        certificate_pem=pem,
+        chain_pem=pem,
+        serial=request.serial,
+        fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        not_before=certificate.not_valid_before_utc,
+        not_after=certificate.not_valid_after_utc,
+        generation=request.generation,
+    )
 
 
 class FixtureCertificateAuthority(CertificateAuthority):
@@ -19,7 +58,7 @@ class FixtureCertificateAuthority(CertificateAuthority):
             self._journal = {}
         with self._journal_guard:
             if request.request_id in self._journal:
-                raise StepCAIssuancePending("certificate.issuance_in_progress")
+                raise StepCAIssuancePending("journal busy")
             self._journal[request.request_id] = None
 
     def _finish(
@@ -78,6 +117,9 @@ class FixtureCertificateAuthority(CertificateAuthority):
             if request.request_id not in self._journal:
                 return None
             issued = self._journal[request.request_id]
-            if issued is None:
-                raise StepCAIssuancePending("certificate.issuance_in_progress")
-            return issued
+        if issued is None:
+            # Like the real CA, observing a begun-but-unfinished request
+            # finishes it by exact replay.
+            issued = fixture_certificate(request.node_id, csr_pem, request)
+            self._finish(request, issued)
+        return issued

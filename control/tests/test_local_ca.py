@@ -24,7 +24,7 @@ from vonk_control.api import build_agent_services
 from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.models import AgentCertificate, Base
 from vonk_control.models.fleet import LocalCertificateRevocation
-from vonk_control.step_ca import StepCAError, StepCAIssuancePending
+from vonk_control.step_ca import StepCAError
 
 from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
 
@@ -281,8 +281,6 @@ ca.issue_node(body['node'], body['csr'].encode(), datetime.fromisoformat(body['n
     )
     assert child.returncode == 73, child.stderr
     restarted = LocalCertificateAuthority(**options)
-    with pytest.raises(StepCAIssuancePending):
-        restarted.observe_node(csr, NOW, request=binding)
     entered, release = Event(), Event()
     sign = ca._certificate
 
@@ -298,9 +296,11 @@ ca.issue_node(body['node'], body['csr'].encode(), datetime.fromisoformat(body['n
         first = executor.submit(ca.issue_node, NODE_ID, csr, NOW, request=binding)
         try:
             assert entered.wait(30)
-            issued = restarted.issue_node(NODE_ID, csr, NOW, request=binding)
+            # Observing the crash-left PENDING row heals it by exact replay.
+            issued = restarted.observe_node(csr, NOW, request=binding)
         finally:
             release.set()
+        assert issued is not None
         assert first.result(timeout=30) == issued
 
 
