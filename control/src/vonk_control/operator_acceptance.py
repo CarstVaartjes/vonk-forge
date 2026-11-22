@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from .artifact_jobs import ArtifactJobService
     from .fleet_profiles import FleetProfileService
     from .fleet_projection import FleetProjection
-    from .gateway_keys import GatewayKeyService
+    from .gateway.keys import GatewayKeyService
     from .model_cache import ModelCacheService
     from .operator_projection_api.services import FleetOperatorServices
     from .recipe_image_availability import RecipeImageAvailabilityService
@@ -220,7 +220,7 @@ class OperatorReceiptResolver:
             FleetProfileView,
         )
         from .fleet_projection import FleetNodeIdentity
-        from .gateway_keys import GatewayKeyCreated, GatewayKeyRevoked
+        from .gateway.keys import GatewayKeyCreated, GatewayKeyRevoked
         from .jobs.operator_receipts import read_job_operator_receipt
         from .model_cache_contract import ModelCacheOperatorResponse
         from .operation_api import JobResumeResponse

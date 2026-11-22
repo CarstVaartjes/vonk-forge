@@ -33,6 +33,7 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 from ..agent_jobs import release_owned_reservations_in_session
 from ..categorized_errors import UnsettledOutcome
 from ..distributed_lifecycle import DistributedRecoveryInvalid
+from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeStartParent,
@@ -40,7 +41,6 @@ from ..jobs.documents import (
     RecoveryStartItem,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..litellm import LiteLlmGeneration, ServedModelInfo
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,

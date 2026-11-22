@@ -23,7 +23,7 @@ from vonk_forge_contracts.api import (
 )
 from vonk_forge_contracts.recipe import Scalar
 
-from .strict_json import StrictModel
+from ..strict_json import StrictModel
 
 if TYPE_CHECKING:
     from .route_bundle_contract import RouteAcceptedModelPolicy

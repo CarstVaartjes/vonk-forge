@@ -521,9 +521,9 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.models import AgentOperation
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.worker import assemble_production_worker
 
     from .test_recipe_operations import (

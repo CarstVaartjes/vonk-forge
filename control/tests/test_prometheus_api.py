@@ -19,7 +19,7 @@ from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import SwapObservation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.litellm import PROMETHEUS_EXCLUDE_METRICS
+from vonk_control.gateway.litellm import PROMETHEUS_EXCLUDE_METRICS
 from vonk_control.metrics import MetricsRegistry
 from vonk_control.metrics_contract import (
     METRIC_SPECS,

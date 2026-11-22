@@ -87,7 +87,7 @@ from ..failure_evidence_api import install_failure_evidence_routes
 from ..fleet_profile_api import install_fleet_profile_routes
 from ..fleet_stream import parse_last_event_id
 from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
-from ..gateway_keys import GatewayKeyService, install_gateway_key_routes
+from ..gateway.keys import GatewayKeyService, install_gateway_key_routes
 from ..http_errors import RetryAfterMiddleware, TemporaryHTTPError
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt

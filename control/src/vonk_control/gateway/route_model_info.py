@@ -42,10 +42,21 @@ from vonk_forge_contracts.recipe import (
     Scalar,
 )
 
-from .catalog.revision_contract import (
+from ..catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
     read_recipe_projection,
+)
+from ..models import (
+    CatalogDocumentRevision,
+    ClusterMapping,
+    RecipeInstallation,
+    RecipeRun,
+)
+from ..recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    _compiled_arguments,
+    split_option_choices,
 )
 from .litellm import (
     LiteLlmModelInfo,
@@ -55,17 +66,6 @@ from .litellm import (
     VonkReasoningEffortLevels,
     VonkReasoningEffortText,
     VonkThinking,
-)
-from .models import (
-    CatalogDocumentRevision,
-    ClusterMapping,
-    RecipeInstallation,
-    RecipeRun,
-)
-from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
-    _compiled_arguments,
-    split_option_choices,
 )
 
 _LOGGER = logging.getLogger(__name__)

@@ -24,11 +24,9 @@ from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from .. import bounded_retry
 from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
+from ..gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from ..gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from ..jobs.documents import DistributedRecoveryMarker
-from ..litellm import (
-    LiteLlmGeneration,
-    ServedModelInfo,
-)
 from ..logging import log_event
 from ..models import (
     Job,
@@ -43,10 +41,6 @@ from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..recipe_lifecycle_contract import RecipeOperationResult
 from ..recovery_policy import ROUTE_RECOVERY, schedule
-from ..route_runtime import (
-    RECIPE_ROUTE_AUTHORITY_ID,
-    ActivationMarker,
-)
 from ..stored_documents import RouteClaimMarker
 from . import candidate
 from . import withdrawal as withdrawal_steps

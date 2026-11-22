@@ -31,6 +31,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.inventory_items import inventory_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -54,7 +55,6 @@ from vonk_control.models import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector

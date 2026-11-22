@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, AgentIdentity, TokenCodec
 from vonk_control.categorized_errors import MissingRecord
-from vonk_control.gateway_keys import GatewayKeyRevoked
+from vonk_control.gateway.keys import GatewayKeyRevoked
 from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base
 from vonk_control.operator_acceptance import (

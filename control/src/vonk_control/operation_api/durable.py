@@ -34,6 +34,8 @@ from ..fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from ..gateway.route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
+from ..gateway.route_runtime import recipe_route_run_id, verify_active_route_bundle
 from ..inventory_items import runtime_value
 from ..jobs import states as job_states
 from ..jobs.operator_receipts import (
@@ -55,8 +57,6 @@ from ..models import (
 from ..operations.item_contract import OperationItem, OperationOwnerReference
 from ..operations.progress import aggregate_progress, member_progress
 from ..operations.summary import workload_aliases
-from ..route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
-from ..route_runtime import recipe_route_run_id, verify_active_route_bundle
 from ..state_filters import state_filter
 from .constants import _ACTIVE_PUBLICATION_STATES, NODE_PATTERN
 from .contracts import (

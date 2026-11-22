@@ -2,7 +2,7 @@
 
 A route bundle is staged as ``routes.json`` (the aliases the gateway serves and
 the endpoint behind each) beside ``litellm.json`` (see
-:mod:`vonk_control.litellm`).  The route identity is the document whose digest
+:mod:`vonk_control.gateway.litellm`).  The route identity is the document whose digest
 names a candidate bundle: the same runs and ranks always produce the same
 digest, so an otherwise identical heartbeat never generates a new bundle.
 """
@@ -17,8 +17,8 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_forge_contracts import EndpointAlias
 
+from ..strict_json import StrictModel
 from .litellm import LiteLlmModelInfo
-from .strict_json import StrictModel
 
 
 class RouteEndpointDocument(StrictModel):

@@ -30,8 +30,8 @@ from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
-from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
-from ..gateway_route_grants import recipe_key_routes
+from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
+from ..gateway.route_grants import recipe_key_routes
 from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..library.assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
@@ -247,6 +247,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from ..fleet_events import FleetEventRepository
     from ..fleet_projection import FleetProjection
     from ..fleet_stream import FleetStream
+    from ..gateway.route_runtime import (
+        AtomicRouteBundlePublisher,
+        FileSupervisorAcknowledger,
+    )
     from ..install_admission import (
         InstallAdmissionService,
     )
@@ -256,7 +260,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from ..operation_api import durable_operation_services
     from ..presence import ManagementAddressPolicy
     from ..recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-    from ..route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from ..run_admission import RunAdmissionService
     from ..runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,

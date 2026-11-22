@@ -202,12 +202,12 @@ module defines its own.
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
-| `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
+| `control/src/vonk_control/gateway/keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/jobs/documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library/contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight.py` | declared | 1 | Durable, recipe-bound admission probes without replaying expensive phases. |
-| `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
+| `control/src/vonk_control/gateway/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache/input_contracts.py` | controller-contract | 3 | Typed catalog artifact locators and explicit fixture ingress. |
 | `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
@@ -235,7 +235,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
-| `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
+| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |
 | `control/src/vonk_control/run_switch_contract/plans.py` | controller-contract | 2 | Run switch contract: plans. |
@@ -312,7 +312,7 @@ Native renewal acceptance uses `NativeRenewalEvidence` and `RenewalHelperManifes
 from the registered `vonk_agent_protocol.agent_state` module. The source journal
 is persisted before rotation; an absent replacement is an observation miss.
 
-Gateway mutation recovery uses `gateway_keys.GatewayMutationReceipt` to bind
+Gateway mutation recovery uses `gateway.keys.GatewayMutationReceipt` to bind
 a request identity and durable completion to the exact `_KeyGenerateRequest`.
 Completed receipts remain independent of alias history; a fresh request ID
 creates a new secret and a repeated ID reuses its original receipt. The proposed alias, scope, lifetime, and secret are persisted before

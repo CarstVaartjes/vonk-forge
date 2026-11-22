@@ -4173,7 +4173,7 @@ _PAGE_CEILINGS = (
 
 
 def test_a_page_count_ceiling_on_a_fetch_loop_is_flagged() -> None:
-    path = "control/src/vonk_control/gateway_keys.py"
+    path = "control/src/vonk_control/gateway/keys.py"
     assert check_source(path, _PAGE_CEILINGS, {2}, modes=("item-counts",))
     # No fetch in the body, a stated protocol limit, and a literal retry count.
     assert not check_source(path, _PAGE_CEILINGS, {7}, modes=("item-counts",))

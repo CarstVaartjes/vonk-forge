@@ -42,17 +42,17 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import EndpointAlias
 
-from .auth import MUTATION_ROLES, Actor
-from .capabilities import CapabilityUnavailableError
-from .gateway_route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
-from .operation_api import bounded_error_responses
-from .operator_acceptance import (
+from ..auth import MUTATION_ROLES, Actor
+from ..capabilities import CapabilityUnavailableError
+from ..operation_api import bounded_error_responses
+from ..operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
     operator_acceptance,
 )
-from .runtime_init import GATEWAY_MASTER_KEY_PATH
-from .strict_json import StrictJSONModel
+from ..runtime_init import GATEWAY_MASTER_KEY_PATH
+from ..strict_json import StrictJSONModel
+from .route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1244,7 +1244,7 @@ def install_gateway_key_routes(
     actor_dependency: Any,
     service: GatewayKeyService | None,
 ) -> None:
-    from .operation_api import _ADMIN_OPERATION_IDS
+    from ..operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS[("get", _KEY_PATH)] = "listGatewayKeys"
     _ADMIN_OPERATION_IDS[("post", _KEY_PATH)] = "createGatewayKey"

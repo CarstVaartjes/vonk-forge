@@ -311,7 +311,7 @@ def test_key_receipts_replay_without_repeating_external_effects(
 ):
     """Catches losing key acceptance or treating transport uncertainty as success."""
     import httpx2
-    from vonk_control.gateway_keys import GatewayKeyService
+    from vonk_control.gateway.keys import GatewayKeyService
 
     from .test_gateway_keys import MASTER, FakeLiteLlm
 

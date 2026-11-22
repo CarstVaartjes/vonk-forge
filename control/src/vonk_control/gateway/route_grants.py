@@ -8,8 +8,8 @@ from vonk_agent_protocol import RouteState, RunState
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDecisionSettings
 
-from .models import CatalogDocumentRevision, RecipeInstallation, RecipeRun
-from .recipe_routes import RecipeRouteNotReady
+from ..models import CatalogDocumentRevision, RecipeInstallation, RecipeRun
+from ..recipe_routes import RecipeRouteNotReady
 
 
 class GatewayInferenceRoute(StrEnum):

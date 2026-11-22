@@ -758,7 +758,7 @@ def assemble_production_worker(
     else:
         artifact_phase_executor = None
 
-    from .gateway_route_grants import require_existing_recipe_routes
+    from .gateway.route_grants import require_existing_recipe_routes
 
     recipe_routes = RecipeRouteService(
         sessions,
@@ -1122,13 +1122,13 @@ if __name__ == "__main__":
         wait_for_database,
     )
     from .execution_plan_service import ControllerExecutionPlanService
-    from .logging import configure_controller_logging
-    from .model_cache import ModelCacheService
-    from .presence import ManagementAddressPolicy
-    from .route_runtime import (
+    from .gateway.route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
     )
+    from .logging import configure_controller_logging
+    from .model_cache import ModelCacheService
+    from .presence import ManagementAddressPolicy
     from .runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
         stored_runtime_image_resolver,

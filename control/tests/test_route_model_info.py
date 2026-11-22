@@ -21,8 +21,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, UnknownError
-from vonk_control import route_model_info as module
-from vonk_control.litellm import (
+from vonk_control.gateway import route_model_info as module
+from vonk_control.gateway.litellm import (
     LiteLlmConfig,
     LiteLlmModelInfo,
     LiteLlmPolicy,
@@ -31,22 +31,22 @@ from vonk_control.litellm import (
     render_config,
     render_empty_config,
 )
-from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
-from vonk_control.recipe_routes.shared import _RecipeEndpoint
-from vonk_control.recipe_runtime_specs import split_option_choices
-from vonk_control.route_bundle_contract import (
+from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteBundleDocument,
     RouteIdentityDocument,
     RouteRunIdentity,
 )
-from vonk_control.route_model_info import build_model_info
-from vonk_control.route_runtime import (
+from vonk_control.gateway.route_model_info import build_model_info
+from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     verify_active_route_bundle,
 )
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.shared import _RecipeEndpoint
+from vonk_control.recipe_runtime_specs import split_option_choices
 from vonk_forge_contracts import read_recipe, read_recipe_api
 
 FIXTURES = Path(__file__).parent / "fixtures" / "route_model_info"

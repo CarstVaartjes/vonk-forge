@@ -20,7 +20,7 @@ SUPPORT = ROOT / "control/tests/pass_budget_clocks.py"
 # do not yield a partial collection pass; their tests own retry/stall clocks.
 WAIT_DEADLINE_MODULES = {
     "vonk_control.artifact_blob_store",
-    "vonk_control.route_runtime",
+    "vonk_control.gateway.route_runtime",
     "vonk_control.recipe_image_availability.requests",
     "vonk_control.exact_integer_adoption",
     "vonk_control.model_cache.download_admission",

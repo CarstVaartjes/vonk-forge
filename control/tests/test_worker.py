@@ -1286,9 +1286,9 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
 ) -> None:
     """Catches assemble_production_worker dropping the step heartbeat."""
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.worker import assemble_production_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")

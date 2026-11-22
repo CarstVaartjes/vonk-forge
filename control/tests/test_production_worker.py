@@ -16,13 +16,13 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
 )
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.worker import Worker, assemble_production_worker
 

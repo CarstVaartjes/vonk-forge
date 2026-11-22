@@ -36,6 +36,7 @@ from ..distributed_recovery import (
     run_node_reports_absent,
     settle_absent_run_in_session,
 )
+from ..gateway.litellm import ServedModelInfo
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
@@ -48,7 +49,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..litellm import ServedModelInfo
 from ..models import (
     Job,
     RecipeRun,
