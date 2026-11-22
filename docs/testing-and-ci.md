@@ -403,6 +403,13 @@ probe named by `VONK_CONSUMER_CORPUS_PROBE`; the `control` suite leaves that
 file out, and CI runs it in the job that builds the probe so the Controller
 shards never wait for a Cargo build.
 
+Property tests (Hypothesis) carry `@pytest.mark.property` and pin their known
+cases with `@example`. `control/tests/conftest.py` registers two profiles once:
+`ci` (the default) is derandomized with 50 examples, so every batch replays the
+same inputs and a property can never turn an unrelated batch red; `fuzz`
+(`pytest -m property --hypothesis-profile=fuzz`) draws randomly with 20000
+examples and is for the scheduled fuzz job and local runs.
+
 Prerequisites have one registry and one policy, `tools/pytest_prereqs.py`,
 shared by every suite. A test that needs something beyond the locked Python
 environment carries a prerequisite marker (`postgres`, `needs_docker`,
@@ -632,6 +639,27 @@ by the pre-commit hook, which runs lint, format, types and the added-line
 guards. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
+### Image vulnerability scanning
+
+One scanner stays, because a finding blocks something: the Trivy gate in
+`.github/actions/image-scan` (HIGH/CRITICAL, fixable only, OS packages and
+libraries, skipping `/usr/local/lib/skopeo`, the upstream binary). The findings
+table is in the job log; nothing is uploaded to code scanning, and no workflow
+holds `security-events: write`. It gates the `api` and `worker` images in
+two places, both on the digest that ships:
+
+- the lane's `Candidate image scan and smoke` job (`release-acceptance.yml`),
+  whose failure fails `lane-proof`, so the batch cannot merge; Release's
+  `dev-images.yml` reuses that evidence for the identical digests or scans again;
+- the `v*` tag's `publish-images` job in `stable-release.yml`, before it promotes
+  the accepted dev digests.
+
+`Controller image build tests` scans nothing; it only builds and tests. LiteLLM
+is an upstream application with a thin layer of ours: it is smoked on both
+architectures but never scanned, because only a LiteLLM release fixes its
+findings (`docs/image-pin-refresh.md`). A finding heals by the next dev build:
+`DEPENDENCY_DAY` refreshes the OS and library layers daily.
+
 ## What earns a test
 
 The suites are a merge gate, so every test costs review time on every future
@@ -752,6 +780,20 @@ validator that `validate-recipe-library.yml` runs. It only reads, and a failed
 job is the alarm; the fix is a pin move or a contract fix in the repository that
 drifted, never a gate on unrelated pull requests. The recipes repository owns
 its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
+
+### Coverage: code no test executes
+
+`.github/workflows/coverage.yml` runs on `workflow_dispatch` only: no pull
+request, batch or release calls it, so it costs no runner-minutes there. Run it
+before a deletion or refactor wave. It runs the Python control and repository
+suites through `scripts/test` with the same shards as `ci.yml`, and the Rust
+workspace through `cargo llvm-cov`, all under coverage. The result is one list,
+written to the job summary and to the `code-no-test-executes` artifact (with an
+HTML report, kept 7 days): the files and functions with no executed line,
+as deletion candidates (`scripts/coverage-unexecuted`). It stores and compares
+no percentage and gates nothing. `agent_protocol/src` is not listed because its
+tests run in their own consumer environment. The tool versions are pinned once, in the
+workflow's `env`.
 
 ### Release acceptance before merge
 

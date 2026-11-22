@@ -530,16 +530,21 @@ def _read_archive(payload: IO[bytes], limits: BundleLimits) -> bytes:
 
 
 def _inspect_archive(archive: bytes, limits: BundleLimits) -> SourceBundleManifest:
-    files: list[SourceBundleFile] = []
-    seen: set[str] = set()
-    total = 0
+    # tarfile reads lazily, so a truncated or damaged archive fails while
+    # iterating members or reading them, not only when it is opened.
     try:
-        bundle = tarfile.open(fileobj=io.BytesIO(archive), mode="r:*")  # noqa: SIM115
-    except (tarfile.TarError, OSError) as error:
+        return _inspect_members(archive, limits)
+    except (tarfile.TarError, OSError, EOFError) as error:
         raise SourceBundleError(
             SourceBundleCode.INVALID_ARCHIVE, "source bundle is invalid"
         ) from error
-    with bundle:
+
+
+def _inspect_members(archive: bytes, limits: BundleLimits) -> SourceBundleManifest:
+    files: list[SourceBundleFile] = []
+    seen: set[str] = set()
+    total = 0
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as bundle:
         for member in bundle:
             path = _safe_path(member.name)
             if path in seen:
@@ -608,7 +613,7 @@ def _safe_path(value: str) -> str:
             SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )
     path = PurePosixPath(value)
-    if any(part in {"", ".", ".."} for part in path.parts):
+    if not path.parts or any(part in {"", ".", ".."} for part in path.parts):
         raise SourceBundleError(
             SourceBundleCode.PATH_FORBIDDEN, "source bundle path is forbidden"
         )

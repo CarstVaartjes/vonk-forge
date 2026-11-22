@@ -363,7 +363,10 @@ candidate acceptance with the upgrade carry, and every proof (the proofs are
 workflow exists, `tests/test_workflow_assertions.py`). Main's Release runs the
 complete CI unless it reuses the integration PR's run for the identical tree,
 and its own release acceptance (on a signed `v*` tag `ci.yml` also calls
-`stable-release.yml`, the stable-channel publication jobs). Adding the label
+`stable-release.yml`, the stable-channel publication jobs). The one image
+scanner is the Trivy gate on the api and worker digests (lane `image-security`,
+and `stable-release.yml` before promotion); nothing uploads to code scanning and
+no workflow holds `security-events: write`. Adding the label
 re-runs `ci.yml` in full at
 once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
 reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe

@@ -97,6 +97,37 @@ _LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# Flat names are at most 128 characters and real extended headers are under 1 KiB.
+MAX_TAR_EXTENDED_HEADER_BYTES = 8 * 1024
+_EXTENDED_HEADER_TYPES = frozenset(
+    {
+        tarfile.XHDTYPE,
+        tarfile.XGLTYPE,
+        tarfile.SOLARIS_XHDTYPE,
+        tarfile.GNUTYPE_LONGNAME,
+        tarfile.GNUTYPE_LONGLINK,
+    }
+)
+
+
+class _BoundedTarInfo(tarfile.TarInfo):
+    """Refuse an oversized extended header before CPython reads it into memory.
+
+    tarfile reads a whole PAX/GNU extended header into memory while parsing the
+    header, before any check of ours (and before the signature) can run.
+    `_proc_member` is the one private hook that sees the declared size first;
+    it has kept this shape since Python 2, and a rename fails the tests loudly.
+    """
+
+    def _proc_member(self, tar: tarfile.TarFile) -> tarfile.TarInfo | None:
+        if (
+            self.type in _EXTENDED_HEADER_TYPES
+            and self.size > MAX_TAR_EXTENDED_HEADER_BYTES
+        ):
+            raise tarfile.ReadError("extended tar header exceeds its bound")
+        return super()._proc_member(tar)  # type: ignore[no-any-return,attr-defined]
+
+
 # How a refused index is reported: another schema or major is incompatible.
 _REFUSAL_CODES = {
     RefusalReason.SCHEMA_UNSUPPORTED: RecipePackageCode.SCHEMA_INCOMPATIBLE,
@@ -460,7 +491,7 @@ class RecipePackageClient:
         hashed again.
         """
         try:
-            with tarfile.open(path, mode="r:") as tar:
+            with tarfile.open(path, mode="r:", tarinfo=_BoundedTarInfo) as tar:
                 members: dict[str, tarfile.TarInfo] = {}
                 for member in tar:
                     if (
@@ -507,7 +538,8 @@ class RecipePackageClient:
                         continue
                     if self._store_package(tar, member, digest):
                         verified.add(name)
-        except (OSError, tarfile.TarError) as error:
+        # A long chain of tiny extended headers recurses inside tarfile.
+        except (OSError, tarfile.TarError, RecursionError) as error:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID,
                 f"{RELEASE_LIBRARY} is not a readable tar archive",
@@ -973,7 +1005,7 @@ class RecipePackageClient:
                     if total > MAX_PACKAGE_TOTAL_BYTES:
                         raise ValueError("package is too large")
                     files[member.name] = content
-        except (OSError, tarfile.TarError, ValueError) as error:
+        except (OSError, EOFError, tarfile.TarError, ValueError) as error:
             raise RecipePackageError(
                 RecipePackageCode.EXTRACT_INVALID, "recipe package extraction failed"
             ) from error

@@ -29,18 +29,10 @@ for role in "${roles[@]}"; do
   [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
   evidence="$directory/$role/${digest#sha256:}"
   if [[ ! -f "$evidence/verified" || -L "$evidence/verified" ]] \
-    || [[ "$(cat "$evidence/verified")" != "$run_id:$attempt" ]] \
-    || ! jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0)' \
-      "$evidence/development-$role.sarif" >/dev/null; then
+    || [[ "$(cat "$evidence/verified")" != "$run_id:$attempt" ]]; then
     echo "PR run $run_id has no scan and smoke proof for $role@$digest; running checks" >> "$GITHUB_STEP_SUMMARY"
     exit 0
   fi
-done
-mkdir -p trivy-results
-for role in "${roles[@]}"; do
-  variable="${role^^}_DIGEST"
-  digest=${!variable}
-  cp "$directory/$role/${digest#sha256:}/development-$role.sarif" "trivy-results/"
 done
 echo 'reused=true'
 echo "Trivy scans and LiteLLM smoke reused from pull request run $run_id for these exact digests (under 24 h old)" >> "$GITHUB_STEP_SUMMARY"
