@@ -96,13 +96,15 @@ def locked_temporary_pip_acquisition(words: tuple[str, ...]) -> bool:
         return False
 
 
+def acquisition_prefix(words: tuple[str, ...]) -> bool:
+    """True for a command whose name and subcommand are on the allowlist."""
+    return any(tuple(words[: len(prefix)]) == prefix for prefix in _COMMANDS)
+
+
 def main(command: list[str] | None = None) -> int:
     command = sys.argv[1:] if command is None else command
     words = (Path(command[0]).name, *command[1:]) if command else ()
-    if not (
-        any(tuple(words[: len(prefix)]) == prefix for prefix in _COMMANDS)
-        or locked_temporary_pip_acquisition(words)
-    ):
+    if not (acquisition_prefix(words) or locked_temporary_pip_acquisition(words)):
         print(
             "Only dependency acquisition may be retried: "
             + ", ".join(" ".join(prefix) for prefix in _COMMANDS)
@@ -110,6 +112,7 @@ def main(command: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 64
+    assert words
     deadline = monotonic() + FETCH_DEADLINE_SECONDS
     for attempt in range(1, MAX_ATTEMPTS + 1):
         timeout = max(1.0, min(FETCH_TIMEOUT_SECONDS, deadline - monotonic()))

@@ -111,7 +111,7 @@ jobs:
           set -euo pipefail
           rustup set profile minimal
           scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component rustfmt,llvm-tools-preview
-          scripts/retry-dependency-fetch cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
+          cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Run the Rust tests under coverage

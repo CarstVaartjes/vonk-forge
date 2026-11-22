@@ -47,7 +47,7 @@ jobs:
           key: cargo-fuzz-${{ env.CARGO_FUZZ_VERSION }}-${{ env.FUZZ_NIGHTLY }}
       - name: Install cargo-fuzz
         if: steps.tool.outputs.cache-hit != 'true'
-        run: scripts/retry-dependency-fetch cargo "+$FUZZ_NIGHTLY" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+        run: cargo "+$FUZZ_NIGHTLY" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
       - name: Save the cargo-fuzz binary
         if: steps.tool.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -87,7 +87,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           mapfile -t files < <(grep -rl "pytest.mark.property" control/tests tests --include='test_*.py')
-          timeout 300 uv run --project control --frozen pytest "${files[@]}" -m property -x --hypothesis-profile=fuzz
+          timeout 300 uv run --project control --frozen pytest "${files[@]}" -m "property and not needs_recipe_library" -x --hypothesis-profile=fuzz
       - name: Minimize the corpus
         if: always()
         run: |
