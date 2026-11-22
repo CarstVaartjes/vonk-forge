@@ -6,15 +6,14 @@ use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
 use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthority};
 
 use super::commands::command;
-use super::custody::{digest, digest_file, now, safe};
+use super::custody::{digest, now, safe};
 use super::{AGENT, HELPER, PACKAGE, Store, Transaction, prerequisites};
 
-/// What dpkg and the filesystem say is installed and running at confirm time.
+/// What dpkg and the filesystem say is installed at confirm time.
 pub(super) struct Observed {
-    pub dpkg_status: String,
+    pub dpkg_status: Result<String, String>,
     pub agent_sha256: String,
     pub helper_sha256: String,
-    pub running_sha256: String,
 }
 
 impl Store {
@@ -223,39 +222,34 @@ impl Store {
     pub fn acknowledge(&self, node: &str, candidate: &str, nonce: &str) -> Result<(), String> {
         let _lock = self.lock()?;
         let tx = self.read()?;
-        // Observe what runs now: any unreadable observation refuses, the
+        let timestamp = now()?;
+        // Cheap request checks first: a wrong or expired request never spawns dpkg.
+        self.check_acknowledgement(&tx, node, candidate, nonce, timestamp)?;
+        // Observe what is installed: any unreadable observation refuses, the
         // transaction stays Armed and the watchdog restores at the deadline.
         let observed = Observed {
             dpkg_status: command(
                 "/usr/bin/dpkg-query",
                 &["-W", "-f=${Status}\t${Version}", PACKAGE],
                 false,
-            )?,
+            ),
             agent_sha256: digest(Path::new(AGENT))?,
             helper_sha256: digest(Path::new(HELPER))?,
-            running_sha256: digest_file(
-                &mut fs::File::open("/proc/self/exe").map_err(|e| e.to_string())?,
-            )?,
         };
-        self.acknowledge_observed(tx, node, candidate, nonce, &observed, now()?)
+        self.finish_acknowledgement(tx, &observed, timestamp)
     }
-    pub(super) fn acknowledge_observed(
+    pub(super) fn finish_acknowledgement(
         &self,
         mut tx: Transaction,
-        node: &str,
-        candidate: &str,
-        nonce: &str,
         observed: &Observed,
         timestamp: i64,
     ) -> Result<(), String> {
-        self.check_acknowledgement(&tx, node, candidate, nonce, timestamp)?;
         let installed = format!("install ok installed\t{}", tx.candidate_version);
-        if observed.dpkg_status != installed
+        if observed.dpkg_status.as_deref() != Ok(installed.as_str())
             || observed.agent_sha256 != tx.candidate_binary_sha256
             || observed.helper_sha256 != tx.candidate_helper_sha256
-            || observed.running_sha256 != tx.candidate_helper_sha256
         {
-            return Err("candidate is not the installed and running package".into());
+            return Err("candidate is not the installed package".into());
         }
         tx.phase = Phase::Acknowledged;
         tx.updated_at = timestamp;

@@ -316,13 +316,12 @@ fn damaged_lock_shape_does_not_poison_fresh_admission() {
     assert!(store.lock().is_ok());
 }
 
-fn observed(status: &str) -> Observed {
+fn observed(status: Result<&str, &str>) -> Observed {
     let tx = transaction();
     Observed {
-        dpkg_status: status.into(),
+        dpkg_status: status.map(str::to_owned).map_err(str::to_owned),
         agent_sha256: tx.candidate_binary_sha256,
-        helper_sha256: tx.candidate_helper_sha256.clone(),
-        running_sha256: tx.candidate_helper_sha256,
+        helper_sha256: tx.candidate_helper_sha256,
     }
 }
 
@@ -337,33 +336,24 @@ fn confirm(observed: &Observed) -> (Result<(), String>, Phase) {
     let _lock = store.lock().unwrap();
     let tx = transaction();
     store.write(&tx).unwrap();
-    let result = store.acknowledge_observed(
-        tx.clone(),
-        &tx.node_id,
-        &tx.candidate_sha256,
-        &tx.rollback.attempt_nonce,
-        observed,
-        150,
-    );
+    let result = store.finish_acknowledgement(tx, observed, 150);
     (result, store.read().unwrap().phase)
 }
 
 #[test]
-fn acknowledgement_requires_the_candidate_installed_and_running() {
+fn acknowledgement_requires_the_candidate_installed() {
     let installed = "install ok installed\t0.2.0";
-    assert_eq!(confirm(&observed(installed)), (Ok(()), Phase::Acknowledged));
+    assert_eq!(
+        confirm(&observed(Ok(installed))),
+        (Ok(()), Phase::Acknowledged)
+    );
     for status in [
-        "install ok half-configured\t0.2.0",
-        "install ok installed\t0.1.0",
-        "",
+        Ok("install ok half-configured\t0.2.0"),
+        Ok("install ok installed\t0.1.0"),
+        Err("dpkg-query failed"),
     ] {
         let (result, phase) = confirm(&observed(status));
         assert!(result.is_err());
         assert_eq!(phase, Phase::Armed);
     }
-    let mut stale = observed(installed);
-    stale.running_sha256 = "9".repeat(64);
-    let (result, phase) = confirm(&stale);
-    assert!(result.is_err());
-    assert_eq!(phase, Phase::Armed);
 }
