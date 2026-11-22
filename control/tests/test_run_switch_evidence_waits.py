@@ -36,13 +36,13 @@ from vonk_control.run_switch_operations.evidence_waits import (
 )
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
-from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _request,
     _result,
     _service,
 )
+from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
 
 _PHASES = (
     ProfileChildPhase.PREPARE,

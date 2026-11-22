@@ -20,7 +20,7 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import _CanonicalImageTransport
-from .test_run_switch_operations import _cold_compile_switch
+from .run_switch_operations_support import _cold_compile_switch
 
 
 def test_identity_conflict_names_both_build_inputs_through_the_evidence_download(

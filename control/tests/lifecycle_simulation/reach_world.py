@@ -53,7 +53,10 @@ from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import document_sha256
 
 from ..recipe_operations_support import ConcurrentPublisher
-from ..test_run_switch_operations import RecordingArtifactExecutor, _fixture_execution
+from ..run_switch_operations_support import (
+    RecordingArtifactExecutor,
+    _fixture_execution,
+)
 from .world import Controller, World, build_world
 
 #: The model's one file, as the provider serves it.

@@ -68,12 +68,12 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_fleet_profile_api import _client, _headers
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_fleet_profile_api import _client, _headers
 
 
 class _IdleRoutes:

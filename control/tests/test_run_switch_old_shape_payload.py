@@ -22,7 +22,7 @@ from vonk_control.run_switch_operations.observation_helpers import (
 from vonk_control.strict_json import read_stored_model
 
 from .recipe_operations_support import installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _ObservingLifecycle,

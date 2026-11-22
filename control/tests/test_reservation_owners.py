@@ -41,9 +41,9 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_attempt_residues import _load, _loop
 from .test_disk_reservations import _record_disk
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
 def _claims(sessions, **where) -> list[ResourceReservation]:

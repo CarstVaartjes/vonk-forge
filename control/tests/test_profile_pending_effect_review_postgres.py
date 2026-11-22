@@ -52,15 +52,15 @@ from .recipe_operations_support import (
     setup_services,
     start_evidence,
 )
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .test_fleet_profile_cancel import (
     _agent_result,
     _agent_service_and_target_claim,
     _start_profile_stop_child,
     _two_target_stop_case,
-)
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
 )
 
 

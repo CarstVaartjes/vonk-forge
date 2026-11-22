@@ -51,6 +51,7 @@ from .fleet_profiles_support import (
 )
 from .node_contacts import contact_row
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
+from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_continuity_postgres import (
@@ -58,7 +59,6 @@ from .test_profile_continuity_postgres import (
     _SQLCancellationAdapter,
 )
 from .test_recipe_operations_part5 import _issue_exact_stop_grant
-from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 
 def _parallel_world(engine: Engine, *, gang: bool = False):

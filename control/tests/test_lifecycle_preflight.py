@@ -665,7 +665,7 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
     from .recipe_operations_support import installed_recipe
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
         _request,

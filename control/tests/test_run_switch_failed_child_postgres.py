@@ -14,7 +14,7 @@ from vonk_control.run_switch_contract import (
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _replace_child,

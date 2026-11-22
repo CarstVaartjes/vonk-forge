@@ -56,10 +56,10 @@ from .recipe_operations_support import (
     started_recipe,
 )
 from .recipe_stop_fixtures import recipe_stop_payload
+from .run_switch_operations_support import _request
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs_postgres import COMMIT, NODE_B, parent, service  # noqa: F401
 from .test_profile_port_claims import _ready_profile
-from .test_run_switch_operations import _request
 
 
 def _newer_parent(sessions, clock, ordinal: int) -> Job:

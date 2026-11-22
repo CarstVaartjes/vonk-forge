@@ -59,7 +59,7 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -683,7 +683,7 @@ def _recheck_world(tmp_path, postgres_engine):
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
     from .recipe_operations_support import setup_services
-    from .test_run_switch_operations import (
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )

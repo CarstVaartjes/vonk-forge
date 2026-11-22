@@ -119,7 +119,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
         RunSwitchPhase,
     )
 
-    from .test_run_switch_operations import _runtime_receipt
+    from .run_switch_operations_support import _runtime_receipt
 
     accepted = _accepted(tmp_path)
     executor = CompositeDistributionPhaseExecutor(

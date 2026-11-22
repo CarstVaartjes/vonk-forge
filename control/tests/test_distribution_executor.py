@@ -101,8 +101,8 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .agent_jobs_support import distribution_payload
 from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import _runtime_receipt
 from .runtime_image_fixtures import place_test_image
-from .test_run_switch_operations import _runtime_receipt
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:

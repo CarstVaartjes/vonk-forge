@@ -19,8 +19,8 @@ from vonk_control.owner_liveness import OwnerKind
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 
 from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_disk_reservations import _record_disk
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
 def _inject_build(sessions, ready_build, node_id, state, *, failed_row=False):
