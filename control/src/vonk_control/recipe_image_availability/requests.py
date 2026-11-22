@@ -42,11 +42,7 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
 )
-from ..operation_blockers import (
-    IdentityConflict,
-    OperationBlocker,
-    make_blocker,
-)
+from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
 from ..recipe_availability_intent import (
     RecipeRevisionIntent,
     RecipeSelectorIntent,

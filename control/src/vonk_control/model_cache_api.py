@@ -47,8 +47,8 @@ from .operation_api import (
     OperationQuery,
     bounded_error_responses,
 )
-from .operation_contract import AvailabilityOperationFailure
-from .operation_item_contract import (
+from .operations.contract import AvailabilityOperationFailure
+from .operations.item_contract import (
     OperationItem,
     OperationOwnerReference,
     OperationResultFacts,

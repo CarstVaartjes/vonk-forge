@@ -58,12 +58,8 @@ from ..model_cache_contract import (
     ModelCacheOperationProgress,
 )
 from ..models import Job
-from ..operation_blockers import (
-    OperationBlocker,
-)
-from ..operation_contract import (
-    AvailabilityOperationFailure,
-)
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import wait_due
 from ..recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,

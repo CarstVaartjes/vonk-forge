@@ -98,7 +98,7 @@ from ..jobs import states as job_states
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
-from ..operation_progress import progress_document
+from ..operations.progress import progress_document
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..stored_json import read_row_column

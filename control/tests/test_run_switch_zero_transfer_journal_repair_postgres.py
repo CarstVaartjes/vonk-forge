@@ -29,7 +29,7 @@ from vonk_control.models import (
     RunSwitchJournalRepair,
     RunSwitchJournalRepairPending,
 )
-from vonk_control.operation_contract import OperationRecoveryAction
+from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,

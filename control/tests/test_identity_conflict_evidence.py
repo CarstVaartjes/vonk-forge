@@ -9,7 +9,7 @@ from vonk_agent_protocol import LifecycleState, RecipeImageCode
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.install_admission import InstallAdmissionBusy
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
-from vonk_control.operation_blockers import IdentityConflict
+from vonk_control.operations.blockers import IdentityConflict
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityService,

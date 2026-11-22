@@ -71,12 +71,12 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
-from vonk_control.operation_blockers import PHASE_RETRY_CODE
-from vonk_control.operation_contract import (
+from vonk_control.operations.blockers import PHASE_RETRY_CODE
+from vonk_control.operations.contract import (
     OperationFailureEvidence,
     OperationRecoveryAction,
 )
-from vonk_control.operation_item_contract import OperationItem, operation_item
+from vonk_control.operations.item_contract import OperationItem, operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_builds.cancellation import (

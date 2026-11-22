@@ -36,8 +36,8 @@ from vonk_control.operation_api import (
     durable_operation_services,
     operation_detail_response,
 )
-from vonk_control.operation_item_contract import operation_item
-from vonk_control.operation_progress import aggregate_progress
+from vonk_control.operations.item_contract import operation_item
+from vonk_control.operations.progress import aggregate_progress
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 

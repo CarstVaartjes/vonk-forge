@@ -36,8 +36,8 @@ from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
 from ..models import FleetProfile, FleetProfileApplication, User
-from ..operation_contract import OperationFailureEvidence
-from ..operation_item_contract import (
+from ..operations.contract import OperationFailureEvidence
+from ..operations.item_contract import (
     OperationItem,
     OperationOwnerReference,
     OperationResultFacts,

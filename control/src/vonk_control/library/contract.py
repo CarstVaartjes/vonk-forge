@@ -46,7 +46,7 @@ from ..model_cache_contract import (
     ModelCacheUsage,
     ModelStorageObservation,
 )
-from ..operation_blockers import MAX_BLOCKERS, OperationBlocker
+from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
 from ..run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from ..strict_json import StrictModel
 

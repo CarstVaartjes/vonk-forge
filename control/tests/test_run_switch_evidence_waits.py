@@ -24,7 +24,7 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
 )
 from vonk_control.models import RecipeRun, RunNode
-from vonk_control.operation_blockers import STALL_RETRY_ATTEMPT, ProgressStall
+from vonk_control.operations.blockers import STALL_RETRY_ATTEMPT, ProgressStall
 from vonk_control.progress_stall import is_stalled, next_stall
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import (

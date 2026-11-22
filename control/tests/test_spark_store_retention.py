@@ -22,7 +22,7 @@ from vonk_control.models import (
     ModelCacheSet,
     RecipeBuild,
 )
-from vonk_control.operation_blockers import OperationBlocker, StorageReliefEvidence
+from vonk_control.operations.blockers import OperationBlocker, StorageReliefEvidence
 from vonk_control.spark_store_retention import store_retention_request
 
 from .test_catalog_revision_collection import NODE, NOW, Catalog

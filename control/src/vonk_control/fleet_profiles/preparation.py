@@ -21,7 +21,7 @@ from .. import fleet_profile_states
 from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..models import FleetProfileApplication
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..profile_claim_restore import restore_released_profile_claims
 from ..stall_window import latest_progress
 from ..storage_demands import StorageRelief

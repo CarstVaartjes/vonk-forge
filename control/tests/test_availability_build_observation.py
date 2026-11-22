@@ -24,7 +24,7 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.oci_image_store import OciImageStore
-from vonk_control.operation_contract import AvailabilityOperationFailure
+from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,

@@ -121,9 +121,9 @@ from ..operation_api import (
     job_response,
     operation_detail_response,
 )
-from ..operation_contract import OperationRecoveryAction
-from ..operation_item_contract import OperationRow, operation_item
-from ..operation_summary import UNREADABLE_SUMMARY
+from ..operations.contract import OperationRecoveryAction
+from ..operations.item_contract import OperationRow, operation_item
+from ..operations.summary import UNREADABLE_SUMMARY
 from ..operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,

@@ -31,8 +31,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import DigestText
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 
-from .child_phases import FleetProfileChildPhase
-from .strict_json import StrictJSONModel
+from ..child_phases import FleetProfileChildPhase
+from ..strict_json import StrictJSONModel
 
 MAX_BLOCKERS = 16
 _BLOCKER_REASON = TypeAdapter(OperationReason | ProgressAlarmCode)

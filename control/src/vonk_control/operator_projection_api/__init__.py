@@ -88,7 +88,7 @@ from ..observation_transfer import (
 from ..observation_transfer import observation_openapi as observation_openapi
 from ..observation_transfer import observation_response as observation_response
 from ..operation_api import bounded_error_responses as bounded_error_responses
-from ..operation_item_contract import OperationResultFacts as OperationResultFacts
+from ..operations.item_contract import OperationResultFacts as OperationResultFacts
 from ..platform_observation_errors import (
     ObservationCaptureUnavailable as ObservationCaptureUnavailable,
 )

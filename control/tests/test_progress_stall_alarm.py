@@ -39,7 +39,7 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     ResourceReservation,
 )
-from vonk_control.operation_blockers import (
+from vonk_control.operations.blockers import (
     BlockingOperation,
     ProgressAlarmCode,
     make_blocker,

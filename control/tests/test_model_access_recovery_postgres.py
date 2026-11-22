@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, ModelAccessReason
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, ModelCacheOperation
-from vonk_control.operation_contract import (
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

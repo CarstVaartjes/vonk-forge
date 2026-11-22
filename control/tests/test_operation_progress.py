@@ -6,8 +6,8 @@ from vonk_agent_protocol import (
     OperationMemberProgress,
     OperationProgress,
 )
-from vonk_control.operation_contract import validate_progress_update
-from vonk_control.operation_progress import (
+from vonk_control.operations.contract import validate_progress_update
+from vonk_control.operations.progress import (
     aggregate_progress,
     progress_document,
     progress_write_due,
@@ -238,7 +238,7 @@ def test_the_aggregate_of_parallel_transfers_is_a_transfer_and_otherwise_prepare
 def test_successful_distribution_progress_no_longer_projects_pulling() -> None:
     # A retained heartbeat describes the last active step, not the terminal phase.
     from vonk_agent_protocol import LifecycleState, ProgressPhase
-    from vonk_control.operation_progress import project_progress_for_state
+    from vonk_control.operations.progress import project_progress_for_state
 
     pulled = OperationProgress(
         phase=ProgressPhase.PULLING.value, completed_bytes=5_381_019_286

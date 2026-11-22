@@ -62,12 +62,12 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
     """Catches dropped enum/nullable evidence, split transactions and read churn."""
     from vonk_agent_protocol import WaitOwnerKind, WaitResumeCondition
     from vonk_control.operation_api.lane_wait import apply_queue_wait
-    from vonk_control.operation_blockers import (
+    from vonk_control.operations.blockers import (
         BlockingOperation,
         OperationBlocker,
         StorageReliefEvidence,
     )
-    from vonk_control.operation_item_contract import OperationItem
+    from vonk_control.operations.item_contract import OperationItem
     from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 
     Base.metadata.create_all(postgres_engine)
@@ -263,7 +263,7 @@ def test_every_durable_wait_owner_has_identity_and_projection() -> None:
     from sqlalchemy import Integer
     from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
     from vonk_control.models import Base, Job
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
     from vonk_control.persisted_waits import owner_identity, read_wait, write_wait
 
     now = datetime(2026, 10, 19, tzinfo=UTC)
@@ -387,7 +387,7 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
 def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
     """Catches an attention warning resetting the dependency's original age."""
     from vonk_agent_protocol import ProgressAlarmCode
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
     from vonk_control.persisted_waits import read_wait, schedule_wait
 
     job = _job()

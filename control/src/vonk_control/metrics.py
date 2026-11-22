@@ -40,7 +40,7 @@ from .models import (
     AgentOperationAttempt,
     Job,
 )
-from .operation_progress import project_progress
+from .operations.progress import project_progress
 from .strict_json import read_stored_model
 from .terminal_history_collection import history_rows_past_grace
 from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState

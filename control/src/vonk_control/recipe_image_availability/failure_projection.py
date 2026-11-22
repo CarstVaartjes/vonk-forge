@@ -30,14 +30,12 @@ from ..model_cache import ModelCacheError
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
-from ..operation_contract import (
+from ..operations.blockers import make_blocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..operation_progress import aggregate_progress
+from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_image_availability_reader_contract import (
     StoredAvailabilityIdentity,

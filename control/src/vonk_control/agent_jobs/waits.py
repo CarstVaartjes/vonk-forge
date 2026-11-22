@@ -18,12 +18,8 @@ from .. import agent_operation_states
 from ..agent_operation_facts import attempt_is_live, aware
 from ..gpu_health import GPU_HEALTH_CODES
 from ..models import AgentOperation, AgentOperationAttempt
-from ..operation_blockers import (
-    BlockingOperation,
-    ProgressAlarmCode,
-    make_blocker,
-)
-from ..operation_progress import stored_progress
+from ..operations.blockers import BlockingOperation, ProgressAlarmCode, make_blocker
+from ..operations.progress import stored_progress
 from ..persisted_waits import read_wait, write_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import last_progress_at

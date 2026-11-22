@@ -62,7 +62,7 @@ from vonk_control.operation_api import (
     OperationQuery,
     durable_operation_services,
 )
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator

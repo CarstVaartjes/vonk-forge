@@ -42,7 +42,7 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
 )
-from vonk_control.operation_progress import aggregate_progress, member_progress
+from vonk_control.operations.progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
@@ -882,7 +882,7 @@ def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
 
     from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
     from vonk_agent_protocol.agent_words import ProfileDocumentState
-    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.wait_contract import QueueWait
 
     from cluster_profiles.cli_render import render_payload

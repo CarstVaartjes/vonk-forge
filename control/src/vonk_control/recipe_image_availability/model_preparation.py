@@ -24,8 +24,8 @@ from ..model_cache_contract import (
     ModelCacheOperationProgress,
 )
 from ..model_cache_progress import project_cache_progress
-from ..operation_blockers import OperationBlocker
-from ..operation_contract import (
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

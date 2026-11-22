@@ -24,7 +24,7 @@ from ..fleet_profile_contract import (
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..models import FleetProfile, FleetProfileApplication
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,

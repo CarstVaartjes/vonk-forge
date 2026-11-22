@@ -20,7 +20,7 @@ from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.operation_api.contracts import OperationListPage, OperationProvider
 from vonk_control.operation_api.providers import merge_operation_providers
-from vonk_control.operation_item_contract import OperationItem
+from vonk_control.operations.item_contract import OperationItem
 
 from .display_fixtures import create_draft, reword
 

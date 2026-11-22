@@ -1390,7 +1390,7 @@ def test_postgres_distribution_lower_receipt_settles_without_lease_retry(
         OperationCheckpoint,
         ProgressPhase,
     )
-    from vonk_control.operation_progress import stored_progress
+    from vonk_control.operations.progress import stored_progress
 
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)

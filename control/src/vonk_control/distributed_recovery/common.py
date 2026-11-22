@@ -52,7 +52,7 @@ from ..models import (
     ResourceReservation,
     RunNode,
 )
-from ..operation_blockers import BlockingOperation, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import read_wait, schedule_wait, write_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,

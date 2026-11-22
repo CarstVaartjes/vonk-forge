@@ -14,9 +14,7 @@ from ..jobs import states as job_states
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
+from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
 from ..run_switch_contract import (
     RunSwitchOperation,

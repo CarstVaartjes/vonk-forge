@@ -34,7 +34,7 @@ from ..operation_api import (
     OperationQuery,
     _activity_keyset_filter,
 )
-from ..operation_item_contract import OperationItem
+from ..operations.item_contract import OperationItem
 from ..run_switch_contract import (
     RunSwitchOperation,
 )

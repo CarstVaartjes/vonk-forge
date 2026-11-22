@@ -17,7 +17,7 @@ from .model_cache_contract import (
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
 )
-from .operation_progress import STALE_AFTER_SECONDS, project_progress, sample_progress
+from .operations.progress import STALE_AFTER_SECONDS, project_progress, sample_progress
 from .strict_json import read_stored_model
 
 #: The measured phase of each operation phase.  Both are words of the contract's

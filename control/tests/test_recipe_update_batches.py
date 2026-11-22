@@ -23,7 +23,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.operation_api import OperationQuery, operation_detail_response
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operations.item_contract import operation_item
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
@@ -1360,7 +1360,7 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
     """Missing peer failure fields cannot adopt terminal state or duplicate work."""
     from vonk_agent_protocol import RecipeUpdateCode
     from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
-    from vonk_control.operation_contract import AvailabilityOperationFailure
+    from vonk_control.operations.contract import AvailabilityOperationFailure
 
     sessions, recipes, now, fresh = update_env
     service = fresh()

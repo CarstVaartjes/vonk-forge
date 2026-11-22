@@ -845,7 +845,7 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
         FleetProfilePreview,
     )
     from vonk_control.fleet_profiles.assessment_support import _preview_blockers
-    from vonk_control.operation_blockers import dump_blockers, read_blockers
+    from vonk_control.operations.blockers import dump_blockers, read_blockers
     from vonk_control.run_switch_contract import RunSwitchAssessment
 
     _, _, _, _, plan = _switch_world(
@@ -867,7 +867,7 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     assert read_blockers(stored)[0].swap == reason.swap
 
     # Without evidence the key is absent, in a stored wait and in a review reason.
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
 
     assert "swap" not in dump_blockers([make_blocker(blocker.code, "no shortfall")])[0]
     assert "swap" not in reason.model_copy(update={"swap": None}).model_dump(

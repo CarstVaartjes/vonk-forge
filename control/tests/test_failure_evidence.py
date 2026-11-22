@@ -40,7 +40,7 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from vonk_control.operation_item_contract import OperationResultFacts, operation_item
+from vonk_control.operations.item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import (
@@ -1369,7 +1369,7 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
-    from vonk_control.operation_contract import sanitize_failure_evidence
+    from vonk_control.operations.contract import sanitize_failure_evidence
 
     document = _child_diagnostics_document("segfault\n")
     document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]

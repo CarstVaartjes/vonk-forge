@@ -11,8 +11,8 @@ from vonk_control.operation_api.contracts import (
     OperationPage,
     OperationProvider,
 )
-from vonk_control.operation_contract import OperationRecoveryAction
-from vonk_control.operation_item_contract import OperationItem
+from vonk_control.operations.contract import OperationRecoveryAction
+from vonk_control.operations.item_contract import OperationItem
 
 from .test_operation_api import NODE_ID, _client
 

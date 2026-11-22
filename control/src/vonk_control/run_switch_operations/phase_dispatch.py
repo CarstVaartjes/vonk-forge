@@ -49,7 +49,7 @@ from ..logging import log_event
 from ..models import (
     Job,
 )
-from ..operation_blockers import make_blocker
+from ..operations.blockers import make_blocker
 from ..persisted_waits import schedule_wait
 from ..preparation_contract import (
     RuntimeImageIdentity,

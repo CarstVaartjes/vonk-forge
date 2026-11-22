@@ -49,7 +49,7 @@ from .models import (
     CatalogDocumentRevision,
     Job,
 )
-from .operation_progress import (
+from .operations.progress import (
     aggregate_progress,
     member_progress,
     project_progress_for_state,

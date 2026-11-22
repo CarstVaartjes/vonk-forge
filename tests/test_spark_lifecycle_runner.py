@@ -1727,7 +1727,7 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         OperationProgress,
         ProgressPhase,
     )
-    from vonk_control.operation_contract import (
+    from vonk_control.operations.contract import (
         AvailabilityOperationFailure,
         AvailabilityRecoveryAction,
     )

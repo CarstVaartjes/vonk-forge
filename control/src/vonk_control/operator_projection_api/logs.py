@@ -33,7 +33,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
-from ..operation_item_contract import OperationResultFacts
+from ..operations.item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 
 #: How far back the log projection narrates failed agent attempts by default:

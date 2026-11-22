@@ -35,7 +35,7 @@ from ..models import (
     Job,
     NodeInventorySnapshot,
 )
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from ..resource_planning import (
     ResourceReason,
     memory_reservation_kinds,

@@ -26,9 +26,7 @@ from ..model_cache import ModelCacheService
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    bound_blockers,
-)
+from ..operations.blockers import bound_blockers
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict

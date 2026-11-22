@@ -29,10 +29,7 @@ from ..models import (
     Job,
     RecipeBuild,
 )
-from ..operation_blockers import (
-    OperationBlocker,
-    bound_blockers,
-)
+from ..operations.blockers import OperationBlocker, bound_blockers
 from ..recipe_image_availability_contract import (
     AvailabilityBuildReceipt,
 )

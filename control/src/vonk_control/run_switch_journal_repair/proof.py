@@ -22,7 +22,7 @@ from ..models import (
     FleetProfileApplication,
     Job,
 )
-from ..operation_progress import stored_progress
+from ..operations.progress import stored_progress
 from ..recipe_operations import current_recipe_progress_attribution
 from ..run_switch_contract import (
     RunSwitchOperationResult,

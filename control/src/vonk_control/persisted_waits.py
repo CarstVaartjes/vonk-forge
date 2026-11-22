@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 
 from .agent_operation_facts import aware
 from .models.waits import ScheduledWaitOwner
-from .operation_blockers import BlockingOperation, OperationBlocker, make_blocker
+from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
 from .strict_json import warn_unreadable_once
 from .wait_contract import QueueWait, WaitEvidence
 

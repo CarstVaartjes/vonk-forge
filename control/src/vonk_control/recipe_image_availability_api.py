@@ -28,8 +28,8 @@ from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
-from .operation_blockers import OperationBlocker
-from .operation_contract import (
+from .operations.blockers import OperationBlocker
+from .operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
     OperationProgress,

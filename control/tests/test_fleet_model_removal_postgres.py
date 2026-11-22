@@ -30,7 +30,7 @@ from vonk_control.models import (
     Job,
     RecipeInstallation,
 )
-from vonk_control.operation_contract import AvailabilityOperationFailure
+from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import document_sha256

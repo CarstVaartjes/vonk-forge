@@ -40,7 +40,7 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
-from ..operation_progress import stored_progress
+from ..operations.progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP

@@ -45,8 +45,8 @@ from vonk_forge_contracts import RecipeDefinition
 from ..distribution_assignment import NodeDistributionAssignment
 from ..lifecycle.evidence import BookkeepingReason
 from ..mapping_parameters import EngineArgumentValue
-from ..operation_blockers import OperationBlocker
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import AvailabilityOperationFailure
 from ..profile_stop_authority import (
     JobRunStopScope,
     OfflineStopIntent,

@@ -30,7 +30,7 @@ from ..models import (
     AgentOperationAttempt,
     Job,
 )
-from ..operation_progress import aggregate_progress, project_progress
+from ..operations.progress import aggregate_progress, project_progress
 from ..run_switch_contract import (
     ArtifactVerificationEvidence,
     RunSwitchCachedTransferResult,

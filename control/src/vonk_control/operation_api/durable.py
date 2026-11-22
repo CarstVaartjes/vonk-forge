@@ -52,9 +52,9 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
-from ..operation_item_contract import OperationItem, OperationOwnerReference
-from ..operation_progress import aggregate_progress, member_progress
-from ..operation_summary import workload_aliases
+from ..operations.item_contract import OperationItem, OperationOwnerReference
+from ..operations.progress import aggregate_progress, member_progress
+from ..operations.summary import workload_aliases
 from ..route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from ..route_runtime import recipe_route_run_id, verify_active_route_bundle
 from ..state_filters import state_filter

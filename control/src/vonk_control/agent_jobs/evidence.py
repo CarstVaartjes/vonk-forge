@@ -28,7 +28,7 @@ from ..agent_operation_facts import aware as _aware
 from ..failure_evidence import safe_text, sanitize_diagnostics
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeRun, RunNode
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import sanitize_failure_evidence
+from ..operations.contract import sanitize_failure_evidence
 from ..recovery_policy import FailureKind
 from .contracts import _REFUSAL_PREFIXES, AgentResultRefused
 from .predicates import _document

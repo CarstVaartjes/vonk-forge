@@ -68,7 +68,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.operation_api import OperationQuery
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operations.item_contract import operation_item
 from vonk_control.persisted_waits import wait_due
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.preparation_contract import (
@@ -3773,7 +3773,7 @@ def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -
 def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
     """A load asks for the model and image it lacks instead of stopping there."""
 
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -3822,7 +3822,7 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
 
     from vonk_agent_protocol import RecipeImageCode
     from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -4563,7 +4563,7 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     """An exhausted chain must release its application scope, not poison new loads."""
     from vonk_agent_protocol import RecipeImageCode, ReservationState
     from vonk_control.models import FleetProfileApplication
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
 
     from .non_blocking import assert_ended_without_blocking
 

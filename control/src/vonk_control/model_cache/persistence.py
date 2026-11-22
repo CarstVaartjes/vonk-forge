@@ -43,8 +43,8 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_progress
 from ..models import ModelCacheOperation, ModelCacheSet
-from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
+from ..operations.contract import AvailabilityOperationFailure
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .artifacts import ArtifactSetManifest, _sha256_json

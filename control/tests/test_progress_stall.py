@@ -18,7 +18,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
-from vonk_control.operation_blockers import ProgressAlarmCode, make_blocker
+from vonk_control.operations.blockers import ProgressAlarmCode, make_blocker
 from vonk_control.progress_stall import (
     PROGRESS_STALL_WINDOW,
     is_stalled,

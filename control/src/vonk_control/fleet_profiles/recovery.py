@@ -33,7 +33,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import wait_due
 from ..profile_error_summary import _normalized_failure_text
 from .assessment_support import (

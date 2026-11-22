@@ -19,8 +19,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
 
-from . import agent_operation_states
-from .logging import redact_text
+from .. import agent_operation_states
+from ..logging import redact_text
 
 _SENSITIVE = re.compile(
     r"(?i)(password|secret|token|private.?key|authorization|cookie)"

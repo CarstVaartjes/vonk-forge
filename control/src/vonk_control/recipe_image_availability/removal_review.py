@@ -46,9 +46,7 @@ from ..model_cache import (
 from ..models import (
     ArtifactLifecycleGate,
 )
-from ..operation_contract import (
-    AvailabilityRecoveryAction,
-)
+from ..operations.contract import AvailabilityRecoveryAction
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )

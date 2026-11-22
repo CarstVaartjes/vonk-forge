@@ -67,8 +67,8 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
-from vonk_control.operation_blockers import make_blocker
-from vonk_control.operation_contract import (
+from vonk_control.operations.blockers import make_blocker
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

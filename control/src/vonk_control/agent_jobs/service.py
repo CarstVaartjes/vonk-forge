@@ -47,8 +47,8 @@ from ..models import (
     Job,
 )
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import validate_progress_update
-from ..operation_progress import progress_document, sample_progress, stored_progress
+from ..operations.contract import validate_progress_update
+from ..operations.progress import progress_document, sample_progress, stored_progress
 from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
 from ..settings import DATABASE_WAIT_BUDGETS

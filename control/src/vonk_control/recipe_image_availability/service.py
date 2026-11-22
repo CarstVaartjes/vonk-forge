@@ -47,9 +47,7 @@ from ..models import (
     ModelCacheOperation,
     RecipeBuild,
 )
-from ..operation_blockers import (
-    OperationBlocker,
-)
+from ..operations.blockers import OperationBlocker
 from ..recipe_availability_intent import (
     RecipeAvailabilityIntent,
     RecipeRevisionIntent,

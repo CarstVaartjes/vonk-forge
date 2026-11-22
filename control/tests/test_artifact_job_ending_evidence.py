@@ -52,8 +52,8 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
-from vonk_control.operation_contract import OperationFailureEvidence
-from vonk_control.operation_item_contract import agent_receipt_for
+from vonk_control.operations.contract import OperationFailureEvidence
+from vonk_control.operations.item_contract import agent_receipt_for
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,

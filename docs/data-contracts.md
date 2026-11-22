@@ -213,9 +213,9 @@ module defines its own.
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
 | `control/src/vonk_control/observation_transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
 | `control/src/vonk_control/operation_api/contracts.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
-| `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
-| `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
-| `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
+| `control/src/vonk_control/operations/blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
+| `control/src/vonk_control/operations/contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
+| `control/src/vonk_control/operations/item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api/contracts.py` | declared | 10 | Operator projection api: contracts. |
 | `control/src/vonk_control/platform_observation.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |

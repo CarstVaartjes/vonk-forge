@@ -443,7 +443,7 @@ def dispatch_wait(
     from ..agent_operation_facts import (
         aware,
     )
-    from ..operation_blockers import make_blocker
+    from ..operations.blockers import make_blocker
     from ..persisted_waits import schedule_wait
     from ..recipe_operations.observation_helpers import reinstall_in_flight
     from ..recovery_policy import WAIT_STEP

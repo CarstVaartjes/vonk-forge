@@ -35,7 +35,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter, cancellation_state, doc_state
 from ..models import STOPPABLE_RUN_STATES, FleetProfileApplication, RecipeRun
-from ..operation_blockers import BlockingOperation, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, write_wait
 from ..run_switch_contract import RunSwitchOperation
 from .assessment_support import (

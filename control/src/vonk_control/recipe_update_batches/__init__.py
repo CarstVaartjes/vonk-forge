@@ -115,13 +115,11 @@ from ..operation_api import (
 from ..operation_api import (
     _activity_keyset_filter as _activity_keyset_filter,
 )
-from ..operation_contract import (
+from ..operations.contract import (
     AvailabilityOperationFailure as AvailabilityOperationFailure,
 )
-from ..operation_item_contract import (
-    OperationItem as OperationItem,
-)
-from ..operation_item_contract import (
+from ..operations.item_contract import OperationItem as OperationItem
+from ..operations.item_contract import (
     OperationOwnerReference as OperationOwnerReference,
 )
 from ..recipe_availability_intent import (

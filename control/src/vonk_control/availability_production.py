@@ -55,7 +55,7 @@ from .models import (
     Job,
     RecipeBuild,
 )
-from .operation_blockers import OperationBlocker, make_blocker
+from .operations.blockers import OperationBlocker, make_blocker
 from .prebuilt_images import PrebuiltDecision
 from .recipe_availability_intent import RecipeBuildDependency
 from .recipe_builds import (

@@ -24,7 +24,7 @@ from ..models import (
     Job,
     RecipeRun,
 )
-from ..operation_blockers import OperationBlocker, bound_blockers
+from ..operations.blockers import OperationBlocker, bound_blockers
 from ..persisted_waits import schedule_wait
 from ..recipe_operations import (
     RecipeOperationView,

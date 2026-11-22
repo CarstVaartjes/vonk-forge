@@ -23,13 +23,13 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from . import agent_operation_states
-from .jobs import states as job_states
-from .lifecycle.evidence import Residue
-from .operation_contract import same_progress_attempt
-from .stall_window import progress_advanced
-from .stored_json import read_row_column
-from .strict_json import read_stored_model
+from .. import agent_operation_states
+from ..jobs import states as job_states
+from ..lifecycle.evidence import Residue
+from ..stall_window import progress_advanced
+from ..stored_json import read_row_column
+from ..strict_json import read_stored_model
+from .contract import same_progress_attempt
 
 #: Lifecycle words a stored phase can also be while the work waits for something
 #: other than bytes; the progress words that wait are ``WAITING_PHASES``.

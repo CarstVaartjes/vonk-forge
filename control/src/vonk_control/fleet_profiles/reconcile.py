@@ -37,7 +37,7 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfileApplication
-from ..operation_blockers import (
+from ..operations.blockers import (
     PHASE_RETRY_CODE,
     BlockingOperation,
     OperationBlocker,

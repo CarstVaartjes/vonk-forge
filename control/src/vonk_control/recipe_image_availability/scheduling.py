@@ -34,10 +34,8 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
-from ..operation_contract import (
+from ..operations.blockers import make_blocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )

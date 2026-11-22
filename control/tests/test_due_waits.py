@@ -289,7 +289,7 @@ def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
     """Catches one Job kind consuming another kind's bounded observation turns."""
     from vonk_agent_protocol import WaitReason
-    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.persisted_waits import write_wait
 
     Base.metadata.create_all(postgres_engine)

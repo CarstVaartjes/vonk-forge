@@ -24,7 +24,7 @@ from ..model_cache import ModelCacheError
 from ..models import (
     Job,
 )
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.contract import AvailabilityOperationFailure
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )

@@ -30,7 +30,7 @@ from .inventory_items import inventory_items
 from .inventory_items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from .operation_blockers import (
+from .operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
     OperationBlocker,

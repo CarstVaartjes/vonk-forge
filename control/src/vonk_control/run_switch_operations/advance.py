@@ -40,7 +40,7 @@ from ..lifecycle.types import (
 from ..models import (
     Job,
 )
-from ..operation_blockers import BlockingOperation, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,

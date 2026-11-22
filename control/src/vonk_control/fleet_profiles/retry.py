@@ -35,7 +35,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import FleetProfileApplication
-from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..persisted_waits import schedule_wait
 from .assessment_support import (
     _preview_blockers,

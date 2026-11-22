@@ -85,9 +85,7 @@ from ..models import (
 from ..models import (
     RunSwitchJournalRepairPending as RunSwitchJournalRepairPending,
 )
-from ..operation_progress import (
-    stored_progress as stored_progress,
-)
+from ..operations.progress import stored_progress as stored_progress
 from ..recipe_operations import (
     current_recipe_progress_attribution as current_recipe_progress_attribution,
 )

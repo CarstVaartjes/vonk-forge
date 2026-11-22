@@ -69,7 +69,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
-from vonk_control.operation_item_contract import OperationRow, operation_item
+from vonk_control.operations.item_contract import OperationRow, operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchDistributionChildResult,

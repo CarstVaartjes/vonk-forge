@@ -31,7 +31,7 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..models import FleetProfileApplication, Job
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..run_switch_contract import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,

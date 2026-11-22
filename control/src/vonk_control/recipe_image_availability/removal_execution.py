@@ -47,7 +47,7 @@ from ..model_cache_contract import (
 from ..models import (
     Job,
 )
-from ..operation_contract import (
+from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
