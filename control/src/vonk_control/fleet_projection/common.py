@@ -41,7 +41,7 @@ from ..machine_states import (
     RouteStateField,
     RunStateField,
 )
-from ..metrics_contract import PrometheusAttention
+from ..metrics.contract import PrometheusAttention
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,

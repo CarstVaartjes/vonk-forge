@@ -22,17 +22,11 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
-from . import agent_operation_states
-from .compose_bundle import ComposeBundle
-from .jobs import states as job_states
-from .jobs.queue import without_agent_operation
-from .metrics_readings import (
-    engine_reading_lines,
-    host_reading_lines,
-    node_fact_lines,
-    node_facts,
-)
-from .models import (
+from .. import agent_operation_states
+from ..compose_bundle import ComposeBundle
+from ..jobs import states as job_states
+from ..jobs.queue import without_agent_operation
+from ..models import (
     AgentCertificate,
     AgentNode,
     AgentNodeContact,
@@ -40,14 +34,20 @@ from .models import (
     AgentOperationAttempt,
     Job,
 )
-from .operations.progress import project_progress
-from .strict_json import read_stored_model
-from .terminal_history_collection import history_rows_past_grace
-from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
+from ..operations.progress import project_progress
+from ..strict_json import read_stored_model
+from ..terminal_history_collection import history_rows_past_grace
+from ..worker_memory_contract import WorkerMemoryReport, WorkerTraceState
+from .readings import (
+    engine_reading_lines,
+    host_reading_lines,
+    node_fact_lines,
+    node_facts,
+)
 
 if TYPE_CHECKING:
-    from .fleet_projection import FleetSnapshot
-    from .telemetry import LiveEngineReading
+    from ..fleet_projection import FleetSnapshot
+    from ..telemetry import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
@@ -321,7 +321,7 @@ class MetricsRegistry:
     def _fleet_values(snapshot: FleetSnapshot):
         """Project the typed FleetSnapshot without inventing node health."""
 
-        from .fleet_projection import FleetSnapshot
+        from ..fleet_projection import FleetSnapshot
 
         if not isinstance(snapshot, FleetSnapshot):
             raise TypeError("fleet metrics require a typed FleetSnapshot")

@@ -92,7 +92,8 @@ from ..http_errors import RetryAfterMiddleware, TemporaryHTTPError
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt
 from ..logging import current_request_id
-from ..metrics import MetricsRegistry
+from ..metrics.prometheus_api import PrometheusReader
+from ..metrics.registry import MetricsRegistry
 from ..model_cache_api import install_model_operator_routes
 from ..model_cache_contract import UUID_PATTERN
 from ..observation_delivery import ObservationDeliveryMiddleware
@@ -144,7 +145,6 @@ from ..platform_observation_errors import (
     observation_capture_unavailable_response,
 )
 from ..profile_application_cancel_api import install_profile_application_cancel_route
-from ..prometheus_api import PrometheusReader
 from ..recipe_operations import RecipeOperationService
 from ..run_switch_operations import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute, read_stored_model, warn_unreadable_once

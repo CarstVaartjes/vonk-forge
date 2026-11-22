@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_control.metrics import MetricsRegistry
+from vonk_control.metrics.registry import MetricsRegistry
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.worker import Worker
 from vonk_control.worker_memory import (

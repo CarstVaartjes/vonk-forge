@@ -308,7 +308,7 @@ def test_job_waiting_on_its_agent_operation_is_neither_claimed_nor_starved(
     # two-hour transfer while its agent operation ran on the Spark, and
     # RunnableControlJobStarved fired. The worker never claims such a job,
     # so the starvation signal must not count it either.
-    from vonk_control.metrics import read_runnable_job_ages
+    from vonk_control.metrics.registry import read_runnable_job_ages
     from vonk_control.models import AgentOperation
 
     engine = create_engine(f"sqlite:///{tmp_path / 'starved.sqlite'}")

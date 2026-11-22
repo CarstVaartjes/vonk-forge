@@ -36,7 +36,7 @@ from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..library.assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging
-from ..metrics import MetricsRegistry, read_runnable_job_ages
+from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
 from ..model_cache import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
 from ..operator_projection_api import build_fleet_operator_services
@@ -255,7 +255,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         InstallAdmissionService,
     )
     from ..jobs.queue import JobService
-    from ..metrics import OperationalMetricsCollector
+    from ..metrics.registry import OperationalMetricsCollector
     from ..models import Job
     from ..operation_api import durable_operation_services
     from ..presence import ManagementAddressPolicy

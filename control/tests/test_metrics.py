@@ -17,7 +17,7 @@ from vonk_control.fleet_projection import (
     TelemetryPoint,
     TelemetryState,
 )
-from vonk_control.metrics import MetricsRegistry, runnable_job_ages
+from vonk_control.metrics.registry import MetricsRegistry, runnable_job_ages
 from vonk_control.models import NodeEngineSample
 from vonk_control.telemetry import LiveEngineReading
 

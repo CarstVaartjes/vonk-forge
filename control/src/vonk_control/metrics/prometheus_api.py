@@ -16,8 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_agent_protocol import UnknownOutcomeError
 
-from .auth import Actor
-from .metrics_contract import (
+from ..auth import Actor
+from ..operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
+from .contract import (
     METRIC_SPECS,
     SERIES_LABEL,
     Metric,
@@ -31,7 +32,6 @@ from .metrics_contract import (
     SeriesLabel,
     SeriesSummary,
 )
-from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 
 # Scrape intervals of the jobs in deploy/compose/prometheus/prometheus.yml (its owner:
 # change both together).

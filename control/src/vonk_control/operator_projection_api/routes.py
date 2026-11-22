@@ -31,6 +31,7 @@ from ..fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
 )
+from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
 from ..models import RecipeRun, RunNode
 from ..observation_transfer import (
     ObservationTransferRecord,
@@ -43,10 +44,6 @@ from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
-)
-from ..prometheus_api import (
-    PrometheusReader,
-    install_metrics_routes,
 )
 from ..run_states import ENDED_RUN_STATES
 from .contracts import (

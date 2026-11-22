@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from .strict_json import StrictJSONModel
+from ..strict_json import StrictJSONModel
 
 Metric = Literal[
     "gpu_utilization",
