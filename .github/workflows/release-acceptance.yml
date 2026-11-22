@@ -144,9 +144,11 @@ jobs:
           - {role: api, context: '.', file: control/Dockerfile, target: api, cache: 'type=registry,ref=ghcr.io/carstvaartjes/vonk-forge-api:buildcache'}
           - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: '', cache: 'type=gha,scope=vonk-forge-litellm'}
     env:
-      # Pull requests keep their own Controller build cache so a later push
-      # reuses the layers of the previous one; main's cache stays read-only
-      # here. CI base image mirrors prunes the caches of closed pull requests.
+      # Pull requests keep their own Controller build cache (final-image layers
+      # only, mode=min, exported by the api leaf on both platforms) so a later
+      # push reuses the previous one's layers; main's cache, which holds the
+      # intermediate stages, stays read-only here. CI base image mirrors prune
+      # the caches of closed pull requests.
       PR_CACHE: ghcr.io/carstvaartjes/vonk-forge-api:buildcache-pr-${{ github.event.pull_request.number || 'dispatch' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

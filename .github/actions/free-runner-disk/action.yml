@@ -36,8 +36,8 @@ runs:
             ;;
           start)
             df -h /
-            rm -f "$marker"
-            setsid nohup bash -c 'sudo rm -rf "${@:2}"; touch "$1"' _ "$marker" "${paths[@]}" > /dev/null 2>&1 &
+            rm -f "$marker" "$marker.err"
+            setsid nohup bash -c 'sudo rm -rf "${@:2}" 2> "$1.err" || echo failed >> "$1.err"; touch "$1"' _ "$marker" "${paths[@]}" > /dev/null 2>&1 &
             ;;
           finish)
             for _ in $(seq 1 300); do
@@ -45,6 +45,10 @@ runs:
               sleep 1
             done
             [[ -e "$marker" ]] || echo "::warning title=Runner disk::toolchain deletion still running after 300 s; building anyway"
+            if [[ -s "$marker.err" ]]; then
+              cat "$marker.err"
+              echo "::warning title=Runner disk::toolchain deletion reported errors; the margin below is what the build gets"
+            fi
             report
             ;;
           *)
