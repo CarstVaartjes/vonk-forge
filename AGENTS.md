@@ -333,6 +333,7 @@ guards on the staged diff, so a violation fails before push; it skips with a
 message only when a staged file also has unstaged edits.
 `cross-repo-nightly.yml` validates the recipes `main` library with the platform `main` validator every
 night; a red run is the drift alarm.
+`fuzz.yml` (daily, dispatch only otherwise) fuzzes the parsers in `rust/fuzz` (outside the Cargo workspace); a red run is a crash, and the fix adds one case to the parser's existing test (docs/testing-and-ci.md, Fuzzing).
 
 One uv workspace owns every Python package: the root `vonk-cluster-profiles`
 (vonkctl) plus `agent_protocol`, `control` and `nas_setup`, with the single

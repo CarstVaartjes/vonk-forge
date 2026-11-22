@@ -753,6 +753,41 @@ job is the alarm; the fix is a pin move or a contract fix in the repository that
 drifted, never a gate on unrelated pull requests. The recipes repository owns
 its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
 
+### Fuzzing
+
+`rust/fuzz/` is a cargo-fuzz crate outside the Cargo workspace (its own
+`[workspace]` and `Cargo.lock`), so no batch compiles it and the pinned stable
+toolchain is untouched. Its targets cover the hand-written parsers that
+untrusted bytes reach; each states its invariant in its first comment:
+
+| Target | Parser | Invariant |
+|---|---|---|
+| `image_store_head` | loopback image-store HTTP head | never panics; an accepted head has a servable path |
+| `engine_metrics` | `parse_engine` (engine Prometheus text) | never panics; every number in a reading is finite |
+| `source_bundle` | `source_bundle_digest` then `materialize_source_bundle` | never panics; nothing outside the root, no links |
+| `wire` | claim response, compiled plan, helper request and frames | never panics |
+
+`.github/workflows/fuzz.yml` runs daily (and on demand), as one job of at most 25
+minutes: 150 s per target after seeding from the repository fixtures
+(`rust/fuzz/seed-corpus`). The corpus lives in the Actions cache, restored by
+prefix and saved after `cargo fuzz cmin`; it is never in git. The nightly date
+and the `cargo-fuzz` version are exact pins in that one file. No other workflow
+calls it and it has no pull request trigger (a workflow test checks this), so a
+batch pays nothing. The cost of that trade: a signature change in a target
+parser turns the next scheduled run red instead of a batch, and the fix is a
+tiny PR.
+
+A crash turns the run red. The job summary carries the minimized input as
+base64 and the `fuzz-crash` artifact holds it. The fix PR adds exactly one case
+to an existing test of that parser, with the bytes inline (or rebuilt with the
+test's own tar builder), and no corpus file is committed. Reproduce locally with
+`cargo +<nightly> fuzz run --fuzz-dir rust/fuzz <target> <artifact>` from the
+repository root.
+
+Follow-ups: the build-egress parser target once its parser is a library, and the
+Python `pytest --hypothesis-profile=fuzz -m property` step once the Hypothesis
+profiles land.
+
 ### Release acceptance before merge
 
 Every integration PR, including acceptance-harness changes, builds an immutable

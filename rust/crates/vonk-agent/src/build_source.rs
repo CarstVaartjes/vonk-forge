@@ -42,14 +42,17 @@ pub struct MaterializedSource {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
+/// The canonical digest of a bundle: what the Controller signs and
+/// `materialize_source_bundle` expects. Reads nothing from the filesystem.
+pub fn source_bundle_digest(payload: &[u8]) -> Result<String, BuildSourceError> {
+    Ok(scan(payload)?.sha256)
+}
+
 pub fn materialize_source_bundle(
     payload: &[u8],
     expected_sha256: &str,
     root: &Path,
 ) -> Result<MaterializedSource, BuildSourceError> {
-    if payload.is_empty() || payload.len() > MAX_ARCHIVE_BYTES {
-        return Err(BuildSourceError::Size);
-    }
     if expected_sha256.len() != 64
         || !expected_sha256
             .bytes()
@@ -57,10 +60,63 @@ pub fn materialize_source_bundle(
     {
         return Err(BuildSourceError::Digest);
     }
+    let scanned = scan(payload)?;
+    if scanned.sha256 != expected_sha256 {
+        return Err(BuildSourceError::Digest);
+    }
     fs::create_dir_all(root)?;
+    for directory in &scanned.directories {
+        fs::create_dir_all(root.join(directory))?;
+    }
+    for item in &scanned.manifest.files {
+        let destination = root.join(&item.path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)?;
+        output.write_all(&scanned.files[&item.path])?;
+        output.sync_all()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                &destination,
+                fs::Permissions::from_mode(
+                    (*item.mode)
+                        .try_into()
+                        .map_err(|_| BuildSourceError::Entry)?,
+                ),
+            )?;
+        }
+    }
+    Ok(MaterializedSource {
+        sha256: scanned.sha256,
+        total_bytes: scanned.total_bytes,
+        files: scanned.files,
+    })
+}
+
+struct Scanned {
+    sha256: String,
+    total_bytes: u64,
+    directories: Vec<String>,
+    files: BTreeMap<String, Vec<u8>>,
+    manifest: SourceBundleDigestManifest,
+}
+
+/// Walk the archive within its bounds and derive the canonical manifest and its
+/// digest. Nothing is written.
+fn scan(payload: &[u8]) -> Result<Scanned, BuildSourceError> {
+    if payload.is_empty() || payload.len() > MAX_ARCHIVE_BYTES {
+        return Err(BuildSourceError::Size);
+    }
     let mut archive = tar::Archive::new(Cursor::new(payload));
     let entries = archive.entries().map_err(|_| BuildSourceError::Archive)?;
     let mut seen = BTreeSet::new();
+    let mut directories = Vec::new();
     let mut files = BTreeMap::new();
     let mut manifest = Vec::new();
     let mut total = 0_u64;
@@ -72,7 +128,7 @@ pub fn materialize_source_bundle(
             return Err(BuildSourceError::Path);
         }
         if entry.header().entry_type().is_dir() {
-            fs::create_dir_all(root.join(&normalized))?;
+            directories.push(normalized);
             continue;
         }
         if !entry.header().entry_type().is_file() || files.len() >= MAX_FILES {
@@ -117,37 +173,12 @@ pub fn materialize_source_bundle(
     };
     let canonical = canonical_json(&manifest).map_err(|_| BuildSourceError::Archive)?;
     let sha256 = hex_sha256(&canonical);
-    if sha256 != expected_sha256 {
-        return Err(BuildSourceError::Digest);
-    }
-    for item in &manifest.files {
-        let destination = root.join(&item.path);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)?;
-        output.write_all(&files[&item.path])?;
-        output.sync_all()?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(
-                &destination,
-                fs::Permissions::from_mode(
-                    (*item.mode)
-                        .try_into()
-                        .map_err(|_| BuildSourceError::Entry)?,
-                ),
-            )?;
-        }
-    }
-    Ok(MaterializedSource {
+    Ok(Scanned {
         sha256,
         total_bytes: total,
+        directories,
         files,
+        manifest,
     })
 }
 

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Seed rust/fuzz/corpus/<target>/ from the repository's existing fixtures.
+
+Nothing is committed: the scheduled job restores the cached corpus first and
+then runs this, so a cold cache starts from real inputs. Existing files are kept.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import tarfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+CORPUS = ROOT / "rust/fuzz/corpus"
+DIGEST = "0e16f117c4f95ba678a0d89ef1fe2cbf2c08bec568f9c55d4873272ac1d69b7e"
+VECTORS = ROOT / "agent_protocol/src/vonk_agent_protocol/vectors"
+
+
+def put(target: str, data: bytes) -> None:
+    directory = CORPUS / target
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / hashlib.sha1(data).hexdigest()).write_bytes(data)  # noqa: S324
+
+
+def bundle(entries: list[tuple[str, bytes | None, int]]) -> bytes:
+    """A tar of (path, content or None for a directory, mode)."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for path, content, mode in entries:
+            info = tarfile.TarInfo(path)
+            info.mode = mode
+            if content is None:
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+            else:
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+def main() -> None:
+    # image_store_head: the heads of the inline tests in image_store.rs.
+    path = f"/v2/vonk/runtime/blobs/sha256:{DIGEST}"
+    put(
+        "image_store_head",
+        (
+            f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:41000\r\n"
+            "Accept: application/vnd.oci.image.manifest.v1+json\r\n"
+            "Accept: application/vnd.docker.distribution.manifest.v2+json\r\n"
+            "Range: bytes=100-\r\nUser-Agent: docker/27\r\n"
+        ).encode(),
+    )
+    for head in (
+        b"HEAD /v2/ HTTP/1.1\r\n",
+        b"PUT /v2/ HTTP/1.1\r\n",
+        b"GET /v2/_catalog HTTP/1.1\r\n",
+        f"GET /v2/vonk/runtime/manifests/sha256:{DIGEST} HTTP/1.0\r\n\r\n".encode(),
+    ):
+        put("image_store_head", head)
+
+    # engine_metrics: the captured engine bodies of the shared vectors.
+    for sample in json.loads((VECTORS / "engine-metrics-v1.json").read_text())["samples"]:
+        put("engine_metrics", sample["metrics"].encode())
+    capture = json.loads((VECTORS / "telemetry-sample-v2.json").read_text())["captures"]
+    put("engine_metrics", capture["tensorfold_metrics"].encode())
+    # Two finite sums that overflow: the crash the first run of the target found.
+    put("engine_metrics", b"vllm:e2e_request_latency_seconds_sum 1e308\n" * 2)
+
+    # source_bundle: the shapes of tests/build_source.rs.
+    put("source_bundle", bundle([("Dockerfile", b"FROM scratch\nUSER 10001\n", 0o644)]))
+    put(
+        "source_bundle",
+        bundle(
+            [
+                ("src", None, 0o755),
+                ("src/run.sh", b"#!/bin/sh\n", 0o755),
+                ("src/data.txt", b"x\n", 0o644),
+            ]
+        ),
+    )
+
+    # wire: every JSON fixture and vector the protocol tests already read.
+    for pattern in (
+        "agent_protocol/fixtures/*.json",
+        "agent_protocol/src/vonk_agent_protocol/vectors/*.json",
+        "agent_protocol/tests/fixtures/*.json",
+        "agent_protocol/tests/fixtures/catalog-launch/*.json",
+        "control/tests/fixtures/compiled_plan_751.json",
+    ):
+        for fixture in sorted(ROOT.glob(pattern)):
+            if fixture.stat().st_size <= 1024 * 1024:
+                put("wire", fixture.read_bytes())
+
+
+if __name__ == "__main__":
+    main()
