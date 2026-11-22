@@ -92,7 +92,7 @@ jobs:
   build-agent-package:
     name: Build, attest, and lifecycle-test ARM64 Spark agent
     if: needs.release-metadata.result == 'success'
-    needs: [release-metadata]
+    needs: [nope]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: agent-release
