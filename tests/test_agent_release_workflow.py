@@ -1012,12 +1012,16 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
     assert "source_sha: ${{ github.sha }}" in publication
     assert "version: ${{ needs.agent.outputs.version }}" in publication
     # Later releases reuse the package only after apt dev published it, and
-    # the installer generation waits for the apt publication.
+    # promotion waits for the apt publication.
     assert (
         "if: needs.agent.result == 'success' && needs.apt.result == 'success'"
         in producers
     )
-    assert "needs: [changes, ci, agent, apt, images, setups, producers]" in authority
+    assert "needs: [changes, ci, agent, images, setups]" in authority
+    promote = workflow_job(release, "promote")
+    assert (
+        "needs: [authority, candidate, release-acceptance, apt, producers]" in promote
+    )
 
 
 def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:

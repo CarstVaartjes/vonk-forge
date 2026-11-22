@@ -41,8 +41,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Free runner disk
-        uses: ./.github/actions/free-runner-disk
       - name: Verify the main commit before building
         id: metadata
         shell: bash
@@ -149,6 +147,11 @@ jobs:
           else
             echo "Images are built: pull request run $REUSE_RUN_ID has no reusable images for this tree" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # Only a build needs the disk; reusing the pull request images does not.
+      - name: Free runner disk
+        if: steps.pr_images.outputs.reused != 'true'
+        uses: ./.github/actions/free-runner-disk
 
       - name: Restore accepted litellm digest and signed evidence
         id: cache_litellm
