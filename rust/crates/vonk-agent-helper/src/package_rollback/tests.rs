@@ -9,6 +9,7 @@ use vonk_agent_protocol::{
     PackageActivationPhase as Phase, PackageRollbackAuthority, parse_strict,
 };
 
+use super::activation::Observed;
 use super::recovery::{retry_process_proof, rollback_retry_budget};
 use super::{ROLLBACK_RETRY_TIMEOUT, Store, Transaction};
 fn transaction() -> Transaction {
@@ -313,4 +314,46 @@ fn damaged_lock_shape_does_not_poison_fresh_admission() {
     fs::write(store.root.join("lock/unknown-entry"), b"preserved").unwrap();
     drop(store.lock().unwrap());
     assert!(store.lock().is_ok());
+}
+
+fn observed(status: Result<&str, &str>) -> Observed {
+    let tx = transaction();
+    Observed {
+        dpkg_status: status.map(str::to_owned).map_err(str::to_owned),
+        agent_sha256: tx.candidate_binary_sha256,
+        helper_sha256: tx.candidate_helper_sha256,
+    }
+}
+
+/// Confirm against a tempdir store; returns the result and the stored phase.
+fn confirm(observed: &Observed) -> (Result<(), String>, Phase) {
+    let temporary = tempfile::tempdir().unwrap();
+    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let store = Store {
+        root: temporary.path().join("rollback"),
+        owner: fs::metadata(temporary.path()).unwrap().uid(),
+    };
+    let _lock = store.lock().unwrap();
+    let tx = transaction();
+    store.write(&tx).unwrap();
+    let result = store.finish_acknowledgement(tx, observed, 150);
+    (result, store.read().unwrap().phase)
+}
+
+#[test]
+fn acknowledgement_requires_the_candidate_installed() {
+    let installed = "install ok installed\t0.2.0";
+    assert_eq!(
+        confirm(&observed(Ok(installed))),
+        (Ok(()), Phase::Acknowledged)
+    );
+    for status in [
+        Ok("install ok half-configured\t0.2.0"),
+        Ok("install ok installed\t0.1.0"),
+        Err("dpkg-query failed"),
+    ] {
+        let (result, phase) = confirm(&observed(status));
+        assert!(result.is_err());
+        assert_eq!(phase, Phase::Armed);
+    }
 }

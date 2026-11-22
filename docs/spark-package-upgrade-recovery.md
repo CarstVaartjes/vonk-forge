@@ -67,10 +67,12 @@ The new agent contacts the Controller, which issues the signed fixed
 `confirm-package-activation` operation only for the candidate that has met the
 contact and readiness gate. It binds the candidate package digest and the
 original attempt nonce; the host grant binds the node. The helper acknowledges
-only when `dpkg` reports the candidate version installed and configured and the
-installed agent and helper hashes are the candidate's. A candidate that is only
-unpacked or half-configured is never acknowledged. The acknowledged root
-receipt is the final activation gate.
+only when `dpkg` reports the package `install ok installed` at the candidate
+version and the installed agent and helper hashes are the candidate's. Any
+other or unreadable state refuses, the transaction stays armed, and the
+watchdog restores at the deadline: a candidate that is only unpacked or
+half-configured is never acknowledged. The acknowledged root receipt is the
+final activation gate.
 
 Any other end is restored by the watchdog: a failed install restores
 immediately; no acknowledgement restores at the deadline, including after a
