@@ -18,8 +18,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as WireAgentOperation,
 )
-from vonk_control import availability_production
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production import production as availability_production
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_mapping
 from vonk_control.jobs.documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild

@@ -898,7 +898,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
     ],
 )
 def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
-    path = "control/src/vonk_control/availability_production.py"
+    path = "control/src/vonk_control/availability_production/production.py"
     assert check_source(path, source, {1}, modes=("excerpts",))
     assert not check_source(
         "control/tests/test_availability_production.py",
@@ -921,7 +921,7 @@ def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
     ],
 )
 def test_output_kept_from_its_end_from_both_streams_is_allowed(source):
-    path = "control/src/vonk_control/availability_production.py"
+    path = "control/src/vonk_control/availability_production/production.py"
     assert not check_source(path, source, {1}, modes=("excerpts",))
 
 
@@ -1383,7 +1383,7 @@ def test_capacity_guard_allows_claim_first_and_non_gates(source: str) -> None:
 
 def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
     source = "def tick(self):\n    if capacity <= 0:\n        return 0\n" + _CLAIM
-    reviewed = "control/src/vonk_control/availability_production.py"
+    reviewed = "control/src/vonk_control/availability_production/scheduler.py"
     assert not check_source(reviewed, source, {2}, modes=("capacity-gates",))
     test = "control/tests/test_example.py"
     assert not check_source(test, source, {2}, modes=("capacity-gates",))

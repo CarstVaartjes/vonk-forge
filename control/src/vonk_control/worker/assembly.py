@@ -288,7 +288,7 @@ def assemble_production_worker(
         )
         worker_background_closers += (prebuilt_importer.close,)
     if recipe_image_artifact_root is not None:
-        from ..availability_production import build_recipe_image_availability
+        from ..availability_production.production import build_recipe_image_availability
 
         assert runtime_archive_storage is not None  # the root implies the cache
 

@@ -160,7 +160,9 @@ def test_cache_pagination_uses_authenticated_observation_cursors():
 
 
 def test_incomplete_cached_build_enters_normal_preparation():
-    from vonk_control.availability_production import _cached_build_receipt
+    from vonk_control.availability_production.build_observation import (
+        _cached_build_receipt,
+    )
     from vonk_control.recipe_builds import RecipeBuildResolution
 
     resolution = RecipeBuildResolution(

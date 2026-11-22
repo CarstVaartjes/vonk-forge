@@ -11,7 +11,9 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import CompiledExecutionPlan, LifecycleState, RunSwitchCode
 from vonk_control.agent_contacts import record_contact
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService

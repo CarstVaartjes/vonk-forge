@@ -313,7 +313,7 @@ SECURITY_EDGES = frozenset(
         "control/src/vonk_control/auth_api.py",
         "control/src/vonk_control/agent_api/authority.py",
         # The recipe source policy refusal: the source authority edge for builds.
-        "control/src/vonk_control/availability_production.py",
+        "control/src/vonk_control/availability_production/production.py",
     }
 )
 

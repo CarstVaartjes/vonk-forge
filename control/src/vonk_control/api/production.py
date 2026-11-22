@@ -241,7 +241,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from sqlalchemy import func, select
 
     from ..agent_upgrades import AgentUpgradeService
-    from ..availability_production import build_recipe_image_availability
+    from ..availability_production.production import build_recipe_image_availability
     from ..db import build_engine, session_factory
     from ..execution_plan_service import ControllerExecutionPlanService
     from ..fleet_events import FleetEventRepository

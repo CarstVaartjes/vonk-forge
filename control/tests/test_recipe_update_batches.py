@@ -1172,7 +1172,9 @@ def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
 ):
     import threading
 
-    from vonk_control.availability_production import RecipeImageAvailabilityScheduler
+    from vonk_control.availability_production.scheduler import (
+        RecipeImageAvailabilityScheduler,
+    )
 
     _, recipes, _, fresh = update_env
     service = fresh()

@@ -11,7 +11,7 @@ from importlib import resources
 from pathlib import Path
 
 import pytest
-import vonk_control.availability_production as availability_production_module
+import vonk_control.availability_production.production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
 import vonk_control.runtime.adapters as runtime_adapters_module
 from sqlalchemy import Table, create_engine, select
@@ -29,7 +29,9 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService

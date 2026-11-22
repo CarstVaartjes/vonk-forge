@@ -88,7 +88,7 @@ Current source anchors (paths are under `control/src/vonk_control`):
 `harnesses/canonical.py:149`, `harnesses/common.py:64`,
 `source_bundles.py:397,431`, `contract_graph.py:158`,
 `operation_api.py:2345`, `catalog/sync.py:735`, `recipe_builds.py:575`,
-`availability_production.py:777,895,953,961,1240`, and
+`availability_production/production.py:777,895,953,961,1240`, and
 `prebuilt_images.py:304,444`.
 
 - Required Controller static guards plus the focused unknown-planning regression:
