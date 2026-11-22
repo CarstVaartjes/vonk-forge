@@ -337,9 +337,9 @@ jobs:
 
   authority:
     name: Accept one complete source generation
-    # needs: makes every producer settle first; a failed or superseded
-    # (cancelled) producer or CI run publishes nothing.
-    needs: [changes, ci, agent, apt, images, setups, producers]
+    # needs: makes every producer that supplies evidence settle first. apt and
+    # producers publish nothing this job consumes; promote waits for them.
+    needs: [changes, ci, agent, images, setups]
     if: >-
       ${{ !cancelled() &&
       !contains(needs.*.result, 'failure') &&
@@ -460,7 +460,7 @@ jobs:
           [[ "$compose_source_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$setup_source_sha" =~ ^[0-9a-f]{40}$ ]]
 
-          # needs: settled every producer; still verify the exact evidence.
+          # needs: settled the evidence producers; still verify the exact evidence.
           artifacts() {
             gh api --paginate \
               -H 'Accept: application/vnd.github+json' \
@@ -545,9 +545,13 @@ jobs:
 
   promote:
     name: Promote accepted ${{ needs.authority.outputs.channel }} installer generation
-    needs: [authority, candidate, release-acceptance]
+    # Nothing is promoted before apt dev and the producer records settled; a
+    # failed or superseded (cancelled) one publishes nothing.
+    needs: [authority, candidate, release-acceptance, apt, producers]
     if: >-
       !cancelled() && needs.authority.result == 'success' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
       needs.candidate.result == 'success' &&
       needs['release-acceptance'].result == 'success'
     runs-on: ubuntu-24.04

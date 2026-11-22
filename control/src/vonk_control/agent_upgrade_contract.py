@@ -1,4 +1,4 @@
-"""The documents of an agent upgrade rollout: package, repair, intent, plan, result.
+"""The documents of an agent upgrade rollout: package, intent, plan, result.
 
 ``jobs.payload`` and ``jobs.result`` of an ``agent-upgrade`` job hold these.
 They live apart from :mod:`vonk_control.job_documents` so the operation
@@ -52,16 +52,6 @@ class AgentUpgradePackage(_UpgradeDocument):
     ]
 
 
-class AgentUpgradeRepairManifest(_UpgradeDocument):
-    """The repair capsule's authority, bound to one Spark and the package."""
-
-    authority_sha256: DigestText
-    kind: Literal["agent-upgrade-repair"]
-    node_id: Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-    package: AgentUpgradePackage
-    schema_version: Literal[2]
-
-
 class AgentUpgradeRequestIntent(_UpgradeDocument):
     """Which Sparks the operator asked for: all of them, or an explicit list."""
 
@@ -84,7 +74,6 @@ class AgentUpgradeRolloutPayload(_UpgradeDocument):
     package: AgentUpgradePackage
     request_intent: AgentUpgradeRequestIntent
     sources: dict[NodeText, AgentPackageSource]
-    repair_manifest: AgentUpgradeRepairManifest | None = None
 
 
 class AgentUpgradeRolloutResult(_UpgradeDocument):

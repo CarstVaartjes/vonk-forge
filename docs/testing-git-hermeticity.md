@@ -19,7 +19,6 @@ over `tests/*.py`, `tests/**/*.py` and `control/tests/*.py`, plus test helpers.
 | `control/tests/security/test_agent_protocol.py` | no Git call: contract source field data. |
 | `control/tests/subprocess_environment.py` | no Git-state call: locates the Git executable for explicit subprocess environments; remaining subprocesses create a venv/install a wheel. |
 | `tests/install/test_curl_bootstraps.py` | no real Git call: fake tool lookup for bootstrap probes. |
-| `tests/scripts/test_agent_repair_lifecycle.py` | no Git call: assertions about workflow-only shell harness source. |
 | `tests/scripts/test_ci_ruff.py` | no real Git call: fixture-owned fake Git executable. |
 | `tests/scripts/test_promote_accepted_channel.py` | no real Git call: fixture-owned fake Git executable. |
 | `tests/scripts/test_retry_dependency_fetch.py` | no real Git call: fixture-owned fake fetch executable and rejected command data. |

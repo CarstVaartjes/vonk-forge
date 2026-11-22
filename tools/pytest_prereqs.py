@@ -52,7 +52,6 @@ MARKERS = {
     "needs_aptly": "requires aptly for package repository integration tests",
     "needs_recipe_library": "requires VONK_RECIPE_LIBRARY_ROOT to name the canonical recipe checkout",
     "needs_rust_probe": "drives the Linux-only Rust wire probes (scripts/tests/run_agent_wire_contracts.py)",
-    "needs_repair_probe": "requires REPAIR_PROBE_BINARY or a built vonk-repair-helper-probe",
     "needs_installer_release_probe": "requires VONK_INSTALLER_RELEASE_WIRE_PROBE",
     "needs_agent_binary": "requires VONK_AGENT_BINARY to name a built vonk-agent binary",
     "needs_backup_container": "requires the opt-in PostgreSQL backup container lane (VONK_RUN_BACKUP_CONTAINER_TEST=1)",
@@ -147,15 +146,6 @@ def _recipe_library() -> str | None:
     )
 
 
-def _repair_probe() -> str | None:
-    if _executable_env("REPAIR_PROBE_BINARY")() is None:
-        return None
-    target = Path(os.environ.get("CARGO_TARGET_DIR", _ROOT / "target"))
-    if (target / "release" / "vonk-repair-helper-probe").is_file():
-        return None
-    return "executable REPAIR_PROBE_BINARY"
-
-
 def _installer_release_probe() -> str | None:
     configured = os.environ.get("VONK_INSTALLER_RELEASE_WIRE_PROBE")
     return (
@@ -201,7 +191,6 @@ _CHECKS: dict[str, Callable[[], str | None]] = {
     "needs_skopeo": _tool("skopeo"),
     "needs_recipe_library": _recipe_library,
     "needs_rust_probe": _linux,
-    "needs_repair_probe": _repair_probe,
     "needs_installer_release_probe": _installer_release_probe,
     "needs_agent_binary": _executable_env("VONK_AGENT_BINARY"),
     "needs_backup_container": _backup_container,

@@ -90,7 +90,6 @@ flowchart LR
 - [Signed CLI updates](operators/cli-updates.md)
 - [Agent PKI](runbooks/agent-pki.md)
 - [Spark package upgrade recovery](spark-package-upgrade-recovery.md)
-- [Node-bound agent repair capsules](runbooks/agent-repair-capsule.md)
 - [Spark fabric](runbooks/fabric.md)
 
 ## Release and platform guides

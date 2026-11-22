@@ -12,7 +12,6 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from ..agent_contacts import last_seen as contact_last_seen
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
-    AgentUpgradeRepairManifest,
 )
 from ..inventory_items import runtime_value
 from ..models import AgentNode
@@ -33,29 +32,6 @@ class EligibilityMixin:
                 "agent upgrade package is invalid",
                 reason=InvalidRequestReason.MALFORMED,
             ) from None
-
-    @classmethod
-    def _repair_manifest(
-        cls,
-        manifest: AgentUpgradeRepairManifest,
-        package: AgentUpgradePackage,
-    ) -> AgentUpgradeRepairManifest:
-        expected_url = (
-            "https://install.vonkforge.ai/repair-capsules/"
-            f"{manifest.node_id}/{manifest.authority_sha256}/"
-            f"{manifest.package.package_sha256}/vonk-forge-agent.deb"
-        )
-        if manifest.package.package_url != expected_url:
-            raise AgentUpgradeInvalid(
-                "agent repair package URL is not canonical",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        if package != manifest.package:
-            raise AgentUpgradeInvalid(
-                "agent repair manifest does not match its package descriptor",
-                reason=InvalidRequestReason.CONFLICT,
-            )
-        return manifest
 
     @staticmethod
     def _permanent_ineligible_reason(

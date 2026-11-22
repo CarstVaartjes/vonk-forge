@@ -40,9 +40,11 @@ release for the current tip. Each run is one fan-in:
    `changes` found no reusable evidence. A stable release always builds its
    setup programs; it never runs the development producers.
 4. `apt` publishes a freshly built development agent package to apt dev.
-5. `authority` starts once all of the above have settled, and only if none
-   failed or was cancelled. It verifies the exact evidence and hands it to
-   candidate, NAS and Spark acceptance, acceptance signing and promotion.
+5. `authority` starts once `ci`, `agent`, `images` and `setups` have settled,
+   and only if none failed or was cancelled. It verifies the exact evidence
+   and hands it to candidate, NAS and Spark acceptance, acceptance signing and
+   promotion. `apt` and the producer records run beside it: promotion waits
+   for both, and a failed or cancelled one blocks it.
 
 A development producer is skipped when the newest release run that completed
 it, on an ancestor of the source, saw the same producer inputs and its

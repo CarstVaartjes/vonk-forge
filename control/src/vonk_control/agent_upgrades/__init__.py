@@ -110,9 +110,6 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage as AgentUpgradePackage,
 )
 from ..agent_upgrade_contract import (
-    AgentUpgradeRepairManifest as AgentUpgradeRepairManifest,
-)
-from ..agent_upgrade_contract import (
     AgentUpgradeRequestIntent as AgentUpgradeRequestIntent,
 )
 from ..agent_upgrade_contract import (
@@ -193,7 +190,6 @@ from .helpers import _failure_detail as _failure_detail
 from .helpers import _summary as _summary
 from .intent import _plan_digest as _plan_digest
 from .intent import _request_intent as _request_intent
-from .intent import _rollout_document as _rollout_document
 from .plan import AgentUpgradePlan as AgentUpgradePlan
 from .service import AgentUpgradeService as AgentUpgradeService
 from .stored import _stored_field as _stored_field

@@ -114,11 +114,12 @@ def test_publication_waits_for_every_producer_and_ci() -> None:
         "changes",
         "ci",
         "agent",
-        "apt",
         "images",
         "setups",
-        "producers",
     }
+    # Nothing is promoted before apt dev and the producer records settled.
+    promote = jobs["promote"]
+    assert {"apt", "producers"} <= set(promote["needs"])
     condition = " ".join(authority["if"].split())
     assert "!cancelled()" in condition
     assert "!contains(needs.*.result, 'failure')" in condition
@@ -164,6 +165,40 @@ def test_release_accepts_only_successful_or_proven_reused_ci(
             },
         )
         is accepted
+    )
+
+
+@pytest.mark.parametrize("authority", ["success", "failure", "skipped"])
+@pytest.mark.parametrize("apt", ["success", "skipped", "failure", "cancelled"])
+@pytest.mark.parametrize("producers", ["success", "skipped", "failure", "cancelled"])
+def test_promote_waits_for_apt_and_producers_and_needs_them_not_failed(
+    authority, apt, producers
+) -> None:
+    expression = " ".join(load(RELEASE)["jobs"]["promote"]["if"].split())
+    results = {
+        "authority": authority,
+        "candidate": "success",
+        "release-acceptance": "success",
+        "apt": apt,
+        "producers": producers,
+    }
+    expression = expression.replace("needs.*.result", repr(list(results.values())))
+    expression = expression.replace(
+        "needs['release-acceptance'].result", repr(results["release-acceptance"])
+    )
+    for name in ("authority", "candidate"):
+        expression = expression.replace(f"needs.{name}.result", repr(results[name]))
+    expression = re.sub(r"!(?!=)", "not ", expression)
+    expression = expression.replace("&&", "and")
+    promoted = eval(
+        expression,
+        {"__builtins__": {}},
+        {"cancelled": lambda: False, "contains": lambda v, i: i in v},
+    )
+    assert promoted is (
+        authority == "success"
+        and apt in ("success", "skipped")
+        and producers in ("success", "skipped")
     )
 
 
