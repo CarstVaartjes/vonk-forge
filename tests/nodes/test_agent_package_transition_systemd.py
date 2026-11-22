@@ -710,6 +710,7 @@ def main() -> None:
         lane.send(operation)
         wait(tree.runs, "removal: candidate does not run", 55)
         assert TRANSACTION.exists(), "removal: no armed transaction to supersede"
+        assert time.time() < deadline, "removal: started only after the deadline"
         run("/usr/bin/dpkg", "--remove", "vonk-forge-agent")
         wait(
             lambda: time.time() > deadline + 5,
@@ -720,7 +721,7 @@ def main() -> None:
         assert not TRANSACTION.exists(), "removal: transaction survives"
         assert (
             run("/usr/bin/systemctl", "is-active", WATCHDOG, check=False).stdout.strip()
-            != "active"
+            == "inactive"
         )
         lane.evidence.append(
             {"case": "removal-supersedes-watchdog", "package": installed()}
