@@ -78,7 +78,7 @@ jobs:
           # xdist workers and test subprocesses start coverage through this hook.
           purelib=$("$python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
           printf 'import coverage; coverage.process_startup()\n' > "$purelib/vonk_coverage.pth"
-          mkdir coverage-data
+          mkdir -p coverage-data
       - name: Run the suite shard (a failing test does not stop the report)
         continue-on-error: true
         shell: bash
