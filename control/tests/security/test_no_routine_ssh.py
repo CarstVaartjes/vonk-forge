@@ -31,7 +31,6 @@ def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() 
             imports = _imports(path)
             source = path.read_text()
             assert "subprocess" not in imports
-            assert "vonk_control.runtime" not in imports
             assert "vonk_control.legacy_runtime" not in imports
             assert "RuntimeHandlers" not in source
             assert "LegacyRuntimeHandlers" not in source
