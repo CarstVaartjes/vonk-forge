@@ -211,6 +211,7 @@ PRODUCERS = {
             "Cargo.toml",
             "nas_setup/**",
             ".github/actions/python-env/**",
+            ".github/actions/spark-setup-toolchain/**",
             "uv.lock",
             "rust-toolchain.toml",
             "scripts/retry-dependency-fetch",

@@ -303,6 +303,15 @@ def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
     assert pr["candidate"]["with"]["premerge"] is True
 
 
+def test_sudo_recovery_runs_in_its_own_setups_job() -> None:
+    """Catches the PTY recovery proof dropped or put back on the build leg."""
+    jobs = load(WORKFLOWS / "installer-setups.yml")["jobs"]
+    recovery = str(jobs["sudo-recovery"]["steps"])
+    assert "run_installer_pty_recovery.sh" in recovery
+    assert "run_installer_pty_recovery.sh" not in str(jobs["build-and-test"])
+    assert "needs" not in jobs["sudo-recovery"]
+
+
 def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
     for name in ("generated-clients", "repository-guards"):

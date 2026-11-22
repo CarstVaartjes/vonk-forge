@@ -71,7 +71,7 @@ the pre-merge candidate acceptance (`release-acceptance.yml`):
 | contract-artifacts | Redundant; removed | `Rust workspace tests` checks wire generation determinism from the same source; the uploaded artifacts had no consumer. |
 | agent-upgrade-recovery | Redundant; removed | `Native ARM64 agent package lifecycle` already ran `test_agent_upgrade_recovery_systemd.sh` in every crash mode; its two unique proofs, `test_agent_package_rollback_systemd.py` and `test_agent_boot_restart_systemd.py`, now run in that job. The script itself was deleted with the forward capsule it exercised. |
 | browser-contract-artifacts | Folded into `Admin web behavior` | The Python-emitted corpus, observation transfers, official JSON Schema cases and the contracts Playwright project now run in the regular web job; the artifact uploads had no consumer. |
-| installer-pty-recovery | Redundant; removed | `Build and test native Spark setup (linux-arm64)` in the pre-merge candidate acceptance runs `run_installer_pty_recovery.sh` for every change that selects it. |
+| installer-pty-recovery | Redundant; removed | `Exercise uncached sudo recovery (linux-arm64)` (its own job in `installer-setups.yml`) in the pre-merge candidate acceptance runs `run_installer_pty_recovery.sh` for every change that selects it. |
 | installed-cli-transition-proof, installed-cli-update-proof | Merged into `installed-cli-proof` | Both unique lanes share one checkout, environment and isolated resolver cache; the two named cases run in one invocation. |
 
 2026-11 follow-up: the five retained lanes, `installed-cli-proof` and

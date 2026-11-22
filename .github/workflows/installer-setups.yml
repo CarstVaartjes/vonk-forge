@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Extracted binary from the reviewed Mozilla v0.18.0 release archive.
+  SPARK_SETUP_SCCACHE_SHA256: 0fd82ece4469b791e30fffdd43d58d2e6cae303950c0d6c8faad932d93e35cf4
+
 jobs:
   build-nas-wheel:
     name: Build and verify portable Python NAS setup
@@ -57,8 +61,6 @@ jobs:
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
             binaries: vonk-spark-setup
-            # Extracted binary from the reviewed Mozilla v0.18.0 release archive.
-            sccache_sha256: 0fd82ece4469b791e30fffdd43d58d2e6cae303950c0d6c8faad932d93e35cf4
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -68,49 +70,10 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_ref || github.sha }}
 
-      - name: Prepare Pydantic contracts for Cargo builds
-        uses: ./.github/actions/python-env
-        with:
-          contracts: none
-          cli-dependencies: "false"
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          rustup toolchain install 1.98.1
-          rustup default 1.98.1
-
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/spark-setup-toolchain
         with:
           shared-key: ${{ matrix.platform }}
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Run Rust compiler cache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-
-      - name: Verify pinned Rust compiler cache binary
-        shell: bash
-        env:
-          EXPECTED_SCCACHE_SHA256: ${{ matrix.sccache_sha256 }}
-        run: |
-          set -euo pipefail
-          test -n "${SCCACHE_PATH:-}"
-          test -x "$SCCACHE_PATH"
-          case "$(uname -s)" in
-            Linux) actual="$(sha256sum "$SCCACHE_PATH")" ;;
-            Darwin) actual="$(shasum -a 256 "$SCCACHE_PATH")" ;;
-            *) echo "unsupported sccache verification platform" >&2; exit 1 ;;
-          esac
-          actual="${actual%% *}"
-          if [[ "$actual" != "$EXPECTED_SCCACHE_SHA256" ]]; then
-            echo "sccache binary checksum mismatch" >&2
-            exit 1
-          fi
+          sccache_sha256: ${{ env.SPARK_SETUP_SCCACHE_SHA256 }}
 
       - name: Test and build exact native setup programs
         shell: bash
@@ -148,9 +111,34 @@ jobs:
             sha256sum -- "${binaries[@]}" | LC_ALL=C sort > SHA256SUMS
           )
 
+      - name: Upload accepted native setup programs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-setup-${{ inputs.source_ref || github.sha }}-${{ matrix.platform }}
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 0
+          path: ${{ runner.temp }}/setup
+
+  sudo-recovery:
+    name: Exercise uncached sudo recovery (linux-arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+      - uses: ./.github/actions/spark-setup-toolchain
+        with:
+          shared-key: linux-arm64
+          sccache_sha256: ${{ env.SPARK_SETUP_SCCACHE_SHA256 }}
       - name: Exercise uncached sudo recovery in a disposable ARM64 terminal
-        if: matrix.platform == 'linux-arm64'
         shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64
@@ -162,12 +150,3 @@ jobs:
           )"
           test -x "$test_binary"
           scripts/tests/run_installer_pty_recovery.sh "$test_binary"
-
-      - name: Upload accepted native setup programs
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: installer-setup-${{ inputs.source_ref || github.sha }}-${{ matrix.platform }}
-          retention-days: 90
-          if-no-files-found: error
-          compression-level: 0
-          path: ${{ runner.temp }}/setup

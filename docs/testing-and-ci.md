@@ -780,6 +780,13 @@ request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.
 
+`installer-setups.yml` runs the NAS wheel build, the native Spark setup build and the
+uncached sudo recovery test (`sudo-recovery`) as parallel jobs, so the recovery proof
+no longer lengthens the build job on the candidate's critical path. Its caller
+(`setups` in the lane and in Release) still succeeds only when every one of them does,
+and `CI gate` reaches it through `candidate`. The two Spark jobs share their toolchain
+steps in `.github/actions/spark-setup-toolchain`.
+
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
 

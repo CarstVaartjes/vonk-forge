@@ -1,0 +1,59 @@
+name: Spark setup toolchain
+description: >-
+  Prepare the ARM64 Rust toolchain for the native Spark setup jobs: Pydantic
+  contract inputs, the pinned Rust toolchain, the Rust dependency cache and the
+  checksum-verified sccache binary. Used by the build job and the sudo recovery
+  job of installer-setups.yml, so both build with the same cache and tools.
+inputs:
+  shared-key:
+    description: rust-cache key shared between the build and recovery jobs
+    required: true
+  sccache_sha256:
+    description: Expected SHA-256 of the extracted sccache binary
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Prepare Pydantic contracts for Cargo builds
+      uses: ./.github/actions/python-env
+      with:
+        contracts: none
+        cli-dependencies: "false"
+    - name: Install pinned Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        rustup set profile minimal
+        rustup toolchain install 1.98.1
+        rustup default 1.98.1
+
+    - name: Restore Rust dependency cache
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        shared-key: ${{ inputs.shared-key }}
+        add-job-id-key: "false"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    - name: Run Rust compiler cache
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.18.0
+
+    - name: Verify pinned Rust compiler cache binary
+      shell: bash
+      env:
+        EXPECTED_SCCACHE_SHA256: ${{ inputs.sccache_sha256 }}
+      run: |
+        set -euo pipefail
+        test -n "${SCCACHE_PATH:-}"
+        test -x "$SCCACHE_PATH"
+        case "$(uname -s)" in
+          Linux) actual="$(sha256sum "$SCCACHE_PATH")" ;;
+          Darwin) actual="$(shasum -a 256 "$SCCACHE_PATH")" ;;
+          *) echo "unsupported sccache verification platform" >&2; exit 1 ;;
+        esac
+        actual="${actual%% *}"
+        if [[ "$actual" != "$EXPECTED_SCCACHE_SHA256" ]]; then
+          echo "sccache binary checksum mismatch" >&2
+          exit 1
+        fi
