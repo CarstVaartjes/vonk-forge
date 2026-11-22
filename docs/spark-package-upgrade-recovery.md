@@ -106,7 +106,7 @@ The ARM64 systemd CI lane executes
 helper and its disposable acceptance probe. Both fixture package generations
 use the current signed protocol and current preinst; no obsolete supported
 baseline is invented. The small service executable and postinst are explicit
-fault-injection fixtures, while adjacent recovery/repair shell lanes exercise
+fault-injection fixtures, while the adjacent recovery shell lane exercises
 the complete production maintainer scripts. This is Debian/systemd acceptance,
 not physical Spark, NVIDIA, or live Controller deployment evidence.
 

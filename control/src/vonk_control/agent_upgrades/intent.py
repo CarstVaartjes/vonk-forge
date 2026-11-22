@@ -13,9 +13,7 @@ from vonk_agent_protocol.package_source import AgentPackageSource
 
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
-    AgentUpgradeRepairManifest,
     AgentUpgradeRequestIntent,
-    AgentUpgradeRolloutPayload,
 )
 from ..strict_json import read_stored_model
 from .errors import AgentUpgradeInvalid
@@ -47,15 +45,6 @@ def _request_intent(
         ) from None
 
 
-def _rollout_document(payload: AgentUpgradeRolloutPayload) -> dict[str, object]:
-    """The stored rollout payload; a rollout without a repair carries no key."""
-
-    document = payload.model_dump(mode="json")
-    if payload.repair_manifest is None:
-        del document["repair_manifest"]
-    return document
-
-
 def _plan_digest(
     *,
     sources: Mapping[str, AgentPackageSource],
@@ -63,7 +52,6 @@ def _plan_digest(
     node_ids: Sequence[str],
     package: AgentUpgradePackage,
     request_intent: AgentUpgradeRequestIntent,
-    repair_manifest: AgentUpgradeRepairManifest | None,
 ) -> str:
     """The digest that binds a rollout plan; the same bytes at plan and resume."""
 
@@ -76,10 +64,5 @@ def _plan_digest(
         "node_ids": list(node_ids),
         "package": package.model_dump(mode="json"),
         "request_intent": request_intent.model_dump(mode="json"),
-        **(
-            {"repair_manifest": repair_manifest.model_dump(mode="json")}
-            if repair_manifest is not None
-            else {}
-        ),
     }
     return hashlib.sha256(canonical_message(document)).hexdigest()

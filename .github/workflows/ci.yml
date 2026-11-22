@@ -1308,81 +1308,6 @@ jobs:
 
   # The standalone proof workflows run here, selected by the same areas and the
   # same tested commit (the pull request merge commit) as every other job.
-  agent-repair-recovery:
-    name: Exercise full repair matrix on disposable ARM64 systemd
-    needs: changes
-    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.agent_package == 'true'
-    runs-on: ubuntu-24.04-arm
-    # Passing runs take about 10 minutes; a hung matrix must fail fast.
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Prepare the protocol environment for Cargo builds
-        uses: ./.github/actions/protocol-env
-      - name: Set up Rust
-        uses: ./.github/actions/setup-rust
-        with:
-          shared-key: linux-arm64
-      - name: Install native acceptance dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/ci-apt-install \
-            acl adduser build-essential ca-certificates crun curl fuse-overlayfs \
-            init-system-helpers iproute2 iptables openssl podman shellcheck \
-            slirp4netns systemd uidmap util-linux
-      - name: Validate repair scripts before mutation
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash -n \
-            tests/nodes/test_agent_upgrade_repair_matrix.sh \
-            tests/nodes/test_agent_upgrade_repair_systemd.sh
-          shellcheck -S error \
-            packaging/debian/postinst-repair \
-            packaging/debian/preinst-repair
-          shellcheck \
-            tests/nodes/test_agent_upgrade_repair_matrix.sh \
-            tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - name: Build exact repair fixtures once
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = aarch64
-          cargo build --locked --release --package vonk-repair-helper-probe
-          RUSTFLAGS='-C target-feature=+crt-static' \
-            cargo build --locked --release --package vonk-build-egress
-          probe=$(realpath target/release/vonk-repair-helper-probe)
-          build_egress=$(realpath target/release/vonk-build-egress)
-          probe_staged="$probe.root-owned"
-          build_egress_staged="$build_egress.root-owned"
-          sudo install -o root -g root -m 0755 "$probe" "$probe_staged"
-          sudo install -o root -g root -m 0755 \
-            "$build_egress" "$build_egress_staged"
-          sudo mv -f "$probe_staged" "$probe"
-          sudo mv -f "$build_egress_staged" "$build_egress"
-          test "$(stat -c %u:%g:%a:%h "$probe")" = 0:0:755:1
-          test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1
-      - name: Exercise every repair success, refusal, and crash path
-        shell: bash
-        env:
-          REPAIR_MATRIX_MODE: full
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = aarch64
-          test -d /run/systemd/system
-          test "$(dpkg --print-architecture)" = arm64
-          probe=$(realpath target/release/vonk-repair-helper-probe)
-          build_egress=$(realpath target/release/vonk-build-egress)
-          sudo env REPAIR_MATRIX_MODE="$REPAIR_MATRIX_MODE" \
-            REPAIR_PROBE_BINARY="$probe" \
-            BUILD_EGRESS_BINARY="$build_egress" \
-            tests/nodes/test_agent_upgrade_repair_matrix.sh
-
   client-compatibility-report:
     # A report, never a gate: a deliberate break is legitimate. It shows, before
     # the deploy, every response shape the published vonkctl would refuse.
@@ -1764,7 +1689,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, agent-repair-recovery, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
+    needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1817,7 +1742,6 @@ jobs:
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
           NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
           AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
-          AGENT_REPAIR_RECOVERY_RESULT: ${{ needs.agent-repair-recovery.result }}
           CLIENT_COMPATIBILITY_REPORT_RESULT: ${{ needs.client-compatibility-report.result }}
           INSTALLED_CLI_PROOF_RESULT: ${{ needs.installed-cli-proof.result }}
           MODEL_CACHE_UNKNOWN_EXPIRY_RESULT: ${{ needs.model-cache-unknown-expiry.result }}
@@ -1857,7 +1781,6 @@ jobs:
             --result "compose=$COMPOSE_RESULT" \
             --result "nas-install=$NAS_INSTALL_RESULT" \
             --result "agent-package=$AGENT_PACKAGE_RESULT" \
-            --result "agent-repair-recovery=$AGENT_REPAIR_RECOVERY_RESULT" \
             --result "client-compatibility-report=$CLIENT_COMPATIBILITY_REPORT_RESULT" \
             --result "installed-cli-proof=$INSTALLED_CLI_PROOF_RESULT" \
             --result "model-cache-unknown-expiry=$MODEL_CACHE_UNKNOWN_EXPIRY_RESULT" \

@@ -76,7 +76,6 @@ PRODUCERS = {
             "rust/crates/vonk-agent-helper/**",
             "rust/crates/vonk-agent-protocol/**",
             "rust/crates/vonk-build-egress/**",
-            "rust/crates/vonk-repair-helper-probe/**",
             "scripts/agent-apt-metadata",
             "scripts/agent-apt-state",
             "scripts/agent-package-metadata",
@@ -123,7 +122,6 @@ PRODUCERS = {
             "scripts/retry_dependency_fetch.py",
             "tests/nodes/test_agent_package_native_lifecycle.sh",
             "tests/nodes/test_agent_upgrade_recovery_systemd.sh",
-            "tests/nodes/test_agent_upgrade_repair_systemd.sh",
         ),
         artifacts=(
             "vonk-agent-development-{sha}",

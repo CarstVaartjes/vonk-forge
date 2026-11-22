@@ -31,7 +31,7 @@ AREA_JOBS = {
     "generated": ("generated",),
     "compose": ("compose",),
     "nas-install": ("nas-install",),
-    "agent-package": ("agent-package", "agent-repair-recovery"),
+    "agent-package": ("agent-package",),
     # A change to the upgrade-carry lane's own code is merged only with a
     # green lane run on that head.
     "lane": ("lane-proof",),
