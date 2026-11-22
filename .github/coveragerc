@@ -1,0 +1,11 @@
+# Used only by .github/workflows/coverage.yml (an on-demand run, never a gate).
+# Each pytest process, xdist workers included, writes its own data file next to
+# COVERAGE_FILE; `coverage combine` merges them. agent_protocol/src is left out:
+# its tests run in a separate consumer environment that scripts/test does not use.
+[run]
+source =
+    ${GITHUB_WORKSPACE}/src
+    ${GITHUB_WORKSPACE}/control/src
+    ${GITHUB_WORKSPACE}/nas_setup/src
+parallel = True
+relative_files = True

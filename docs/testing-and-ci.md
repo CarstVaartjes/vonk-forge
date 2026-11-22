@@ -774,6 +774,20 @@ job is the alarm; the fix is a pin move or a contract fix in the repository that
 drifted, never a gate on unrelated pull requests. The recipes repository owns
 its `platform_ref` pin (see `docs/runbooks/supply-chain.md`).
 
+### Coverage: code no test executes
+
+`.github/workflows/coverage.yml` runs on `workflow_dispatch` only: no pull
+request, batch or release calls it, so it costs no runner-minutes there. Run it
+before a deletion or refactor wave. It runs the Python control and repository
+suites through `scripts/test` with the same shards as `ci.yml`, and the Rust
+workspace through `cargo llvm-cov`, all under coverage. The result is one list,
+written to the job summary and to the `code-no-test-executes` artifact (with an
+HTML report, kept 7 days): the files and functions with no executed line,
+as deletion candidates (`scripts/coverage-unexecuted`). It stores and compares
+no percentage and gates nothing. `agent_protocol/src` is not listed because its
+tests run in their own consumer environment. The tool versions are pinned once, in the
+workflow's `env`.
+
 ### Release acceptance before merge
 
 Every integration PR, including acceptance-harness changes, builds an immutable

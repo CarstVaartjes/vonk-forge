@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""List the code that no test executed, as deletion candidates.
+
+Reads the JSON that `coverage json` (Python) and `cargo llvm-cov --json`
+(Rust) write and prints Markdown: the files with no executed line and the
+functions with no executed line. It prints no percentage and compares nothing
+with an earlier run; the list is the whole result.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+
+def python_candidates(report: dict) -> tuple[list[str], list[str]]:
+    files, functions = [], []
+    for path, data in sorted(report["files"].items()):
+        if not data["missing_lines"]:
+            continue
+        if not data["executed_lines"]:
+            files.append(path)
+            continue
+        for name, function in sorted(data.get("functions", {}).items()):
+            if name and not function["executed_lines"] and function["missing_lines"]:
+                first = min(function["missing_lines"])
+                functions.append(f"{path}:{first} `{name}`")
+    return files, functions
+
+
+def rust_candidates(report: dict) -> tuple[list[str], list[str]]:
+    export = report["data"][0]
+    files = [
+        item["filename"]
+        for item in export["files"]
+        if item["summary"]["lines"]["count"] and not item["summary"]["lines"]["covered"]
+    ]
+    # Generic functions have one entry per instantiation at the same line: the
+    # function is unexecuted only when every instantiation is.
+    by_place: dict[tuple[str, int], list[dict]] = defaultdict(list)
+    for function in export["functions"]:
+        by_place[(function["filenames"][0], function["regions"][0][0])].append(function)
+    functions = [
+        f"{path}:{line} `{group[0]['name']}`"
+        for (path, line), group in sorted(by_place.items())
+        if path not in files and all(item["count"] == 0 for item in group)
+    ]
+    return sorted(files), functions
+
+
+def section(title: str, files: list[str], functions: list[str]) -> list[str]:
+    lines = [f"## {title}", "", f"### Files no test executes ({len(files)})", ""]
+    lines += [f"- `{path}`" for path in files] or ["None."]
+    lines += ["", f"### Functions no test executes ({len(functions)})", ""]
+    lines += [f"- {item}" for item in functions] or ["None."]
+    return [*lines, ""]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--python", type=Path, help="coverage json output")
+    parser.add_argument("--rust", type=Path, help="cargo llvm-cov --json output")
+    args = parser.parse_args()
+    lines = ["# Code no test executes (deletion candidates)", ""]
+    if args.python:
+        report = json.loads(args.python.read_text())
+        lines += section("Python", *python_candidates(report))
+    if args.rust:
+        report = json.loads(args.rust.read_text())
+        lines += section("Rust", *rust_candidates(report))
+    sys.stdout.write("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
