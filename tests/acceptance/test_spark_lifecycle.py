@@ -80,6 +80,7 @@ from tests.acceptance.controller_contract import ContractSkew, ControllerContrac
 from tests.acceptance.ephemeral import release_public_key
 from tests.acceptance.ephemeral import test_mode as ephemeral_test_mode
 from tests.acceptance.runtime import (
+    TIMINGS,
     AcceptanceError,
     _compose_rows,
     assert_compose_services_healthy,
@@ -1478,7 +1479,8 @@ class SparkLifecycle:
     def __enter__(self) -> Self:
         self._assert_spark_target_is_fresh()
         try:
-            self._start_controller()
+            with TIMINGS.phase("bring-up"):
+                self._start_controller()
             return self
         except BaseException as error:
             try:
@@ -1488,7 +1490,8 @@ class SparkLifecycle:
             raise
 
     def __exit__(self, *_error: object) -> None:
-        self._cleanup()
+        with TIMINGS.phase("cleanup"):
+            self._cleanup()
 
     def _compose(self, *arguments: str) -> list[str]:
         overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
@@ -3087,37 +3090,40 @@ class SparkLifecycle:
     def observe(self) -> dict[str, object]:
         if self.control is None or self.bundle is None or self.temporary_root is None:
             raise LifecycleError("candidate controller is not ready")
-        grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
-        try:
-            _run_spark_bootstrap(
-                self._bootstrap_url(baseline=False),
-                cwd=self.temporary_root,
-                environment=self._installer_environment(baseline=False),
-                enrollment_url=enrollment_url,
-                ca_sha256=ca_sha256,
-                pairing_token=pairing_token,
+        with TIMINGS.phase("install"):
+            grant_id, enrollment_url, ca_sha256, pairing_token = self._create_grant()
+            try:
+                _run_spark_bootstrap(
+                    self._bootstrap_url(baseline=False),
+                    cwd=self.temporary_root,
+                    environment=self._installer_environment(baseline=False),
+                    enrollment_url=enrollment_url,
+                    ca_sha256=ca_sha256,
+                    pairing_token=pairing_token,
+                )
+            except AcceptanceError as error:
+                raise self._installation_failure(
+                    "candidate Spark installation", error
+                ) from error
+            finally:
+                del pairing_token
+            self.agent_installed = True
+            try:
+                verify_effective_sandbox()
+            except (SandboxError, OSError, subprocess.SubprocessError) as error:
+                raise self._installation_failure(
+                    "Spark service sandbox verification", error
+                ) from error
+            self._prepare_podman_apparmor_profile()
+            candidate = self._wait_for_agent_identity(
+                package_version=str(self.graph["candidate_version"]), timeout=180
             )
-        except AcceptanceError as error:
-            raise self._installation_failure(
-                "candidate Spark installation", error
-            ) from error
-        finally:
-            del pairing_token
-        self.agent_installed = True
-        try:
-            verify_effective_sandbox()
-        except (SandboxError, OSError, subprocess.SubprocessError) as error:
-            raise self._installation_failure(
-                "Spark service sandbox verification", error
-            ) from error
-        self._prepare_podman_apparmor_profile()
-        candidate = self._wait_for_agent_identity(
-            package_version=str(self.graph["candidate_version"]), timeout=180
-        )
-        use_count = self._pairing_grant_use_count(grant_id)
+            use_count = self._pairing_grant_use_count(grant_id)
         node_id = str(candidate["node_id"])
-        canary = self._run_synthetic_canary(node_id)
-        self._run_artifact_job_canary(node_id)
+        with TIMINGS.phase("canary"):
+            canary = self._run_synthetic_canary(node_id)
+        with TIMINGS.phase("artifact-job-canary"):
+            self._run_artifact_job_canary(node_id)
         synthetic_device = {
             "architecture": self.arguments.platform,
             "cdi_name": "nvidia.com/gpu=all",
@@ -3126,7 +3132,8 @@ class SparkLifecycle:
             "provenance": "ci-only-synthetic-cdi",
             "synthetic": True,
         }
-        renewal = self._observe_renewal(node_id, str(candidate["serial"]))
+        with TIMINGS.phase("renewal"):
+            renewal = self._observe_renewal(node_id, str(candidate["serial"]))
         return {
             "canary": canary,
             "controller_generation": self.arguments.generation,
@@ -5672,7 +5679,8 @@ def run_lifecycle(
     try:
         if not _valid_run_identity(arguments):
             raise LifecycleError("lifecycle run identity is invalid")
-        graph = check_publication_graph(arguments)
+        with TIMINGS.phase("publication-graph"):
+            graph = check_publication_graph(arguments)
         factory = lifecycle_factory or SparkLifecycle
         phase = "controller-startup"
         with factory(arguments, graph) as lifecycle_run:
@@ -5711,6 +5719,8 @@ def run_lifecycle(
         if not isinstance(error, Exception):
             raise
         raise LifecycleError(_exception_cause(error, phase=phase)) from error
+    finally:
+        TIMINGS.emit(f"Spark lifecycle {arguments.platform}")
 
 
 def _arguments() -> argparse.Namespace:

@@ -25,6 +25,47 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+class PhaseTimings:
+    """Wall-clock per harness phase, shown in the job summary and as one JSON line.
+
+    Measurement only: nothing reads these durations back or asserts on them.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[str, float]] = []
+
+    @contextlib.contextmanager
+    def phase(self, name: str):
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.rows.append((name, round(time.monotonic() - started, 1)))
+
+    def emit(self, label: str) -> None:
+        """Print the machine-readable line and append the table to the step summary."""
+        if not self.rows:
+            return
+        print(
+            "phase-timings "
+            + json.dumps(
+                {"harness": label, "seconds": dict(self.rows)}, separators=(",", ":")
+            ),
+            flush=True,
+        )
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if not summary:
+            return
+        table = "".join(f"| {name} | {seconds} |\n" for name, seconds in self.rows)
+        with contextlib.suppress(OSError), open(summary, "a", encoding="utf-8") as out:
+            out.write(
+                f"#### {label} phase timings\n\n| phase | seconds |\n|---|---|\n{table}\n"
+            )
+
+
+TIMINGS = PhaseTimings()
+
+
 def reclaim_gateway_journal(bundle: Path) -> None:
     """Restore the disposable bundle owner's access after Compose has stopped.
 
