@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { EndpointState, ProfileDocumentState } from "../api/vocabulary.generated";
+import { EndpointState, ProfileDocumentState } from "../../api/vocabulary.generated";
 import {
   readableProfile,
   type ControlApi,
   type FleetProfileEndpoints,
   type VisualFleetNode,
-} from "../api/types";
-import { ConnectionExamples } from "./connection-examples";
+} from "../../api/types";
+import { ConnectionExamples } from "../connection-examples";
 
 type ServedAssignment = NonNullable<FleetProfileEndpoints["assignments"]>[number];
 

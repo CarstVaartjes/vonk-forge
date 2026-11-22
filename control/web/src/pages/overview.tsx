@@ -12,13 +12,13 @@ import { EnergyCard } from "../components/energy-card";
 import { FleetPulse } from "../components/fleet-pulse";
 import { TokensCard } from "../components/tokens-card";
 import { FleetFeedback } from "../components/fleet-feedback";
-import { WorkloadUnits } from "../components/workload-units";
+import { WorkloadUnits } from "../components/workload/workload-units";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
 import { useToast } from "../components/toast";
 import { EnrollmentGrant } from "../components/enrollment-grant";
-import { ServingNow, servingKey } from "../components/serving-now";
+import { ServingNow, servingKey } from "../components/workload/serving-now";
 import { safeErrorText } from "../lib/error-display";
 
 const FAILED_ACTIVITY = "/activity?status=unsuccessful";

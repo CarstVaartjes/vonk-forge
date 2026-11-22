@@ -1,14 +1,14 @@
 import "./workload-row.css";
 import type { ReactNode } from "react";
-import type { MetricsSeriesResponse } from "../api/types";
-import type { WorkloadReads } from "../hooks/use-workload-reads";
+import type { MetricsSeriesResponse } from "../../api/types";
+import type { WorkloadReads } from "../../hooks/use-workload-reads";
 import {
   formatBytes,
   NOT_REPORTED_TEXT,
   nodeDisplayName,
   nodeMemorySplit,
   type WorkloadGroup,
-} from "../lib/fleet";
+} from "../../lib/fleet";
 import {
   compactCount,
   formatValue,
@@ -17,11 +17,11 @@ import {
   queueText,
   UNITS,
   windowPoints,
-} from "../lib/metric-units";
-import { Sparkline } from "./chart/sparkline";
-import { sparkColor } from "./chart/series";
-import { Estimate } from "./estimate";
-import { StatusPill } from "./status-pill";
+} from "../../lib/metric-units";
+import { Sparkline } from "../chart/sparkline";
+import { sparkColor } from "../chart/series";
+import { Estimate } from "../estimate";
+import { StatusPill } from "../status-pill";
 
 const WINDOW_SECONDS = 1800;
 

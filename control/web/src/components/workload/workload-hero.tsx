@@ -1,5 +1,5 @@
-import { type JobWorkloadApi, useJobWorkload, WorkloadKind } from "../hooks/use-workload-jobs";
-import { ENGINE_FIGURES, type WorkloadReads } from "../hooks/use-workload-reads";
+import { type JobWorkloadApi, useJobWorkload, WorkloadKind } from "../../hooks/use-workload-jobs";
+import { ENGINE_FIGURES, type WorkloadReads } from "../../hooks/use-workload-reads";
 import {
   aliasSeries,
   formatValue,
@@ -7,11 +7,11 @@ import {
   queueText,
   UNITS,
   windowPoints,
-} from "../lib/metric-units";
-import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../lib/fleet";
-import { AreaChart } from "./chart/area-chart";
-import { Estimate, EstimateTag } from "./estimate";
-import { StatusPill } from "./status-pill";
+} from "../../lib/metric-units";
+import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../../lib/fleet";
+import { AreaChart } from "../chart/area-chart";
+import { Estimate, EstimateTag } from "../estimate";
+import { StatusPill } from "../status-pill";
 import { WorkloadChecking, WorkloadJobs } from "./workload-jobs";
 
 const WINDOW_SECONDS = 1800;

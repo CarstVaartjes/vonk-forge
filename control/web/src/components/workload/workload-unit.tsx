@@ -1,8 +1,8 @@
 import "./workload-unit.css";
-import type { WorkloadReads } from "../hooks/use-workload-reads";
-import { nodeDisplayName, type WorkloadCluster } from "../lib/fleet";
+import type { WorkloadReads } from "../../hooks/use-workload-reads";
+import { nodeDisplayName, type WorkloadCluster } from "../../lib/fleet";
 import type { ReactNode } from "react";
-import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
+import type { JobWorkloadApi } from "../../hooks/use-workload-jobs";
 import { WorkloadHeader, WorkloadHero } from "./workload-hero";
 
 /**

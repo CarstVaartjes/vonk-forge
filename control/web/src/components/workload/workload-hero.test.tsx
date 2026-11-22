@@ -5,10 +5,10 @@ import type {
   MetricsSeriesResponse,
   RecipeDetail,
   VisualFleetNode,
-} from "../api/types";
-import type { JobWorkloadApi } from "../hooks/use-workload-jobs";
-import type { WorkloadReads } from "../hooks/use-workload-reads";
-import { groupByWorkload } from "../lib/fleet";
+} from "../../api/types";
+import type { JobWorkloadApi } from "../../hooks/use-workload-jobs";
+import type { WorkloadReads } from "../../hooks/use-workload-reads";
+import { groupByWorkload } from "../../lib/fleet";
 
 // The real projection ids: the run carries a catalog recipe id and the revision id the recipe read takes.
 const REVISION = "0b6c0f0e-4f56-4d27-8c0f-2f7a1d5a6a01";
