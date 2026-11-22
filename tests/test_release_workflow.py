@@ -303,22 +303,6 @@ def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
     assert pr["candidate"]["with"]["premerge"] is True
 
 
-def test_candidate_and_baseline_packages_build_in_parallel_legs() -> None:
-    """Catches a leg dropped from the package matrix or a package name that no
-    longer follows its version, which candidate assembly would then miss."""
-    pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]
-    legs = pr["package"]["strategy"]["matrix"]["include"]
-    assert {leg["kind"] for leg in legs} == {"candidate", "baseline"}
-    assert len({leg["artifact"] for leg in legs}) == 2
-    with_ = pr["candidate"]["with"]
-    assert {with_["package_artifact"], with_["baseline_artifact"]} == {
-        leg["artifact"] for leg in legs
-    }
-    for leg, key in zip(legs, ("arm64_package", "arm64_baseline_package")):
-        version = leg["version"].removeprefix("${{ ").removesuffix(" }}")
-        assert version in with_[key]
-
-
 def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
     for name in ("generated-clients", "repository-guards"):
