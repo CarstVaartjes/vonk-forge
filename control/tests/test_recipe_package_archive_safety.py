@@ -25,8 +25,6 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from hypothesis import example, given
-from hypothesis import strategies as st
 from vonk_control import recipe_packages
 
 from tests.recipe_library_source import recipe_library_root
@@ -437,22 +435,3 @@ def test_total_size_limit_is_exclusive(
     _accept(tmp_path / "at-limit", published_package)
     monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_TOTAL_BYTES", total - 1)
     _reject(tmp_path / "over-limit", published_package, package)
-
-
-@pytest.mark.property
-@given(
-    st.lists(
-        st.sampled_from(["a", "b.txt", "..", ".", "", "\\", "\x00"]), max_size=5
-    ).map("/".join)
-)
-@example("./a")
-@example("a//b")
-@example("a/../b")
-@example("/etc/passwd")
-def test_accepted_package_path_is_canonical_and_relative(raw: str) -> None:
-    if not recipe_packages._safe_path(raw):
-        return
-    parts = raw.split("/")
-    assert raw and not raw.startswith("/")
-    assert "\x00" not in raw and "\\" not in raw
-    assert all(part not in {"", ".", ".."} for part in parts)

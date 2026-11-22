@@ -56,13 +56,18 @@ def backoff(attempt: int) -> float:
     return uniform(1, min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS**attempt))
 
 
+def locked_pip_shape(words: tuple[str, ...]) -> bool:
+    """The run-independent shape of the hash-locked ``uv pip install`` form."""
+    return (
+        len(words) == 9
+        and words[:4] == ("uv", "pip", "install", "--python")
+        and words[5:8] == ("--reinstall", "--require-hashes", "-r")
+    )
+
+
 def locked_temporary_pip_acquisition(words: tuple[str, ...]) -> bool:
     """Only the declared hash-locked resolver-cache preparation may retry."""
-    if (
-        len(words) != 9
-        or words[:4] != ("uv", "pip", "install", "--python")
-        or words[5:8] != ("--reinstall", "--require-hashes", "-r")
-    ):
+    if not locked_pip_shape(words):
         return False
     temporary = os.environ.get("RUNNER_TEMP")
     cache = os.environ.get("UV_CACHE_DIR")
@@ -104,7 +109,9 @@ def acquisition_prefix(words: tuple[str, ...]) -> bool:
 def main(command: list[str] | None = None) -> int:
     command = sys.argv[1:] if command is None else command
     words = (Path(command[0]).name, *command[1:]) if command else ()
-    if not (acquisition_prefix(words) or locked_temporary_pip_acquisition(words)):
+    if not words or not (
+        acquisition_prefix(words) or locked_temporary_pip_acquisition(words)
+    ):
         print(
             "Only dependency acquisition may be retried: "
             + ", ".join(" ".join(prefix) for prefix in _COMMANDS)
@@ -112,7 +119,6 @@ def main(command: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 64
-    assert words
     deadline = monotonic() + FETCH_DEADLINE_SECONDS
     for attempt in range(1, MAX_ATTEMPTS + 1):
         timeout = max(1.0, min(FETCH_TIMEOUT_SECONDS, deadline - monotonic()))

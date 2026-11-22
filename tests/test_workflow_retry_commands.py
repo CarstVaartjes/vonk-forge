@@ -6,6 +6,7 @@ allowlist is read from the script itself.
 """
 
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -14,21 +15,19 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from retry_dependency_fetch import acquisition_prefix
+from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
 
 WRAPPER = "scripts/retry-dependency-fetch"
-# The hash-locked pip form is checked against RUNNER_TEMP by the script at run time.
-PIP_FORM = ("uv", "pip", "install", "--python")
 
 
 def wrapped_commands(script: str) -> list[tuple[str, ...]]:
     found = []
     for line in script.replace("\\\n", " ").splitlines():
-        if WRAPPER not in line:
-            continue
-        words = shlex.split(line.split(WRAPPER, 1)[1], comments=True)
-        if words:
-            found.append((os.path.basename(words[0]), *words[1:]))
+        for call in line.split(WRAPPER)[1:]:
+            # Cut at a shell separator so a later command is not part of this one.
+            words = shlex.split(re.split(r"&&|\|\||;|\|", call)[0], comments=True)
+            if words:
+                found.append((os.path.basename(words[0]), *words[1:]))
     return found
 
 
@@ -36,7 +35,7 @@ def refused(script: str) -> list[tuple[str, ...]]:
     return [
         words
         for words in wrapped_commands(script)
-        if not (acquisition_prefix(words) or words[:4] == PIP_FORM)
+        if not (acquisition_prefix(words) or locked_pip_shape(words))
     ]
 
 
@@ -62,3 +61,12 @@ def test_wrapped_commands_are_on_the_script_allowlist() -> None:
 def test_a_wrapped_install_of_a_cargo_tool_is_refused() -> None:
     script = f'{WRAPPER} cargo "+$N" install cargo-fuzz --locked\n{WRAPPER} cargo fetch \\\n  --locked'
     assert refused(script) == [("cargo", "+$N", "install", "cargo-fuzz", "--locked")]
+
+
+def test_every_wrapper_call_on_a_line_is_checked() -> None:
+    script = f"{WRAPPER} uv sync && {WRAPPER} cargo install x"
+    assert refused(script) == [("cargo", "install", "x")]
+    unhashed = f'{WRAPPER} uv pip install --python "$p" -r req.txt'
+    assert refused(unhashed) == [
+        ("uv", "pip", "install", "--python", "$p", "-r", "req.txt")
+    ]

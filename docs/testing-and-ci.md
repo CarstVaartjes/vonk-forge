@@ -898,10 +898,10 @@ is required.
 
 ## Dependency acquisition failures
 
-`scripts/retry-dependency-fetch` permits only `uv sync`, `skopeo inspect`,
-`docker pull`, and `docker buildx imagetools inspect` (the allowlist lives in
-the script; `tests/test_workflow_retry_commands.py` fails when any workflow or
-composite action wraps a command it would refuse, such as `cargo install`). The Controller and wire
+`scripts/retry-dependency-fetch` permits only the acquisition commands listed
+in `scripts/retry_dependency_fetch.py`; `tests/test_workflow_retry_commands.py`
+fails when any workflow or composite action wraps a command it would refuse,
+such as `cargo install`. The Controller and wire
 jobs resolve locked dependencies before running checks. Controller image tests
 reuse local base images or pull missing inputs from `images.lock.json` through
 the helper before building; they pass those same pins as build arguments.
