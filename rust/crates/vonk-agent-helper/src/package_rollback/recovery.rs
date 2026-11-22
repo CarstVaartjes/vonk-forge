@@ -14,6 +14,22 @@ use super::{
 
 impl Store {
     pub fn watch(&self) -> Result<(), String> {
+        self.watch_with(
+            |tx, remaining| {
+                retry_process_proof(Instant::now() + remaining, Duration::from_secs(1), || {
+                    self.restore(tx)
+                })
+            },
+            start_services,
+        )
+    }
+
+    /// `restore` is the bounded restore attempt; `heal` starts the units again.
+    pub(super) fn watch_with(
+        &self,
+        restore: impl Fn(&Transaction, Duration) -> Result<(), String>,
+        heal: impl Fn(),
+    ) -> Result<(), String> {
         loop {
             let lock = self.lock()?;
             let mut observed = None;
@@ -58,6 +74,9 @@ impl Store {
                 } else {
                     Phase::RollbackFailed
                 };
+                if !restored {
+                    heal();
+                }
                 tx.updated_at = now()?;
                 tx.outcome = if restored {
                     Outcome::SourceRestoredAndRestarted
@@ -71,10 +90,13 @@ impl Store {
             tx.updated_at = timestamp;
             tx.outcome = Outcome::RestoringCapturedSource;
             self.write(&tx)?;
-            let result =
-                retry_process_proof(Instant::now() + remaining, Duration::from_secs(1), || {
-                    self.restore(&tx)
-                });
+            let result = restore(&tx, remaining);
+            if result.is_err() {
+                // restore() stopped the agent and helper before dpkg. A failed
+                // restore must not leave the Spark unreachable: the failure
+                // stays in the journal for the Controller to see and re-drive.
+                heal();
+            }
             tx.updated_at = now()?;
             if result.is_ok() {
                 tx.phase = Phase::RolledBack;
@@ -155,6 +177,17 @@ impl Store {
         )
         .map_err(|_| "source process identity differs after rollback".to_owned())?;
         Ok(())
+    }
+}
+
+/// Best effort: bring the helper socket and the agent back after a failed
+/// restore. `Restart=always` does not undo an explicit stop.
+fn start_services() {
+    for unit in [
+        "vonk-forge-package-helper.socket",
+        "vonk-forge-agent.service",
+    ] {
+        let _ = command("/usr/bin/systemctl", &["--system", "start", unit], false);
     }
 }
 

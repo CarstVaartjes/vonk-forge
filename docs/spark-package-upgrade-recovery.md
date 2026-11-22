@@ -103,6 +103,15 @@ different package or overwrite a third identity. The restore runs `dpkg`
 offline, so the source `postinst` schedules no finisher; the watchdog itself
 reloads systemd and restarts the helper socket and the agent.
 
+Restoration stops the agent and helper before `dpkg` can run, and `Restart=always`
+does not undo an explicit stop. So whenever a restore ends without success
+(`dpkg` keeps failing until the retry budget is spent, or a restarted watchdog
+finds no budget left and cannot confirm the source), the watchdog starts the
+helper socket and the agent again, best effort, before it records
+`rollback_failed`. The Spark stays reachable, the receipt still reports
+`rollback_failed`, and the Controller re-drives. The stops stay before `dpkg`:
+whether `dpkg` can proceed is only known by running it.
+
 An interrupted upgrade therefore ends on the previous version within the
 deadline, not forward on the candidate.
 
