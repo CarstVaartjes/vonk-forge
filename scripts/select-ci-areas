@@ -117,6 +117,7 @@ CARRY_EXEMPT = (
     "docs/",
     ".github/ISSUE_TEMPLATE/",
     ".github/workflows/ci.yml",
+    ".github/workflows/stable-release.yml",
     ".github/workflows/ci-image-mirror.yml",
     ".github/workflows/dev-images.yml",
 )

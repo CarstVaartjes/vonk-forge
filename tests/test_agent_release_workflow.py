@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/installer-publication.yml"
-UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
+UNIFIED_WORKFLOW = ROOT / ".github/workflows/stable-release.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
 COMPILE_WORKFLOW = ROOT / ".github/actions/agent-package-compile/action.yml"
 SECURITY_WORKFLOW = ROOT / ".github/actions/agent-package-security/action.yml"
@@ -448,7 +448,6 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in text
     assert "scripts/sign-package-keyless" in text
     assert "agent-release\\.yml@refs/heads/main" in text
-    assert "ci\\.yml@refs/tags/v" in text
 
 
 def test_development_parallelizes_only_prebuilt_deterministic_package_assembly() -> (
@@ -578,7 +577,7 @@ def test_agent_key_cleanup_guard_rejects_fallback_before_lifecycle() -> None:
         assert_agent_key_cleanup_contract(mutated)
 
 
-def test_stable_sigstore_identity_renders_the_exact_version() -> None:
+def stable_identity_regexp(version: str = "1.2.3") -> str:
     line = next(
         line.strip()
         for line in PACKAGE_WORKFLOW.read_text().splitlines()
@@ -589,19 +588,51 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
             "bash",
             "-c",
             (
-                f"VERSION=1.2.3; GITHUB_REPOSITORY=example/vonk; {line}; "
-                "printf '%s\\n' \"$identity\""
+                f"VERSION={version}; GITHUB_REPOSITORY=example/vonk; {line}; "
+                "printf '%s' \"$identity\""
             ),
         ],
         check=True,
         capture_output=True,
         text=True,
     )
+    return result.stdout
 
-    assert result.stdout == (
-        "^https://github\\.com/example/vonk/\\.github/workflows/"
-        "ci\\.yml@refs/tags/v1\\.2\\.3$\n"
-    )
+
+def test_stable_sigstore_identity_renders_the_exact_version() -> None:
+    identity = stable_identity_regexp()
+    holder = "https://github.com/example/vonk/.github/workflows/{}@refs/tags/v{}"
+    assert re.search(identity, holder.format("stable-release.yml", "1.2.3"))
+    assert not re.search(identity, holder.format("stable-release.yml", "1.2.34"))
+    assert not re.search(identity, holder.format("stable-release.yml", "1x2.3"))
+
+
+def test_stable_sigstore_identity_names_the_workflow_that_builds_the_stable_package() -> (
+    None
+):
+    """The signing certificate names the workflow file holding the signing job.
+
+    cosign verifies the certificate's job_workflow_ref, which is the called
+    workflow's path at the caller's ref, not the caller's file. The file is
+    derived from the workflow that calls agent-package-build with the literal
+    stable channel, so moving that job without the identity fails here, not on
+    the first stable tag.
+    """
+
+    holders = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        jobs = yaml.safe_load(path.read_text()).get("jobs", {})
+        for definition in jobs.values():
+            for step in definition.get("steps", []):
+                if (
+                    str(step.get("uses", "")).endswith("/agent-package-build")
+                    and step.get("with", {}).get("channel") == "stable"
+                ):
+                    holders.append(path.name)
+    assert len(holders) == 1, holders
+    identity = stable_identity_regexp()
+    uri = f"https://github.com/example/vonk/.github/workflows/{holders[0]}"
+    assert re.search(identity, f"{uri}@refs/tags/v1.2.3")
 
 
 def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_sets() -> (

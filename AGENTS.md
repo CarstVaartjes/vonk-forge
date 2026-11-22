@@ -359,7 +359,9 @@ candidate acceptance with the upgrade carry, and every proof (the proofs are
 `ci.yml` jobs behind `ci-gate`, selected by the same areas; no standalone proof
 workflow exists, `tests/test_workflow_assertions.py`). Main's Release runs the
 complete CI unless it reuses the integration PR's run for the identical tree,
-and its own release acceptance. Adding the label re-runs `ci.yml` in full at
+and its own release acceptance (on a signed `v*` tag `ci.yml` also calls
+`stable-release.yml`, the stable-channel publication jobs). Adding the label
+re-runs `ci.yml` in full at
 once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
 reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe
 library by revision and the hash of the build script and `.tool-versions`.
