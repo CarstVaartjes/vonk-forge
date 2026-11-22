@@ -41,7 +41,6 @@ from vonk_forge_contracts import CONTRACT_MAJOR
 RELEASE_TAG = f"v{CONTRACT_MAJOR}.0.0"
 _SIGNATURE_KIND = "vonk-forge-test-recipe-release-signature"
 _RELEASES = f"/repos/{PACKAGE_REPOSITORY}/releases"
-_DOWNLOAD = f"/{PACKAGE_REPOSITORY}/releases/download/{RELEASE_TAG}/"
 
 
 def _verify(checksums: bytes, bundle: bytes) -> str:
@@ -126,6 +125,16 @@ class SignedRecipeRelease:
         return cls(index, lambda location: (root / location).read_bytes())
 
     @property
+    def tag(self) -> str:
+        """The release tag, named by the index's own contract version.
+
+        The publisher tags each release ``v<contract_version>``; the Controller
+        refuses a signed library served under another tag.
+        """
+        version = self.index.get("contract_version")
+        return f"v{version}" if version else RELEASE_TAG
+
+    @property
     def library_downloads(self) -> int:
         """How many times the Controller downloaded the library bundle."""
         return self.requests.count(RELEASE_LIBRARY)
@@ -147,13 +156,14 @@ class SignedRecipeRelease:
 
     def handler(self, request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
-        self.requests.append(path.removeprefix(_DOWNLOAD))
+        download = f"/{PACKAGE_REPOSITORY}/releases/download/{self.tag}/"
+        self.requests.append(path.removeprefix(download))
         if self.offline:
             raise httpx2.ConnectError("offline", request=request)
         library = self.library()
         served = {RELEASE_LIBRARY: library}
         release = {
-            "tag_name": RELEASE_TAG,
+            "tag_name": self.tag,
             "draft": False,
             "assets": [
                 {
@@ -165,13 +175,13 @@ class SignedRecipeRelease:
         }
         if path == _RELEASES:
             return httpx2.Response(200, json=[release])
-        if path == f"{_RELEASES}/tags/{RELEASE_TAG}":
+        if path == f"{_RELEASES}/tags/{self.tag}":
             return httpx2.Response(200, json=release)
-        if path.startswith(_DOWNLOAD) and path[len(_DOWNLOAD) :] in served:
+        if path.startswith(download) and path[len(download) :] in served:
             return httpx2.Response(
                 200,
                 headers={"content-type": "application/octet-stream"},
-                content=served[path[len(_DOWNLOAD) :]],
+                content=served[path[len(download) :]],
             )
         return httpx2.Response(404)
 
