@@ -32,15 +32,7 @@ removing the whole Controller.
 
 ### 1b. Remove the package and its services (`sudo`)
 
-Removal does not yet stop `vonk-forge-package-rollback.service`. If a Controller
-package upgrade is still armed (a rollback transaction exists), stop it first,
-or it reinstalls the previous package at its deadline:
-
-```sh
-sudo systemctl stop vonk-forge-package-rollback.service
-```
-
-Then remove the package:
+Removal supersedes a Controller package upgrade that is still armed, so nothing needs stopping first.
 
 ```sh
 sudo dpkg --purge vonk-forge-agent
@@ -50,18 +42,34 @@ The package's `prerm` is a three-line shim that runs
 `vonk-agent-helper --package-hook prerm remove` (package lifecycle logic lives
 in `vonk-agent-helper::package_hooks`). On `remove` and on `purge` (which
 removes first) the hook stops the upgrade finisher, then `vonk-forge-agent`,
-`vonk-forge-monitor`, `vonk-forge-package-helper` (socket and service) and
-`vonk-forge-docker-firewall`, disables those units and
-`vonk-forge-package-rollback`, and disables lingering for the `vonk-agent`
+`vonk-forge-monitor`, `vonk-forge-package-helper` (socket and service),
+`vonk-forge-docker-firewall` and the rollback watchdog
+`vonk-forge-package-rollback`, retires an armed rollback transaction (so the
+watchdog cannot reinstall the package at its deadline, nor after a reboot),
+disables those units, and disables lingering for the `vonk-agent`
 account. Every step is best effort: removal never fails because a unit is
 already gone or the helper binary is damaged, but with a damaged or missing
-binary nothing is stopped or disabled, so the services keep running until the
-next reboot. The shim does nothing on `upgrade`. Purge then deletes the package files (`/usr/lib/vonk-forge`, the unit
+binary nothing is stopped, disabled or retired, so the services keep running
+until the next reboot and an armed upgrade can still be rolled back at its
+deadline (stop `vonk-forge-package-rollback.service` by hand in that case). The shim does nothing on `upgrade`. Purge then deletes the package files (`/usr/lib/vonk-forge`, the unit
 files under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 `/usr/share/doc/vonk-forge-agent`) and the package conffile
 `/etc/vonk-forge-agent/containers-storage.conf`. Its `postrm` is shell and only
 forgets the units' enablement state on purge (the binary is gone by then), so
 everything below is cleaned up by hand.
+
+One gap: a package that an upgrade left half installed (`dpkg -l` shows `iHR`,
+an interrupted unpack) is refused by a plain remove, and
+`--force-remove-reinstreq` does not run `prerm`, so nothing supersedes the
+watchdog. Let the rollback finish (it reinstalls the previous package at its
+deadline), or stop it and drop its transaction first:
+
+```sh
+sudo systemctl stop vonk-forge-package-rollback.service
+sudo rm -f /var/lib/vonk-forge/package-rollback/transaction.json
+```
+
+Half-configured packages (`iF`, a failed postinst) do run `prerm remove`.
 
 ### 1c. Remove workloads and runtime images (`sudo`)
 
