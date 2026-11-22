@@ -206,7 +206,6 @@ def test_component_prs_select_no_candidate_acceptance(paths: list[str]) -> None:
         ["install/spark/install.sh"],
         ["deploy/compose/compose.yaml"],
         ["tests/acceptance/test_fresh_nas_install.py"],
-        ["tests/fixtures/canonical-synthetic-canary/index.json"],
         ["weird/new"],
     ],
 )
@@ -311,7 +310,6 @@ def test_ordinary_test_changes_run_core_suites_without_unrelated_integrations(
         "tests/helpers.py",
         "control/tests/catalog_launch_fixtures.py",
         "control/tests/fixtures/compiled_workload_v2.json",
-        "tests/fixtures/canonical-synthetic-canary/index.json",
         "tests/acceptance/test_spark_lifecycle.py",
         "tests/nodes/test_helper_runtime_filesystem.py",
         "deploy/compose/tests/test_litellm_supervisor.py",
@@ -328,7 +326,6 @@ def test_shared_and_acceptance_test_inputs_keep_their_integrations(path: str) ->
     assert module.lane_selected([path], "pull_request") is path.startswith(
         (
             "tests/acceptance/",
-            "tests/fixtures/canonical-synthetic-canary/",
             "deploy/",
             "weird/",
         )
