@@ -8,4 +8,9 @@ source =
     ${GITHUB_WORKSPACE}/control/src
     ${GITHUB_WORKSPACE}/nas_setup/src
 parallel = True
-relative_files = True
+
+# Generated at build time and git-ignored, so the report job (a plain checkout)
+# has no source for it; it is not code anyone deletes.
+[report]
+omit =
+    */generated_control/*

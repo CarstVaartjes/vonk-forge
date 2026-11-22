@@ -12,7 +12,7 @@ dependencies = [
   "attrs>=26.1.0",
   "httpx2[socks]>=2.13.1",
   "jsonschema>=4.23",
-  "pillow>=12.3.0",
+  "pillow>=13.0.0",
   "securesystemslib[crypto]>=1.5.1",
   "tuf>=7.0.1",
 ]
