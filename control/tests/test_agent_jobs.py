@@ -51,7 +51,7 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import (
+from vonk_control.inventory.items import (
     inventory_items,
     runtime_value,
 )
@@ -4746,7 +4746,7 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
     # cleanup must remain claimable and a healthy observation must unblock it.
     from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.inventory import GpuHealth
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )

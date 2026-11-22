@@ -160,7 +160,7 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )

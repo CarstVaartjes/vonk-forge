@@ -31,7 +31,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware, job_output_retention_expiry
 from ..agent_outcome import agent_outcome
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation

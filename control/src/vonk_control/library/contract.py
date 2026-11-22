@@ -39,7 +39,7 @@ from ..catalog.revision_contract import (
     RecipeRevisionProjection,
 )
 from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..machine_states import InstallationStateField, RouteStateField, RunStateField
 from ..model_cache_contract import (
     ModelCacheOperationState,

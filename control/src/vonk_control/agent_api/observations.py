@@ -35,7 +35,7 @@ from ..agent_jobs import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
 from ..http_errors import temporary_http_answer
-from ..inventory_repository import (
+from ..inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,

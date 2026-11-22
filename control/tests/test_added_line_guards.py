@@ -2993,7 +2993,7 @@ def test_any_stored_digest_column_compared_with_a_fresh_hash_is_a_rehash(source)
             "bad = row.content_digest != document_sha256(row.document)\n",
         ),
         (
-            "control/src/vonk_control/inventory_repository.py",
+            "control/src/vonk_control/inventory/repository.py",
             "bad = report.payload_digest != _digest(report.payload)\n",
         ),
         # Two recorded digests, or a digest of something that is not stored.

@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,

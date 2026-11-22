@@ -388,7 +388,7 @@ from ..coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
 
-from ..inventory_items_contract import AgentInventoryItems
+from ..inventory.items_contract import AgentInventoryItems
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
 

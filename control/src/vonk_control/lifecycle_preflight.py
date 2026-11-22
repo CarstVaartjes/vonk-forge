@@ -26,8 +26,8 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
-from .inventory_items import inventory_items
-from .inventory_items_contract import PreflightInventoryItem
+from .inventory.items import inventory_items
+from .inventory.items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
 from .operations.blockers import (

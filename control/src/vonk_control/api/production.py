@@ -32,7 +32,7 @@ from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
 from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway.route_grants import recipe_key_routes
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..library.assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging

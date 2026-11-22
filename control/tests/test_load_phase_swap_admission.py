@@ -21,7 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
-from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
+from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
     CatalogDocumentRevision,
     InstallationNode,

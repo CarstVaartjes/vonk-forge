@@ -17,7 +17,7 @@ from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,

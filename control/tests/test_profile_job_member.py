@@ -33,7 +33,7 @@ from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.inventory_items import inventory_items, runtime_value
+from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,

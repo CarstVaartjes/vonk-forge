@@ -33,7 +33,7 @@ from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
-from ..inventory_items import inventory_items, runtime_value
+from ..inventory.items import inventory_items, runtime_value
 from ..jobs import states as job_states
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter

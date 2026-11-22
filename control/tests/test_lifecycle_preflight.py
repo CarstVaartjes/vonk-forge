@@ -19,7 +19,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.agent_jobs.waits import refresh_queue_waits
-from vonk_control.inventory_items import inventory_items, record_preflight
+from vonk_control.inventory.items import inventory_items, record_preflight
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,

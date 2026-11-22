@@ -318,7 +318,7 @@ struct CustodyExecutor<'a, E> {
 /// Seconds after a completed `recipe.stop` at which an inventory is collected.
 /// The Controller counts an inventory as proof the stop is reflected only when
 /// observed_at > stopped_at + MAX_INVENTORY_FUTURE_SKEW (30 s,
-/// control/src/vonk_control/inventory_repository.py:32), so 31 s is the first
+/// control/src/vonk_control/inventory/repository.py:32), so 31 s is the first
 /// instant one can count. A multi-Spark run's stopped_at is set when its LAST
 /// rank's result is projected, up to about 60 s after this Spark's stop, so the
 /// collection repeats at +46, +61 and +91 s (covering a peer up to ~60 s later)

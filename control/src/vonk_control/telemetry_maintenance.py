@@ -24,8 +24,8 @@ from .admission_locking import is_admission_contention, label_transaction
 from .catalog.revision_collection import GRACE
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
-from .inventory_items_contract import InventorySnapshotKind
-from .inventory_repository import newest_snapshot_ids
+from .inventory.items_contract import InventorySnapshotKind
+from .inventory.repository import newest_snapshot_ids
 from .models import (
     AgentCertificate,
     AgentNode,

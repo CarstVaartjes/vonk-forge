@@ -23,7 +23,7 @@ from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 
 from ..agent_contacts import last_seen as last_seen_at
 from ..gpu_health import gpu_health_reason
-from ..inventory_items import inventory_items
+from ..inventory.items import inventory_items
 from ..models import (
     AgentCertificate,
     AgentNode,
@@ -419,7 +419,7 @@ def _inventory(
     observed = _utc(value.observed_at)
     received = _utc(value.received_at)
     age = max(0.0, (current - received).total_seconds())
-    from ..inventory_repository import _validated_inventory
+    from ..inventory.repository import _validated_inventory
 
     report = _validated_inventory(value, observed_at=observed)
     return InventoryState(

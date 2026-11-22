@@ -44,7 +44,7 @@ from .catalog.revision_contract import read_catalog_document
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, is_security_failure
 from .failure_evidence import safe_text
-from .inventory_items import runtime_value
+from .inventory.items import runtime_value
 from .jobs import states as job_states
 from .jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (

@@ -33,7 +33,7 @@ from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

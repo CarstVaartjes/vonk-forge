@@ -26,7 +26,7 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
-from ..inventory_items import record_runtime
+from ..inventory.items import record_runtime
 from ..jobs import states as job_states
 from ..logging import redact_text
 from ..models import (

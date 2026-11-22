@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
     NodeInventoryReport,

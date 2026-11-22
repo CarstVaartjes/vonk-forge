@@ -21,7 +21,7 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,

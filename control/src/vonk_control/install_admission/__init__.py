@@ -49,8 +49,8 @@ from ..disk_reservations import outstanding_disk_charges as outstanding_disk_cha
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes as outstanding_disk_reservation_bytes,
 )
-from ..inventory_repository import InventoryRepository as InventoryRepository
-from ..inventory_repository import InventorySnapshotView as InventorySnapshotView
+from ..inventory.repository import InventoryRepository as InventoryRepository
+from ..inventory.repository import InventorySnapshotView as InventorySnapshotView
 from ..legal_admission import territorial_admission as territorial_admission
 from ..models import AgentNode as AgentNode
 from ..models import CatalogDocumentRevision as CatalogDocumentRevision

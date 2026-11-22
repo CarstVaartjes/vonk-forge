@@ -7,7 +7,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import Digest
 
-from .strict_json import StrictModel
+from ..strict_json import StrictModel
 
 
 class InventorySnapshotKind(StrEnum):

@@ -16,7 +16,7 @@ from ..categorized_errors import (
 from ..cluster_mappings import (
     ClusterMappingService,
 )
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..lifecycle_preflight import LifecyclePreflight
 from ..recipe_operations import (
     RecipeOperationService,

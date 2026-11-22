@@ -21,7 +21,7 @@ from vonk_forge_contracts import PrebuiltImage
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu_health import gpu_health_reason
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,

@@ -21,7 +21,7 @@ from vonk_control.disk_reservations import (
     describe_disk_charges,
     outstanding_disk_charges,
 )
-from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from vonk_control.models import (
     FleetProfileApplication,
     Job,

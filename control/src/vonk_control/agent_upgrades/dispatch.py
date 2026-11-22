@@ -26,7 +26,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..jobs import states as job_states
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter

@@ -18,7 +18,7 @@ from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition
 from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

@@ -19,12 +19,12 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
-from .categorized_errors import InvalidValue
-from .dialect_insert import dialect_insert
-from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
-from .inventory_items_contract import InventorySnapshotKind
-from .logging import log_event
-from .models import AgentNode, NodeInventorySnapshot, NodeSnapshot
+from ..categorized_errors import InvalidValue
+from ..dialect_insert import dialect_insert
+from ..installed_bytes import reconcile_missing_installations, refresh_installed_bytes
+from ..logging import log_event
+from ..models import AgentNode, NodeInventorySnapshot, NodeSnapshot
+from .items_contract import InventorySnapshotKind
 
 _LOG = logging.getLogger(__name__)
 

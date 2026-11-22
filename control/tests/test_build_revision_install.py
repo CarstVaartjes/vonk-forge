@@ -18,7 +18,7 @@ from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import (
     InstallAdmissionService,
 )
-from vonk_control.inventory_items import runtime_value
+from vonk_control.inventory.items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

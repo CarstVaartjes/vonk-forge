@@ -80,8 +80,8 @@ from vonk_control.install_admission import (
 from vonk_control.install_admission import (
     require_admissible as require_install_admissible,
 )
-from vonk_control.inventory_items import inventory_items
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

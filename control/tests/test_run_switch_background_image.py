@@ -26,7 +26,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState, canonical_message
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

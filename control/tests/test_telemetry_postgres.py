@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control.inventory_items_contract import InventorySnapshotKind
+from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.models import (
     AgentNode,
     Base,

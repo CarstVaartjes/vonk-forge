@@ -42,8 +42,8 @@ from ..catalog.revision_contract import (
 )
 from ..categorized_errors import InvalidType
 from ..categorized_faults import security_reason
-from ..inventory_items import inventory_items
-from ..inventory_repository import InventorySnapshotView
+from ..inventory.items import inventory_items
+from ..inventory.repository import InventorySnapshotView
 from ..memory_reservations import memory_reservations, memory_reserve_floor
 from ..models import (
     AgentNode,

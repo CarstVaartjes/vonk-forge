@@ -92,7 +92,7 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     from vonk_agent_protocol import RunSwitchCode
     from vonk_agent_protocol.inventory import HostSettings
     from vonk_control.gpu_clock_validation import assess_gpu_clock
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )

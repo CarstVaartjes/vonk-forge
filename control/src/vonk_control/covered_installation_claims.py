@@ -11,7 +11,7 @@ from vonk_agent_protocol import (
     ReservationState,
 )
 
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, newest_snapshot_ids
+from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW, newest_snapshot_ids
 from .machine_states import rank_installed
 from .models import (
     STOPPABLE_RUN_STATES,

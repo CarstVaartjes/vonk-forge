@@ -23,7 +23,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
 )
 
-from ..inventory_items_contract import PreflightInventoryItem
+from ..inventory.items_contract import PreflightInventoryItem
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +145,7 @@ def latest_result(
     session, node_id: str, *, requirements_sha256: str | None = None
 ) -> PreflightInventoryItem | None:
     """Read the canonical reusable item; attempt results remain operation history."""
-    from ..inventory_items import inventory_items
+    from ..inventory.items import inventory_items
     from ..models import AgentNode
 
     items = inventory_items(session.get(AgentNode, node_id))

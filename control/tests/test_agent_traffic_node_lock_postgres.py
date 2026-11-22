@@ -26,7 +26,7 @@ from vonk_control.admission_locking import (
     set_admission_timeout,
 )
 from vonk_control.agent_contacts import record_contact, record_observation_delivery
-from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
+from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
     AgentNode,
     AgentNodeContact,

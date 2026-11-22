@@ -33,7 +33,7 @@ from vonk_control.agent_jobs import (
     StaleAgentAttempt,
     _failure_result,
 )
-from vonk_control.inventory_items import inventory_items
+from vonk_control.inventory.items import inventory_items
 from vonk_control.models import AgentNode
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,

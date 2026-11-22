@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from ..operator_receipt_contract import ReceiptOwner

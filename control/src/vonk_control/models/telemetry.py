@@ -40,7 +40,7 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.telemetry import HostResourceSample
 
-from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
+from ..inventory.items_contract import AgentInventoryItems, InventorySnapshotKind
 from ..lifecycle.evidence import Residue
 from ..model_primitives import Base, _lower_hex, _Utf8ByteLength, _uuid_shape
 from ..stored.json_values import ContractJSON

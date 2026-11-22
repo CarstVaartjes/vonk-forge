@@ -339,7 +339,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
 def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     sessions,
 ) -> None:
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )
@@ -373,7 +373,7 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
             )
         )
 
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
 
     from .runtime_identity_support import inventory_items_fixture
 

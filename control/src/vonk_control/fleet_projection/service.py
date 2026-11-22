@@ -20,8 +20,8 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
-from ..inventory_items import inventory_items
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
+from ..inventory.items import inventory_items
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,

@@ -24,7 +24,7 @@ from ..admission_locking import (
 )
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu_health import gpu_health_reason
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,

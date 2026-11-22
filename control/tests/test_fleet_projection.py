@@ -34,7 +34,7 @@ from vonk_control.fleet_projection import (
     _install_partial_warnings,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

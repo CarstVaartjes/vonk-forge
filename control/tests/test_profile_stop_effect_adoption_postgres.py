@@ -26,7 +26,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     _persisted_profile_progress,
 )
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

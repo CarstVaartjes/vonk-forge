@@ -22,7 +22,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control import models
-from vonk_control.inventory_items_contract import AgentInventoryItems
+from vonk_control.inventory.items_contract import AgentInventoryItems
 from vonk_control.stored.json_values import (
     ContractJSON,
     JsonColumn,

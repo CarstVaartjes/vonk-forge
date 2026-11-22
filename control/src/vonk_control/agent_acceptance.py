@@ -24,7 +24,7 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from .agent_operation_facts import aware
 from .auth import agent_identity_from_scope
-from .inventory_items import inventory_items, runtime_value
+from .inventory.items import inventory_items, runtime_value
 from .models import (
     AgentCertificate,
     AgentNode,

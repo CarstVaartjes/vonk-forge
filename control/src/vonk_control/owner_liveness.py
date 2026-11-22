@@ -49,7 +49,7 @@ from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
 )
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from .jobs import states as job_states
 from .models import (
     STOPPABLE_RUN_STATES,

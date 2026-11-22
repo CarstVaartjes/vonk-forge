@@ -201,7 +201,7 @@ Pydantic contract per item in a typed column of `node_inventory_snapshots` or
 `agent_node_contacts`, written only through `agent_contacts.py`. Whether a
 Spark holds a model file has one source, the agent's store scan
 (`node_inventory_snapshots.model_objects`): Run/Switch and fleet removal read it
-through `inventory_repository.spark_model_objects`, install admission from the
+through `inventory.repository.spark_model_objects`, install admission from the
 inventory snapshot it already loaded. Copy planning and disk admission count an
 unknown or stale scan as missing (the copy reuses what the agent already
 holds); fleet model removal waits for a fresh scan instead.
@@ -211,7 +211,7 @@ install admission read `disk_reservations.runtime_images_named_on_nodes` (one
 query for all target Sparks), and any other image is charged. Whether a rank is
 installed is `machine_states.rank_installed`, for a stored state or the
 `InstallationNode.state` column; the `rank-installed` added-line guard refuses
-an inline `== InstallationNodeState.INSTALLED`. Admission row locks cover only live reservations (`machine_states.reservation_live`; released rows are 24 h history), and the `live-reservation` added-line guard refuses an inline `ResourceReservation.state != RELEASED`. A node's newest inventory report is `inventory_repository.newest_snapshot_ids` (one indexed probe per node); the `newest-snapshot` added-line guard refuses a window or grouped max over `node_id`. The Controller records no image or model-file availability receipts
+an inline `== InstallationNodeState.INSTALLED`. Admission row locks cover only live reservations (`machine_states.reservation_live`; released rows are 24 h history), and the `live-reservation` added-line guard refuses an inline `ResourceReservation.state != RELEASED`. A node's newest inventory report is `inventory.repository.newest_snapshot_ids` (one indexed probe per node); the `newest-snapshot` added-line guard refuses a window or grouped max over `node_id`. The Controller records no image or model-file availability receipts
 of its own. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a

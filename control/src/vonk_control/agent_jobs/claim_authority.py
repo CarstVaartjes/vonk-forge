@@ -26,7 +26,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from .. import agent_operation_states
 from ..disk_reservations import outstanding_disk_charges
 from ..gpu_health import gpu_health_reason
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from ..jobs import states as job_states
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state

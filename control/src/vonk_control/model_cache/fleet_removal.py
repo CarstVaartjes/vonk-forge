@@ -55,7 +55,7 @@ from ..fleet_model_removal_contract import (
 from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
-from ..inventory_repository import spark_model_objects
+from ..inventory.repository import spark_model_objects
 from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     BookkeepingReason,
