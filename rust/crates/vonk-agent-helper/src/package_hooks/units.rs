@@ -25,8 +25,6 @@ pub(super) struct Unit {
     pub name: &'static str,
     /// `None`: socket-activated, never enabled by the package.
     pub enablement: Option<Enablement>,
-    /// Stopped by removal.
-    pub stopped_on_removal: bool,
 }
 
 /// In the order removal stops them: the consumers before the helper they use.
@@ -34,33 +32,27 @@ pub(super) const UNITS: [Unit; 6] = [
     Unit {
         name: "vonk-forge-agent.service",
         enablement: Some(Enablement::BestEffort),
-        stopped_on_removal: true,
     },
     Unit {
         name: "vonk-forge-monitor.service",
         enablement: Some(Enablement::BestEffort),
-        stopped_on_removal: true,
     },
     Unit {
         name: "vonk-forge-package-helper.socket",
         enablement: Some(Enablement::BestEffort),
-        stopped_on_removal: true,
     },
     Unit {
         name: "vonk-forge-package-helper.service",
         enablement: None,
-        stopped_on_removal: true,
     },
     Unit {
         name: "vonk-forge-docker-firewall.service",
         enablement: Some(Enablement::WhenFirewallConfigured),
-        stopped_on_removal: true,
     },
     // Last: nothing can arm a transaction once the helper is stopped.
     Unit {
         name: "vonk-forge-package-rollback.service",
         enablement: Some(Enablement::BootRecovery),
-        stopped_on_removal: true,
     },
 ];
 

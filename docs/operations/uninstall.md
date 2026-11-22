@@ -58,6 +58,19 @@ files under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 forgets the units' enablement state on purge (the binary is gone by then), so
 everything below is cleaned up by hand.
 
+One gap: a package that an upgrade left half installed (`dpkg -l` shows `iHR`,
+an interrupted unpack) is refused by a plain remove, and
+`--force-remove-reinstreq` does not run `prerm`, so nothing supersedes the
+watchdog. Let the rollback finish (it reinstalls the previous package at its
+deadline), or stop it and drop its transaction first:
+
+```sh
+sudo systemctl stop vonk-forge-package-rollback.service
+sudo rm -f /var/lib/vonk-forge/package-rollback/transaction.json
+```
+
+Half-configured packages (`iF`, a failed postinst) do run `prerm remove`.
+
 ### 1c. Remove workloads and runtime images (`sudo`)
 
 Workloads run in the host Docker engine. The helper labels every container it

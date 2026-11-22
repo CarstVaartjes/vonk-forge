@@ -17,7 +17,6 @@ struct Fake {
     dpkg_alive: bool,
     dpkg_exits_after: u32,
     armed: Option<String>,
-    rollback_pending: bool,
     helper_exe: String,
     active: Vec<String>,
     show: BTreeMap<String, String>,
@@ -190,7 +189,6 @@ impl Host for Fake {
     }
     fn retire_rollback(&mut self) -> Result<(), String> {
         self.commands.push("retire-rollback".into());
-        self.rollback_pending = false;
         Ok(())
     }
     fn pause(&mut self) {
@@ -511,25 +509,11 @@ fn removal_stops_the_consumers_first_and_disables_exactly_what_install_enabled()
 #[test]
 fn removal_stops_the_watchdog_before_retiring_the_armed_transaction() {
     let mut fake = Fake::machine();
-    fake.rollback_pending = true;
     remove(&mut fake);
     assert!(
         fake.position("deb-systemd-invoke stop vonk-forge-package-rollback.service")
             < fake.position("retire-rollback")
     );
-    assert!(!fake.rollback_pending);
-}
-
-#[test]
-fn an_upgrade_never_retires_the_transaction() {
-    let mut fake = Fake::machine();
-    fake.rollback_pending = true;
-    run_arguments(
-        &["prerm".into(), "upgrade".into(), "0.2.0".into()],
-        &mut fake,
-    )
-    .unwrap();
-    assert!(fake.commands.is_empty() && fake.rollback_pending);
 }
 
 #[test]

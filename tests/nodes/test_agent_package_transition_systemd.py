@@ -702,6 +702,29 @@ def main() -> None:
         lane.activates("stale-capsule-files-retired", tree, 120)
         left = [str(path) for path in ARMING if os.path.lexists(path)]
         assert not left, f"the candidate left capsule state: {left}"
+
+        # Removal is the newest request: an armed, unacknowledged upgrade must
+        # not be undone by the watchdog's deadline restore.
+        lane.baseline(packages)
+        nonce, deadline, operation = lane.install(tree, deadline=60)
+        lane.send(operation)
+        wait(tree.runs, "removal: candidate does not run", 55)
+        assert TRANSACTION.exists(), "removal: no armed transaction to supersede"
+        run("/usr/bin/dpkg", "--remove", "vonk-forge-agent")
+        wait(
+            lambda: time.time() > deadline + 5,
+            "removal: deadline not reached",
+            max(1.0, deadline - time.time() + 15),
+        )
+        assert not installed().startswith("ii"), installed()
+        assert not TRANSACTION.exists(), "removal: transaction survives"
+        assert (
+            run("/usr/bin/systemctl", "is-active", WATCHDOG, check=False).stdout.strip()
+            != "active"
+        )
+        lane.evidence.append(
+            {"case": "removal-supersedes-watchdog", "package": installed()}
+        )
         print(
             json.dumps(
                 {

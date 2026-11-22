@@ -380,9 +380,10 @@ fn retiring_an_armed_transaction_ends_the_watchdog_without_a_restore() {
             .join("package-activation.receipt.json")
             .exists()
     );
-    // Past its deadline the transaction would have been restored; now the
-    // watchdog finds no authority and ends.
+    // The watchdog finds no authority and ends. A surviving journal would be
+    // rewritten as RollbackFailed (its deadline is long past).
     assert!(store.watch().is_ok());
+    assert!(!store.root.join("transaction.json").exists());
 }
 
 #[test]
