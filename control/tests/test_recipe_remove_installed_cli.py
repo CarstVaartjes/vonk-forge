@@ -32,9 +32,7 @@ from vonk_control.recipe_image_removal_contract import (
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import document_sha256
 
-from .runtime_image_fixtures import place_test_image
-from .test_profile_load_installed_cli import _https_api_peer, _process_environment
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     _add_head,
@@ -44,6 +42,8 @@ from .test_recipe_image_availability import (
     _reference_receipt,
     _runtime,
 )
+from .runtime_image_fixtures import place_test_image
+from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

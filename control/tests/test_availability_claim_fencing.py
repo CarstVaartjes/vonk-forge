@@ -21,7 +21,7 @@ from vonk_control.runtime_image_preparation import (
     read_runtime_image_reference_intent,
 )
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     Transport,
     _add_head,
     _add_revision,

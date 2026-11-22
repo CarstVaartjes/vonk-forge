@@ -25,7 +25,7 @@ from vonk_control.source_bundles import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .test_recipe_image_availability import _recipe_projection
+from .recipe_image_availability_support import _recipe_projection
 
 
 def test_production_app_recipe_download_auth_and_status(

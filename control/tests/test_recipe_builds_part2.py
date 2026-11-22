@@ -51,7 +51,7 @@ from .recipe_builds_support import (
     _restore_builder_inventory,
     setup,
 )
-from .test_recipe_image_availability import _typed_availability_payload
+from .recipe_image_availability_support import _typed_availability_payload
 
 
 def _json_array(value: object) -> list[object]:

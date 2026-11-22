@@ -76,11 +76,11 @@ from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_builds_support import setup as _build_setup
+from .recipe_image_availability_support import _typed_availability_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image
 from .test_model_cache_availability_regressions import _drain
 from .test_recipe_builds_part1 import _write_controller_build_receipt
-from .test_recipe_image_availability import _typed_availability_payload
 
 
 class _Service(RecipeImageAvailabilityService):

@@ -25,9 +25,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
 
-from .recipe_removal_review_support import remove_after_review
-from .runtime_image_fixtures import place_test_image
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     _add_head,
@@ -37,6 +35,8 @@ from .test_recipe_image_availability import (
     _runtime,
     _service,
 )
+from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image
 
 _REQUEST = "00000000-0000-4000-8000-000000000071"
 

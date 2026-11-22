@@ -22,11 +22,11 @@ from vonk_control.models import Base, FleetProfile, FleetProfileApplication, Job
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
+from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_model_cache_cancel_recovery import _artifact
 from .test_profile_cancel_receipt_postgres import _application
-from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
 
 class DropFirstResponse:

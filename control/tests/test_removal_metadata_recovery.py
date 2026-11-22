@@ -210,9 +210,7 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
     )
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
@@ -222,6 +220,8 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
         _runtime,
         _service,
     )
+    from .recipe_removal_review_support import remove_after_review
+    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -537,8 +537,7 @@ def test_recipe_receipt_observation_is_request_owned(
     from vonk_control.models import ArtifactLifecycleGate, Base
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
@@ -548,6 +547,7 @@ def test_recipe_receipt_observation_is_request_owned(
         _runtime,
         _service,
     )
+    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

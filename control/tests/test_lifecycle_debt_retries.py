@@ -251,7 +251,7 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     from vonk_control.recipe_builds import RecipeBuildPlan
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .test_recipe_image_availability import _recipe, _recipe_projection
+    from .recipe_image_availability_support import _recipe, _recipe_projection
 
     service: Any = object.__new__(RunSwitchOperationService)
     calls = []
