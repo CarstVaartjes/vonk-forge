@@ -632,6 +632,27 @@ by the pre-commit hook, which runs lint, format, types and the added-line
 guards. See the
 [development workflow](runbooks/development-workflow.md#generated-artifacts-and-release-evidence).
 
+### Image vulnerability scanning
+
+One scanner stays, because a finding blocks something: the Trivy gate in
+`.github/actions/image-scan` (HIGH/CRITICAL, fixable only, OS packages and
+libraries, skipping `/usr/local/lib/skopeo`, the upstream binary). The findings
+table is in the job log; nothing is uploaded to code scanning, and no workflow
+holds `security-events: write`. It gates the `api` and `worker` images in
+two places, both on the digest that ships:
+
+- the lane's `Candidate image scan and smoke` job (`release-acceptance.yml`),
+  whose failure fails `lane-proof`, so the batch cannot merge; Release's
+  `dev-images.yml` reuses that evidence for the identical digests or scans again;
+- the `v*` tag's `publish-images` job in `stable-release.yml`, before it promotes
+  the accepted dev digests.
+
+`Controller image build tests` scans nothing; it only builds and tests. LiteLLM
+is an upstream application with a thin layer of ours: it is smoked on both
+architectures but never scanned, because only a LiteLLM release fixes its
+findings (`docs/image-pin-refresh.md`). A finding heals by the next dev build:
+`DEPENDENCY_DAY` refreshes the OS and library layers daily.
+
 ## What earns a test
 
 The suites are a merge gate, so every test costs review time on every future
