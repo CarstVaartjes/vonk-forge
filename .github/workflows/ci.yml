@@ -848,6 +848,39 @@ jobs:
             "$(realpath "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb")" \
             "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
             "$BASELINE_VERSION" "$VERSION"
+      - name: Upgrade the promoted package to this candidate through its own helper
+        # The lanes above build baseline and candidate from this tree. This one
+        # starts from the promoted dev release package and drives its own
+        # helper, sandbox and rollback watchdog over the real socket. It runs
+        # last: it needs a systemd host, not a pristine one.
+        run: |
+          set -euo pipefail
+          cargo build --locked --package vonk-agent-helper --example package_grant_probe
+          promoted="$RUNNER_TEMP/promoted"
+          mkdir -p "$promoted"
+          fetch() {
+            curl -fsS --retry 5 --retry-delay 2 --retry-all-errors \
+              --connect-timeout 10 --max-time 120 -o "$2" "https://install.vonkforge.ai/$1"
+          }
+          fetch artifacts/dev/current.manifest "$promoted/current.manifest"
+          generation=$(sed -n 's/^generation=\([0-9a-f]\{64\}\)$/\1/p' "$promoted/current.manifest")
+          fetch "artifacts/dev/releases/$generation/release.json" "$promoted/release.json"
+          fetch "artifacts/dev/releases/$generation/release.sig" "$promoted/release.sig"
+          base64 -d "$promoted/release.sig" > "$promoted/release.sig.bin"
+          openssl dgst -sha256 -verify install/installer-release-public.pem \
+            -signature "$promoted/release.sig.bin" "$promoted/release.json"
+          read -r path digest < <(jq -er --arg generation "$generation" \
+            'select(.channel == "dev" and .generation == $generation)
+              | .artifacts["agent-package-linux-arm64"] | "\(.path) \(.sha256)"' \
+            "$promoted/release.json")
+          fetch "$path" "$promoted/vonk-forge-agent.deb"
+          echo "$digest  $promoted/vonk-forge-agent.deb" | sha256sum --check --strict -
+          sudo python3 tests/nodes/test_agent_package_transition_systemd.py \
+            --disposable-systemd \
+            --promoted "$promoted/vonk-forge-agent.deb" \
+            --candidate "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
+            --probe "$(realpath target/debug/examples/package_grant_probe)" \
+            | tee package-transition-acceptance.json
 
   repository-guards:
     name: Repository guards
