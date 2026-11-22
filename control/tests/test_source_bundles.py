@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import io
 import tarfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
-from hypothesis import assume, example, given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control import source_bundles
@@ -361,8 +361,6 @@ def _typed_archive(entries: list[tuple[str, bytes]]) -> bytes:
 def test_parsed_bundle_is_typed_or_confined_to_the_root(
     entries: list[tuple[str, bytes]], cut: int | None
 ) -> None:
-    # A bare "." (the archive root) is accepted as a file path; reported separately.
-    assume(all(PurePosixPath(name).parts for name, _ in entries))
     payload = _typed_archive(entries)
     if cut is not None:
         payload = payload[:cut]
@@ -381,6 +379,7 @@ def test_parsed_bundle_is_typed_or_confined_to_the_root(
 @example("a/../b")
 @example("/etc/passwd")
 @example("a\x00b")
+@example(".")
 def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
     try:
         normalised = source_bundles._safe_path(raw)
@@ -390,6 +389,4 @@ def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
             SourceBundleCode.PATH_TOO_LONG,
         }
         return
-    if normalised == ".":
-        return  # the archive root spelled as a path; reported, not a file escape
     assert _stays_inside_root(normalised)
