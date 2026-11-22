@@ -7,7 +7,7 @@ from pydantic import BeforeValidator, Field, field_validator
 from vonk_agent_protocol import CatalogSyncState, machine_adopter
 from vonk_agent_protocol.wire_model import WireEnum
 
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..strict_json import StrictModel
 
 if TYPE_CHECKING:

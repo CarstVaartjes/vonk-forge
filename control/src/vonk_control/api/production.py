@@ -33,7 +33,7 @@ from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway_route_grants import recipe_key_routes
 from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from ..library_assessment import LibraryAssessment
+from ..library.assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging
 from ..metrics import MetricsRegistry, read_runnable_job_ages

@@ -23,7 +23,7 @@ import httpx2
 import jsonschema
 import pytest
 from vonk_control.cli_update_contract import CliUpdateContract
-from vonk_control.library_contract import (
+from vonk_control.library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
     RecipeLibraryResponse,

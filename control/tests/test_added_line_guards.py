@@ -2845,7 +2845,7 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     assert not check_source(path, marked, {1}, modes=("agent-422",))
     other = "raise HTTPException(status_code=422)\n"
     assert not check_source(
-        "control/src/vonk_control/library_api.py", other, {1}, modes=("agent-422",)
+        "control/src/vonk_control/library/api.py", other, {1}, modes=("agent-422",)
     )
     assert not check_source(path, other, set(), modes=("agent-422",))
 

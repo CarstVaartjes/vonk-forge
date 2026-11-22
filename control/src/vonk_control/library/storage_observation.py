@@ -6,13 +6,13 @@ import threading
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 
-from .model_cache_contract import (
+from ..model_cache_contract import (
     ModelCacheUsage,
     ModelStorageObservation,
     ModelStorageObservationReason,
     ModelStorageSnapshot,
 )
-from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 
 STORAGE_OBSERVATION_DEADLINE_SECONDS = RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 

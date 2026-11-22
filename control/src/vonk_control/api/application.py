@@ -250,7 +250,7 @@ def create_app(
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
-        from ..library_api import SelectorAmbiguityHTTPError
+        from ..library.api import SelectorAmbiguityHTTPError
 
         if isinstance(error, TemporaryHTTPError):
             return Response(

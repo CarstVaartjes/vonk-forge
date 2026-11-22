@@ -11,19 +11,19 @@ from vonk_forge_contracts import CatalogVocabulary
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from .api_availability import AVAILABILITY_ERRORS
-from .auth import CursorError
-from .cursor_contract import MAX_CURSOR_LENGTH
-from .library_contract import (
+from ..api_availability import AVAILABILITY_ERRORS
+from ..auth import CursorError
+from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..library_projection import LibrarySelectorAmbiguous
+from ..model_cache.errors import ModelCacheError
+from ..operation_api import bounded_error_responses
+from ..request_fault import RequestFault
+from .contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
-from .library_projection import LibrarySelectorAmbiguous
-from .model_cache.errors import ModelCacheError
-from .operation_api import bounded_error_responses
-from .request_fault import RequestFault
 
 # Friendly names may contain spaces.  Keep selectors bounded and reject control
 # characters; path routing remains safe because the projection resolves only an
@@ -63,7 +63,7 @@ class SelectorAmbiguityHTTPError(HTTPException):
 
 def _error(error: Exception) -> HTTPException:
     if isinstance(error, ModelCacheError):
-        from .model_cache_api import model_cache_http_error
+        from ..model_cache_api import model_cache_http_error
 
         return model_cache_http_error(error)
     if isinstance(error, LibrarySelectorAmbiguous):
@@ -87,7 +87,7 @@ def install_library_routes(
 ) -> None:
     """Install the singular read hierarchy; no legacy library aliases remain."""
 
-    from .operation_api import _ADMIN_OPERATION_IDS
+    from ..operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(LIBRARY_OPERATION_IDS)
     authenticated = actor_dependency

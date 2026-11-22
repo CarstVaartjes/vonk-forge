@@ -128,7 +128,7 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         # answer (503, Retry-After, error code) says to ask again.
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
-        from .library_api import SelectorAmbiguityHTTPError
+        from .library.api import SelectorAmbiguityHTTPError
         from .library_projection import LibrarySelectorAmbiguous
 
         return SelectorAmbiguityHTTPError(

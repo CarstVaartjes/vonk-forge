@@ -18,7 +18,7 @@ from ..catalog.revision_contract import (
     RecipeRevisionProjection,
 )
 from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from ..library_contract import (
+from ..library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
     LibraryLocalProgress,
@@ -27,8 +27,8 @@ from ..library_contract import (
     LibraryRecipeProjection,
     LibraryResourceProjection,
 )
-from ..library_image_presence import ImagePresenceIndex
-from ..library_storage_observation import LibraryStorageObserver
+from ..library.image_presence import ImagePresenceIndex
+from ..library.storage_observation import LibraryStorageObserver
 from ..model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,

@@ -34,22 +34,21 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
-from .catalog.revision_contract import ModelRevisionProjection, RecipeRevisionProjection
-from .cursor_contract import MAX_CURSOR_LENGTH
-from .inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from .machine_states import (
-    InstallationStateField,
-    RouteStateField,
-    RunStateField,
+from ..catalog.revision_contract import (
+    ModelRevisionProjection,
+    RecipeRevisionProjection,
 )
-from .model_cache_contract import (
+from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..machine_states import InstallationStateField, RouteStateField, RunStateField
+from ..model_cache_contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
     ModelStorageObservation,
 )
-from .operation_blockers import MAX_BLOCKERS, OperationBlocker
-from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
-from .strict_json import StrictModel
+from ..operation_blockers import MAX_BLOCKERS, OperationBlocker
+from ..run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
+from ..strict_json import StrictModel
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"

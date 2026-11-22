@@ -87,8 +87,8 @@ CLASSIFIED = {
     "vonk_control.model_cache.removal_reconcile": "step deadline set before the removals",
     "vonk_control.library_projection.views": "request budget, not a collector",
     "vonk_control.library_projection.local_state": "request budget, not a collector",
-    "vonk_control.library_assessment": "probe budget, not a collector",
-    "vonk_control.library_image_presence": "probe budget, not a collector",
+    "vonk_control.library.assessment": "probe budget, not a collector",
+    "vonk_control.library.image_presence": "probe budget, not a collector",
     "vonk_control.profile_read_observation": "read budget, not a collector",
     "vonk_control.model_cache.observation": "checkpoint cadence, not a deadline",
 }

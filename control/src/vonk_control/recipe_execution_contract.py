@@ -28,7 +28,7 @@ from vonk_agent_protocol.integer_domains import (
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .content_identity import ImageContent, same_image
-from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
+from .library.contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .operation_blockers import SwapShortfallEvidence
 from .platform_ports import serving_port
 from .strict_json import StrictJSONModel

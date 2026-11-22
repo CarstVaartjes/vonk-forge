@@ -81,7 +81,7 @@ def install_operator_projection_routes(
     module never falls back to SSH or synthetic values.
     """
 
-    from ..library_api import install_library_routes
+    from ..library.api import install_library_routes
     from ..operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_OPERATION_IDS)

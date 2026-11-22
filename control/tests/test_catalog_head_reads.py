@@ -13,8 +13,8 @@ from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.service import CatalogService
 from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_contract import RecipeDetailResponse
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.contract import RecipeDetailResponse
 from vonk_control.library_projection import LibraryProjection, _canonical_recipe
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision

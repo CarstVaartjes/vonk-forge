@@ -338,7 +338,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/library_contract.py",
+      "module": "control/src/vonk_control/library/contract.py",
       "kind": "controller-contract"
     },
     {

@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelAccessReason, OperationProgress
 from vonk_control.auth import TokenCodec
-from vonk_control.library_contract import LibraryLocalState
+from vonk_control.library.contract import LibraryLocalState
 from vonk_control.library_projection import LibraryProjection, local_state
 from vonk_control.model_cache_contract import (
     CacheManifest,

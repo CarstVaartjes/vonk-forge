@@ -205,7 +205,7 @@ module defines its own.
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/jobs/documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
-| `control/src/vonk_control/library_contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
+| `control/src/vonk_control/library/contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight.py` | declared | 1 | Durable, recipe-bound admission probes without replaying expensive phases. |
 | `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache/input_contracts.py` | controller-contract | 3 | Typed catalog artifact locators and explicit fixture ingress. |

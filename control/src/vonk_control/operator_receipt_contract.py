@@ -6,7 +6,7 @@ from typing import Literal, Self
 from pydantic import Field, model_validator
 from vonk_agent_protocol import OperatorActionName
 
-from .library_contract import UuidId
+from .library.contract import UuidId
 from .strict_json import StrictModel
 
 

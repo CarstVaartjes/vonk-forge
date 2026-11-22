@@ -15,7 +15,7 @@ from ..catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from ..library_contract import (
+from ..library.contract import (
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,

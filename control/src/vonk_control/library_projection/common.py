@@ -31,7 +31,7 @@ from ..catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
 )
-from ..library_contract import (
+from ..library.contract import (
     LibraryCacheState,
     LibraryLocalState,
     LibraryModelIdentity,

@@ -27,7 +27,7 @@ from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
+from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.model_cache import model_artifact_cache

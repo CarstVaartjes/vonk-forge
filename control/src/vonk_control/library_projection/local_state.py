@@ -32,14 +32,14 @@ from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
 from ..catalog.queries import active_head_revision
 from ..content_identity import recipe_content_membership
-from ..library_assessment import unassessed
-from ..library_contract import (
+from ..library.assessment import unassessed
+from ..library.contract import (
     LibraryCacheState,
     LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
-from ..library_image_presence import ImageKey, ImagePresence
+from ..library.image_presence import ImageKey, ImagePresence
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache.errors import ModelCacheError
 from ..model_cache.lineage import verifies_model

@@ -59,7 +59,7 @@ from ..compiled_artifact_contract import (
     compile_artifact_contract,
 )
 from ..jobs.documents import RecipeJobRunParent
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Damaged,

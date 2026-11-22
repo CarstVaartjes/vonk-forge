@@ -19,8 +19,8 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
     spark_model_objects,
 )
-from vonk_control.library_assessment import LibraryAssessment
-from vonk_control.library_contract import RecipeReadinessCheck
+from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library.contract import RecipeReadinessCheck
 from vonk_control.models import Job, RecipeBuild
 from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchReason
 from vonk_control.run_switch_operations import (

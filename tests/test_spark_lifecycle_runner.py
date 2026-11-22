@@ -2426,7 +2426,7 @@ def _canary_lane_under_withdrawal(
     lane stops at the profile load, the first step after the re-offered serve.
     """
     lifecycle = _module()
-    import vonk_control.library_contract as contract
+    from vonk_control.library import contract
 
     sha = "a" * 64
     fixture = lifecycle.CanonicalCanaryFixture(

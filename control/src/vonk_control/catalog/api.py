@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse
 from vonk_agent_protocol import CatalogSyncCode
 
 from ..auth import Actor
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..machine_states import CatalogSyncStateField
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait

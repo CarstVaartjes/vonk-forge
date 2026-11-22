@@ -41,7 +41,7 @@ from ..inventory_repository import (
     NodeInventoryReport,
     _validated_inventory,
 )
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..logging import log_event
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,

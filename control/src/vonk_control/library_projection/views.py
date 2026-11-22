@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from ..auth import cursor_key
 from ..catalog.queries import active_head_revision
-from ..library_contract import (
+from ..library.contract import (
     _MAX_PAGE_RECIPES,
     _UUID_PATTERN,
     LibraryFilterValues,

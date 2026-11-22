@@ -20,7 +20,7 @@ def test_unbounded_request_history_scan_is_rejected(query):
     """A state/kind filter must not disguise a full history materialization."""
     assert scan_tree(
         ast.parse(f"def detail(session, state, kind):\n {query}\n"),
-        path="control/src/vonk_control/library_api.py",
+        path="control/src/vonk_control/library/api.py",
     )
 
 
@@ -36,7 +36,7 @@ def test_unbounded_request_history_scan_is_rejected(query):
 def test_scoped_or_bounded_request_read_is_permitted(query):
     assert not scan_tree(
         ast.parse(f"def detail(session, digest, ids, limit, selector):\n {query}\n"),
-        path="control/src/vonk_control/library_api.py",
+        path="control/src/vonk_control/library/api.py",
     )
 
 

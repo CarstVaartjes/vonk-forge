@@ -13,7 +13,7 @@ from ..jobs.documents import (
     ProfilePartialStop,
     ServiceRunStopReview,
 )
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..profile_stop_authority import JobRunStopScope, ProfileJobRunStopAuthorization
 from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult

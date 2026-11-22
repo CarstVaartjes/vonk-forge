@@ -37,8 +37,8 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_contract import (
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.contract import (
     LibraryModelProjection,
     LibraryRecipeProjection,
     ModelDetailResponse,
