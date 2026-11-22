@@ -308,7 +308,7 @@ jobs:
         with:
           image: ghcr.io/carstvaartjes/vonk-forge-worker@${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}
           role: worker
-      - name: Scan the litellm image and smoke its runtime
+      - name: Smoke the litellm image runtime (upstream, not scanned)
         if: steps.pr_security.outputs.reused != 'true' && steps.reuse_litellm.outputs.digest == ''
         uses: ./.github/actions/image-security
         with:

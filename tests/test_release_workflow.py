@@ -616,8 +616,8 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     for prefix in reproofs:
         assert count(prefix) == (0 if pr_proof else 3), prefix
     assert count("Accept the pull request images") == (1 if pr_proof else 0)
+    assert count("Scan the") == 2 and count("Smoke the litellm") == 1
     for prefix in (
-        "Scan the",
         "Publish immutable",
         "Verify immutable",
         "Sign accepted",
@@ -696,7 +696,7 @@ def evaluate(expression: str, context: dict[str, str]) -> object:
     """Evaluate a workflow expression over step outputs (absent ones are '')."""
     expression = expression.strip().removeprefix("${{").removesuffix("}}")
     expression = re.sub(
-        r"\b(?:steps|github|runner|inputs)\.[\w.-]+",
+        r"\b(?:steps|github|runner|inputs|needs|env)\.[\w.-]+",
         lambda found: repr(context.get(found.group(), "")),
         expression,
     )
@@ -1320,17 +1320,26 @@ def test_only_shipped_api_and_worker_images_are_scanned_and_promotion_follows_th
     }
     assert scanned == {"api", "worker"}
     steps = load(WORKFLOWS / "stable-release.yml")["jobs"]["publish-images"]["steps"]
-    gates = [
-        index
-        for index, step in enumerate(steps)
-        if step.get("uses") == "./.github/actions/image-scan"
-    ]
-    promotions = [
-        index for index, step in enumerate(steps) if step.get("id") in ("api", "worker")
-    ]
-    assert len(gates) == 2 and gates[-1] < min(promotions)
-    gated = " ".join(steps[index]["with"]["image"] for index in gates)
-    assert "api_digest" in gated and "worker_digest" in gated
+    context = {
+        f"needs.{job}.outputs.{name}": f"{name}-value"
+        for job in ("release-metadata", "validate-release-images")
+        for name in ("api_image", "worker_image", "api_digest", "worker_digest")
+    }
+    gates, promotions = {}, {}
+    for index, step in enumerate(steps):
+        if step.get("uses") == "./.github/actions/image-security":
+            gates[step["with"]["role"]] = index
+        if step.get("id") in ("api", "worker"):
+            promotions[step["id"]] = index
+    assert set(gates) == set(promotions) == {"api", "worker"}
+    assert max(gates.values()) < min(promotions.values())
+    for role, gate in gates.items():
+        env = steps[promotions[role]]["env"]
+        shipped = render(
+            f"${{{{ env.{role.upper()}_IMAGE }}}}@${{{{ env.DIGEST }}}}",
+            {f"env.{key}": render(value, context) for key, value in env.items()},
+        )
+        assert render(steps[gate]["with"]["image"], context) == shipped
 
 
 def test_candidate_litellm_smoke_uses_digest_only_registry_references(tmp_path):
