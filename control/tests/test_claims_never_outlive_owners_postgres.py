@@ -680,12 +680,12 @@ def _live_distribution_grant(tmp_path: Path, engine: Engine) -> None:
 def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
     """A renewal the agent keeps asking for survives the revocation sweep.
 
-    The provider's issuance is pending; the agent asks again within the
-    issuance window each time. The sweep runs long after the intent was
+    The CA is busy; the agent asks again within the issuance window each time. The sweep runs long after the intent was
     created, but while its renewal is still touching it.
     """
 
     from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+    from vonk_control.step_ca import StepCAIssuancePending
 
     from .test_enrollment import (
         NODE_ID,
@@ -695,19 +695,22 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
         enroll,
     )
 
-    class LostResponseAuthority(RecordingAuthority):
-        """The journal row is begun, then the signer dies before its result."""
+    class BusyAuthority(RecordingAuthority):
+        """The CA journal stays busy for the whole first request."""
 
-        def renew_node(self, node_id, public_key_pem, now, *, request):
-            self.renew_request_ids.append(request.request_id)
-            self._begin(request)
-            raise OSError("signer died after the claim commit")
+        busy = False
+
+        def observe_node(self, csr_pem, now, *, request):
+            if self.busy:
+                raise StepCAIssuancePending("local CA journal is busy")
+            return super().observe_node(csr_pem, now, request=request)
 
     sessions = _sessions(engine)
     clock = Clock()
-    authority = LostResponseAuthority()
+    authority = BusyAuthority()
     service = EnrollmentService(sessions, authority, clock=clock)
     source = enroll(service)
+    authority.busy = True
     request = csr()
     assert not isinstance(
         service.renew(NODE_ID, source.serial, request), IssuedCertificate
@@ -719,7 +722,8 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
         intent = session.get(AgentCertificateRotation, NODE_ID)
         assert intent is not None
         binding = CertificateIssuanceBinding.model_validate(intent.provider_request)
-    # The next request replays the begun journal row unaided.
+    # Once the CA is free the next request finishes the kept claim unaided.
+    authority.busy = False
     renewed = service.renew(NODE_ID, source.serial, request)
     assert isinstance(renewed, IssuedCertificate)
     assert set(authority.renew_request_ids) == {binding.request_id}
