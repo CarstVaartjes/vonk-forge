@@ -827,10 +827,9 @@ def build(
                 stage, f"DEBIAN/{name}", source(f"packaging/debian/{name}"), 0o755
             )
         install_file(stage, "DEBIAN/postrm", source("packaging/debian/postrm"), 0o755)
-        postinst = source("packaging/debian/postinst").replace(
-            b"@VERSION@", version.encode()
+        install_file(
+            stage, "DEBIAN/postinst", source("packaging/debian/postinst"), 0o755
         )
-        install_file(stage, "DEBIAN/postinst", postinst, 0o755)
         package = finish_package(
             stage, Path(temporary), output, package_name, epoch, private_key
         )

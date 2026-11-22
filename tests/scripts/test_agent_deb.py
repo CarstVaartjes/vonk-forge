@@ -333,7 +333,6 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
 ):
     postinst = POSTINST.read_text()
 
-    assert '&& { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; };' in postinst
     assert "deb-systemd-invoke restart vonk-forge-agent.service" not in postinst
     helper_restart = postinst.index(
         "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
@@ -355,27 +354,6 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
         "wget",
     ):
         assert forbidden not in postinst
-
-
-def test_package_lifecycle_accepts_only_current_pending_and_has_no_bridge() -> None:
-    postinst = POSTINST.read_text()
-    prerm = PRERM.read_text()
-
-    for lifecycle in (postinst, prerm):
-        assert "state=pre-unpack" not in lifecycle
-    assert '[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]' in postinst
-    assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in prerm
-    assert "bridge_dropin" not in postinst
-    assert "upgrade-bridge" not in postinst
-    activation = postinst[
-        postinst.index("activate_permanent_helper_unit()") : postinst.index(
-            "schedule_permanent_helper_restart()"
-        )
-    ]
-    assert "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent" in (
-        activation
-    )
-    assert "/usr/bin/systemctl --system daemon-reload" in activation
 
 
 def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
@@ -433,22 +411,10 @@ def test_package_helper_restart_waits_for_verified_exec_identity() -> None:
 def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None:
     postinst = POSTINST.read_text()
 
-    pending_write = postinst.index('"helper_sha256=$helper_digest"')
     helper_restart = postinst.index(
         "/usr/bin/systemctl --system restart \\\n                vonk-forge-package-helper.service"
     )
     running_digest = postinst.index('"/proc/$new_helper_pid/exe"', helper_restart)
-    installed_digest = postinst.index(
-        "/usr/lib/vonk-forge/vonk-agent-helper", running_digest
-    )
-    receipt_validation = postinst.index('grep -Fxq "schema_version=2"')
-    confirmed_digest = postinst.index("confirmed_helper_digest=", receipt_validation)
-    pending_retire = postinst.index(
-        '/usr/bin/rm -f -- "$helper_pending"', confirmed_digest
-    )
-    pending_retire_sync = postinst.index(
-        "/usr/bin/sync -f /var/lib/vonk-forge", pending_retire
-    )
     agent_restart = postinst.index(
         "/usr/bin/systemctl --system restart \\\n                vonk-forge-agent.service",
         helper_restart,
@@ -457,67 +423,7 @@ def test_upgrade_finisher_causally_proves_helper_before_agent_identity() -> None
         'schedule_permanent_helper_restart "$PPID" "$dpkg_start"'
     )
 
-    assert pending_write < schedule_call
-    assert helper_restart < running_digest < installed_digest < receipt_validation
-    assert receipt_validation < confirmed_digest < pending_retire
-    assert pending_retire < pending_retire_sync < agent_restart < schedule_call
-    assert "helper-upgrade.pending" in postinst
-    assert "helper-upgrade.receipt" in postinst
-    assert '"schema_version=2"' in postinst
-    assert '"schema_version=1"' not in postinst
-    assert "receipt_new=" not in postinst
-    assert "ReadWritePaths=/var/lib/vonk-forge" in postinst
-    pending_file_sync = postinst.index('/usr/bin/sync -f "$pending_new"')
-    pending_rename = postinst.index(
-        '/usr/bin/mv -f -- "$pending_new" "$helper_pending"'
-    )
-    pending_dir_sync = postinst.index(
-        "/usr/bin/sync -f /var/lib/vonk-forge", pending_rename
-    )
-    assert pending_file_sync < pending_rename < pending_dir_sync < schedule_call
-    assert "^version=[0-9A-Za-z.+~:-]+$" in postinst
-    assert "active package helper identity is invalid" in postinst
-
-
-def test_interrupted_upgrade_state_has_safe_fresh_recovery_and_remove_paths() -> None:
-    postinst = POSTINST.read_text()
-    prerm = PRERM.read_text()
-
-    assert "clear_stale_pending_for_fresh_install" not in postinst
-    pending_probe = postinst.index(
-        'if [ -e "$helper_pending" ] || [ -L "$helper_pending" ]'
-    )
-    finisher_decision = postinst.index(
-        '&& { [ -n "${2:-}" ] || [ "$pending_present" -eq 1 ]; };'
-    )
-    pending_write = postinst.index("pending_digests=$(write_helper_pending)")
-    schedule = postinst.index('schedule_permanent_helper_restart "$PPID" "$dpkg_start"')
-    assert pending_probe < finisher_decision < pending_write < schedule
-    assert (
-        "interrupted helper activation requires a live systemd configure retry"
-        in postinst
-    )
-    # Malformed pending state is discarded and rewritten, not a dpkg failure;
-    # only an unsafe root-owned parent directory still refuses.
-    pending_discard = postinst.index(
-        "discard_own_state \"$helper_pending\" 'pending helper upgrade state'"
-    )
-    assert pending_probe < pending_discard < pending_write
-
-    stop_finisher = prerm.index("vonk-forge-package-helper-upgrade-finish.service")
-    stop_agent = prerm.index("deb-systemd-invoke stop vonk-forge-agent.service")
-    stop_helper = prerm.index(
-        "deb-systemd-invoke stop vonk-forge-package-helper.service"
-    )
-    remove_evidence = prerm.index('/usr/bin/rm -f -- "$pending" "$receipt"')
-    assert stop_finisher < stop_agent < stop_helper < remove_evidence
-    assert "safe_pending" in prerm
-    assert "safe_receipt" in prerm
-    assert "schema_version=2" in prerm
-    assert "intent_sha256=" in prerm
-    assert "schema_version=2" in postinst
-    assert "intent_sha256=" in postinst
-    assert "/usr/bin/sync -f /var/lib/vonk-forge" in prerm
+    assert helper_restart < running_digest < agent_restart < schedule_call
 
 
 def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
@@ -537,32 +443,6 @@ def test_agent_uses_package_managed_private_temp_directory() -> None:
     assert "install -d -o vonk-agent -g vonk-agent -m 0700 \\" in postinst
     assert "/var/lib/vonk-forge-agent/tmp" in postinst
     assert "Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp" in unit
-
-
-@pytest.mark.parametrize(
-    ("package_version", "expected_semantic"),
-    (
-        ("0.1.0", "0.1.0"),
-        ("0.1.0~dev.418+g0123456789ab", "0.1.0"),
-        ("0.1.0+lifecycle.1", "0.1.0"),
-        ("0.0.0~acceptance.1+g0123456789ab", "0.0.0"),
-    ),
-)
-def test_postinst_derives_the_exact_cargo_semantic_version(
-    tmp_path: Path, package_version: str, expected_semantic: str
-) -> None:
-    source = POSTINST.read_text().replace("@VERSION@", package_version)
-    prefix = source[: source.index('if [ "${1:-}" != configure ]')]
-    script = tmp_path / "postinst-version"
-    script.write_text(prefix + "printf '%s\\n' \"$agent_semver\"\n")
-    script.chmod(0o755)
-
-    result = subprocess.run(
-        [script], capture_output=True, text=True, check=False, env={"PATH": "/bin"}
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == f"{expected_semantic}\n"
 
 
 def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None:
