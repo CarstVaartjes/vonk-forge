@@ -7,15 +7,15 @@ import { failureNotice } from "../../lib/error-display";
 import { CancelOperation } from "../cancel-operation";
 import { WaitingFor } from "../waiting-for";
 import { useToast } from "../toast";
-import { CacheRemovalProgress } from "../cache-removal-progress";
+import { CacheRemovalProgress } from "../cache-removal/cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
   submitReviewedRemoval,
   validateRemovalReview,
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
-} from "../cache-removal-operations";
-import { CacheRemovalReviewDetails } from "../cache-removal-review";
+} from "../cache-removal/cache-removal-operations";
+import { CacheRemovalReviewDetails } from "../cache-removal/cache-removal-review";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;

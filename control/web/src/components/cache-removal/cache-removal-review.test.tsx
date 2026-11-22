@@ -1,13 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
-import { LifecycleState, ProgressPhase } from "../api/vocabulary.generated";
-import { ApiClient, ApiError } from "../api/client";
-import type { ControlApi, RecipeOperatorResponse } from "../api/types";
-import { cacheRemovalReview } from "../test-fixtures/cache-removal";
+import { LifecycleState, ProgressPhase } from "../../api/vocabulary.generated";
+import { ApiClient, ApiError } from "../../api/client";
+import type { ControlApi, RecipeOperatorResponse } from "../../api/types";
+import { cacheRemovalReview } from "../../test-fixtures/cache-removal";
 import { CacheRemovalReviewDetails } from "./cache-removal-review";
 import { CacheRemovalProgress } from "./cache-removal-progress";
-import { LibraryCacheAction } from "./library/library-cache-action";
-import { LibraryRecipeRemoveAction } from "./library/library-recipe-remove-action";
+import { LibraryCacheAction } from "../library/library-cache-action";
+import { LibraryRecipeRemoveAction } from "../library/library-recipe-remove-action";
 
 afterEach(() => {
   vi.unstubAllGlobals();

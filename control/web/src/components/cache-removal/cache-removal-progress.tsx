@@ -1,6 +1,6 @@
-import { LifecycleState, LifecycleEffect } from "../api/vocabulary.generated";
+import { LifecycleState, LifecycleEffect } from "../../api/vocabulary.generated";
 import { useEffect, useRef, useState } from "react";
-import type { ControlApi } from "../api/types";
+import type { ControlApi } from "../../api/types";
 import {
   findRemovalRequest,
   isDefiniteRemovalRefusal,
@@ -9,8 +9,8 @@ import {
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
-import { failureNotice } from "../lib/error-display";
-import { useToast } from "./toast";
+import { failureNotice } from "../../lib/error-display";
+import { useToast } from "../toast";
 import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
 /** An accepted removal remains an observable operation until its owner settles. */

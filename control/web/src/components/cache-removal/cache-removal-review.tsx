@@ -2,8 +2,8 @@ import {
   CacheAssetDisposition,
   FleetRemovalDisposition,
   AssetAvailability,
-} from "../api/vocabulary.generated";
-import type { CacheRemovalReview } from "../api/types";
+} from "../../api/vocabulary.generated";
+import type { CacheRemovalReview } from "../../api/types";
 
 const DISPOSITION_TEXT: Record<CacheRemovalReview["assets"][number]["disposition"], string> = {
   [CacheAssetDisposition.REMOVE]: "Remove",

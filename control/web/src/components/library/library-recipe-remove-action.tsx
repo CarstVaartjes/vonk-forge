@@ -2,15 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRemovalReview, ControlApi } from "../../api/types";
 import { failureNotice } from "../../lib/error-display";
 import { useToast } from "../toast";
-import { CacheRemovalProgress } from "../cache-removal-progress";
+import { CacheRemovalProgress } from "../cache-removal/cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
   submitReviewedRemoval,
   validateRemovalReview,
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
-} from "../cache-removal-operations";
-import { CacheRemovalReviewDetails } from "../cache-removal-review";
+} from "../cache-removal/cache-removal-operations";
+import { CacheRemovalReviewDetails } from "../cache-removal/cache-removal-review";
 
 /** Choose retention, inspect the Controller decision, then accept that review. */
 export function LibraryRecipeRemoveAction({

@@ -1,12 +1,12 @@
-import { CacheOperationKind, LifecycleEffect } from "../api/vocabulary.generated";
-import { ApiError } from "../api/client";
+import { CacheOperationKind, LifecycleEffect } from "../../api/vocabulary.generated";
+import { ApiError } from "../../api/client";
 import type {
   CacheRemovalReview,
   ControlApi,
   ModelCacheOperatorResponse,
   RecipeOperatorResponse,
   RecipeRemovalUnavailable,
-} from "../api/types";
+} from "../../api/types";
 
 export type CacheRemovalIntent =
   | { kind: "model"; selector: string; requestKey: string; review: CacheRemovalReview }

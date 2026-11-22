@@ -123,12 +123,12 @@
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/cache-removal-operations.ts",
+      "file": "control/web/src/components/cache-removal/cache-removal-operations.ts",
       "type": "CacheRemovalIntent",
       "reason": "UI-only request bookkeeping shared by the cache-removal components; never sent as a body (calls go through typed client methods)"
     },
     {
-      "file": "control/web/src/components/cache-removal-operations.ts",
+      "file": "control/web/src/components/cache-removal/cache-removal-operations.ts",
       "type": "CacheRemovalReviewTarget",
       "reason": "UI-only discriminated union for one screen or hook; not an API document"
     },
