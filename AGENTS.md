@@ -355,7 +355,7 @@ complete CI unless it reuses the integration PR's run for the identical tree,
 and its own release acceptance. Adding the label re-runs `ci.yml` in full at
 once. Jobs that build Rust set it up with `.github/actions/setup-rust`, which
 reads `rust-toolchain.toml`. The `recipe-library` action caches the built recipe
-library by revision and build-script hash.
+library by revision and the hash of the build script and `.tool-versions`.
 Before the upgrade the carry's checks require only what any release provides;
 `test_carry_baseline_phase_accepts_an_older_release_shape` runs them against an
 older release's shape (see `docs/testing-and-ci.md`).

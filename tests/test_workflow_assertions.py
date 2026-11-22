@@ -257,8 +257,8 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
 def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_restore_key() -> (
     None
 ):
-    """Catches a cache that survives a build-script change, is saved unbuilt, is
-    saved under a key nothing restores, or is saved on pull requests."""
+    """Catches a cache that survives a build-script or uv-pin change, is saved unbuilt,
+    is saved under a key nothing restores, or is saved on pull requests."""
     action = yaml.safe_load(
         (ROOT / ".github/actions/recipe-library/action.yml").read_text()
     )
@@ -271,7 +271,7 @@ def test_built_recipe_library_cache_is_saved_on_main_after_the_build_under_its_r
         and "recipe-library-built" in s["with"]["key"]
     ]
     key = restore["with"]["key"]
-    assert "hashFiles('scripts/build-recipe-library')" in key
+    assert "hashFiles('scripts/build-recipe-library', '.tool-versions')" in key
     assert "revision" in key
     assert save["with"]["key"] == key
     assert "refs/heads/main" in save["if"]
