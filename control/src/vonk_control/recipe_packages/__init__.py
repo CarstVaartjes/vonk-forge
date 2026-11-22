@@ -1005,7 +1005,7 @@ class RecipePackageClient:
                     if total > MAX_PACKAGE_TOTAL_BYTES:
                         raise ValueError("package is too large")
                     files[member.name] = content
-        except (OSError, tarfile.TarError, ValueError) as error:
+        except (OSError, EOFError, tarfile.TarError, ValueError) as error:
             raise RecipePackageError(
                 RecipePackageCode.EXTRACT_INVALID, "recipe package extraction failed"
             ) from error

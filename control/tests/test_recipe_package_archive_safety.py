@@ -182,6 +182,18 @@ def _accept(tmp_path, published_package) -> None:
 # --- member paths -----------------------------------------------------------------
 
 
+def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
+    decoder = recipe_packages.RecipePackageClient.__new__(
+        recipe_packages.RecipePackageClient
+    )
+    package = _repack([_member("manifest.json", b"x" * 4096)])
+
+    with pytest.raises(recipe_packages.RecipePackageError) as raised:
+        decoder._decode_package(package[: len(package) // 2], None)  # type: ignore[arg-type]
+
+    assert raised.value.code == recipe_packages.RecipePackageCode.EXTRACT_INVALID
+
+
 @pytest.mark.parametrize(
     "name",
     (

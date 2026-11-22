@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import io
 import tarfile
 from pathlib import Path
@@ -9,10 +10,12 @@ from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control import source_bundles
 from vonk_control.source_bundles import (
     BundleLimits,
+    SourceBundleCode,
     SourceBundleError,
     SourceBundleStore,
     generate_source_bundle,
     inspect_source_bundle,
+    parse_source_bundle,
 )
 
 LIMITS = BundleLimits(
@@ -34,13 +37,23 @@ def archive(files: list[tuple[str, bytes]]) -> bytes:
     return output.getvalue()
 
 
-@pytest.mark.parametrize("name", ["/etc/passwd", "../escape", "a/../../escape"])
+@pytest.mark.parametrize("name", ["/etc/passwd", "../escape", "a/../../escape", "."])
 def test_bundle_rejects_paths_outside_context(name: str) -> None:
     with pytest.raises(Exception):  # noqa: B017 -- rejected ingress followed by valid admission
         inspect_source_bundle(io.BytesIO(archive([(name, b"x")])), LIMITS)
 
     accepted = inspect_source_bundle(io.BytesIO(archive([("safe", b"x")])), LIMITS)
     assert [item.path for item in accepted.files] == ["safe"]
+
+
+@pytest.mark.parametrize("cut", [513, 520, 1537])
+def test_truncated_archive_raises_only_the_typed_error(cut: int) -> None:
+    whole = archive([("a", b"abc"), ("b", b"abc")])
+    packed = gzip.compress(whole)
+    for damaged in (whole[:cut], packed[: len(packed) // 2]):
+        with pytest.raises(SourceBundleError) as raised:
+            parse_source_bundle(damaged, LIMITS)
+        assert raised.value.code == SourceBundleCode.INVALID_ARCHIVE
 
 
 def test_bundle_digest_is_archive_order_independent() -> None:
