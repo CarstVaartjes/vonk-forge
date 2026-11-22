@@ -133,6 +133,7 @@ MODES = (
     "head-digests",
     "set-first-requester",
     "printed-output",
+    "maintainershim",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1628,6 +1629,50 @@ def _handler_body(lines: list[str], except_line: int) -> list[tuple[str, str]]:
     return body
 
 
+# Package lifecycle logic lives in vonk-agent-helper::package_hooks; the
+# maintainer scripts are shims. An added line there is one of these, nothing else.
+SHIM_LINE = re.compile(
+    r"""(?x)^(?:
+        \#.*
+      | set\ -eu?
+      | exit\ 0
+      | \[\ "\$\{?1(?::-)?\}?"\ =\ [a-z-]+\ \]\ \|\|\ exit\ 0
+      | (?:exec\ )?/usr/lib/vonk-forge/vonk-agent-helper\ --package-hook\ (?:postinst|prerm)\ [a-z" $@-]+(?:\ \|\|\ true)?
+      | (?:/usr/bin/)?deb-systemd-helper\ purge\ [A-Za-z0-9_.@"$-]+(?:\ >/dev/null)?(?:\ \|\|\ true)?
+      | rm\ -rf\ --\ /[A-Za-z0-9_./-]+
+      | if\ \[\ "\$\{1:-\}"\ =\ purge\ \];\ then
+      | for\ unit\ in\ \\
+      | vonk-forge-[a-z.-]+;?(?:\ \\)?
+      | do|done|fi
+    )$"""
+)
+SHIM_SCRIPTS = frozenset({"postinst", "prerm", "postrm"})
+
+
+def shim_hits(path: str, source: str, added: set[int]) -> list[str]:
+    """Added shell under packaging/debian is a shim; no shell under systemd."""
+    lines = source.splitlines()
+    if path.startswith("packaging/debian/"):
+        name = path.rsplit("/", 1)[1]
+        if name in {"preinst", "config"} or name.endswith("-repair"):
+            return [f"{path}:{min(added)}: maintainer logic belongs in package_hooks"]
+        if name in SHIM_SCRIPTS:
+            return [
+                f"{path}:{line}: maintainer script line is not a shim"
+                for line in sorted(added)
+                if line <= len(lines)
+                and lines[line - 1].strip()
+                and not SHIM_LINE.match(lines[line - 1].strip())
+            ]
+    if path.startswith("packaging/systemd/"):
+        return [
+            f"{path}:{line}: a unit runs a binary, not /bin/sh -c"
+            for line in sorted(added)
+            if line <= len(lines) and "/bin/sh -c" in lines[line - 1]
+        ]
+    return []
+
+
 def check_source(
     path: str,
     source: str,
@@ -1651,7 +1696,9 @@ def check_source(
             ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
-    noexit_hits: list[str] = []
+    noexit_hits: list[str] = (
+        shim_hits(path, source, added) if "maintainershim" in modes else []
+    )
     if "noexit" in modes and not is_test:
         test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
         patterns = [

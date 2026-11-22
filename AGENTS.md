@@ -84,6 +84,13 @@ custody, private files, atomic publication and durable replay when changing an
 implementation language; portability is not permission to weaken recovery or
 security.
 
+Package lifecycle logic lives in `vonk-agent-helper::package_hooks`; the Debian
+maintainer scripts (`packaging/debian/{postinst,prerm,postrm}`) are shims that
+exec it, and `scripts/verify-agent-deb` requires them to equal the packaged
+shim sources. A new dpkg action is a new `Hook` variant (the `match` is
+exhaustive), never new shell. `packaging/systemd` units run binaries, not
+`/bin/sh -c`. The `maintainershim` added-line guard enforces both.
+
 ## Shared decisions and operator visibility
 
 The Controller owns planning, admission, orchestration, and durable progress.

@@ -4541,3 +4541,46 @@ def test_a_test_fixture_bound_on_127_0_0_1_is_rejected_but_the_test_address_and_
         _BIND_PATH, _BIND_SRC, _all_lines(_BIND_SRC), modes=("loopback-bind",)
     )
     assert [h.split(":")[1] for h in hits] == ["3", "4", "5"]
+
+
+SHIM = (
+    "#!/bin/sh\nset -e\n"
+    'exec /usr/lib/vonk-forge/vonk-agent-helper --package-hook postinst "$@"\n'
+)
+
+
+@pytest.mark.parametrize(
+    "path,source,flagged",
+    [
+        ("packaging/debian/postinst", SHIM, False),
+        ("packaging/debian/postinst", SHIM + "adduser vonk-agent\n", True),
+        ("packaging/debian/postinst", SHIM + "systemctl daemon-reload\n", True),
+        ("packaging/debian/postinst", SHIM + "install -d /var/lib/x\n", True),
+        ("packaging/debian/prerm", '[ "$1" = remove ] || exit 0\n', False),
+        (
+            "packaging/debian/prerm",
+            "/usr/lib/vonk-forge/vonk-agent-helper --package-hook prerm remove || true\n",
+            False,
+        ),
+        (
+            "packaging/debian/postrm",
+            'deb-systemd-helper purge "$unit" >/dev/null || true\n',
+            False,
+        ),
+        ("packaging/debian/postrm", "rm -rf -- /var/lib/vonk-forge-agent\n", False),
+        ("packaging/debian/postrm", "rm -rf -- $dir\n", True),
+        ("packaging/debian/preinst", "#!/bin/sh\n", True),
+        ("packaging/debian/preinst-repair", "#!/bin/sh\n", True),
+        ("packaging/debian/control", "Package: x\n", False),
+        ("packaging/systemd/new.service", "ExecStart=/bin/sh -c 'x'\n", True),
+        ("packaging/systemd/new.service", "ExecStart=/usr/bin/x\n", False),
+    ],
+)
+def test_maintainer_scripts_stay_shims_and_units_run_no_shell(path, source, flagged):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert bool(check_source(path, source, lines, modes=("maintainershim",))) is flagged
+    # Only an added line can fail: an unchanged line of the same file is clean.
+    if "preinst" not in path:
+        assert not check_source(
+            path, source, {len(lines) + 5}, modes=("maintainershim",)
+        )
