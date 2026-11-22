@@ -39,7 +39,7 @@ from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from vonk_control.recovery_policy import FailureKind
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from ..runtime_identity_support import PACKAGED_RUNTIME_IDENTITY
 from ..test_recipe_operations import start_evidence

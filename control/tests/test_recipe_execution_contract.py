@@ -25,7 +25,7 @@ from vonk_control.recipe_execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 
 _ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 

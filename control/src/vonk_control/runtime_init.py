@@ -16,7 +16,7 @@ from pathlib import Path
 from vonk_agent_protocol import WaitReason
 
 from .categorized_errors import UnsettledOutcome
-from .runtime_asset_contract import RuntimeAssetInventory
+from .runtime.asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024

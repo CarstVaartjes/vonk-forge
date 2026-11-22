@@ -18,7 +18,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.revision_images import revision_images
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,

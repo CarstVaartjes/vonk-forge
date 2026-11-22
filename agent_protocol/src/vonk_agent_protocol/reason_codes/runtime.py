@@ -51,18 +51,18 @@ class RuntimeImageCode(WireEnum):
 class RuntimePreflightCode(WireEnum):
     """Runtime preflight blockers."""
 
-    CHILD_MISSING = "runtime_preflight.child_missing"
-    EXECUTION_FAILED = "runtime_preflight.execution_failed"
-    HOST_CHANGED = "runtime_preflight.host_changed"
-    NODE_REVOKED = "runtime_preflight.node_revoked"
-    OPERATION_MISSING = "runtime_preflight.operation_missing"
-    RECEIPT_INVALID = "runtime_preflight.receipt_invalid"
-    RECEIPT_MISSING = "runtime_preflight.receipt_missing"
-    REQUIRED = "runtime_preflight.required"
-    REQUIREMENT_UNKNOWN = "runtime_preflight.requirement_unknown"
-    REQUIREMENTS_CHANGED = "runtime_preflight.requirements_changed"
-    NODE_MISSING = "runtime_preflight.node_missing"
-    CAPABILITY_FAILED = "runtime_preflight.capability_failed"
+    CHILD_MISSING = "runtime.preflight.child_missing"
+    EXECUTION_FAILED = "runtime.preflight.execution_failed"
+    HOST_CHANGED = "runtime.preflight.host_changed"
+    NODE_REVOKED = "runtime.preflight.node_revoked"
+    OPERATION_MISSING = "runtime.preflight.operation_missing"
+    RECEIPT_INVALID = "runtime.preflight.receipt_invalid"
+    RECEIPT_MISSING = "runtime.preflight.receipt_missing"
+    REQUIRED = "runtime.preflight.required"
+    REQUIREMENT_UNKNOWN = "runtime.preflight.requirement_unknown"
+    REQUIREMENTS_CHANGED = "runtime.preflight.requirements_changed"
+    NODE_MISSING = "runtime.preflight.node_missing"
+    CAPABILITY_FAILED = "runtime.preflight.capability_failed"
 
 
 class RuntimePreflightFindingCode(WireEnum):

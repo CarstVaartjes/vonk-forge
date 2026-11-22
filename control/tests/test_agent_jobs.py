@@ -77,7 +77,7 @@ from vonk_control.recipe_start_payloads import (
     bind_compiled_execution_plan,
 )
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.workload_intent import (
     allocate_workload_intent,
     take_workload_intent,
@@ -4853,7 +4853,7 @@ def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_sta
 def test_reusable_preflight_survives_operation_history_collection(service) -> None:
     """Catches treating a historical command receipt as current capability storage."""
     from sqlalchemy import delete
-    from vonk_control.runtime_preflight import (
+    from vonk_control.runtime.preflight import (
         admission_blockers,
         latest_result,
         request_digest,
@@ -4894,7 +4894,7 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
 def test_failed_child_end_wake_preserves_committed_receipt(service):
     """A failed owner wake cannot turn an already committed report into loss."""
     from vonk_control.run_switch_operations.child_wake import ChildEndWake
-    from vonk_control.runtime_preflight import latest_result, request_digest
+    from vonk_control.runtime.preflight import latest_result, request_digest
 
     from .test_runtime_preflight import request as preflight_request
     from .test_runtime_preflight import result as passing_result

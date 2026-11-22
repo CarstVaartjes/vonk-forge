@@ -37,7 +37,7 @@ from vonk_control.operations.blockers import (
     make_blocker,
 )
 from vonk_control.persisted_waits import read_wait
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import set_inventory_fingerprint
@@ -160,7 +160,7 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
         )
         assert child is not None and operation is not None
         child.state = "failed"
-        child.status_reason = "runtime_preflight.execution_failed"
+        child.status_reason = "runtime.preflight.execution_failed"
         operation.state = "failed"
 
     waiting, blocked = service.ensure(previous=checkpoint, **arguments)

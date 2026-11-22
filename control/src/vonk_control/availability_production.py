@@ -92,11 +92,11 @@ from .recipe_runtime_specs import (
 )
 from .recipe_update_contract import UPDATE_KIND
 from .recovery_policy import kind_for_failure_fields
+from .runtime.spec_contract import SpecRuntime
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
 )
-from .runtime_spec_contract import SpecRuntime
 from .stored_states import CatalogRevisionState
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent

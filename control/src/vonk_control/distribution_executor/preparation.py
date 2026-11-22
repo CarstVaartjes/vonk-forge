@@ -320,7 +320,7 @@ class CompositeDistributionPhaseExecutor(
             resolve_recipe_entities,
             split_option_choices,
         )
-        from ..runtime_spec_contract import RuntimeSpec
+        from ..runtime.spec_contract import RuntimeSpec
 
         with self._sessions() as session:
             revision = session.scalar(

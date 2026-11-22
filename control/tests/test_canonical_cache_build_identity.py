@@ -22,7 +22,7 @@ from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds import (
     derive_build_input_identity,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword

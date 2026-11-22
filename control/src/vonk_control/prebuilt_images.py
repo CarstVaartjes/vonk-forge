@@ -158,7 +158,7 @@ def package_build_intent(
         canonical_build,
         derive_build_input_identity,
     )
-    from .runtime_adapters import resolve_runtime_adapter
+    from .runtime.adapters import resolve_runtime_adapter
     from .source_policy import dockerfile_base_images
 
     recipe = (
@@ -278,7 +278,7 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     import tarfile
 
     from .catalog.entities import build_policy_projection
-    from .runtime_adapters import (
+    from .runtime.adapters import (
         RUNTIME_ADAPTER_DIGEST_LABEL,
         RUNTIME_ADAPTER_LABEL,
         RUNTIME_INTERFACE_LABEL,

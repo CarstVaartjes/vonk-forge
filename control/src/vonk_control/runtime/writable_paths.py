@@ -525,7 +525,7 @@ def document(
 
 def _compile_error(message: str) -> ValueError:
     # Import lazily because the harness package imports this module.
-    from .harnesses.common import HarnessCompileError
+    from ..harnesses.common import HarnessCompileError
 
     return HarnessCompileError(message)
 

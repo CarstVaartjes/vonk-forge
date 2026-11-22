@@ -15,7 +15,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.runtime_preflight import (
+from vonk_control.runtime.preflight import (
     mandatory_capabilities,
     recipe_requirements,
     request_digest,

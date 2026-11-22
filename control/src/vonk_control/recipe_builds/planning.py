@@ -36,7 +36,7 @@ from ..recipe_execution_contract import (
     build_plan_document,
     build_policy_document,
 )
-from ..runtime_adapters import RuntimeAdapter
+from ..runtime.adapters import RuntimeAdapter
 from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,

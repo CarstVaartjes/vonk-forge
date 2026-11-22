@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import vonk_control.availability_production as availability_production_module
 import vonk_control.recipe_builds as recipe_builds_module
-import vonk_control.runtime_adapters as runtime_adapters_module
+import vonk_control.runtime.adapters as runtime_adapters_module
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -62,7 +62,7 @@ from vonk_control.recipe_operations import (
     record_build_evidence,
 )
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,

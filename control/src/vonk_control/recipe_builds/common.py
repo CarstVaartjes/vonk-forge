@@ -57,7 +57,7 @@ from ..prebuilt_images import PrebuiltDecision
 from ..profile_capacity import profile_build_memory_claims
 from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..resource_planning import memory_capacity_snapshot
-from ..runtime_adapters import (
+from ..runtime.adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,

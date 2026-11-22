@@ -41,8 +41,8 @@ from vonk_agent_protocol.build_import import (
     RecipeBuildAdapterDefinition,
 )
 
-from .harnesses.canonical_metadata import CANONICAL_HARNESS_BY_SLUG
-from .runtime_writable_paths import writable_paths
+from ..harnesses.canonical_metadata import CANONICAL_HARNESS_BY_SLUG
+from .writable_paths import writable_paths
 
 RUNTIME_INTERFACE_LABEL = "ai.vonkforge.runtime-interface"
 RUNTIME_INTERFACE_LABEL_VALUE = "v1"

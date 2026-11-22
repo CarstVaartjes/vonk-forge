@@ -52,7 +52,7 @@ from ..recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from ..resource_planning import installation_disk_requirement
-from ..runtime_preflight import (
+from ..runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,

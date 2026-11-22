@@ -129,7 +129,7 @@ from vonk_control.recipe_routes import (
 )
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,

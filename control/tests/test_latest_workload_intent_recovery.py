@@ -38,7 +38,7 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationService,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import (

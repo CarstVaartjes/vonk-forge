@@ -39,7 +39,7 @@ from .operations.blockers import (
 )
 from .persisted_waits import read_wait, typed_wait_reason
 from .recovery_policy import RECOVERY
-from .runtime_preflight import (
+from .runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,

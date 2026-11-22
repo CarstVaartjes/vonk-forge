@@ -621,7 +621,7 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.run_switch_operations import RunSwitchOperationService
-    from vonk_control.runtime_preflight import latest_result, request_digest
+    from vonk_control.runtime.preflight import latest_result, request_digest
 
     from .runtime_identity_support import claim_agent
     from .test_lifecycle_preflight import _clear

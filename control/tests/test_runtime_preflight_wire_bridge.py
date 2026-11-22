@@ -18,7 +18,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.inventory_items_contract import PreflightInventoryItem
-from vonk_control.runtime_preflight import (
+from vonk_control.runtime.preflight import (
     admission_blockers,
     request_digest,
 )

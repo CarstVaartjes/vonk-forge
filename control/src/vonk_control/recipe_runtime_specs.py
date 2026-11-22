@@ -31,7 +31,7 @@ from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
 from .models import CatalogDocumentRevision
 from .platform_ports import serving_port
-from .runtime_spec_contract import (
+from .runtime.spec_contract import (
     RuntimeSpec,
     SpecArgument,
     SpecEndpoint,
@@ -48,7 +48,7 @@ from .runtime_spec_contract import (
     SpecTopology,
     SpecWritablePath,
 )
-from .runtime_writable_paths import document as writable_path_document
+from .runtime.writable_paths import document as writable_path_document
 from .stored_states import CatalogRevisionState
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"

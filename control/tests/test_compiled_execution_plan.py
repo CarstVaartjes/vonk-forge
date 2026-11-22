@@ -52,11 +52,11 @@ from vonk_control.recipe_start_payloads import (
     bind_compiled_execution_plan,
 )
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
+from vonk_control.runtime.spec_contract import RuntimeSpec
 from vonk_control.runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
-from vonk_control.runtime_spec_contract import RuntimeSpec
 from vonk_forge_contracts import (
     RecipeDefinition,
     document_sha256,

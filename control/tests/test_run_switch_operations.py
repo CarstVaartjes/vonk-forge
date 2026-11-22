@@ -135,13 +135,13 @@ from vonk_control.run_switch_operations import (
     _planned_transfer_bytes,
     effective_build_receipt,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
+from vonk_control.runtime.preflight import latest_result
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     prepare_runtime_image,
 )
-from vonk_control.runtime_preflight import latest_result
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 

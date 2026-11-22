@@ -48,7 +48,7 @@ from vonk_control.run_switch_operations import (
     _phase_request_key,
     _phase_result,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
