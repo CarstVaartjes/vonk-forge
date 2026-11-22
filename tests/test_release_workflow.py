@@ -1402,3 +1402,42 @@ with pathlib.Path({str(requests)!r}).open("a") as output:
         "amd64",
         "arm64",
     ]
+
+
+@pytest.mark.parametrize(
+    ("gate", "variables", "ref_type", "ref", "runs"),
+    [
+        ("success", "true", "tag", "v1.2.3", True),
+        ("failure", "true", "tag", "v1.2.3", False),
+        ("skipped", "true", "tag", "v1.2.3", False),
+        ("success", "", "tag", "v1.2.3", False),
+        ("success", "true", "branch", "main", False),
+    ],
+)
+def test_stable_release_call_runs_after_a_green_gate_with_skipped_upstream_jobs(
+    gate: str, variables: str, ref_type: str, ref: str, runs: bool
+) -> None:
+    """A skipped job upstream of ci-gate must not skip the stable channel.
+
+    GitHub skips a job whose upstream was skipped unless its `if` has a status
+    function, so the condition is evaluated with one and the gate result as
+    the only needs input.
+    """
+    call = load(WORKFLOWS / "ci.yml")["jobs"]["stable-release"]
+    expression = " ".join(call["if"].split())
+    assert re.search(r"\b(?:always|success|failure|cancelled)\(\)", expression)
+    expression = re.sub(r"\balways\(\)", "True", expression)
+    expression = expression.replace("needs.ci-gate.result", repr(gate))
+    expression = re.sub(r"vars\.[\w.-]+", repr(variables), expression)
+    expression = re.sub(
+        r"startsWith\(github\.ref_name, '(\w+)'\)",
+        lambda found: f"github.ref_name.startswith({found[1]!r})",
+        expression,
+    )
+    expression = expression.replace("github.ref_name.", "REF.")
+    context = {
+        "github.event_name": "push",
+        "github.ref_type": ref_type,
+    }
+    expression = expression.replace("REF.", repr(ref) + ".")
+    assert bool(evaluate(expression, context)) is runs

@@ -23,7 +23,7 @@ def _excess(path: Path, granted: dict | None, chain: str) -> list[str]:
     for name, job in (workflow.get("jobs") or {}).items():
         uses = job.get("uses", "")
         wanted = job.get("permissions", default)
-        if granted is not None and not uses and isinstance(wanted, dict):
+        if granted is not None and isinstance(wanted, dict):
             for scope, level in wanted.items():
                 if RANK[level] > RANK[granted.get(scope, "none")]:
                     found.append(

@@ -1821,7 +1821,10 @@ jobs:
     # Only a signed v* tag pushed through the release workflow publishes the
     # stable channel; the jobs live in stable-release.yml.
     needs: [ci-gate]
+    # always(): without a status function GitHub skips this job when any
+    # job upstream of ci-gate was skipped (member-web always is on full runs).
     if: >-
+      always() &&
       needs.ci-gate.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
