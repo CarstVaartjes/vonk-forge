@@ -397,12 +397,14 @@ def main() -> None:
             "--value",
             "vonk-forge-agent.service",
         ).stdout.strip()
-        logger = Path("/usr/bin/logger")
-        logger.rename("/usr/bin/logger.vonk551-test")
+        # A missing prerequisite (here diff, which dpkg's own checkpath needs)
+        # refuses the arm before the running agent is touched.
+        required = Path("/usr/bin/diff")
+        required.rename("/usr/bin/diff.vonk551-test")
         try:
             probe(operation(), success=False)
         finally:
-            Path("/usr/bin/logger.vonk551-test").rename(logger)
+            Path("/usr/bin/diff.vonk551-test").rename(required)
         assert (
             run(
                 "/usr/bin/systemctl",

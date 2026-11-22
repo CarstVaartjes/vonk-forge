@@ -103,7 +103,6 @@ fn configure(upgrade: bool, host: &mut impl Host) -> Result<(), String> {
     directories::ensure(host, &ids)?;
     machine_evidence::ensure(host, &ids)?;
     units::enable(host)?;
-    units::retire_forward_capsule(host);
     units::reload_and_finish(host, upgrade)
 }
 

@@ -159,52 +159,6 @@ impl Store {
         )?;
         Ok(())
     }
-    pub fn validate_maintainer_rollback(
-        &self,
-        _version: &str,
-        agent: &str,
-        helper: &str,
-    ) -> Result<(), String> {
-        // The watchdog holds the transaction flock while dpkg invokes this
-        // read-only verifier. Root custody and the exact unit/nonce bind the
-        // nested maintainer process without trying to reacquire that lock.
-        safe(self.root.parent().ok_or("rollback parent")?, true, 0, 0o755)?;
-        safe(&self.root, true, 0, 0o700)?;
-        let tx = self.read()?;
-        let cgroup = fs::read_to_string("/proc/self/cgroup").map_err(|e| e.to_string())?;
-        let unit_cgroup = command(
-            "/usr/bin/systemctl",
-            &[
-                "--system",
-                "show",
-                "--property=ControlGroup",
-                "--value",
-                "vonk-forge-package-rollback.service",
-            ],
-            false,
-        )?;
-        if !unit_cgroup.starts_with('/') || unit_cgroup == "/" {
-            return Err("rollback unit cgroup unavailable".into());
-        }
-        let nonce = std::env::var("VONK_FORGE_PACKAGE_ROLLBACK_NONCE")
-            .map_err(|_| "rollback nonce missing")?;
-        if tx.phase != Phase::RollingBack
-            || nonce != tx.rollback.attempt_nonce
-            || agent != tx.rollback.source.binary_sha256
-            || helper != tx.rollback.source.helper_sha256
-            || !cgroup
-                .lines()
-                .any(|line| line == format!("0::{unit_cgroup}"))
-        {
-            return Err("maintainer rollback is outside captured source authority".into());
-        }
-        let source = self.root.join("source.deb");
-        safe(&source, false, 0, 0o600)?;
-        if digest(&source)? != tx.rollback.source.package_sha256 {
-            return Err("captured source changed".into());
-        }
-        Ok(())
-    }
     pub fn activation_failed(&self) -> Result<(), String> {
         let _lock = self.lock()?;
         let mut tx = self.read()?;

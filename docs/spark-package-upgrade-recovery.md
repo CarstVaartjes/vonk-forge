@@ -44,11 +44,9 @@ nothing arms before unpack. The old package's `prerm upgrade` and `postrm
 upgrade` do nothing. The candidate's `postinst` is a shim that execs its own
 helper binary (`vonk-agent-helper --package-hook`, `package_hooks`), inside the
 old helper's sandbox. `configure` converges the
-account, directories, machine evidence and unit enablement, retires any
-forward-capsule files an older package staged (the old capsule unit, its
-drop-ins, its wants link; they are not dpkg-owned), reloads systemd (a failed reload fails the configure), and
-schedules the finisher. A `postinst` failure leaves the package `iF`, the
-install fails, and the helper moves the transaction to `activation_failed`, so
+account, directories, machine evidence and unit enablement, reloads systemd (a
+failed reload fails the configure), and schedules the finisher. A `postinst`
+failure leaves the package `iF`, the install fails, and the helper moves the transaction to `activation_failed`, so
 the watchdog restores at once.
 
 ## 4. Finisher
@@ -142,13 +140,10 @@ for a day.
   `release.json`, reseals it with a throwaway key, and drives the promoted
   helper's own units, sandbox and watchdog; signed grants go over the real
   socket through `package_grant_probe`. The candidate is this tree's package.
-  Cases: a finisher upgrade with acknowledgement; a candidate that arrives
-  with a capsule's staged files left by the promoted package; a failing
-  postinst; dpkg killed while its payload extraction is held (`iHR`); the
+  Cases: a finisher upgrade with acknowledgement; a failing postinst; dpkg killed while its payload extraction is held (`iHR`); the
   helper cgroup killed, and a reboot stand-in, while the candidate's postinst
-  is held (`iF`). No capsule intent or arming breadcrumb may appear in any of
-  them. A runner cannot reboot inside a job, so the stand-in kills and stops the
-  package's units, waits past the deadline and starts the units a boot starts;
+  is held (`iF`). A runner cannot reboot inside a job, so the stand-in kills
+  and stops the package's units, waits past the deadline and starts the units a boot starts;
   a kernel boot and lost unsynced writes are not reproduced.
 
 This is Debian/systemd acceptance on disposable ARM64 runners, not physical
