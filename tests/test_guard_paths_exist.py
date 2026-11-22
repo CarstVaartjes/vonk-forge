@@ -18,6 +18,7 @@ GUARD_FILES = (
     "control/tests/untyped_mapping_boundaries.py",
     "control/tests/whole_collection_readers.py",
     "control/tests/deterministic_retries.py",
+    "control/tests/lifecycle_writer_boundaries.py",
 )
 PATH = re.compile(r"[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]*)+")
 TOP = {entry.name for entry in ROOT.iterdir() if not entry.name.startswith(".git")}

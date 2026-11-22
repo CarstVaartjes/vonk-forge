@@ -36,7 +36,7 @@ from .parsed_sources import memoized_scan, parsed_tree
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 CORE_PREFIX = "control/src/vonk_control/lifecycle/"
-MODELS_MODULE = "control/src/vonk_control/models.py"
+MODELS_PACKAGE = "control/src/vonk_control/models/"
 
 AGENT_JOB_MODULES = tuple(
     path.relative_to(REPO_ROOT).as_posix()
@@ -671,10 +671,7 @@ def scan_source(
 
     ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
 
-    if path.startswith(CORE_PREFIX) or (
-        path == MODELS_MODULE
-        or path.startswith(MODELS_MODULE.removesuffix(".py") + "/")
-    ):
+    if path.startswith((CORE_PREFIX, MODELS_PACKAGE)):
         return []
     collector = _Collector(path, tree if tree is not None else ast.parse(source))
     return sorted(collector.writes, key=lambda write: (write.line, write.function))
@@ -687,10 +684,7 @@ def scan_unresolved(
 
     Each entry is ``(function, variable, line)``."""
 
-    if path.startswith(CORE_PREFIX) or (
-        path == MODELS_MODULE
-        or path.startswith(MODELS_MODULE.removesuffix(".py") + "/")
-    ):
+    if path.startswith((CORE_PREFIX, MODELS_PACKAGE)):
         return []
     return _Collector(path, tree if tree is not None else ast.parse(source)).unresolved
 
