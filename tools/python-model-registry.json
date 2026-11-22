@@ -545,7 +545,7 @@
       "reason": "Canonical source ingress receipt bound to the managed archive file identity."
     },
     {
-      "module": "control/src/vonk_control/stored_documents.py",
+      "module": "control/src/vonk_control/stored/documents.py",
       "kind": "controller-contract"
     },
     {

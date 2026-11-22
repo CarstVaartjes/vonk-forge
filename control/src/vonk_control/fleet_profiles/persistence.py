@@ -38,7 +38,7 @@ from ..models import (
     RecipeRun,
 )
 from ..run_route_name import carries_alias
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
 from .contracts import (

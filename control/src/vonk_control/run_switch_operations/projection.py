@@ -22,7 +22,7 @@ from ..run_switch_contract import (
 from ..run_switch_progress import (
     _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER
 from .plan_persistence import _view_identity
 from .planning_helpers import _stored_job_plan

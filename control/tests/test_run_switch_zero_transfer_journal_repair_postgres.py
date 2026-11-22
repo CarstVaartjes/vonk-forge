@@ -40,7 +40,7 @@ from vonk_control.run_switch_journal_repair import (
     try_repair_zero_transfer_journal,
 )
 from vonk_control.run_switch_operations import advance as advance_owner
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .lock_wait_support import backend_pid, lock_waits_behind
 from .runtime_identity_support import claim_agent

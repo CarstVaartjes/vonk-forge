@@ -45,7 +45,7 @@ from ..run_switch_operations.publish import _persist_run_switch_runtime_image_re
 from ..runtime_image_preparation import (
     RuntimeImageReceipt,
 )
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from ..worker_memory_contract import WorkerMemoryComponent
 

@@ -32,7 +32,7 @@ from vonk_control.recipe_image_availability import (
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_removal_review_support import remove_after_review

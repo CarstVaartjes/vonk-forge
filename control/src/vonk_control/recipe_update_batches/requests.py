@@ -42,7 +42,7 @@ from ..revision_images import revision_images
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:

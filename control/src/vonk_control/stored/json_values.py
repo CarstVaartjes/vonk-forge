@@ -17,7 +17,7 @@ one authoritative Pydantic contract.  This module owns the mechanism:
   ``dict``/``list`` or a mapping of those at any level, unless the level is a
   declared :class:`ExternalPassthrough`.
 
-The bindings themselves live in :mod:`vonk_control.stored_columns`, which
+The bindings themselves live in :mod:`vonk_control.stored.columns`, which
 imports the contract modules; this module imports none of them, so a contract
 module can use :class:`ExternalPassthrough` without a cycle.
 """
@@ -49,8 +49,8 @@ from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 
-from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from .strict_json import read_stored_document, stored_document_detail
+from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
+from ..strict_json import read_stored_document, stored_document_detail
 
 _LOG = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ def bind(
 def bindings() -> Mapping[str, JsonColumn]:
     """Every bound column, keyed ``table.column``."""
 
-    from . import stored_columns  # noqa: F401  (binds on import)
+    from . import columns as stored_columns  # noqa: F401  (binds on import)
 
     return dict(_REGISTRY)
 
@@ -320,10 +320,10 @@ def read_column(
 def read_row_column(row: object, column: str) -> Any | Residue | None:
     """:func:`read_column` for ``row.column``, with the row's own kind and id."""
 
-    from .models import CatalogDocumentRevision
+    from ..models import CatalogDocumentRevision
 
     if isinstance(row, CatalogDocumentRevision) and column == "document":
-        from .catalog.revision_contract import cached_catalog_document
+        from ..catalog.revision_contract import cached_catalog_document
 
         try:
             return cached_catalog_document(
@@ -396,7 +396,7 @@ def install_write_guard(*, strict: bool | None = None) -> None:
     global _GUARD_INSTALLED
     from sqlalchemy import event
 
-    from .models import Base
+    from ..models import Base
 
     if strict is not None:
         set_write_guard_mode(strict=strict)

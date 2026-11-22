@@ -41,7 +41,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .profile_stop_readmission_support import start_on_released_gang

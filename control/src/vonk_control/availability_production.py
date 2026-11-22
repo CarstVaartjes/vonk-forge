@@ -97,7 +97,7 @@ from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
 )
-from .stored_states import CatalogRevisionState
+from .stored.states import CatalogRevisionState
 from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 

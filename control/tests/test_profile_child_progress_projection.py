@@ -62,7 +62,7 @@ from vonk_control.run_switch_operations import (
     _stored_job_plan,
     _stored_result,
 )
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document
 

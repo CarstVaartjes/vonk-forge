@@ -212,7 +212,7 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
     repository, sessions, _, _ = telemetry
     from vonk_agent_protocol.telemetry import HostResourceSample
     from vonk_control.models import NodeInventoryResourceSnapshot
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     repository.record_batch(NODE_A, (sample(sequence=1),))
     with sessions() as session:

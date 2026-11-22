@@ -45,7 +45,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,

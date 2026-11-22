@@ -55,8 +55,8 @@ from ..recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
 from ..revision_images import revision_archives
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _PREPARATION_RECHECK_QUIET,

@@ -37,7 +37,7 @@ from ..models import (
     FleetProfile,
 )
 from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .assignment_assessment import _AssignmentRows
 from .contracts import _SelectedProfileSnapshot
 from .dependencies import (

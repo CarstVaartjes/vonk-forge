@@ -38,7 +38,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,

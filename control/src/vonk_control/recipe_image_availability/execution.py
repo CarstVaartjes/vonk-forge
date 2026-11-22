@@ -49,7 +49,7 @@ from ..recipe_image_availability_reader_contract import (
     StoredAvailabilityIdentity,
     StoredModelChildCancellation,
 )
-from ..stored_json import Residue, read_row_column
+from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from ..worker_memory_contract import WorkerMemoryComponent
 from .contracts import (

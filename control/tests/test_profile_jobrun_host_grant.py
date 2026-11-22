@@ -73,7 +73,7 @@ def _selected_profile_grant(tmp_path, reason="superseded by newer workload inten
     assert stop is not None, profiles.application(accepted.id)
     assert stop.payload["profile_application_id"] == accepted.id
     # Human diagnostic wording is never part of exact cancellation authority.
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     with write_guard_mode(strict=False), sessions.begin() as session:
         source = session.get(Job, artifact.operation_id)

@@ -3169,7 +3169,7 @@ def test_current_contract_code_passes_the_legacy_guard(source):
     "path",
     [
         "control/src/vonk_control/lifecycle/evidence.py",
-        "control/src/vonk_control/stored_json.py",
+        "control/src/vonk_control/stored/json_values.py",
         "control/src/vonk_control/strict_json.py",
     ],
 )

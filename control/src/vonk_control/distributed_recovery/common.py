@@ -63,8 +63,8 @@ from ..recipe_execution_contract import (
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
 from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from ..reservation_owners import run_has_live_operation
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState
 
 """Durable controller coordination for distributed recipe recovery."""
 

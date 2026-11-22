@@ -41,7 +41,7 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.inventory_items import inventory_items
 from vonk_control.models import AgentNode, Job, RecipeRun
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 
 from .agent_grant_requests import job_run_grant_request
 from .lifecycle_simulation.simulation import Simulation

@@ -51,7 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
-from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,

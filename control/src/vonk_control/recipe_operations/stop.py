@@ -54,7 +54,7 @@ from ..recipe_routes import (
     route_publication_transaction,
 )
 from ..run_admission import RunAdmissionBusy
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import _STOP_WITHDRAWAL_ATTEMPTS
 from .errors import (
     RecipeArtifactJobCancellationPending,

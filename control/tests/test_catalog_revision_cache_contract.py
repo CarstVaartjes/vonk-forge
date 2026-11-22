@@ -116,7 +116,7 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
 
     import vonk_control.catalog.revision_contract as contract
     from vonk_control.fleet_profiles.persistence import _stored_recipe
-    from vonk_control.stored_json import read_row_column
+    from vonk_control.stored.json_values import read_row_column
     from vonk_forge_contracts import document_sha256
 
     monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)

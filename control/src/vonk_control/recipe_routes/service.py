@@ -41,7 +41,7 @@ from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..recipe_lifecycle_contract import RecipeOperationResult
 from ..recovery_policy import ROUTE_RECOVERY, schedule
-from ..stored_documents import RouteClaimMarker
+from ..stored.documents import RouteClaimMarker
 from . import candidate
 from . import withdrawal as withdrawal_steps
 from .publisher import AtomicRecipeRoutePublisher

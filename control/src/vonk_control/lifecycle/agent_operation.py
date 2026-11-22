@@ -101,7 +101,7 @@ from ..offline_stops import is_deferred_stop
 from ..operations.progress import progress_document
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .evidence import keep_recorded_outcome

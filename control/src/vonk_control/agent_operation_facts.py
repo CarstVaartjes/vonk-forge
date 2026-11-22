@@ -31,7 +31,7 @@ from .stall_window import (
     progress_deadline,
     stall_deadline,
 )
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {

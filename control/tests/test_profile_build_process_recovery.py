@@ -370,7 +370,7 @@ def _worker_process(config: dict, crash: str) -> None:
                 )
                 return
             from vonk_control.run_switch_contract import RunSwitchOperationResult
-            from vonk_control.stored_json import read_row_column
+            from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before
             # the accepted observation budget. No real-time sleep or new

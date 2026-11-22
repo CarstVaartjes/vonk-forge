@@ -33,7 +33,7 @@ from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,

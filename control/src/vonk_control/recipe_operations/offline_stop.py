@@ -55,7 +55,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView

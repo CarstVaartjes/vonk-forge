@@ -28,7 +28,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityOperationFailure
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .artifacts import ArtifactSetManifest, _unique_artifacts
 from .constants import _LOGGER
 from .errors import ModelCacheError

@@ -58,7 +58,7 @@ from ..recipe_image_removal_contract import (
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import (
     _LOGGER,

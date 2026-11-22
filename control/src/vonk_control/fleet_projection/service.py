@@ -45,7 +45,7 @@ from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,

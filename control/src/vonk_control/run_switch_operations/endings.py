@@ -41,7 +41,7 @@ from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import Verdict, stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .awaited_children import start_request_key
 from .errors import RunSwitchOperationConflict
 from .observation_window import checkpoint_deadline, checkpoint_verdict

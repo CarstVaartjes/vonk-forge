@@ -49,7 +49,7 @@ from .runtime.spec_contract import (
     SpecWritablePath,
 )
 from .runtime.writable_paths import document as writable_path_document
-from .stored_states import CatalogRevisionState
+from .stored.states import CatalogRevisionState
 
 RUNTIME_INTERFACE = "vonk.runtime.v1"
 

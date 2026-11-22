@@ -27,7 +27,7 @@ from vonk_control.fleet_events import (
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySample,

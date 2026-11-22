@@ -19,7 +19,7 @@ from .catalog.queries import active_head_revision
 from .catalog.revision_contract import shared_catalog_document
 from .content_identity import RecipeExecution, runs_identically
 from .models import CatalogDocumentRevision
-from .stored_states import CatalogRevisionState
+from .stored.states import CatalogRevisionState
 from .strict_json import StrictJSONModel
 
 RECIPE_UPDATE_AVAILABLE = ProjectionCode.RECIPE_UPDATE_AVAILABLE

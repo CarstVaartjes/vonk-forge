@@ -40,7 +40,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .node_contacts import contact_row
@@ -425,7 +425,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         _persisted_result,
         _read_progress,
     )
-    from vonk_control.stored_json import read_row_column
+    from vonk_control.stored.json_values import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.
     # The generic parent observer must not retire its accepted effect merely

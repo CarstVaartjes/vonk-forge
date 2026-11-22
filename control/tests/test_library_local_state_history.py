@@ -30,7 +30,7 @@ from vonk_control.model_cache_contract import (
 from vonk_control.models import Base, ModelCacheOperation, ModelCacheSet
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts.model import ModelReference
 

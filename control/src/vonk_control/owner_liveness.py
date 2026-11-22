@@ -68,7 +68,7 @@ from .models import (
     RecipeRun,
     ResourceReservation,
 )
-from .stored_states import LibrarySyncRunState, RecipeBuildState
+from .stored.states import LibrarySyncRunState, RecipeBuildState
 from .strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.

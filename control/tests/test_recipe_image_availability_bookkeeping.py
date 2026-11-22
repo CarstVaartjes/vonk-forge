@@ -30,7 +30,7 @@ from vonk_control.recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_control.stored_json import Residue, read_row_column
+from vonk_control.stored.json_values import Residue, read_row_column
 from vonk_forge_contracts import RecipeDefinition
 
 from .test_recipe_image_availability import (

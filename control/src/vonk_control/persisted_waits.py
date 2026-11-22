@@ -208,7 +208,7 @@ if TYPE_CHECKING:
 
 def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
     # Opaque engine content is never interpreted as Controller scheduling data.
-    from .stored_json import binding_for
+    from .stored.json_values import binding_for
 
     schema = binding_for("jobs", "payload").contract_for(owner.kind)
     return schema is contract or contract in get_args(schema)

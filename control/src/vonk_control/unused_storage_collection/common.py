@@ -31,7 +31,7 @@ from ..storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 if TYPE_CHECKING:
     from .evidence import _Item

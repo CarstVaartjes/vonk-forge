@@ -34,7 +34,7 @@ from ..model_cache_contract import (
 )
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..revision_images import RevisionImage, revision_images
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,

@@ -51,7 +51,7 @@ from ..models import (
     FleetProfileSelection,
     InstallationNode,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,

@@ -9,7 +9,7 @@ from sqlalchemy import DateTime
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 
 from ..lifecycle.evidence import Residue
-from ..stored_json import ContractJSON
+from ..stored.json_values import ContractJSON
 from ..wait_contract import WaitEvidence
 
 

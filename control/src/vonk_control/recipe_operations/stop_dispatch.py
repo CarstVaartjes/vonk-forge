@@ -71,7 +71,7 @@ from ..recipe_stop_payloads import (
     durable_run_stop_payloads,
 )
 from ..run_admission import RunAdmissionBusy
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import RecipeOperationContext
 from .errors import (

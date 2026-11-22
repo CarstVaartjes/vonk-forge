@@ -31,7 +31,7 @@ from ..model_cache_contract import CacheResolution
 from ..models import CatalogDocument, CatalogDocumentRevision, FleetProfile
 from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .contracts import (
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,

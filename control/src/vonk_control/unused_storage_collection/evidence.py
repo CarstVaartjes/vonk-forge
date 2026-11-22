@@ -26,7 +26,7 @@ from ..models import (
 )
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .references import _applied_revision_ids, _profile_pointers
 
 

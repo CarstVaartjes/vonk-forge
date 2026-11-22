@@ -122,7 +122,7 @@ from ..models import (
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_images
 from ..run_states import ENDED_RUN_STATES
-from ..stored_json import binding_for
+from ..stored.json_values import binding_for
 from ..wait_contract import WaitOwnerKind
 from .revision_contract import UnprojectedRevision, shared_catalog_document
 

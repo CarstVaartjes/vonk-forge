@@ -50,7 +50,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _recipe_model_identities as _recipe_model_identities,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import _MAX_ACTION_NODES, _MAX_ACTIVE_RUNS, _MEMORY_RESERVATION_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .intent import _active_owned_workload_jobs

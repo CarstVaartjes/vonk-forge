@@ -68,7 +68,7 @@ from ..runtime_image_preparation import (
     RuntimeImagePreparationUnknown,
     RuntimeImageStorage,
 )
-from ..stored_json import JsonColumn, read_column
+from ..stored.json_values import JsonColumn, read_column
 
 _LOGGER = logging.getLogger(__package__)
 #: The progress ``activity`` of an operation: working now, or waiting for its turn.

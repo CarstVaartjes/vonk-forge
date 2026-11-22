@@ -31,7 +31,7 @@ from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     RunSwitchJournalRepairEndEvidence,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .discovery import _candidate, _discover, _fingerprint, journal_document
 from .pending import _pending
 

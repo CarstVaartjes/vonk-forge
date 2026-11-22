@@ -28,7 +28,7 @@ from ..operations.contract import AvailabilityOperationFailure
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_json import Residue
+from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

@@ -17,7 +17,7 @@ from ..run_switch_contract import (
     FreshnessEvidence,
     RunSwitchContainerBuildResult,
 )
-from ..stored_states import RecipeBuildState
+from ..stored.states import RecipeBuildState
 from .constants import _CONTAINER_BUILD_STATE_ADAPTER
 from .errors import RunSwitchRetryLater
 

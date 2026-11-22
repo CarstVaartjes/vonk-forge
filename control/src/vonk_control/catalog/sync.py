@@ -43,7 +43,7 @@ from ..recipe_library_types import (
 )
 from ..recipe_packages.contracts import has_newer_major_note
 from ..source_bundles import SourceBundleUnknown
-from ..stored_states import LibrarySyncRunState
+from ..stored.states import LibrarySyncRunState
 from ..wait_contract import QueueWait
 from .queries import active_head_revision
 from .revision_contract import catalog_document_readable

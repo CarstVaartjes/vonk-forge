@@ -13,7 +13,7 @@ from .operations.blockers import OperationBlocker
 from .operations.contract import AvailabilityOperationFailure
 from .recipe_availability_intent import RecipeAvailabilityIntent
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .stored_json import Residue
+from .stored.json_values import Residue
 from .strict_json import StrictJSONModel
 from .wait_contract import QueueWait
 

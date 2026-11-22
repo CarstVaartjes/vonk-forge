@@ -44,7 +44,7 @@ from ..runtime_image_preparation import (
 from ..runtime_image_preparation import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import (
     read_stored_model,
 )

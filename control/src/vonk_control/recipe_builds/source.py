@@ -42,7 +42,7 @@ from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
 )
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,

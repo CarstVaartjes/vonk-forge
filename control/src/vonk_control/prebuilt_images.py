@@ -70,7 +70,7 @@ from .recipe_execution_contract import (
 )
 from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
-from .stored_states import RecipeBuildState
+from .stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 

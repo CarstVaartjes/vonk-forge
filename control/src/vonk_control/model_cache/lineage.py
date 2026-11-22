@@ -30,7 +30,7 @@ from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
 from ..models import CatalogDocumentRevision, ModelCacheSet, ModelCacheSetArtifact
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 
 def set_bindings(

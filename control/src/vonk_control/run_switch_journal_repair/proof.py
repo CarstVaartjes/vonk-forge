@@ -36,7 +36,7 @@ from ..run_switch_journal_contract import (
     JournalRepairPurpose,
     NativeProgressWitness,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 
 def _prove(

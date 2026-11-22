@@ -36,7 +36,7 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 from vonk_agent_protocol.wire_model import WireEnum
-from vonk_control import stored_states
+from vonk_control.stored import states as stored_states
 
 from .parsed_sources import memoized_scan, parse_file
 

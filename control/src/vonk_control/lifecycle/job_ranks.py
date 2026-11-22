@@ -18,7 +18,7 @@ from vonk_agent_protocol import RecipeJobRunRequest
 
 from .. import artifact_job_states as ajs
 from ..models import AgentOperation, ArtifactJob, Job
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .agent_operation import is_artifact_owned
 
 

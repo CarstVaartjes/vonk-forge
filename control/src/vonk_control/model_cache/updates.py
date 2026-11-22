@@ -17,7 +17,7 @@ from ..catalog.revision_contract import (
 )
 from ..categorized_errors import InvalidValue
 from ..models import CatalogDocumentRevision, ModelCacheSet
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import (

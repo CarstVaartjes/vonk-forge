@@ -75,7 +75,7 @@ from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
 from ..stall_window import Verdict, stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _ARTIFACT_WAIT_CODES,

@@ -33,7 +33,7 @@ from ..model_cache.source_helpers import _model_selector
 from ..models import CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .common import (
     _LIBRARY_ORDER,
     _canonical_model,

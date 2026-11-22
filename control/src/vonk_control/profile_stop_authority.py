@@ -46,7 +46,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")

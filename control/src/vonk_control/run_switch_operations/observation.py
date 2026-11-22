@@ -27,7 +27,7 @@ from ..models import (
     Job,
 )
 from ..operations.blockers import bound_blockers
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
 from .evidence_waits import wake_evidence_waits

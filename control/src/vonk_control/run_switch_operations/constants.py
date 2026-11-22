@@ -31,7 +31,7 @@ from ..run_switch_contract import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 
 _ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
 

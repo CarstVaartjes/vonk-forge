@@ -59,7 +59,7 @@ from ..runtime.preflight import (
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,

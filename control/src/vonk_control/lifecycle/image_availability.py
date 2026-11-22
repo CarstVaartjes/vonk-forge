@@ -77,7 +77,7 @@ from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_contract import UPDATE_KIND
 from ..stall_window import stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .adapter import Dispatch
 from .core import STOP_BUDGET, transition

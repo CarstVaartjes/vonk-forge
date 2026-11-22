@@ -65,7 +65,7 @@ from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _OBSERVING,

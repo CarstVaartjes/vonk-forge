@@ -41,7 +41,7 @@ from ..operations.contract import (
 )
 from ..persisted_waits import schedule_wait
 from ..stall_window import Verdict, Wait, progress_verdict
-from ..stored_json import Residue
+from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     _CLAIM_SCAN_WINDOW,

@@ -26,8 +26,8 @@ from ..models import (
     RecipeRun,
 )
 from ..reference_facts import profiles_naming
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import _iso, _recipe_model_content_digests
 from .constants import SCHEMA_VERSION

@@ -385,7 +385,7 @@ def test_old_receipt_cannot_revive_newer_attempt_or_intent(
 def test_fresh_controller_contract_registration_starts_without_import_cycle():
     """Catches a receipt-handler import breaking a fresh Controller process."""
     subprocess.run(
-        [sys.executable, "-c", "import vonk_control.stored_columns"],
+        [sys.executable, "-c", "import vonk_control.stored.columns"],
         check=True,
         capture_output=True,
         text=True,

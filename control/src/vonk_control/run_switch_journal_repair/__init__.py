@@ -128,9 +128,7 @@ from ..run_switch_journal_contract import (
 from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState as RunSwitchJournalRepairPendingState,
 )
-from ..stored_json import (
-    read_row_column as read_row_column,
-)
+from ..stored.json_values import read_row_column as read_row_column
 from .discovery import REPAIR_WAIT as REPAIR_WAIT
 from .discovery import _candidate as _candidate
 from .discovery import _discover as _discover

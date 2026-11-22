@@ -34,8 +34,8 @@ from ..model_primitives import (
     _state_in,
     _uuid_shape,
 )
-from ..stored_json import ContractJSON
-from ..stored_states import LibrarySyncRunState, RecipeBuildState
+from ..stored.json_values import ContractJSON
+from ..stored.states import LibrarySyncRunState, RecipeBuildState
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 

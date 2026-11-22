@@ -48,7 +48,7 @@ from ..run_switch_contract import (
     RunSwitchRuntimeImageReferenceIntent,
     RunSwitchStopApplyRequest,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import (
     read_stored_model,
     serialize_json_value,

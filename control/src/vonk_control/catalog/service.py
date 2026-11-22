@@ -50,7 +50,7 @@ from ..source_bundles import (
     SourceBundleUnknown,
     parse_source_bundle_manifest,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .entities import (
     CatalogDocumentRevision,
     CatalogEntityService,

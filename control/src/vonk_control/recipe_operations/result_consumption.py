@@ -66,7 +66,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parse_recipe_parent as _parse_recipe_parent,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater

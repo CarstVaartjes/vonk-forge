@@ -33,7 +33,7 @@ from .catalog.revision_contract import (
 from .content_identity import build_source_bundles
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import CatalogDocumentRevision, RecipeBuild
-from .stored_states import RecipeBuildState
+from .stored.states import RecipeBuildState
 
 
 @dataclass(frozen=True, slots=True)

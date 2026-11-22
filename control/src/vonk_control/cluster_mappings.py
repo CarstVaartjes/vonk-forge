@@ -34,7 +34,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     split_option_choices,
 )
-from .stored_states import CatalogRevisionState, ClusterMappingState
+from .stored.states import CatalogRevisionState, ClusterMappingState
 from .strict_json import StrictModel
 from .topology import Placement, TopologyError, validate_topology
 

@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
 from ..models import (
     CatalogDocumentRevision,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .contracts import (
     _REFRESHABLE_PREFLIGHT_BLOCKERS,
     _RETRYABLE_INSTALL_BLOCKERS,

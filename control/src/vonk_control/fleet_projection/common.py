@@ -52,7 +52,7 @@ from ..models import (
     RunNode,
 )
 from ..recipe_update_notice import RecipeUpdateNotice
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel
 from ..telemetry import TelemetrySampleView
 from .host_checks import HostCheck, HostCheckAdvice, Text1024

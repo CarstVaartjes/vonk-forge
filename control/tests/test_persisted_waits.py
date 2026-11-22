@@ -229,7 +229,7 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
 def test_wait_model_inventory_is_exhaustive() -> None:
     """Every concrete owner binds its JSON to the canonical persisted model."""
     from vonk_control.models import Base
-    from vonk_control.stored_json import binding_for
+    from vonk_control.stored.json_values import binding_for
     from vonk_control.wait_contract import WaitEvidence
 
     owners = [

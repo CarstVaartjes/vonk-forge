@@ -49,8 +49,8 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalResult,
 )
 from ..revision_images import revision_images
-from ..stored_json import Residue, read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import Residue, read_row_column
+from ..stored.states import CatalogRevisionState
 from .contracts import (
     _ACTIVE,
     _SHA256,

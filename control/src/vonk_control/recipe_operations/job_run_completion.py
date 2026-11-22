@@ -42,7 +42,7 @@ from ..profile_stop_authority import (
     jobrun_stop_key,
 )
 from ..recipe_progress import _parent_execution_mode
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .rank_authority import _profile_jobrun_parent
 
 

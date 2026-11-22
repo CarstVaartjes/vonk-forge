@@ -88,7 +88,7 @@ from .resource_planning import (
     memory_reservation_kind,
     plan_capacity,
 )
-from .stored_states import CatalogRevisionState, ClusterMappingState
+from .stored.states import CatalogRevisionState, ClusterMappingState
 from .topology import Placement, TopologyError, validate_topology
 
 _PORT_CONFLICTS = {

@@ -11,7 +11,7 @@ from vonk_control.inventory_repository import (
     newest_snapshot_ids,
 )
 from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 

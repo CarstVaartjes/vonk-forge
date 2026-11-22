@@ -39,8 +39,8 @@ from ..runtime_image_preparation import (
     prepare_runtime_image,
 )
 from ..stall_window import last_progress_at, latest_progress
-from ..stored_json import Residue
-from ..stored_states import RecipeBuildState
+from ..stored.json_values import Residue
+from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _LOGGER,

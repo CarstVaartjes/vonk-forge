@@ -43,7 +43,7 @@ from vonk_control.models import (
     RecipeInstallation,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_library_local_state_history import _cache_set, _operation

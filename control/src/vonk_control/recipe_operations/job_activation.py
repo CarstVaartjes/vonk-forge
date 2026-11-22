@@ -46,7 +46,7 @@ from ..run_admission import (
 from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import (
     RecipeRequestInvalid,

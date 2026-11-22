@@ -13,7 +13,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.db import initialize_database
 from vonk_control.db import startup as startup_owner
 from vonk_control.models import NodeInventorySnapshot
-from vonk_control.stored_json import ContractJSON
+from vonk_control.stored.json_values import ContractJSON
 
 
 def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None:

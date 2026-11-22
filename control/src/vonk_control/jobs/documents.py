@@ -5,7 +5,7 @@
 availability operation, an agent upgrade rollout ...).  This module defines the
 documents that have no other home; the ones a feature already owns
 (``RunSwitchOperationResult``, ``RecipeUpdateDocument`` ...) are bound to their
-kind in :mod:`vonk_control.stored_columns`.
+kind in :mod:`vonk_control.stored.columns`.
 
 A kind nothing registers (the generic ``JobService`` queue, which no production
 code enqueues into) keeps its document opaque: see :class:`GenericJobDocument`.
@@ -73,7 +73,7 @@ from ..run_switch_contract import (
     RunSwitchStopApplyRequest,
 )
 from ..runtime_image_preparation import RuntimeImageReceipt, RuntimeImageReferenceIntent
-from ..stored_json import ExternalPassthrough
+from ..stored.json_values import ExternalPassthrough
 from ..strict_json import StrictJSONModel
 
 UuidText = Annotated[

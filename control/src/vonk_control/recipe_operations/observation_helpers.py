@@ -64,8 +64,8 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_lifecycle_contract import JOB_ACTIVATION
 from ..reservation_owners import run_has_live_operation
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from .errors import RecipeRetryLater
 from .results import _RANK_FAILED

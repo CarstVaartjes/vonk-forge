@@ -68,7 +68,7 @@ from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
 from ..run_switch_contract import RunSwitchOperationResult
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from .errors import (
     RecipeArtifactJobCancellationPending,

@@ -62,7 +62,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Route activation acknowledgement (`drained` or `ready`) | `vonk_agent_protocol.route_activation.SupervisorAcknowledgement` | LiteLLM supervisor writer; Controller `FileSupervisorAcknowledger` (a withdrawal accepts `drained`, a publication only `ready`) |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
-| Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored_columns.py` (read and written through `stored_json`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |
+| Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored/columns.py` (read and written through `stored.json_values`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
@@ -71,7 +71,7 @@ additional recipe documents for users to maintain.
 ### JSON columns
 
 Every `JSON` column in `models.py` has exactly one contract in
-`stored_columns.py`, typed at every level: no `Any`, `object`, `JsonValue`,
+`stored/columns.py`, typed at every level: no `Any`, `object`, `JsonValue`,
 bare `dict`/`list` or mapping of those. A level that is genuinely someone
 else's document is a named `ExternalPassthrough` subclass whose written reason
 says whose it is; nothing else may be untyped. A table that stores several
@@ -80,7 +80,7 @@ document families (a job's `kind`) binds one contract per kind.
 Writers store `model_dump(mode="json")` of the contract model; the ORM write
 guard checks every changed JSON column against its contract (the test suite
 refuses a violation, the Controller reports it once and stores it, because
-bookkeeping never blocks work). Readers go through `stored_json.read_column`:
+bookkeeping never blocks work). Readers go through `stored.json_values.read_column`:
 a document written by an older build is adopted (retired fields dropped), and
 a damaged one is a typed unknown (`Residue`) naming the column and row, never
 an exception. `control/tests/test_json_column_contracts.py` fails when a column
@@ -553,7 +553,7 @@ added-line vocabulary guard rejects new hand-spelled contract words.
 
 A stored record that never crosses the wire (a catalog document revision, a
 library sync run, a cluster mapping) has its closed state words in
-`control/src/vonk_control/stored_states.py`: a `WireEnum` per column, not in
+`control/src/vonk_control/stored/states.py`: a `WireEnum` per column, not in
 `MACHINES` and not in `LifecycleVocabulary`, so no wire output changes. Recipe
 build states do cross the wire (`RunSwitchContainerBuildResult.state`, built by
 `run_switch_contract/vocabulary.py` into `control/openapi.json`); that Literal is

@@ -65,7 +65,7 @@ from .recipe_runtime_specs import recipe_topology
 from .run_switch_contract import (
     RunSwitchReconciliationAuthority,
 )
-from .stored_states import CatalogRevisionState
+from .stored.states import CatalogRevisionState
 from .strict_json import read_stored_model, serialize_json_value
 
 

@@ -4,7 +4,7 @@
 binding fails ``control/tests/test_json_column_contracts.py``.  A table that
 stores several document families binds one contract per value of its
 ``kind`` column.  The mechanism (reading, writing, the write guard and the
-structural walker) is :mod:`vonk_control.stored_json`.
+structural walker) is :mod:`vonk_control.stored.json_values`.
 """
 
 from __future__ import annotations
@@ -48,24 +48,24 @@ from vonk_forge_contracts import (
     RecipeDisplay,
 )
 
-from .agent_upgrade_contract import (
+from ..agent_upgrade_contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
-from .artifact_job_evidence import ArtifactJobResultEvidence
-from .ca_issuance_contract import CertificateIssuanceBinding
-from .catalog.revision_contract import (
+from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..ca_issuance_contract import CertificateIssuanceBinding
+from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     UnprojectedRevision,
 )
-from .catalog.sync_contract import ManagedCatalogSyncResult
-from .compiled_artifact_contract import (
+from ..catalog.sync_contract import ManagedCatalogSyncResult
+from ..compiled_artifact_contract import (
     ArtifactOutputLimits,
     CompiledArtifactContract,
     ParameterScalar,
 )
-from .fleet_event_contract import (
+from ..fleet_event_contract import (
     AgentOperationPayload,
     InstallationNodePayload,
     JobPayload,
@@ -75,7 +75,7 @@ from .fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from .fleet_profile_contract import (
+from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
     FleetProfileAssignmentInput,
@@ -83,7 +83,7 @@ from .fleet_profile_contract import (
     LabelName,
     LabelValue,
 )
-from .jobs.documents import (
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityUnknownEnd,
@@ -101,27 +101,27 @@ from .jobs.documents import (
     RecipeUninstallParent,
     RunSwitchJobPayload,
 )
-from .mapping_parameters import MappingParameters
-from .model_cache_contract import (
+from ..mapping_parameters import MappingParameters
+from ..model_cache_contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
 )
-from .operator_receipt_contract import ReceiptOwner
-from .profile_stop_authority import ProfileJobRunStopJob
-from .recipe_execution_contract import (
+from ..operator_receipt_contract import ReceiptOwner
+from ..profile_stop_authority import ProfileJobRunStopJob
+from ..recipe_execution_contract import (
     StoredBuildPolicyReport,
     StoredInstallationPlan,
     StoredRunEndpoint,
     StoredRunPlan,
 )
-from .recipe_image_removal_contract import (
+from ..recipe_image_removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,
 )
-from .recipe_lifecycle_contract import (
+from ..recipe_lifecycle_contract import (
     JOB_ACTIVATION,
     RecipeOperationActivatedResult,
     RecipeOperationCancellationResult,
@@ -129,19 +129,19 @@ from .recipe_lifecycle_contract import (
     RecipeOperationResult,
     RecipeOperationStoppedResult,
 )
-from .recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
-from .run_switch_contract import (
+from ..recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
+from ..run_switch_contract import (
     RunSwitchDistributionChildResult,
     RunSwitchOperationResult,
 )
-from .run_switch_journal_contract import (
+from ..run_switch_journal_contract import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
-from .stored_documents import RouteClaimMarker
-from .stored_json import bind
+from .documents import RouteClaimMarker
+from .json_values import bind
 
 ProfileLabels = Annotated[dict[LabelName, LabelValue], Field(max_length=16)]
 
@@ -329,7 +329,7 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
-from .run_switch_identity_contract import RunSwitchCancellation
+from ..run_switch_identity_contract import RunSwitchCancellation
 
 bind(
     "run_switch_journal_repairs",
@@ -364,7 +364,7 @@ bind(
 bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
 
 # Every wait uses one contract; next_check is projected from the owner's SQL clock.
-from .wait_contract import WaitEvidence
+from ..wait_contract import WaitEvidence
 
 for _table in (
     "coordinator_failures",
@@ -384,11 +384,11 @@ for _table in (
 ):
     bind(_table, "wait_evidence", WaitEvidence, nullable=True)
 
-from .coordinator_contract import CoordinatorFailureEvidence
+from ..coordinator_contract import CoordinatorFailureEvidence
 
 bind("coordinator_failures", "failure", CoordinatorFailureEvidence)
 
-from .inventory_items_contract import AgentInventoryItems
+from ..inventory_items_contract import AgentInventoryItems
 
 bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=True)
 
@@ -401,7 +401,7 @@ bind(
     nullable=True,
 )
 
-from .repeated_evidence_contract import RepeatedEvidence
+from ..repeated_evidence_contract import RepeatedEvidence
 
 bind(
     "agent_node_contacts",

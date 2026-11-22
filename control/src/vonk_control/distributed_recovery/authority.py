@@ -52,7 +52,7 @@ from ..recipe_start_payloads import (
 )
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
 from ..stall_window import stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .common import (
     _DAMAGED,

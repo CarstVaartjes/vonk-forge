@@ -49,7 +49,7 @@ from ..models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .revision_contract import (
     CatalogRevisionContractError,

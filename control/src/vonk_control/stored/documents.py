@@ -1,7 +1,7 @@
 """Contract models for stored JSON documents that have no other home.
 
 Most JSON columns store a document owned by an existing contract module (a plan,
-a progress tree, a wire payload); :mod:`vonk_control.stored_columns` binds those
+a progress tree, a wire payload); :mod:`vonk_control.stored.columns` binds those
 where they are defined.  A document that exists only as bookkeeping in a column
 is defined here, with its columns named in its docstring.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field
 
-from .strict_json import StrictJSONModel
+from ..strict_json import StrictJSONModel
 
 
 class _StoredDocument(StrictJSONModel):

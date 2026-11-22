@@ -18,7 +18,7 @@ from vonk_control.models import AgentOperation, Job
 from vonk_control.recipe_lifecycle_contract import parse_recipe_lifecycle_result
 from vonk_control.recipe_operations.contracts import RecipeOperationContext
 from vonk_control.recipe_operations.observation_helpers import _RECIPE_PARENT_READERS
-from vonk_control.stored_json import bindings
+from vonk_control.stored.json_values import bindings
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .test_recipe_operations import installed_recipe, setup_services, start_evidence

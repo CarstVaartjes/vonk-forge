@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_control.models import Base
-from vonk_control.stored_json import install_write_guard
+from vonk_control.stored.json_values import install_write_guard
 
 from . import metadata_type_snapshot
 from .api_response_witness import (
@@ -92,7 +92,7 @@ def load_tools_module(name: str):
 def damaged_json_rows() -> Iterator[None]:
     """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
 
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     with write_guard_mode(strict=False):
         yield

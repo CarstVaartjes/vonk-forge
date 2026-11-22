@@ -1078,7 +1078,7 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
     """One bad manifest must not turn unrelated cached rows into unknown state."""
     from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache_contract import CacheManifest
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     projection, sessions, *_ = assessed_library
     healthy = projection.models().models[0]

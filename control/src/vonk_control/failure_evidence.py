@@ -57,7 +57,7 @@ from .operations.item_contract import (
     OperationResultFacts,
     operation_item,
 )
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 from .summary_cut import summary_cut
 

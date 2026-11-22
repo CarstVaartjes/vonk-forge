@@ -35,7 +35,7 @@ from ..models import Job
 from ..run_switch_contract import (
     RunSwitchReason,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .interfaces import ArtifactInspection
 from .planning_helpers import (
     _as_reason,
