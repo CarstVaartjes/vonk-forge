@@ -71,20 +71,33 @@ pub(super) fn command(path: &str, arguments: &[&str], offline: bool) -> Result<S
 
 pub fn prerequisites() -> Result<(), String> {
     // Probe before dpkg invokes prerm and stops the healthy source agent. This
-    // set is what the maintainer shims, the package hooks and the watchdog run.
+    // is what the maintainer shims, the package hooks, the watchdog and dpkg
+    // itself run. dpkg's own set is its checkpath (dpkg 1.22 src/main/help.c,
+    // called from archives.c): `--install` refuses to run without sh, rm, tar,
+    // diff, dpkg-deb, ldconfig and start-stop-daemon on its PATH. perl runs
+    // deb-systemd-helper, deb-systemd-invoke and adduser; adduser execs
+    // useradd and groupadd.
     for executable in [
         "/bin/sh",
         "/usr/bin/deb-systemd-helper",
         "/usr/bin/deb-systemd-invoke",
+        "/usr/bin/diff",
         "/usr/bin/dpkg",
         "/usr/bin/dpkg-deb",
         "/usr/bin/dpkg-query",
         "/usr/bin/loginctl",
+        "/usr/bin/perl",
+        "/usr/bin/rm",
         "/usr/bin/systemctl",
         "/usr/bin/systemd-run",
+        "/usr/bin/tar",
         "/usr/sbin/addgroup",
         "/usr/sbin/adduser",
+        "/usr/sbin/groupadd",
+        "/usr/sbin/ldconfig",
         "/usr/sbin/nologin",
+        "/usr/sbin/start-stop-daemon",
+        "/usr/sbin/useradd",
         "/usr/sbin/usermod",
     ] {
         let m = fs::metadata(executable)
