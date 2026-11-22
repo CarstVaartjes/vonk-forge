@@ -7,7 +7,14 @@ use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthor
 
 use super::commands::command;
 use super::custody::{digest, now, safe};
-use super::{AGENT, HELPER, Store, Transaction, prerequisites};
+use super::{AGENT, HELPER, PACKAGE, Store, Transaction, prerequisites};
+
+/// What dpkg and the filesystem say is installed at confirm time.
+pub(super) struct Observed {
+    pub dpkg_status: Result<String, String>,
+    pub agent_sha256: String,
+    pub helper_sha256: String,
+}
 
 impl Store {
     pub fn prepare(
@@ -214,15 +221,38 @@ impl Store {
     }
     pub fn acknowledge(&self, node: &str, candidate: &str, nonce: &str) -> Result<(), String> {
         let _lock = self.lock()?;
-        let mut tx = self.read()?;
-        self.check_acknowledgement(&tx, node, candidate, nonce, now()?)?;
-        if digest(Path::new(AGENT))? != tx.candidate_binary_sha256
-            || digest(Path::new(HELPER))? != tx.candidate_helper_sha256
+        let tx = self.read()?;
+        let timestamp = now()?;
+        // Cheap request checks first: a wrong or expired request never spawns dpkg.
+        self.check_acknowledgement(&tx, node, candidate, nonce, timestamp)?;
+        // Observe what is installed: any unreadable observation refuses, the
+        // transaction stays Armed and the watchdog restores at the deadline.
+        let observed = Observed {
+            dpkg_status: command(
+                "/usr/bin/dpkg-query",
+                &["-W", "-f=${Status}\t${Version}", PACKAGE],
+                false,
+            ),
+            agent_sha256: digest(Path::new(AGENT))?,
+            helper_sha256: digest(Path::new(HELPER))?,
+        };
+        self.finish_acknowledgement(tx, &observed, timestamp)
+    }
+    pub(super) fn finish_acknowledgement(
+        &self,
+        mut tx: Transaction,
+        observed: &Observed,
+        timestamp: i64,
+    ) -> Result<(), String> {
+        let installed = format!("install ok installed\t{}", tx.candidate_version);
+        if observed.dpkg_status.as_deref() != Ok(installed.as_str())
+            || observed.agent_sha256 != tx.candidate_binary_sha256
+            || observed.helper_sha256 != tx.candidate_helper_sha256
         {
-            return Err("candidate executable identity changed".into());
+            return Err("candidate is not the installed package".into());
         }
         tx.phase = Phase::Acknowledged;
-        tx.updated_at = now()?;
+        tx.updated_at = timestamp;
         tx.outcome = Outcome::ControllerConfirmedActivation;
         self.write(&tx)
     }
