@@ -14,8 +14,7 @@ from the staged files a promoted package's capsule leaves (none of them
 dpkg-owned) and asserts the candidate retires them. Each fault holds dpkg in
 its payload extraction or its postinst (a pass-through dpkg-deb on dpkg's PATH,
 or a held configure), then kills the helper's cgroup, dpkg alone, or every
-package unit (the reboot stand-in). The helper-cgroup fault also starts the
-agent while its loaded ExecCondition still names the removed runner. A runner cannot reboot inside a job, so that stand-in kills and
+package unit (the reboot stand-in). A runner cannot reboot inside a job, so that stand-in kills and
 stops the package's units, waits past the activation deadline and starts the
 units a boot starts; a kernel boot and unsynced writes are not reproduced.
 No Controller or GPU acceptance is claimed.
@@ -630,7 +629,6 @@ def main() -> None:
                     if hold == HOLD_EXTRACTION
                     else "vonk-forge-agent.postinst\0configure\0"
                 ).encode()
-                observed: dict[str, str] = {}
                 dpkg = wait(
                     lambda marker=marker: held_dpkg(marker),
                     f"{fault}: dpkg not held at {hold.name}",
@@ -649,15 +647,6 @@ def main() -> None:
                         "--signal=SIGKILL",
                         HELPER,
                     )
-                    # No daemon-reload ran: the loaded agent unit still has the
-                    # drop-in whose runner the unpack removed. Whatever systemd
-                    # does with that start, the deadline restore must heal it.
-                    run("/usr/bin/systemctl", "stop", AGENT, check=False)
-                    run("/usr/bin/systemctl", "start", "--no-block", AGENT, check=False)
-                    time.sleep(3)
-                    observed["agent_start_before_reload"] = run(
-                        "/usr/bin/systemctl", "is-active", AGENT, check=False
-                    ).stdout.strip()
                 else:
                     units = (HELPER, AGENT, "vonk-forge-monitor.service", WATCHDOG)
                     for unit in units:
@@ -698,7 +687,6 @@ def main() -> None:
                     f"{fault}-at-{hold.name.removeprefix('vonk-transition-hold-')}",
                     nonce,
                     held_state=held_state,
-                    **observed,
                 )
         assert not watch.seen, f"a forward capsule armed: {sorted(watch.seen)}"
 

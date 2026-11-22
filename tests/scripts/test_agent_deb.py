@@ -1143,6 +1143,11 @@ def test_ordinary_control_verification_remains_unchanged(tmp_path: Path) -> None
 
     VERIFY_MODULE._verify_control(control)
 
+    (control / "preinst").write_bytes(b"#!/bin/sh\n")
+    (control / "preinst").chmod(0o755)
+    with pytest.raises(VERIFY_MODULE.VerificationError):
+        VERIFY_MODULE._verify_control(control)
+
 
 @pytest.mark.parametrize(
     ("mutation", "message"),

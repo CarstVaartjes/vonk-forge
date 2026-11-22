@@ -81,8 +81,9 @@ and the enabled watchdog restores at boot). Restoration stops the agent and
 helper, reinstalls only the captured source DEB, and verifies the configured
 package state plus the actual restarted process executable. Interrupted
 restoration resumes from the same durable transaction; it cannot select a
-different package or overwrite a third identity. The source package's own
-`postinst` runs its finisher on the way back.
+different package or overwrite a third identity. The restore runs `dpkg`
+offline, so the source `postinst` schedules no finisher; the watchdog itself
+reloads systemd and restarts the helper socket and the agent.
 
 An interrupted upgrade therefore ends on the previous version within the
 deadline, not forward on the candidate.
