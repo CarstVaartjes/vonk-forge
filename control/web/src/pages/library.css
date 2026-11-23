@@ -23,7 +23,7 @@
 
 .technical-details > summary {
   align-items: center;
-  color: var(--green-text);
+  color: var(--muted);
   cursor: pointer;
   display: grid;
   font-size: 0.78rem;
@@ -95,10 +95,10 @@
 }
 
 .technical-copy {
-  background: color-mix(in srgb, var(--green) 8%, var(--panel));
+  background: var(--raised);
   border: 1px solid var(--line-control);
   border-radius: var(--r-ctl);
-  color: var(--green-text);
+  color: var(--ink);
   flex: 0 0 auto;
   min-height: 44px;
   padding: 0.3rem 0.52rem;
@@ -1148,9 +1148,9 @@
   accent-color: var(--green);
 }
 .library-toggle:has(input:checked) {
-  background: color-mix(in srgb, var(--green) 8%, var(--panel));
-  border-color: color-mix(in srgb, var(--green-text) 40%, transparent);
-  color: var(--green-text);
+  background: var(--raised);
+  border-color: var(--ink);
+  color: var(--ink);
 }
 .library-filters > summary {
   cursor: pointer;
