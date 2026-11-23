@@ -574,6 +574,24 @@ def _database_local_state(
             revision_digests.get(installation_revision_id),
             controller=controller,
         )
+        # The Sparks of an active installation hold the models of its artifact set.
+        installed_set = recipe_sets.get(
+            revision_digests.get(installation_revision_id, "")
+        )
+        for model_digest in reference_digests.get(installed_set or "", ()):
+            self._merge_local(
+                asset_facts,
+                model_digest,
+                controller=cast(
+                    LibraryControllerState, LibraryCacheState.NOT_CACHED.value
+                ),
+                installed_on_sparks=True,
+            )
+            held = asset_facts[model_digest]
+            if held.controller == AssetAvailability.UNKNOWN.value:
+                held.controller = cast(
+                    LibraryControllerState, LibraryCacheState.NOT_CACHED.value
+                )
     nodes_by_run: dict[str, list[str]] = {}
     for run_id, node_id in run_nodes:
         nodes_by_run.setdefault(run_id, []).append(node_id)

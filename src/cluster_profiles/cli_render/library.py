@@ -8,8 +8,17 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import quote
 
-from ..cli_states_generated import QualificationOutcome, QualificationStatus
+from ..cli_states_generated import (
+    ACTION_DOWNLOAD,
+    ACTION_REMOVE,
+    CACHE_FAILED,
+    CACHE_NOT_CACHED,
+    UNKNOWN,
+    QualificationOutcome,
+    QualificationStatus,
+)
 from ..cli_telemetry_render import size as _size
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
@@ -170,11 +179,22 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
                 "Next",
                 f"vonkctl {noun} progress {shlex.quote(str(preparation['operation_id']))} --follow",
             )
-    elif local.get("controller") in {"not_cached", "failed"} and isinstance(
-        selector, str
+    if noun == LibraryNoun.MODEL and isinstance(selector, str):
+        # The Controller decides which actions apply; the web UI reads the same field.
+        actions = item.get("actions")
+        if not isinstance(actions, list):
+            raise ControlMalformedResponse("actions observation is unavailable")
+        if ACTION_DOWNLOAD in actions:
+            _field("Next", f"vonkctl model download {shlex.quote(selector)}")
+        if ACTION_REMOVE in actions:
+            _field("Remove", f"vonkctl model remove {shlex.quote(selector)} --fleet")
+    elif (
+        not preparation
+        and local.get("controller") in {CACHE_NOT_CACHED, CACHE_FAILED}
+        and isinstance(selector, str)
     ):
         _field("Next", f"vonkctl {noun} download {shlex.quote(selector)}")
-    elif local.get("controller") == "unknown":
+    if local.get("controller") == UNKNOWN:
         print(
             "Cache availability is unknown; inspect the Controller before preparing assets."
         )

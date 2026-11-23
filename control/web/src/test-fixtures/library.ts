@@ -1,3 +1,4 @@
+import { CacheOperationKind } from "../api/vocabulary.generated";
 import type {
   ModelDefinition,
   RecipeDefinition,
@@ -126,6 +127,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
       model_file_count: document.files.length,
       model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
       local,
+      actions: [CacheOperationKind.DOWNLOAD],
       ...facets,
       usage,
       alignment,
@@ -143,6 +145,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
     model_file_count: document.files.length,
     model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
     local,
+    actions: [CacheOperationKind.DOWNLOAD],
     ...facets,
     usage,
     alignment,
@@ -319,6 +322,7 @@ export const modelLibrary: ModelLibrary = {
       usage: [...(entry.model_display?.capabilities ?? [])],
       resources: projectionResources,
       local: entry.local,
+      actions: entry.actions,
       alignment: entry.alignment,
       updated_at: libraryViewSnapshot.generated_at,
     };

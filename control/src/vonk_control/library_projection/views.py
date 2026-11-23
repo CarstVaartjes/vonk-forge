@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..auth import cursor_key
 from ..catalog.queries import active_head_revision
@@ -27,6 +28,7 @@ from ..library.contract import (
     RecipeDetailResponse,
     RecipeLibraryResponse,
     _utc,
+    model_actions,
 )
 from ..model_cache.resolution import ResolutionMixin
 from ..model_cache.source_helpers import _model_selector
@@ -224,16 +226,22 @@ def models(
         snapshot = self._local_state_snapshot(
             [item.identity.content_sha256 for item in selected]
         )
-        return [
-            item.model_copy(
-                update={
-                    "local": self._local(
-                        item.identity.content_sha256, kind="model", snapshot=snapshot
-                    )
-                }
+        observed = []
+        for item in selected:
+            local = self._local(
+                item.identity.content_sha256,
+                kind=RunSwitchReasonScopeName.MODEL,
+                snapshot=snapshot,
             )
-            for item in selected
-        ]
+            observed.append(
+                item.model_copy(
+                    update={
+                        "local": local,
+                        "actions": model_actions(local, item.cache_usage),
+                    }
+                )
+            )
+        return observed
 
     page, next_cursor = _observed_library_page(
         filtered[:limit],

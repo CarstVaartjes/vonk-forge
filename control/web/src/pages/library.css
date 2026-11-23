@@ -911,6 +911,15 @@
   flex-wrap: wrap;
   margin-top: 0.55rem;
 }
+.library-model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.4rem 0.6rem;
+}
+.library-model-actions > .library-cache-action {
+  margin-top: 0.55rem;
+}
 .library-cache-state {
   display: inline-block;
   margin-top: 0.55rem;
