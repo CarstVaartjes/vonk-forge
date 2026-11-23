@@ -17,8 +17,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import job_states
 from ..bounded_json import require_integer
+from ..jobs import states as job_states
 from ..lifecycle.run_switch import (
     RunSwitchAdapter,
 )
@@ -36,7 +36,7 @@ from ..run_switch_contract import (
     RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .constants import (
     _INSTALL_PREFLIGHT_REFRESH_REASON,
     _LOGGER,

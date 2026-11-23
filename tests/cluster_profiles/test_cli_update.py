@@ -1041,14 +1041,15 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     from sqlalchemy.exc import SQLAlchemyError
     from sqlalchemy.orm import sessionmaker
     from vonk_control import api as api_module
-    from vonk_control import build_identity, platform_observation
-    from vonk_control import worker as worker_module
+    from vonk_control import build_identity
     from vonk_control.auth import Actor, TokenCodec
     from vonk_control.models import Base
-    from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE
+    from vonk_control.observation import platform as platform_observation
+    from vonk_control.observation.platform import PlatformObservation, PlatformObserver
+    from vonk_control.observation.transfer import OBSERVATION_MEDIA_TYPE
     from vonk_control.operation_api import admin_openapi_schema
-    from vonk_control.platform_observation import PlatformObservation, PlatformObserver
-    from vonk_control.worker import WorkerHeartbeatRecorder
+    from vonk_control.worker import loop as worker_module
+    from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
     from cluster_profiles import runtime_identity
     from cluster_profiles.control_client import ControlClient

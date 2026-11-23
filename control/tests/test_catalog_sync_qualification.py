@@ -20,9 +20,9 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import CursorCodec, TokenCodec
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
@@ -200,7 +200,7 @@ def test_sync_records_the_published_measured_memory_for_admission_only():
     the Library's ``projected`` block; a complete view without it withdraws it.
     """
     from sqlalchemy import select
-    from vonk_control.catalog_revision_contract import published_steady_peaks
+    from vonk_control.catalog.revision_contract import published_steady_peaks
     from vonk_control.models import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,

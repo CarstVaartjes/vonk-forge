@@ -20,8 +20,8 @@ from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
-from ..inventory_items import inventory_items
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
+from ..inventory.items import inventory_items
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
@@ -40,13 +40,13 @@ from ..models import (
     RunNode,
 )
 from ..nas_transfer_rate import slow_nas_transfers
-from ..observation_capture import begin_observation_capture
-from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
+from ..observation.capture import begin_observation_capture
+from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
-from ..stored_states import CatalogRevisionState
-from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
+from ..stored.states import CatalogRevisionState
+from ..telemetry.samples import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
     _LOW_CLOCK_LOOKBACK_SLACK,
@@ -185,7 +185,7 @@ class FleetProjection:
             stalls = self._stalled_loads(session, node_ids)
             repeating = repeating_evidence(session, node_ids, current)
             layout_notices = model_layout_notices(session, node_ids)
-            from ..gpu_clock import selected_gpu_clocks
+            from ..gpu.clock import selected_gpu_clocks
 
             try:
                 clocks = selected_gpu_clocks(session, node_ids)

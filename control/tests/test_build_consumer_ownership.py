@@ -11,7 +11,7 @@ import vonk_control.recipe_image_availability.requests as availability_requests
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profiles import queue_application as profile_module
-from vonk_control.job_documents import AvailabilityRuntime
+from vonk_control.jobs.documents import AvailabilityRuntime
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,
@@ -21,7 +21,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.recipe_availability_intent import RecipeBuildDependency
-from vonk_control.recipe_build_cancellation import (
+from vonk_control.recipe_builds.cancellation import (
     BuildConsumerError,
     lock_build_dependency,
 )

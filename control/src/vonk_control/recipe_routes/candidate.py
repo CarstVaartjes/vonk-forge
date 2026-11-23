@@ -18,12 +18,16 @@ from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol import RunState
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
-from ..interface_adapters import InterfaceAdapterError, interface_adapter
-from ..litellm import (
-    LiteLlmPolicy,
-    RouteState,
-    ServedModelInfo,
+from ..gateway.litellm import LiteLlmPolicy, RouteState, ServedModelInfo
+from ..gateway.route_bundle_contract import (
+    RouteAcceptedModelPolicy,
+    RouteAcceptedRunIdentity,
+    RouteIdentityDocument,
+    RouteRankIdentity,
+    RouteRunIdentity,
 )
+from ..gateway.route_model_info import RouteModelInfoReader
+from ..interface_adapters import InterfaceAdapterError, interface_adapter
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -39,14 +43,6 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )
-from ..route_bundle_contract import (
-    RouteAcceptedModelPolicy,
-    RouteAcceptedRunIdentity,
-    RouteIdentityDocument,
-    RouteRankIdentity,
-    RouteRunIdentity,
-)
-from ..route_model_info import RouteModelInfoReader
 from ..run_states import ENDED_RUN_STATES
 from ..security.route_authority import require_route_authority
 from .shared import (

@@ -529,8 +529,8 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.models import Base
     from vonk_control.source_bundles import SourceBundleStore
 
@@ -620,8 +620,8 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.models import Base
 
     specification = importlib.util.spec_from_file_location(
@@ -1727,7 +1727,7 @@ def test_recipe_download_timeout_preserves_durable_progress(monkeypatch, state) 
         OperationProgress,
         ProgressPhase,
     )
-    from vonk_control.operation_contract import (
+    from vonk_control.operations.contract import (
         AvailabilityOperationFailure,
         AvailabilityRecoveryAction,
     )
@@ -2149,8 +2149,8 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.compiled_artifact_contract import compile_artifact_contract
     from vonk_control.harnesses.canonical import validate_runtime_policy
     from vonk_control.models import Base
@@ -2426,7 +2426,7 @@ def _canary_lane_under_withdrawal(
     lane stops at the profile load, the first step after the re-offered serve.
     """
     lifecycle = _module()
-    import vonk_control.library_contract as contract
+    from vonk_control.library import contract
 
     sha = "a" * 64
     fixture = lifecycle.CanonicalCanaryFixture(

@@ -13,7 +13,7 @@ from vonk_control.agent_api import InventoryRequest
 from vonk_control.api import create_app
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import CacheRemovalReview
-from vonk_control.inventory_repository import InventoryRepository
+from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import AgentCertificate
 from vonk_control.run_admission import RunAdmissionService, require_admissible
@@ -181,7 +181,7 @@ def test_optional_model_evidence_damage_keeps_core_and_fresh_report_recovers(
         json.loads(record.getMessage())["code"]
         == AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED.value
         for record in caplog.records
-        if record.name == "vonk_control.inventory_repository"
+        if record.name == "vonk_control.inventory.repository"
     )
     clock.now += timedelta(seconds=1)
     payload = request.model_copy(update={"observed_at": clock.now}).model_dump(

@@ -34,7 +34,7 @@ from vonk_control.models import (
     Job,
     ResourceReservation,
 )
-from vonk_control.operation_blockers import make_blocker
+from vonk_control.operations.blockers import make_blocker
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .display_fixtures import reword

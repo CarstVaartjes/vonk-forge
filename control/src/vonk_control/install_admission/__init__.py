@@ -49,8 +49,8 @@ from ..disk_reservations import outstanding_disk_charges as outstanding_disk_cha
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes as outstanding_disk_reservation_bytes,
 )
-from ..inventory_repository import InventoryRepository as InventoryRepository
-from ..inventory_repository import InventorySnapshotView as InventorySnapshotView
+from ..inventory.repository import InventoryRepository as InventoryRepository
+from ..inventory.repository import InventorySnapshotView as InventorySnapshotView
 from ..legal_admission import territorial_admission as territorial_admission
 from ..models import AgentNode as AgentNode
 from ..models import CatalogDocumentRevision as CatalogDocumentRevision
@@ -78,10 +78,10 @@ from ..recipe_runtime_specs import resolve_recipe_entities as resolve_recipe_ent
 from ..resource_planning import (
     installation_disk_requirement as installation_disk_requirement,
 )
-from ..runtime_preflight import admission_blockers as admission_blockers
-from ..runtime_preflight import latest_result as latest_result
-from ..runtime_preflight import recipe_requirements as recipe_requirements
-from ..runtime_preflight import request_digest as request_digest
+from ..runtime.preflight import admission_blockers as admission_blockers
+from ..runtime.preflight import latest_result as latest_result
+from ..runtime.preflight import recipe_requirements as recipe_requirements
+from ..runtime.preflight import request_digest as request_digest
 from ..topology import Placement as Placement
 from ..topology import TopologyError as TopologyError
 from ..topology import validate_topology as validate_topology

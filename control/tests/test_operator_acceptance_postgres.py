@@ -16,7 +16,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, FleetProfile, FleetProfileApplication, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
@@ -311,7 +311,7 @@ def test_key_receipts_replay_without_repeating_external_effects(
 ):
     """Catches losing key acceptance or treating transport uncertainty as success."""
     import httpx2
-    from vonk_control.gateway_keys import GatewayKeyService
+    from vonk_control.gateway.keys import GatewayKeyService
 
     from .test_gateway_keys import MASTER, FakeLiteLlm
 

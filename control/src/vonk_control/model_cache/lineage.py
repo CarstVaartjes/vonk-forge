@@ -30,7 +30,7 @@ from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
 from ..models import CatalogDocumentRevision, ModelCacheSet, ModelCacheSetArtifact
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 
 def set_bindings(
@@ -210,7 +210,7 @@ def catalog_model_files(
     """The files the catalog documents of ``contents`` list; ``None`` when one
     cannot be read (nothing may then be ruled out by files)."""
 
-    from ..catalog_revision_contract import read_catalog_document
+    from ..catalog.revision_contract import read_catalog_document
     from ..lifecycle.evidence import Residue, read_or_rebuild
 
     files: set[str] = set()

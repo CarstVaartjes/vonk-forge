@@ -31,7 +31,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     read_recipe_projection,
     write_catalog_projection,
 )
@@ -44,7 +44,7 @@ from vonk_control.install_admission import (
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -71,17 +71,17 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import OperationQuery
-from vonk_control.operation_blockers import PHASE_RETRY_CODE
-from vonk_control.operation_contract import (
+from vonk_control.operations.blockers import PHASE_RETRY_CODE
+from vonk_control.operations.contract import (
     OperationFailureEvidence,
     OperationRecoveryAction,
 )
-from vonk_control.operation_item_contract import OperationItem, operation_item
+from vonk_control.operations.item_contract import OperationItem, operation_item
 from vonk_control.preparation_contract import RuntimeImageIdentity
-from vonk_control.recipe_build_cancellation import (
+from vonk_control.recipe_builds import RecipeBuildPlan
+from vonk_control.recipe_builds.cancellation import (
     lock_build_dependency,
 )
-from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeBuildService,
     RecipeOperationConflict,
@@ -135,13 +135,13 @@ from vonk_control.run_switch_operations import (
     _planned_transfer_bytes,
     effective_build_receipt,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
+from vonk_control.runtime.preflight import latest_result
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     prepare_runtime_image,
 )
-from vonk_control.runtime_preflight import latest_result
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -2653,7 +2653,7 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        from vonk_control.job_documents import RunSwitchRunIntent
+        from vonk_control.jobs.documents import RunSwitchRunIntent
 
         payload = _run_switch_payload(session.get(Job, operation.operation_id))
         assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)

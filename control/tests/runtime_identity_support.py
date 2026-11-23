@@ -44,7 +44,7 @@ def inventory_items_fixture(
     from datetime import UTC, datetime
 
     from vonk_agent_protocol import canonical_message
-    from vonk_control.inventory_items_contract import AgentInventoryItems
+    from vonk_control.inventory.items_contract import AgentInventoryItems
     from vonk_control.models import NodeInventoryItemsSnapshot
 
     at = observed_at or datetime(2026, 8, 7, 12, tzinfo=UTC)
@@ -66,7 +66,7 @@ def inventory_items_fixture(
 
 def set_inventory_identity(node, **fields):
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
 
     items = inventory_items(node)
     if any(value is None for value in fields.values()):
@@ -94,7 +94,7 @@ def set_inventory_identity(node, **fields):
 
 
 def set_inventory_fingerprint(node, fingerprint):
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
 
     if node.inventory_snapshot is None:
         node.inventory_snapshot = inventory_items_fixture(node.node_id)
@@ -104,7 +104,7 @@ def set_inventory_fingerprint(node, fingerprint):
 
 
 def set_inventory_hostname(session, node_id, hostname):
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
     from vonk_control.models import AgentNode
 
     node = session.get(AgentNode, node_id)

@@ -461,7 +461,7 @@ def test_cancellation_observes_consumer_uncertainty_then_releases_for_fresh_buil
 ):
     """A transient consumer read cannot convert authorized cancellation to bad input."""
     from vonk_agent_protocol import LifecycleState, RecipeBuildCode
-    from vonk_control.recipe_build_cancellation import BuildConsumerError
+    from vonk_control.recipe_builds.cancellation import BuildConsumerError
     from vonk_control.recipe_operations import build_cancellation as owner
 
     sessions, _, operations, _, _, _, _, plan = _services(tmp_path, postgres_engine)

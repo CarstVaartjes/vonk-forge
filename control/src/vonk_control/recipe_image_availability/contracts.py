@@ -41,7 +41,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from .. import job_states
 from ..admission_locking import is_admission_contention
 from ..cache_removal_review import (
     CacheRemovalAsset,
@@ -50,9 +49,8 @@ from ..cache_removal_review import (
 from ..categorized_errors import InvalidValue
 from ..categorized_faults import security_reason
 from ..failure_classification import disposition, error_code, is_security_failure
-from ..job_documents import (
-    AvailabilityRuntime,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityRuntime
 from ..model_cache import (
     ModelCacheRemovalScope,
 )
@@ -60,12 +58,8 @@ from ..model_cache_contract import (
     ModelCacheOperationProgress,
 )
 from ..models import Job
-from ..operation_blockers import (
-    OperationBlocker,
-)
-from ..operation_contract import (
-    AvailabilityOperationFailure,
-)
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import wait_due
 from ..recipe_image_removal_contract import (
     RECIPE_CACHE_REMOVE_KIND,
@@ -74,7 +68,7 @@ from ..runtime_image_preparation import (
     RuntimeImagePreparationUnknown,
     RuntimeImageStorage,
 )
-from ..stored_json import JsonColumn, read_column
+from ..stored.json_values import JsonColumn, read_column
 
 _LOGGER = logging.getLogger(__package__)
 #: The progress ``activity`` of an operation: working now, or waiting for its turn.

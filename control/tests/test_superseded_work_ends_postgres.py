@@ -24,7 +24,7 @@ from vonk_control.agent_jobs import (
     StaleAgentFence,
 )
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,

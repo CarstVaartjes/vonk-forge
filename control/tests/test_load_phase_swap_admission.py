@@ -21,7 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
-from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
+from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
     CatalogDocumentRevision,
     InstallationNode,
@@ -39,7 +39,7 @@ from vonk_control.run_admission import (
     RunAdmissionService,
     require_admissible,
 )
-from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
 from .test_run_admission import setup
 
@@ -845,7 +845,7 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
         FleetProfilePreview,
     )
     from vonk_control.fleet_profiles.assessment_support import _preview_blockers
-    from vonk_control.operation_blockers import dump_blockers, read_blockers
+    from vonk_control.operations.blockers import dump_blockers, read_blockers
     from vonk_control.run_switch_contract import RunSwitchAssessment
 
     _, _, _, _, plan = _switch_world(
@@ -867,7 +867,7 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     assert read_blockers(stored)[0].swap == reason.swap
 
     # Without evidence the key is absent, in a stored wait and in a review reason.
-    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.operations.blockers import make_blocker
 
     assert "swap" not in dump_blockers([make_blocker(blocker.code, "no shortfall")])[0]
     assert "swap" not in reason.model_copy(update={"swap": None}).model_dump(

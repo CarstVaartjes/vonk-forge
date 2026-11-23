@@ -24,7 +24,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReportedPhase,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..auth import MUTATION_ROLES
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
@@ -32,11 +32,12 @@ from ..fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
 from ..models import FleetProfile, FleetProfileApplication, User
-from ..operation_contract import OperationFailureEvidence
-from ..operation_item_contract import (
+from ..operations.contract import OperationFailureEvidence
+from ..operations.item_contract import (
     OperationItem,
     OperationOwnerReference,
     OperationResultFacts,

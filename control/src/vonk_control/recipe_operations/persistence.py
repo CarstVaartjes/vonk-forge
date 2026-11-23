@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -49,7 +49,8 @@ from ..identity_insert import insert_identity
 from ..install_admission import (
     InstallAdmissionBusy,
 )
-from ..job_documents import controller_recipe_document
+from ..jobs import states as job_states
+from ..jobs.documents import controller_recipe_document
 from ..lifecycle.agent_operation import retry_scheduled
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -78,7 +79,7 @@ from ..recipe_progress import _recorded_parent
 from ..run_admission import (
     RunAdmissionBusy,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from ..workload_intent import allocate_workload_intent
 from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS

@@ -16,7 +16,7 @@ from pydantic import (
 from vonk_agent_protocol import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
-from .job_documents import AvailabilityJobPayload
+from .jobs.documents import AvailabilityJobPayload
 from .model_cache_contract import (
     ModelCacheCancellation,
     ModelCacheDownloadPreviewResponse,

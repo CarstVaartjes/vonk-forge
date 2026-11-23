@@ -17,7 +17,7 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
 )
 from vonk_control.enrollment import EnrollmentDenied
-from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -197,8 +197,8 @@ def test_revocation_confirmation_recovers_through_worker_callback(service):
     enrollment.revoke_node(NODE_ID, "admin")
     authority.revoke_failures.clear()
     from vonk_control.coordinator_failures import CoordinatorFailures
-    from vonk_control.jobs import JobService
-    from vonk_control.worker import Worker
+    from vonk_control.jobs.queue import JobService
+    from vonk_control.worker.loop import Worker
 
     worker = Worker(
         JobService(sessions, clock=enrollment._clock),

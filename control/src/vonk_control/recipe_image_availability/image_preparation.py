@@ -18,24 +18,18 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     require_reference_open,
 )
 from ..content_identity import same_image
-from ..job_documents import (
-    AvailabilityJobPayload,
-    AvailabilityRuntime,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload, AvailabilityRuntime
 from ..models import (
     Job,
     RecipeBuild,
 )
-from ..operation_blockers import (
-    OperationBlocker,
-    bound_blockers,
-)
+from ..operations.blockers import OperationBlocker, bound_blockers
 from ..recipe_image_availability_contract import (
     AvailabilityBuildReceipt,
 )
@@ -45,8 +39,8 @@ from ..runtime_image_preparation import (
     prepare_runtime_image,
 )
 from ..stall_window import last_progress_at, latest_progress
-from ..stored_json import Residue
-from ..stored_states import RecipeBuildState
+from ..stored.json_values import Residue
+from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _LOGGER,

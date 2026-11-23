@@ -45,7 +45,7 @@ from ..models import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
 )
-from ..operation_contract import AvailabilityRecoveryAction
+from ..operations.contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (

@@ -27,8 +27,8 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
-from ..operation_blockers import make_blocker
-from ..operation_contract import AvailabilityRecoveryAction
+from ..operations.blockers import make_blocker
+from ..operations.contract import AvailabilityRecoveryAction
 from ..persisted_waits import schedule_wait, typed_wait_reason
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso

@@ -38,7 +38,7 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_contacts import record_observation_delivery
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.inventory_items import inventory_items
+from vonk_control.inventory.items import inventory_items
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..coordinator_contract import CoordinatorFailureEvidence
 from ..model_primitives import Base
-from ..stored_json import ContractJSON
+from ..stored.json_values import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 

@@ -17,15 +17,14 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..categorized_errors import BookkeepingUnknown
 from ..content_identity import reusable_build
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from ..operator_receipt_contract import ReceiptOwner
 from ..profile_read_observation import observing_profile
-from ..recipe_build_receipts import BuildCandidate, PreparedBuildReceipt
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
@@ -43,7 +42,7 @@ from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
 )
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _BUILD_RUNTIME_INTERFACE,
@@ -66,6 +65,7 @@ from .common import (
     _source_policy_document,
     derive_build_input_identity,
 )
+from .receipts import BuildCandidate, PreparedBuildReceipt
 
 if TYPE_CHECKING:
     from .service import RecipeBuildService

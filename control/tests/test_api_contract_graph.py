@@ -11,7 +11,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.distribution import DistributionService, MemoryObjectSource
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 
 from .test_agent_api import NODE_A, agent_headers
 from .test_agent_api import agent_system as _agent_system

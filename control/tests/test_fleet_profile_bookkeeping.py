@@ -673,7 +673,7 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
 
     from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     sessions = _database()
     _, revision_id = _seed(sessions)

@@ -17,7 +17,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import FleetProfileInvalid
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentNode,
     FleetProfileApplication,
@@ -25,7 +25,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_capacity_admission import _capacity_profile

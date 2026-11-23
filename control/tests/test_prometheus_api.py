@@ -19,15 +19,20 @@ from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import SwapObservation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.litellm import PROMETHEUS_EXCLUDE_METRICS
-from vonk_control.metrics import MetricsRegistry
-from vonk_control.metrics_contract import (
+from vonk_control.gateway.litellm import PROMETHEUS_EXCLUDE_METRICS
+from vonk_control.metrics.contract import (
     METRIC_SPECS,
     Metric,
     MetricRange,
     MetricsSeriesResponse,
 )
-from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader, Source
+from vonk_control.metrics.prometheus_api import (
+    QUERIES,
+    RANGES,
+    PrometheusReader,
+    Source,
+)
+from vonk_control.metrics.registry import MetricsRegistry
 
 from .test_api import Jobs
 from .test_metrics import NODE, _fleet_snapshot
@@ -61,7 +66,7 @@ def client(reader, monkeypatch):
 
 def mock_prometheus(monkeypatch, handler):
     monkeypatch.setattr(
-        "vonk_control.prometheus_api.httpx.AsyncClient",
+        "vonk_control.metrics.prometheus_api.httpx.AsyncClient",
         lambda **kwargs: _HTTP_CLIENT(**kwargs, transport=httpx.MockTransport(handler)),
     )
 
@@ -171,7 +176,7 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
     label = "node_id" if metric == "gpu_utilization" else "alias"
     seen = []
     now = time.time()
-    monkeypatch.setattr("vonk_control.prometheus_api.time.time", lambda: now)
+    monkeypatch.setattr("vonk_control.metrics.prometheus_api.time.time", lambda: now)
 
     def handle(request):
         params = request.url.params
@@ -346,7 +351,7 @@ def test_cached_attention_does_not_start_threads(monkeypatch):
 def test_app_reads_never_dispatch_prometheus_workers(monkeypatch):
     """Catches implicit network/worker creation in every test application."""
     monkeypatch.setattr(
-        "vonk_control.prometheus_api.httpx.AsyncClient",
+        "vonk_control.metrics.prometheus_api.httpx.AsyncClient",
         lambda **kwargs: pytest.fail("unconfigured application contacted Prometheus"),
     )
 
@@ -398,7 +403,8 @@ def test_alert_cache_retries_outage_and_reports_stale_observation(reader, monkey
     """Catches permanent outage caching and stale observations reported as current."""
     clock = [100.0]
     monkeypatch.setattr(
-        "vonk_control.prometheus_api.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "vonk_control.metrics.prometheus_api.time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
     )
 
     async def exercise():
@@ -410,7 +416,9 @@ def test_alert_cache_retries_outage_and_reports_stale_observation(reader, monkey
             retry_due.clear()
             clock[0] += delay
 
-        monkeypatch.setattr("vonk_control.prometheus_api.asyncio.sleep", advance)
+        monkeypatch.setattr(
+            "vonk_control.metrics.prometheus_api.asyncio.sleep", advance
+        )
         mock_prometheus(monkeypatch, lambda request: httpx.Response(503))
         async with reader.lifespan():
             await asyncio.wait_for(waiting.wait(), timeout=30)
@@ -550,7 +558,7 @@ def test_application_owns_configured_monitoring_and_preserves_service_lifespan(
 def test_latest_is_only_a_value_from_the_last_step(reader, monkeypatch):
     """Catches a stale last sample shown as the current value."""
     now = 1_000_000.0
-    monkeypatch.setattr("vonk_control.prometheus_api.time.time", lambda: now)
+    monkeypatch.setattr("vonk_control.metrics.prometheus_api.time.time", lambda: now)
 
     def handle(request):
         if request.url.path.endswith("_range"):

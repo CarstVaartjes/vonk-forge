@@ -11,7 +11,7 @@ from vonk_agent_protocol import ProjectionCode, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

@@ -13,8 +13,8 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.inventory_items import runtime_value
-from vonk_control.inventory_repository import InventoryRepository
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentNode,

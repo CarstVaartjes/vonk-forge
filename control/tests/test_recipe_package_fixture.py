@@ -15,9 +15,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_sequence
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import CatalogSyncError, ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
@@ -28,7 +28,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_control.recipe_packages import load_recipe_package
+from vonk_control.recipe_packages.client import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import document_sha256, read_recipe_display
 

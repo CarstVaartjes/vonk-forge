@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from vonk_control.catalog_entities import recipe_document_projection
+from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.models import (
     Base,
@@ -18,7 +18,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.revision_images import revision_images
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,

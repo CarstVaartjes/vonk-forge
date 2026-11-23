@@ -33,7 +33,7 @@ from vonk_forge_contracts import (
 
 from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
 from ..model_primitives import Base, _lower_hex
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..unreadable_rows import note_unreadable
 
 

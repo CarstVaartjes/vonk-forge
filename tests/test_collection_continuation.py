@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from control.tests import collection_continuation as guard
-from control.tests.added_line_guards import check_source
+from control.tests.added_line_guards.check import check_source
 from control.tests.parsed_sources import parse_file
 from control.tests.principle_guards import rust_test_lines
 

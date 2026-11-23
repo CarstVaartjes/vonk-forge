@@ -32,7 +32,7 @@ from ..categorized_faults import OperationInterrupted
 from ..lifecycle import State
 from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from ..models import ModelCacheOperation, ModelCacheSet
-from ..operation_contract import AvailabilityRecoveryAction
+from ..operations.contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
 from .constants import _CHUNK_BYTES, _PARALLEL_RANGE_WORKERS
 from .errors import (

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select, text, update
 from vonk_agent_protocol import ProfileReasonCode
 from vonk_control import source_bundles
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
     write_catalog_projection,

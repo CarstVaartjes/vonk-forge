@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason, canonical_message
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     RecipeJobActivateParent,
     RecipeStartParent,
     controller_recipe_document,
@@ -27,7 +27,7 @@ from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWa
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 
 from .test_run_switch_operations import (
     NOW,

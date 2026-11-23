@@ -1445,7 +1445,7 @@ jobs:
           scripts/retry-dependency-fetch npm ci --prefix control/web
       - name: Consume actual PostgreSQL/API cancellation observations in browser
         run: |
-          npm exec -- vitest run src/components/model-cache-cancellation-consumer.test.tsx --reporter=junit --outputFile="$RUNNER_TEMP/model-cache-browser.xml"
+          npm exec -- vitest run src/components/library/model-cache-cancellation-consumer.test.tsx --reporter=junit --outputFile="$RUNNER_TEMP/model-cache-browser.xml"
           python3 - <<'PY'
           import os
           from pathlib import Path

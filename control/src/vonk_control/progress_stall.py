@@ -68,7 +68,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .models import FleetProfileApplication
-from .operation_blockers import (
+from .operations.blockers import (
     OperationBlocker,
     ProgressAlarmCode,
     ProgressStall,

@@ -18,8 +18,8 @@ from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_service import CatalogService
-from vonk_control.inventory_repository import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -35,7 +35,7 @@ from vonk_control.recipe_builds import (
     _canonical_build,
     _source_policy_document,
 )
-from vonk_control.recipe_packages import RecipePackageError
+from vonk_control.recipe_packages.contracts import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
 

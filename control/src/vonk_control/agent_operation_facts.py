@@ -24,14 +24,14 @@ from vonk_agent_protocol import (
 from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
 from .models import AgentOperationAttempt, Job
-from .operation_progress import stored_progress
+from .operations.progress import stored_progress
 from .stall_window import (
     last_progress_at,
     latest_progress,
     progress_deadline,
     stall_deadline,
 )
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {

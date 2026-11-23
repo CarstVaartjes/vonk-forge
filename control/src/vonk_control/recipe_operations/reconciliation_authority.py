@@ -22,7 +22,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -35,6 +34,7 @@ from ..categorized_errors import (
 from ..install_admission import (
     InstallAdmissionBusy,
 )
+from ..jobs import states as job_states
 from ..models import (
     AgentNode,
     AgentOperation,

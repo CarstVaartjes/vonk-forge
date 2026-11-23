@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.job_documents import AvailabilityModelChild
+from vonk_control.jobs.documents import AvailabilityModelChild
 from vonk_control.models import Base, Job, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityClaim
 from vonk_control.runtime_image_preparation import (

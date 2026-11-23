@@ -42,7 +42,7 @@ from ..recipe_execution_contract import (
 )
 from ..recipe_operations import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
-from ..stored_states import ClusterMappingState, RecipeBuildState
+from ..stored.states import ClusterMappingState, RecipeBuildState
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (

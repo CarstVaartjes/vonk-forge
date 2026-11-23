@@ -3,7 +3,9 @@
 import pytest
 from vonk_agent_protocol import LifecycleState
 
-from .added_line_guards import AGENT_REQUESTS, added_lines, changed_lines, check_source
+from .added_line_guards.check import check_source
+from .added_line_guards.patch import added_lines, changed_lines
+from .added_line_guards.scans import AGENT_REQUESTS
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -873,7 +875,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
     # The catalog collector's fence: refused by every writer in flight, it kept
     # 1,708 of 2,348 revisions in production (2026-11-04).
     fence = 'session.execute(text("LOCK TABLE jobs IN EXCLUSIVE MODE NOWAIT"))\n'
-    collector = "control/src/vonk_control/catalog_revision_collection.py"
+    collector = "control/src/vonk_control/catalog/revision_collection.py"
     assert check_source(collector, fence, {1}, modes=("locks",))
     assert check_source(
         collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
@@ -898,7 +900,7 @@ def test_a_table_wide_lock_is_taken_only_by_its_owners():
     ],
 )
 def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
-    path = "control/src/vonk_control/availability_production.py"
+    path = "control/src/vonk_control/availability_production/production.py"
     assert check_source(path, source, {1}, modes=("excerpts",))
     assert not check_source(
         "control/tests/test_availability_production.py",
@@ -921,7 +923,7 @@ def test_output_bounded_from_its_front_or_one_preferred_stream_fails(source):
     ],
 )
 def test_output_kept_from_its_end_from_both_streams_is_allowed(source):
-    path = "control/src/vonk_control/availability_production.py"
+    path = "control/src/vonk_control/availability_production/production.py"
     assert not check_source(path, source, {1}, modes=("excerpts",))
 
 
@@ -1123,7 +1125,7 @@ def test_document_hashing_stays_at_ingress_and_ignores_existing_calls():
     assert check_source(PATH, source, {2}, modes=("identity",))
     assert not check_source(PATH, source, {1}, modes=("identity",))
     assert not check_source(
-        "control/src/vonk_control/catalog_service.py", source, {2}, modes=("identity",)
+        "control/src/vonk_control/catalog/service.py", source, {2}, modes=("identity",)
     )
 
 
@@ -1251,7 +1253,7 @@ def test_agent_stamp_guard_ignores_controller_written_progress_timestamps():
     ("path", "name"),
     [
         ("control/src/vonk_control/agent_api/observations.py", "inventory"),
-        ("control/src/vonk_control/telemetry.py", "_canonical_sample"),
+        ("control/src/vonk_control/telemetry/samples.py", "_canonical_sample"),
     ],
 )
 def test_ingress_handlers_may_judge_an_agent_stamp_by_location(path, name):
@@ -1383,7 +1385,7 @@ def test_capacity_guard_allows_claim_first_and_non_gates(source: str) -> None:
 
 def test_capacity_guard_allows_reviewed_gates_and_tests() -> None:
     source = "def tick(self):\n    if capacity <= 0:\n        return 0\n" + _CLAIM
-    reviewed = "control/src/vonk_control/availability_production.py"
+    reviewed = "control/src/vonk_control/availability_production/scheduler.py"
     assert not check_source(reviewed, source, {2}, modes=("capacity-gates",))
     test = "control/tests/test_example.py"
     assert not check_source(test, source, {2}, modes=("capacity-gates",))
@@ -2349,7 +2351,7 @@ def test_model_file_removal_belongs_to_the_removal_executor():
     assert not check_source(other, source, {1}, modes=("model-sets",))
 
 
-_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/__init__.py"
+_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/client.py"
 
 
 @pytest.mark.parametrize(
@@ -2845,7 +2847,7 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     assert not check_source(path, marked, {1}, modes=("agent-422",))
     other = "raise HTTPException(status_code=422)\n"
     assert not check_source(
-        "control/src/vonk_control/library_api.py", other, {1}, modes=("agent-422",)
+        "control/src/vonk_control/library/api.py", other, {1}, modes=("agent-422",)
     )
     assert not check_source(path, other, set(), modes=("agent-422",))
 
@@ -2941,7 +2943,7 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
             "def run(s, now):\n    return _CollectorEvidence.read(s, now)\n",
         ),
         (
-            "control/src/vonk_control/catalog_revision_collection.py",
+            "control/src/vonk_control/catalog/revision_collection.py",
             "def run(s, now):\n    return live_tokens(s, now)\n",
         ),
         (
@@ -2993,7 +2995,7 @@ def test_any_stored_digest_column_compared_with_a_fresh_hash_is_a_rehash(source)
             "bad = row.content_digest != document_sha256(row.document)\n",
         ),
         (
-            "control/src/vonk_control/inventory_repository.py",
+            "control/src/vonk_control/inventory/repository.py",
             "bad = report.payload_digest != _digest(report.payload)\n",
         ),
         # Two recorded digests, or a digest of something that is not stored.
@@ -3169,7 +3171,7 @@ def test_current_contract_code_passes_the_legacy_guard(source):
     "path",
     [
         "control/src/vonk_control/lifecycle/evidence.py",
-        "control/src/vonk_control/stored_json.py",
+        "control/src/vonk_control/stored/json_values.py",
         "control/src/vonk_control/strict_json.py",
     ],
 )
@@ -3280,8 +3282,8 @@ def test_a_two_step_rehash_is_flagged(source, expected):
 @pytest.mark.parametrize(
     "path",
     [
-        "control/src/vonk_control/catalog_sync_contract.py",
-        "control/src/vonk_control/telemetry_maintenance.py",
+        "control/src/vonk_control/catalog/sync_contract.py",
+        "control/src/vonk_control/telemetry/maintenance.py",
         "control/src/vonk_control/model_cache/download_admission.py",
     ],
 )
@@ -4173,7 +4175,7 @@ _PAGE_CEILINGS = (
 
 
 def test_a_page_count_ceiling_on_a_fetch_loop_is_flagged() -> None:
-    path = "control/src/vonk_control/gateway_keys.py"
+    path = "control/src/vonk_control/gateway/keys.py"
     assert check_source(path, _PAGE_CEILINGS, {2}, modes=("item-counts",))
     # No fetch in the body, a stated protocol limit, and a literal retry count.
     assert not check_source(path, _PAGE_CEILINGS, {7}, modes=("item-counts",))

@@ -18,12 +18,12 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
-from ..job_documents import controller_recipe_document
+from ..jobs import states as job_states
+from ..jobs.documents import controller_recipe_document
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.core import RECOVERY
@@ -40,7 +40,7 @@ from ..models import (
 )
 from ..owner_liveness import OwnerKind, issued_for
 from ..prebuilt_images import prebuilt_reference
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     build_cancellation,
     current_build_consumers,
@@ -53,7 +53,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_states import RecipeBuildState
+from ..stored.states import RecipeBuildState
 from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
 from .observation_helpers import _aware

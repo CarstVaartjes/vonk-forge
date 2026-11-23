@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 from vonk_control.model_cache.input_contracts import FixtureArtifact
-from vonk_control.operation_contract import AvailabilityOperationFailure
+from vonk_control.operations.contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import (

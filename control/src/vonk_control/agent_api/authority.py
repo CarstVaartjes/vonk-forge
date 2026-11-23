@@ -52,8 +52,8 @@ from ..enrollment import (
     ExpiredRenewalGraceExhausted,
     RenewalIssuanceUncertain,
 )
+from ..enrollment.body import _bounded_enrollment_body
 from ..enrollment.responses import unknown_response
-from ..enrollment_body import _bounded_enrollment_body
 from ..evidence_repeats import note_repeat, note_success
 from ..host_helper_authority import (
     HostHelperAuthorityError,

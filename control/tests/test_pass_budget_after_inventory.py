@@ -15,7 +15,7 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_control.catalog_revision_collection import (
+from vonk_control.catalog.revision_collection import (
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
@@ -68,7 +68,7 @@ def _model_partials(
 
 
 PROBES: dict[str, Probe] = {
-    "vonk_control.catalog_revision_collection": _catalog_revisions,
+    "vonk_control.catalog.revision_collection": _catalog_revisions,
     "vonk_control.model_cache.partials_collection": _model_partials,
 }
 
@@ -87,8 +87,8 @@ CLASSIFIED = {
     "vonk_control.model_cache.removal_reconcile": "step deadline set before the removals",
     "vonk_control.library_projection.views": "request budget, not a collector",
     "vonk_control.library_projection.local_state": "request budget, not a collector",
-    "vonk_control.library_assessment": "probe budget, not a collector",
-    "vonk_control.library_image_presence": "probe budget, not a collector",
+    "vonk_control.library.assessment": "probe budget, not a collector",
+    "vonk_control.library.image_presence": "probe budget, not a collector",
     "vonk_control.profile_read_observation": "read budget, not a collector",
     "vonk_control.model_cache.observation": "checkpoint cadence, not a deadline",
 }

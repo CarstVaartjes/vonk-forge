@@ -1,6 +1,6 @@
 """Canonical platform harness metadata and projection contracts."""
 
-from ..runtime_writable_paths import EngineTelemetryContract, RuntimeWritablePath
+from ..runtime.writable_paths import EngineTelemetryContract, RuntimeWritablePath
 from .canonical_metadata import CANONICAL_HARNESSES, CanonicalHarnessMetadata
 from .common import HarnessCompileError
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection

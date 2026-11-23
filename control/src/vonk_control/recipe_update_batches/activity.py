@@ -19,8 +19,8 @@ from ..operation_api import (
     OperationQuery,
     _activity_keyset_filter,
 )
-from ..operation_contract import AvailabilityOperationFailure
-from ..operation_item_contract import OperationItem, OperationOwnerReference
+from ..operations.contract import AvailabilityOperationFailure
+from ..operations.item_contract import OperationItem, OperationOwnerReference
 from ..recipe_update_contract import (
     UPDATE_KIND,
 )

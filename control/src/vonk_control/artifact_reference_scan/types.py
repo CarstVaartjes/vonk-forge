@@ -10,10 +10,11 @@ from vonk_agent_protocol import (
     RunState,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
 )
+from ..jobs import states as job_states
 from ..machine_states import INSTALLATION_ACTIVE
 
 _ACTIVE_PROFILE_APPLICATIONS = fleet_profile_states.LIVE

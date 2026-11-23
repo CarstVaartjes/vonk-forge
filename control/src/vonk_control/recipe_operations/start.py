@@ -67,7 +67,7 @@ from ..run_admission import (
 from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .errors import (
     RecipeRequestInvalid,
     RecipeRetryLater,
@@ -283,7 +283,7 @@ class StartMixin:
                     canonical_message(payload)
                 )
                 if profile_application_id is not None or gpu_clock is not None:
-                    from ..gpu_clock import gpu_clock_start_intent
+                    from ..gpu.clock import gpu_clock_start_intent
 
                     try:
                         desired_clock = gpu_clock_start_intent(session, node_id)

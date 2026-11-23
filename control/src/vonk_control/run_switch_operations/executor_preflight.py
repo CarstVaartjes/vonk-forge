@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 
-from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
+from ..inventory.repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from ..models import (
     CatalogDocumentRevision,
@@ -43,7 +43,7 @@ from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
 )
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import (
     read_stored_model,
 )

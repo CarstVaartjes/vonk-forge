@@ -20,10 +20,12 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

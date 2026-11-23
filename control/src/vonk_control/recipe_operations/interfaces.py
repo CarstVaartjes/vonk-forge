@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 
-from .. import job_states
+from ..jobs import states as job_states
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models import (
     AgentOperation,

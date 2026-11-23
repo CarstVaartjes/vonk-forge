@@ -22,7 +22,7 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchCh
 from ..admission_locking import (
     set_admission_timeout,
 )
-from ..job_documents import (
+from ..jobs.documents import (
     RecipeStopParent,
     RunSwitchJobPayload,
     ServiceRunStopReview,
@@ -43,7 +43,7 @@ from ..profile_stop_authority import (
 from ..recipe_action_plans import (
     StopPlan,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import new_recipe_job
 

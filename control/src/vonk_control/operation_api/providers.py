@@ -20,8 +20,8 @@ from vonk_agent_protocol import (
 
 from ..auth import CursorCodec, CursorError, cursor_key
 from ..models import AgentOperation, Job
-from ..operation_blockers import read_blockers
-from ..operation_item_contract import (
+from ..operations.blockers import read_blockers
+from ..operations.item_contract import (
     OperationItem,
     OperationOwnerReference,
     operation_item,

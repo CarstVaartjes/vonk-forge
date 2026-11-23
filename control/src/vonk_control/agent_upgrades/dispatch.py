@@ -17,7 +17,7 @@ from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_jobs import (
     _BOUNDARY_REFUSAL_PREFIXES,
     agent_upgrade_in_flight,
@@ -26,7 +26,8 @@ from ..agent_upgrade_contract import (
     AgentUpgradePackage,
     AgentUpgradeRolloutResult,
 )
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
+from ..jobs import states as job_states
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperation, Job

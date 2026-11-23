@@ -45,9 +45,9 @@ from .recipe_runtime_specs import (
     split_option_choices,
 )
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+from .runtime.spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
 from .runtime_image_preparation import RuntimeImageReceipt
-from .runtime_spec_contract import RuntimeSpec, SpecArtifact, SpecModelMount
-from .stored_states import CatalogRevisionState, RecipeBuildState
+from .stored.states import CatalogRevisionState, RecipeBuildState
 
 
 def compile_job_invocation(

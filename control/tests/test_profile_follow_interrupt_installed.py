@@ -18,7 +18,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

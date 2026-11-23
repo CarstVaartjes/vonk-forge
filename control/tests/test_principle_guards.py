@@ -1153,7 +1153,7 @@ def test_rust_collection_loop_exhausts_pages_instead_of_waiting():
 #: Only the background collectors may replay 24 hours of jobs, profile
 #: applications and model operations; a request path pays for it on every call.
 _COLLECTOR_SCAN_OWNERS = (
-    "control/src/vonk_control/catalog_revision_collection.py",
+    "control/src/vonk_control/catalog/revision_collection.py",
     "control/src/vonk_control/unused_storage_collection/",
 )
 

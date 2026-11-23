@@ -9,22 +9,23 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control import telemetry_maintenance
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
 )
-from vonk_control.jobs import JobService
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.worker import Worker, assemble_production_worker
+from vonk_control.telemetry import maintenance as telemetry_maintenance
+from vonk_control.worker.assembly import assemble_production_worker
+from vonk_control.worker.loop import Worker
 
 from .test_worker import _failures
 

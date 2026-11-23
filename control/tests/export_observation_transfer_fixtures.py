@@ -15,12 +15,12 @@ from sqlalchemy import update
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.models import AgentNode, AgentNodeContact, FleetStreamEvent
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     ObservationTransferResponse,
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
-from vonk_control.telemetry import TelemetryRepository
+from vonk_control.telemetry.samples import TelemetryRepository
 
 from tests.test_fleet_stream import (
     NODE_ID,
@@ -127,7 +127,7 @@ def _export_response_errors(output: Path) -> None:
 def _export_peer_response_errors(
     app: FastAPI, peer: TestClient, records: list[dict[str, object]]
 ) -> None:
-    from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
+    from vonk_control.observation.platform_errors import ObservationCaptureUnavailable
 
     for path in ("/api/fleet", "/api/platform", "/api/fleet/stream"):
         response = peer.get(path, headers={"Authorization": "Bearer invalid"})
@@ -158,7 +158,7 @@ def _export_peer_response_errors(
         }
     )
     with patch(
-        "vonk_control.api.application.api_only_observation",
+        "vonk_control.api.routes_platform.api_only_observation",
         side_effect=ObservationCaptureUnavailable(phase="stored-worker-validation"),
     ):
         response = peer.get("/api/platform")

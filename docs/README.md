@@ -13,6 +13,7 @@ does not require routine SSH.
 | Install a controller and first Spark | [Public installation guide](https://vonkforge.ai/install) |
 | Understand what is public and what stays local | [Architecture overview](architecture-overview.md) |
 | Understand the engineering stance | [Engineering principles](engineering-principles.md) |
+| Read the full agent rules behind AGENTS.md | [Agent rules in full](agent-rules.md) |
 | Understand state ownership and deadlock prevention | [Coordination boundaries](architecture-overview.md#coordination-and-deadlock-prevention) |
 | Use the complete terminal interface | [`vonkctl` guide](runbooks/vonkctl.md) |
 | Use unattended credentials and redeploy NAS Compose | [Operator CLI access](runbooks/operator-cli-access.md) |

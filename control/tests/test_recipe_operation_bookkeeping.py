@@ -34,7 +34,7 @@ from vonk_control.install_admission import (
     InstallAdmissionService,
     InstallEvidenceChanged,
 )
-from vonk_control.job_documents import DistributedRecoveryMarker
+from vonk_control.jobs.documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentOperation,

@@ -12,18 +12,18 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control.inventory_items_contract import InventorySnapshotKind
+from vonk_control.inventory.items_contract import InventorySnapshotKind
 from vonk_control.models import (
     AgentNode,
     Base,
     NodeInventoryResourceSnapshot,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry import (
+from vonk_control.telemetry.maintenance import TelemetryMaintenance, _polite
+from vonk_control.telemetry.samples import (
     TelemetryRepository,
     TelemetrySample,
 )
-from vonk_control.telemetry_maintenance import TelemetryMaintenance, _polite
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")

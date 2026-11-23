@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.inventory_items import inventory_items, runtime_value
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import inventory_items, runtime_value
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

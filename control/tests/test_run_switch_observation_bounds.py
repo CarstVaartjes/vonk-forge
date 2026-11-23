@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
-from vonk_control.job_documents import RunSwitchJobPayload
+from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.models import Job, RecipeRun
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
@@ -20,7 +20,7 @@ from vonk_control.run_switch_operations import PhaseExecution
 from vonk_control.run_switch_operations.observation_helpers import (
     _start_child_request_key,
 )
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 
 from .non_blocking import assert_ended_without_blocking
 from .test_run_switch_operations import (

@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import UnknownError
 from vonk_control.auth import Actor
-from vonk_control.gateway_keys import (
+from vonk_control.gateway.keys import (
     GatewayKeyCreated,
     GatewayKeyError,
     GatewayKeyService,
@@ -309,7 +309,7 @@ def test_default_key_is_created_once_and_heals(tmp_path):
 def test_the_default_key_is_asked_for_again_until_the_gateway_answers() -> None:
     import asyncio
 
-    from vonk_control.gateway_keys import GatewayKeyError, keep_default_key
+    from vonk_control.gateway.keys import GatewayKeyError, keep_default_key
 
     class _Service:
         def __init__(self) -> None:
@@ -487,7 +487,7 @@ def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replace
 
     def unavailable_rename(method, path, **kwargs):
         if path == "/key/update":
-            from vonk_control.gateway_keys import GatewayKeyError
+            from vonk_control.gateway.keys import GatewayKeyError
 
             raise GatewayKeyError("injected rename loss")
         return original_request(method, path, **kwargs)
@@ -641,7 +641,7 @@ def test_busy_mutation_observes_unlock_or_ends_without_retained_lock(
 ):
     import fcntl
 
-    from vonk_control import gateway_keys
+    from vonk_control.gateway import keys as gateway_keys
 
     peer = FakeLiteLlm()
     service = _service(peer)
@@ -686,7 +686,7 @@ def test_request_receipts_survive_retirement_and_new_rotation_changes_secret():
 def test_completed_archive_prevents_failed_retirement_from_reusing_rotation(
     monkeypatch,
 ):
-    from vonk_control import gateway_keys
+    from vonk_control.gateway import keys as gateway_keys
 
     peer = FakeLiteLlm()
     service = _service(peer)
@@ -792,7 +792,7 @@ def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
     import asyncio
 
     from fastapi import HTTPException
-    from vonk_control.gateway_keys import keep_default_key
+    from vonk_control.gateway.keys import keep_default_key
 
     class Service:
         def __init__(self):
@@ -1138,7 +1138,7 @@ def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_statu
 
 
 def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal():
-    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)
@@ -1183,7 +1183,7 @@ def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal(
 
 
 def test_existing_inference_only_keys_converge_to_model_info_without_renewal():
-    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)
@@ -1200,7 +1200,7 @@ def test_existing_inference_only_keys_converge_to_model_info_without_renewal():
 
 
 def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
-    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+    from vonk_control.gateway.route_grants import GatewayInferenceRoute
 
     litellm = FakeLiteLlm()
     service = _service(litellm)

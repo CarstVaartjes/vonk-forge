@@ -246,7 +246,7 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     usage, its staging headroom remains promised, and the new profile's claim
     is excluded only for its own child. A competing install must still fail.
     """
-    from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+    from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
     from .test_disk_reservations import _record_disk

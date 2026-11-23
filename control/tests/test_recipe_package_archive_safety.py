@@ -25,7 +25,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from vonk_control import recipe_packages
+from vonk_control.recipe_packages import client as recipe_packages
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases

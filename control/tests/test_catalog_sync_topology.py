@@ -11,9 +11,9 @@ from importlib.resources import files
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.catalog_service import RecipeCatalogLocalRevision
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import RecipeCatalogLocalRevision
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
@@ -177,7 +177,7 @@ def test_snapshot_availability_costs_constant_queries_per_check(
     from types import SimpleNamespace
 
     from sqlalchemy import event, select
-    from vonk_control import catalog_sync
+    from vonk_control.catalog import sync as catalog_sync
     from vonk_control.models import CatalogDocumentRevision
 
     from .test_catalog_revision_collection import Catalog

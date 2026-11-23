@@ -43,13 +43,14 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import EnrollmentRecordState
 
-from . import agent_operation_states, job_states, model_cache_states
+from . import agent_operation_states, model_cache_states
 from .agent_contacts import last_seen
 from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
 )
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
+from .jobs import states as job_states
 from .models import (
     STOPPABLE_RUN_STATES,
     AgentCertificateRotation,
@@ -67,7 +68,7 @@ from .models import (
     RecipeRun,
     ResourceReservation,
 )
-from .stored_states import LibrarySyncRunState, RecipeBuildState
+from .stored.states import LibrarySyncRunState, RecipeBuildState
 from .strict_json import read_stored_model
 
 #: A Job in one of these has ended; nothing it owns can still be used by it.

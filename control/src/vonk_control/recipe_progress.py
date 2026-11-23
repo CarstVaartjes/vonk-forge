@@ -30,7 +30,7 @@ from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from .job_documents import (
+from .jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,
     RecipeJobActivateParent,
@@ -49,7 +49,7 @@ from .models import (
     CatalogDocumentRevision,
     Job,
 )
-from .operation_progress import (
+from .operations.progress import (
     aggregate_progress,
     member_progress,
     project_progress_for_state,
@@ -65,7 +65,7 @@ from .recipe_runtime_specs import recipe_topology
 from .run_switch_contract import (
     RunSwitchReconciliationAuthority,
 )
-from .stored_states import CatalogRevisionState
+from .stored.states import CatalogRevisionState
 from .strict_json import read_stored_model, serialize_json_value
 
 

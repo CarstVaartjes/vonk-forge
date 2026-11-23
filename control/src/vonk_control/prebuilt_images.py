@@ -52,7 +52,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
-from .catalog_revision_contract import BuildSecurityProjection
+from .catalog.revision_contract import BuildSecurityProjection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models import Job, RecipeBuild
@@ -70,7 +70,7 @@ from .recipe_execution_contract import (
 )
 from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
-from .stored_states import RecipeBuildState
+from .stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,12 +153,12 @@ def package_build_intent(
     :func:`executable_build_key` reads matter for a prebuilt image.
     """
 
-    from .catalog_entities import build_policy_projection
+    from .catalog.entities import build_policy_projection
     from .recipe_builds import (
         canonical_build,
         derive_build_input_identity,
     )
-    from .runtime_adapters import resolve_runtime_adapter
+    from .runtime.adapters import resolve_runtime_adapter
     from .source_policy import dockerfile_base_images
 
     recipe = (
@@ -277,8 +277,8 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     import io
     import tarfile
 
-    from .catalog_entities import build_policy_projection
-    from .runtime_adapters import (
+    from .catalog.entities import build_policy_projection
+    from .runtime.adapters import (
         RUNTIME_ADAPTER_DIGEST_LABEL,
         RUNTIME_ADAPTER_LABEL,
         RUNTIME_INTERFACE_LABEL,
@@ -393,7 +393,7 @@ def _library_recipe(
 ) -> tuple[RecipeLibraryItem, GeneratedSourceBundle]:
     """Load one indexed recipe package with its verified build-context bundle."""
 
-    from .recipe_packages import load_recipe_package
+    from .recipe_packages.client import load_recipe_package
     from .source_bundles import parse_source_bundle
 
     document = entry["document"]
@@ -674,7 +674,7 @@ class PrebuiltImageImporter:
         )
 
     def _claim(self, job_id: str | None = None) -> str | None:
-        from .recipe_build_cancellation import build_cancellation
+        from .recipe_builds.cancellation import build_cancellation
 
         now = self._clock()
         with self._sessions.begin() as session:
@@ -725,7 +725,7 @@ class PrebuiltImageImporter:
                 }
 
     def run(self, job_id: str) -> None:
-        from .recipe_build_cancellation import build_cancellation
+        from .recipe_builds.cancellation import build_cancellation
 
         with self._sessions() as session:
             job = session.get(Job, job_id)

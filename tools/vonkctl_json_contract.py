@@ -38,7 +38,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileReadView,
 )
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.library_contract import RecipeDetailResponse, RecipeLibraryResponse
+from vonk_control.library.contract import RecipeDetailResponse, RecipeLibraryResponse
 from vonk_control.strict_json import StrictModel
 
 from cluster_profiles.cli_json_contract import (

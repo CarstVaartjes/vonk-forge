@@ -9,13 +9,13 @@ from sqlalchemy import and_, or_, select
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
-from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog_revision_contract import (
+from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from ..catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from ..library_contract import (
+from ..library.contract import (
     LibraryFacetValues,
     LibraryLocalState,
     LibraryModelProjection,
@@ -36,8 +36,8 @@ from ..models import (
     RecipeLibrarySyncRun,
 )
 from ..operator_receipt_contract import ReceiptOwner
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState, LibrarySyncRunState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState, LibrarySyncRunState
 from .common import (
     DocumentText,
     _document_text,

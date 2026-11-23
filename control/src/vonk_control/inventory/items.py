@@ -1,0 +1,127 @@
+"""One inventory path for claims and reusable runtime evidence."""
+
+import hashlib
+import logging
+from collections.abc import Callable
+from datetime import datetime
+
+from vonk_agent_protocol import UnknownOutcomeError, WaitReason, canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+
+from ..models import AgentNode, NodeInventoryItemsSnapshot
+from .items_contract import AgentInventoryItems, PreflightInventoryItem
+
+
+def inventory_items(node: AgentNode | None) -> AgentInventoryItems:
+    if node is None or node.inventory_snapshot is None:
+        return AgentInventoryItems()
+    items = node.inventory_snapshot.agent_items
+    if not isinstance(items, AgentInventoryItems):
+        raise UnknownOutcomeError(
+            "Spark inventory items are unreadable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+    return items
+
+
+def runtime_value[T](
+    node: AgentNode | None, value: Callable[[AgentRuntimeIdentity], T]
+) -> T | None:
+    identity = inventory_items(node).runtime_identity
+    return None if identity is None else value(identity)
+
+
+def record_items(node: AgentNode, items: AgentInventoryItems, now: datetime) -> None:
+    digest = hashlib.sha256(
+        canonical_message(
+            {
+                "node_id": node.node_id,
+                "observed_at": now.isoformat(),
+                "agent_items": items,
+            }
+        )
+    ).hexdigest()
+    if node.inventory_snapshot is None:
+        node.inventory_snapshot = NodeInventoryItemsSnapshot(
+            node_id=node.node_id,
+            observed_at=now,
+            received_at=now,
+            evidence_digest=digest,
+            agent_items=items,
+        )
+    else:
+        node.inventory_snapshot.agent_items = items
+        node.inventory_snapshot.observed_at = now
+        node.inventory_snapshot.received_at = now
+        node.inventory_snapshot.evidence_digest = digest
+
+
+def _reported_items(node: AgentNode) -> AgentInventoryItems:
+    """A fresh authenticated producer can rebuild its facts after storage damage.
+
+    Readers still expose unknown. Other item families remain unknown until
+    their own producers supply evidence; damaged bytes never become authority.
+    """
+    snapshot = node.inventory_snapshot
+    if snapshot is not None and not isinstance(
+        snapshot.agent_items, AgentInventoryItems
+    ):
+        logging.getLogger(__name__).warning(
+            "Rebuilding unreadable inventory items from a fresh report for %s",
+            node.node_id,
+        )
+        return AgentInventoryItems()
+    return inventory_items(node)
+
+
+def record_runtime(
+    node: AgentNode,
+    identity: AgentRuntimeIdentity,
+    fingerprint: str | None,
+    hostname: str | None,
+    now: datetime,
+) -> None:
+    items = _reported_items(node)
+    record_items(
+        node,
+        items.model_copy(
+            update={
+                "runtime_identity": identity,
+                "hostname": items.hostname if hostname is None else hostname,
+                "preflight_fingerprint": fingerprint,
+            }
+        ),
+        now,
+    )
+
+
+def record_preflight(
+    node: AgentNode,
+    requirements_sha256: str,
+    result: RuntimePreflightResult,
+    now: datetime,
+) -> None:
+    items = _reported_items(node)
+    # One receipt per requirements digest, for this host only: a receipt from
+    # another host fingerprint can never admit anything again.
+    entries = [
+        item
+        for item in items.preflights
+        if item.requirements_sha256 != requirements_sha256
+        and item.result.fingerprint == result.fingerprint
+    ]
+    entries.append(
+        PreflightInventoryItem(
+            requirements_sha256=requirements_sha256, result=result, received_at=now
+        )
+    )
+    # The probe runs on the claim lane, so its receipt is the newest host sample;
+    # a later claim with a different fingerprint still invalidates it.
+    record_items(
+        node,
+        items.model_copy(
+            update={"preflights": entries, "preflight_fingerprint": result.fingerprint}
+        ),
+        now,
+    )

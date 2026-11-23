@@ -21,7 +21,7 @@ from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

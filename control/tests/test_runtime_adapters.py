@@ -15,7 +15,7 @@ from dataclasses import replace
 import pytest
 from vonk_agent_protocol import canonical_message
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESS_BY_SLUG
-from vonk_control.runtime_adapters import (
+from vonk_control.runtime.adapters import (
     ADAPTER_IMAGE_USER,
     RUNTIME_ADAPTER_DIGEST_LABEL,
     RUNTIME_ADAPTER_LABEL,
@@ -25,7 +25,7 @@ from vonk_control.runtime_adapters import (
     render_adaptation_stage,
     resolve_runtime_adapter,
 )
-from vonk_control.runtime_writable_paths import writable_paths
+from vonk_control.runtime.writable_paths import writable_paths
 
 
 def test_every_builtin_engine_resolves_its_own_adapter() -> None:

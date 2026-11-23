@@ -16,8 +16,8 @@ from vonk_control.agent_upgrade_contract import (
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
-from vonk_control.enrollment_contract import EnrollmentRevocationStatus
-from vonk_control.library_api import _error as library_error
+from vonk_control.enrollment.contract import EnrollmentRevocationStatus
+from vonk_control.library.api import _error as library_error
 from vonk_control.operator_projection_api import (
     FleetActionResponse,
     FleetOperatorServices,
@@ -237,7 +237,7 @@ def test_node_selection_returns_exact_ids_before_names_and_all_ambiguity_candida
     ids = [node.id for node in snapshot.nodes]
     assert error.value.candidates == tuple(ids)
     response = _operator_error(error.value)
-    from vonk_control.library_api import SelectorAmbiguityHTTPError
+    from vonk_control.library.api import SelectorAmbiguityHTTPError
 
     assert isinstance(response, SelectorAmbiguityHTTPError)
     assert response.problem.candidates == ids

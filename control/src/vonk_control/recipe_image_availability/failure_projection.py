@@ -20,12 +20,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..failure_classification import is_definite, is_redownload
-from ..job_documents import (
-    AvailabilityJobResult,
-    AvailabilityUnknownEnd,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
 from ..lifecycle.types import State
@@ -33,14 +30,12 @@ from ..model_cache import ModelCacheError
 from ..models import (
     Job,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
-from ..operation_contract import (
+from ..operations.blockers import make_blocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     sanitize_failure_evidence,
 )
-from ..operation_progress import aggregate_progress
+from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_image_availability_reader_contract import (
     StoredAvailabilityIdentity,
@@ -48,7 +43,7 @@ from ..recipe_image_availability_reader_contract import (
 from ..recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
-from ..stored_json import Residue, read_row_column
+from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,

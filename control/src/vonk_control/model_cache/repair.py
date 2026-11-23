@@ -27,7 +27,7 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.contract import AvailabilityOperationFailure
 from ..strict_json import serialize_json_value
 from .artifacts import (
     ArtifactSetManifest,

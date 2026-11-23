@@ -22,8 +22,8 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.swap import GIB, SwapIntent, swap_satisfied
 
 from ..agent_contacts import last_seen as last_seen_at
-from ..gpu_health import gpu_health_reason
-from ..inventory_items import inventory_items
+from ..gpu.health import gpu_health_reason
+from ..inventory.items import inventory_items
 from ..models import (
     AgentCertificate,
     AgentNode,
@@ -34,7 +34,7 @@ from ..nas_route_notice import nas_route_notice
 from ..nas_transfer_rate import NasTransferNotice, nas_transfer_detail
 from ..recipe_update_notice import RECIPE_UPDATE_AVAILABLE
 from ..strict_json import warn_unreadable_once
-from ..telemetry import TelemetrySampleView, sustained_low_cpu_clock
+from ..telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock
 from .common import (
     _AGENT_STATE_ADAPTER,
     _CERTIFICATE_OFFLINE_REASONS,
@@ -419,7 +419,7 @@ def _inventory(
     observed = _utc(value.observed_at)
     received = _utc(value.received_at)
     age = max(0.0, (current - received).total_seconds())
-    from ..inventory_repository import _validated_inventory
+    from ..inventory.repository import _validated_inventory
 
     report = _validated_inventory(value, observed_at=observed)
     return InventoryState(

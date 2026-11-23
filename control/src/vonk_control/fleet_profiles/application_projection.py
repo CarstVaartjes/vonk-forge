@@ -20,7 +20,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
 
-from .. import job_states
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -33,10 +32,11 @@ from ..fleet_profile_contract import (
     FleetProfilePreview,
     profile_switch_child_request_key,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfileApplication, Job
-from ..operation_blockers import MAX_BLOCKERS
-from ..operation_progress import project_progress
+from ..operations.blockers import MAX_BLOCKERS
+from ..operations.progress import project_progress
 from ..persisted_waits import read_wait
 from ..progress_stall import WAITING_STATES, is_stalled, stalled_blocker
 from ..run_switch_contract import RunSwitchStopResult

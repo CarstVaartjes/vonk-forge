@@ -31,7 +31,7 @@ from ..fleet_profile_contract import (
     FleetProfileSupersedeCode,
 )
 from ..lifecycle.evidence import Residue
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract import RunSwitchAssessment
 from ..run_switch_operations import RunSwitchOperationConflict

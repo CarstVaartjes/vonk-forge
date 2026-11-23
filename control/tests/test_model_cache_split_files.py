@@ -22,7 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState
-from vonk_control.catalog_entities import _execution_projection
+from vonk_control.catalog.entities import _execution_projection
 from vonk_control.model_cache import (
     ArtifactPart,
     ArtifactSetManifest,

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     observation_response,
 )

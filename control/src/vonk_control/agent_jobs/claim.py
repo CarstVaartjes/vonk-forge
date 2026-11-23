@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..agent_operation_facts import (
     RESTART_REISSUE_OPERATIONS as _RESTART_REISSUE_OPERATIONS,
 )
@@ -33,13 +33,14 @@ from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
-from ..inventory_items import inventory_items, runtime_value
+from ..inventory.items import inventory_items, runtime_value
+from ..jobs import states as job_states
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
-from ..operation_progress import stored_progress
+from ..operations.progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP

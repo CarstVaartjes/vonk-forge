@@ -25,7 +25,7 @@ from ..oci_image_store import (
     StoredImage,
     StoreUnknown,
 )
-from ..operation_contract import AvailabilityRecoveryAction
+from ..operations.contract import AvailabilityRecoveryAction
 from ..profile_read_observation import observe_storage
 from .contracts import (
     _IMAGE_DIGEST,

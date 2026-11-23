@@ -24,13 +24,13 @@ from vonk_agent_protocol.agent_words import (
 from ..agent_jobs import abandon_idempotent_job_in_session
 from ..agent_operation_facts import aware
 from ..failure_classification import is_security_failure
-from ..job_documents import DistributionJobPayload
+from ..jobs.documents import DistributionJobPayload
 from ..models import (
     AgentOperation,
     AgentOperationAttempt,
     Job,
 )
-from ..operation_progress import aggregate_progress, project_progress
+from ..operations.progress import aggregate_progress, project_progress
 from ..run_switch_contract import (
     ArtifactVerificationEvidence,
     RunSwitchCachedTransferResult,

@@ -30,8 +30,8 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, StatementError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import exact_integer_adoption as adoption_module
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     read_catalog_projection,
 )

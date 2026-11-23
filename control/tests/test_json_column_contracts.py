@@ -1,6 +1,6 @@
 """Every JSON column is bound to a contract model typed all the way down.
 
-The registry (``vonk_control.stored_columns``) binds each ``JSON`` column of
+The registry (``vonk_control.stored.columns``) binds each ``JSON`` column of
 ``models.py`` to the Pydantic contract of the document it stores.  This guard
 fails when
 
@@ -21,11 +21,11 @@ import pytest
 from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from vonk_control import stored_json
 from vonk_control.db.connections import build_engine
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import Base
-from vonk_control.stored_json import (
+from vonk_control.stored import json_values as stored_json
+from vonk_control.stored.json_values import (
     ExternalPassthrough,
     bind,
     bindings,
@@ -100,7 +100,7 @@ class _Marker(BaseModel):
 
 
 def _scratch_binding(**options: object):
-    from vonk_control import stored_json
+    from vonk_control.stored import json_values as stored_json
 
     key = "scratch.document"
     stored_json._REGISTRY.pop(key, None)
@@ -244,7 +244,7 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
         RunSwitchJournalRepairEndEvidence,
         RunSwitchJournalRepairPendingState,
     )
-    from vonk_control.stored_json import binding_for, read_row_column
+    from vonk_control.stored.json_values import binding_for, read_row_column
 
     now = datetime(2026, 10, 7, tzinfo=UTC)
     identity = "00000000-0000-4000-8000-000000000001"

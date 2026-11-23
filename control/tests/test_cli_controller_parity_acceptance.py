@@ -32,7 +32,7 @@ from vonk_control.fleet_profile_contract import (
 from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import CatalogDocumentHead, CatalogDocumentRevision
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferResponse,
     observation_response,

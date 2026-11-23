@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol.route_activation import SupervisorPhase
-from vonk_control.litellm import ServedModelInfo
+from vonk_control.gateway.litellm import ServedModelInfo
 from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_progress import _parent_identity

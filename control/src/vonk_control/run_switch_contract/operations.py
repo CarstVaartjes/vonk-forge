@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from ..lifecycle_preflight import LifecyclePreflightCheckpoint
-from ..operation_blockers import OperationBlocker
+from ..operations.blockers import OperationBlocker
 from ..run_switch_identity_contract import NodeId, RunSwitchCancellation, UuidId
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait

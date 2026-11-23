@@ -38,7 +38,7 @@ from vonk_control.fleet_profiles import (
     build_production_fleet_profile_service,
 )
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import inventory_items, runtime_value
+from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,

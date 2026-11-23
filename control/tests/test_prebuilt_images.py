@@ -25,12 +25,14 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import TokenCodec
-from vonk_control.availability_production import build_recipe_image_availability
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -906,7 +908,7 @@ def test_prebuilt_import_observes_cancellation_between_claim_and_io(
     """Catches a restarted importer pulling after a newer durable cancel won."""
     from uuid import uuid4
 
-    from vonk_control.recipe_build_cancellation import request_build_cancellation
+    from vonk_control.recipe_builds.cancellation import request_build_cancellation
 
     sessions, revision_id = _published_library(tmp_path)
     builds, operations = _services(sessions, tmp_path)

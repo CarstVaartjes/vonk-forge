@@ -56,7 +56,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
-from vonk_control.observation_delivery import ObservationDeliveryMiddleware
+from vonk_control.observation.delivery import ObservationDeliveryMiddleware
 from vonk_control.terminal_history_collection import (
     PASS_BUDGET_SECONDS,
     RETAINED,

@@ -24,7 +24,7 @@ from vonk_forge_contracts.model import (
 )
 
 from ..bounded_json import require_mapping
-from ..catalog_revision_contract import read_shared_catalog_document
+from ..catalog.revision_contract import read_shared_catalog_document
 from ..categorized_errors import InvalidType
 from ..models import CatalogDocumentRevision
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _is_hex

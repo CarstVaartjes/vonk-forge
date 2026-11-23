@@ -167,7 +167,10 @@ def test_publication_input_validation_leaves_a_fresh_input_eligible(
 ):
     # The wrong implementation treats caller syntax as stored-state damage,
     # or keeps a busy publication owner after rejecting the input.
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher, RouteRuntimeError
+    from vonk_control.gateway.route_runtime import (
+        AtomicRouteBundlePublisher,
+        RouteRuntimeError,
+    )
 
     with pytest.raises(RouteRuntimeError):
         AtomicRouteBundlePublisher._identity(authority, plan, evidence)
