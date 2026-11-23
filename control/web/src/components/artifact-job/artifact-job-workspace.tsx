@@ -10,7 +10,6 @@ import type {
   ArtifactJobInterface,
   LibraryApi,
   LibraryViewRecipeDetail,
-  RecipeDefinition,
 } from "../../api/types";
 import {
   addWire,
@@ -39,8 +38,6 @@ import { StatusPill } from "../ui/status-pill";
 import { Time } from "../ui/time";
 import { hashArtifactBlob } from "./artifact-hash";
 import "./artifact-job-workspace.css";
-
-type JobRecipeDocument = RecipeDefinition;
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
@@ -77,7 +74,6 @@ function isCancelling(job: ArtifactJob): boolean {
 
 type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
 type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
-type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
 // A knob value as the form holds it: typed, or the text being edited while it is not yet valid.
 type Scalar = ArtifactJobParameterValue;
 type RecipeParameter = ArtifactJobParameter;
@@ -517,6 +513,7 @@ export function ArtifactJobWorkspace({
   useEffect(() => {
     setValues(parameterDefaults(parameters));
   }, [parameters]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different job interface resets the form
   useEffect(() => {
     setPrompt("");
     setFilesBySlot({});
@@ -1196,7 +1193,7 @@ export function ArtifactJobWorkspace({
     setBusyJobId(undefined);
   }
 
-  function prepareRetry(job: ArtifactJob) {
+  function prepareRetry() {
     setFilesBySlot({});
     setSubmitError("");
     setRetryNotice(

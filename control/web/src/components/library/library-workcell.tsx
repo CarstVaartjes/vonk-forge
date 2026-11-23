@@ -448,6 +448,7 @@ const SHOW_STEP = 40;
 /** Bounds a long list: the first page, a "Show more" button, back to one page when `resetKey` changes. */
 export function useShowMore(resetKey: string, total: number, atLeast = 0, noun = "rows") {
   const [pages, setPages] = useState(1);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new reset key shows the first page again
   useEffect(() => setPages(1), [resetKey]);
   const limit = Math.max(pages * SHOW_STEP, atLeast);
   const more =
@@ -559,6 +560,7 @@ export function LibraryWorkcell({
     "models",
   );
   const recipePaneRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a changed selection brings the recipe pane into view
   useEffect(() => {
     if (
       (!filters.model && route.kind !== LibraryPath.MODELS) ||

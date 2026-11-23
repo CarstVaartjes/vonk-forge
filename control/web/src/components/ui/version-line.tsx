@@ -21,6 +21,7 @@ export function VersionLine({
   const [read, setRead] = useState(false);
   const [platform, setPlatform] = useState<PlatformObservation | null>(null);
   const [sync, setSync] = useState<CatalogSyncStatus | null | undefined>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: readKey re-reads the platform and sync status
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;

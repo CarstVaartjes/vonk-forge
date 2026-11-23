@@ -34,6 +34,7 @@ export function LibraryRecipeRemoveAction({
   const abort = useRef<AbortController | undefined>(undefined);
   const toast = useToast();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different recipe resets the review, the removal and the pending request
   useEffect(() => {
     setReview(null);
     setRemoval(null);

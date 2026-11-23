@@ -86,7 +86,7 @@ export function SeriesChart({
   data: MetricsSeriesResponse;
   names?: Record<string, string>;
 }) {
-  const { symbol: unit, scale } = UNITS[data.spec.unit];
+  const { symbol: unit } = UNITS[data.spec.unit];
   if (!data.series.some((series) => series.points.some((point) => point.value !== null)))
     return <p role="status">No samples in this range</p>;
   const chartSeries = toChartSeries(data, names);
@@ -148,6 +148,7 @@ export function MetricsChart({
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
   const catalogue = useMetricCatalogue(api, retry);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry re-runs the load
   useEffect(() => {
     const controller = new AbortController();
     setTiles({});

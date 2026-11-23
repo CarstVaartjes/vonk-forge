@@ -46,18 +46,6 @@ const visualFleet = {
   ],
 };
 
-const emptyLibrary = {
-  generated_at: "2026-08-15T12:00:00Z",
-  freshness_policy: {
-    inventory_fresh_seconds: 300,
-    telemetry_live_seconds: 6,
-    telemetry_delayed_seconds: 20,
-  },
-  models: [],
-  unlinked_recipes: [],
-  next_cursor: null,
-};
-
 const noOperations = () =>
   vi.fn().mockResolvedValue({ operations: [], total: 0, next_cursor: null });
 

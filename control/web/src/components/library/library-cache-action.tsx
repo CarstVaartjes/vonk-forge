@@ -78,6 +78,7 @@ export function LibraryCacheAction({
   const abort = useRef<AbortController | undefined>(undefined);
   const toast = useToast();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different target resets the review, the removal and the pending request
   useEffect(() => {
     setReview(null);
     setRemoval(null);

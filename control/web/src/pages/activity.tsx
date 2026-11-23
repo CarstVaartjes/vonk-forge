@@ -1279,6 +1279,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
     params.delete("status");
     history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt re-runs the load
   useEffect(() => {
     const generation = ++requestGeneration.current;
     let active = true;

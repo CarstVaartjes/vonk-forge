@@ -21,13 +21,6 @@ vi.mock("../hooks/use-fleet-stream", () => ({
   }),
 }));
 
-function order(): string[] {
-  return screen
-    .getAllByRole("row")
-    .slice(1)
-    .map((row) => within(row).getAllByRole("link")[0]!.textContent ?? "");
-}
-
 const originalClipboard = navigator.clipboard;
 afterEach(() => {
   vi.unstubAllGlobals();

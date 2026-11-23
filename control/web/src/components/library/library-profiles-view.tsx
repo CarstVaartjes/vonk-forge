@@ -630,6 +630,7 @@ export function LibraryProfilesView({
   }, [dirty, draft]);
   const applicationRunning = Boolean(application && !ended(application));
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the draft is read only to keep an open edit; depending on it would reload the profiles on every edit
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -654,6 +655,7 @@ export function LibraryProfilesView({
     return () => controller.abort();
   }, [refreshProfiles, initialCreate]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the preview restarts when the selected profile's identity changes, not on every field of it
   useEffect(() => {
     if (selectedNumber === undefined || !selectedProfile || editing) {
       setPreview(undefined);
@@ -675,6 +677,7 @@ export function LibraryProfilesView({
   const loadedNumber =
     selectedProfile?.status === "loaded" && !editing ? selectedProfile.number : undefined;
   const applicationState = application?.state;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a finished application re-reads the endpoints
   useEffect(() => {
     setEndpoints(undefined);
     if (loadedNumber === undefined) return;

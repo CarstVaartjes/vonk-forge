@@ -61,6 +61,7 @@ export function SparkPage({
   useEffect(() => () => onLive?.(null), [onLive]);
   const [tab, setTab] = useState<Tab>("overview");
   const [range, setRange] = useState<MetricRange>("24h");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a different Spark returns to the overview tab
   useEffect(() => setTab("overview"), [id]);
 
   function moveTab(event: KeyboardEvent<HTMLDivElement>) {

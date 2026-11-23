@@ -100,19 +100,18 @@ function viewModel(
 async function loadAll<T extends { next_cursor: string | null }>(
   load: (cursor: string | undefined) => Promise<T>,
   signal: AbortSignal,
-): Promise<T[]> {
-  const pages: T[] = [];
-  let cursor: string | undefined;
+): Promise<[T, ...T[]]> {
+  const first = await load(undefined);
+  const pages: [T, ...T[]] = [first];
+  let cursor = first.next_cursor ?? undefined;
   const seen = new Set<string>();
-  do {
+  while (cursor && !signal.aborted) {
+    if (seen.has(cursor)) throw new Error("Library pagination cursor repeated");
+    seen.add(cursor);
     const page = await load(cursor);
     pages.push(page);
     cursor = page.next_cursor ?? undefined;
-    if (cursor) {
-      if (seen.has(cursor)) throw new Error("Library pagination cursor repeated");
-      seen.add(cursor);
-    }
-  } while (cursor && !signal.aborted);
+  }
   return pages;
 }
 
@@ -146,17 +145,16 @@ export async function loadLibraryView(
     viewModels.flatMap((model) => model.recipes.map((recipe) => recipe.recipe_revision_id)),
   );
   return {
-    generated_at:
-      modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
-    storage_observation: modelPages[0] && {
+    generated_at: modelPages[0].generated_at,
+    storage_observation: {
       storage_observed_at: modelPages[0].storage_observed_at,
       storage_reason: modelPages[0].storage_reason,
       storage_error_type: modelPages[0].storage_error_type,
       storage_refresh_seconds: modelPages[0].storage_refresh_seconds,
       storage_deadline_at: modelPages[0].storage_deadline_at,
     },
-    freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
-    library: recipePages[0]?.library ?? modelPages[0]?.library ?? null,
+    freshness_policy: modelPages[0].freshness_policy,
+    library: recipePages[0].library ?? modelPages[0].library ?? null,
     models: viewModels,
     unlinked_recipes: recipes.filter((recipe) => !matched.has(recipe.recipe_revision_id)),
   };
@@ -252,6 +250,7 @@ export function LibraryPage({
     fits: libraryFits,
   } = useMemo(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams), [path]);
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt re-runs the library load
   useEffect(() => {
     const controller = new AbortController();
     setError("");
@@ -284,6 +283,7 @@ export function LibraryPage({
       .catch(() => undefined);
     return () => controller.abort();
   }, [api]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetAttempt re-runs the fleet load
   useEffect(() => {
     if (!api.visualFleet) return;
     const controller = new AbortController();
@@ -304,6 +304,7 @@ export function LibraryPage({
       });
     return () => controller.abort();
   }, [api, fleetAttempt]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: detailAttempt re-runs the detail load
   useEffect(() => {
     const selector = route.kind === LibraryPath.RECIPES ? route.selector : undefined;
     if (!selector) {
@@ -348,6 +349,7 @@ export function LibraryPage({
   }, [onNavigatePath, route, snapshot]);
   // Focus the heading on a route, tab or Spark-workspace change, never on the
   // `?q=` rewrite of every search keystroke (it would steal the input's focus).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new view or preferred Spark moves focus to the heading
   useEffect(() => {
     if (
       route.kind === LibraryPath.MODELS &&

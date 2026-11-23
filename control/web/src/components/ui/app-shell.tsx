@@ -25,7 +25,7 @@ type Operator = {
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;
-  role: string;
+  operatorRole: string;
   subject: string;
 };
 
@@ -36,7 +36,7 @@ type AppShellProps = {
   live?: LiveStatus | null;
   navigationKey?: string;
   navigationLocked?: boolean;
-  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): void;
   operator?: Operator | undefined;
 };
 

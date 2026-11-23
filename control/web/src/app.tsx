@@ -200,7 +200,7 @@ export function App({ api }: { api: ControlApi }) {
                   requestNavigation(() => {
                     void auth.logout();
                   }),
-                role: "Administrator",
+                operatorRole: "Administrator",
                 subject: auth.session.subject,
               }
             : undefined
