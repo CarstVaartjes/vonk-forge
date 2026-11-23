@@ -13,7 +13,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
-from vonk_control.run_switch_operations.result_helpers import _persisted_result
+from vonk_control.run_switch_operations.results import _persisted_result
 
 from .run_switch_operations_support import _cold_compile_switch
 from .runtime_identity_support import set_inventory_fingerprint

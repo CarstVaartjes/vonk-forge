@@ -12,8 +12,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.identity import RunSwitchCancellation
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_journal_repair.pending import record_repair_cancellation
-from vonk_control.run_switch_operations.result_helpers import _persisted_result
-from vonk_control.run_switch_operations.results import _stored_result
+from vonk_control.run_switch_operations.results import _persisted_result, _stored_result
 
 
 def test_repair_cancellation_producer_round_trips_through_strict_result_reader() -> (

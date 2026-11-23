@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from ..fleet_qualification import (
+from cluster_profiles.fleet_qualification_observation import (
     QualificationError,
     _BudgetClient,
     _observe,
 )
+
 from .contracts import _PASSED, FAILURE_MODES, Batch, Campaign, Lane, ResultsLog
 from .lanes import _lanes_from_profile
 from .profiles import _fleet_nodes

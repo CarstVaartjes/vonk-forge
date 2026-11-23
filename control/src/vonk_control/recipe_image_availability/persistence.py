@@ -20,6 +20,8 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..catalog.queries import active_head_revision
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
@@ -31,7 +33,7 @@ from ..recipe_operations.availability_intent import (
     RecipeSelectorIntent,
 )
 from ..revision_images import revision_images
-from ..stored.json_values import Residue, read_row_column
+from ..stored.json_values import read_row_column
 from ..stored.states import CatalogRevisionState
 from .contracts import (
     _ACTIVE,

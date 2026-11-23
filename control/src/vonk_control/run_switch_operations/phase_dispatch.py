@@ -21,6 +21,8 @@ from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import (
     AdmissionLockBusy,
     busy_detail,
@@ -55,12 +57,10 @@ from ..run_admission import (
 )
 from ..run_switch_contract.operations import RunSwitchAwaitedInventory
 from ..run_switch_contract.phase_results import RunSwitchFinalVerifyResult
-from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from ..run_switch_contract.progress_view import (
-    _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
-)
-from ..run_switch_contract.progress_view import (
-    _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
+    RECOVERY_STALL_WINDOW,
+    _complete_phase_progress,
+    _merge_progress_evidence,
 )
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stall_window import Verdict, stall_deadline
@@ -91,12 +91,7 @@ from .observation_window import checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
 from .provider import _ADAPTER
-from .result_helpers import (
-    _observe_progress,
-    _persisted_result,
-    _phase_result,
-    _read_progress,
-)
+from .result_helpers import _observe_progress, _phase_result, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

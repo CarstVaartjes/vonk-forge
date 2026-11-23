@@ -16,6 +16,8 @@ from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..failure_classification import is_definite, is_redownload
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobResult, AvailabilityUnknownEnd
@@ -31,7 +33,7 @@ from ..operations.contract import (
 )
 from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
-from ..stored.json_values import Residue, read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,

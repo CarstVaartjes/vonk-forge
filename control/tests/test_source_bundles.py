@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control import source_bundles
 from vonk_control.source_bundles import (
     BundleLimits,
-    SourceBundleCode,
     SourceBundleError,
     SourceBundleStore,
     generate_source_bundle,

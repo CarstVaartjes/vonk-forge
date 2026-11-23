@@ -74,6 +74,8 @@ from vonk_agent_protocol.state_machines import (
     RunState,
 )
 
+from vonk_control.owner_liveness import ADOPTION_WINDOW
+
 from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
 from .installation_transitions import end_orphaned_installation
@@ -91,10 +93,7 @@ from .owner_liveness import (
     referencing_active_job,
 )
 from .persisted_waits import schedule_wait
-from .reservation_owners import (
-    ADOPTION_WINDOW,
-    release_dead_owner_reservations,
-)
+from .reservation_owners import release_dead_owner_reservations
 
 _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is

@@ -20,6 +20,7 @@ from sqlalchemy import event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_control.admission_locking import (
     AdmissionRowLock,
     lock_admission_rows,
@@ -30,7 +31,7 @@ from vonk_control.inventory.repository import InventoryRepository, NodeInventory
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.models.telemetry import NodeTelemetryLatest
-from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry.samples import TelemetryRepository
 
 NODE = "spk_" + "a" * 32
 BOOT = uuid.UUID("00000000-0000-4000-8000-000000000001")

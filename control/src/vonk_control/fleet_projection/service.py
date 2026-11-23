@@ -16,6 +16,8 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
 )
 
+from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
+
 from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
@@ -43,7 +45,6 @@ from ..nas_transfer_rate import slow_nas_transfers
 from ..observation.capture import begin_observation_capture
 from ..operations.blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_batches.notice import newest_active_revisions
-from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..run_states import ENDED_RUN_STATES
 from ..stored.states import CatalogRevisionState
 from ..telemetry.samples import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository

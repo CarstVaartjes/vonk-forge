@@ -39,9 +39,6 @@ from ..storage_demands import (
     STORAGE_INSUFFICIENT,
 )
 from . import states as fleet_profile_states
-from .error_summary import (
-    _error_summary as _error_summary,  # noqa: PLC0414 -- shared helper export
-)
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 

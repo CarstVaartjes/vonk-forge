@@ -108,7 +108,7 @@ def test_guard_detects_sparse_serialization_syntax(source: str, rejected: bool) 
 def test_canonical_serializer_retains_in_place_default_mutation() -> None:
     from vonk_agent_protocol.agent_words import ProgressPhase
     from vonk_agent_protocol.contracts import canonical_message
-    from vonk_control.operations.contract import (
+    from vonk_agent_protocol.wire_model import (
         OperationMemberProgress,
         OperationProgress,
     )

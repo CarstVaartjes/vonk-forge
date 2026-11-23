@@ -20,10 +20,8 @@ from vonk_control.run_switch_contract.progress_view import (
     _merge_progress_evidence,
     _progress_view,
 )
-from vonk_control.run_switch_operations.result_helpers import (
-    _persisted_result,
-    _read_progress,
-)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (

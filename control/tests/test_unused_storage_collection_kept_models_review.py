@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,

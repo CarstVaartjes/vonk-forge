@@ -16,6 +16,8 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorCodec
 from ..bounded_json import require_integer, require_sequence
@@ -33,11 +35,7 @@ from ..operations.item_contract import (
     OperationOwnerReference,
     OperationResultFacts,
 )
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from ..strict_json import read_stored_model
 from .contract import (
     UUID_PATTERN,

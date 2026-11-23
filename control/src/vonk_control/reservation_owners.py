@@ -18,29 +18,12 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.state_machines import ReservationState
 
 from .models.execution import ResourceReservation
-from .owner_liveness import (
-    ADOPTION_WINDOW,
-    OWNER_SETTLE_GRACE,
-    SPARK_PRESENCE_WINDOW,
-    Owner,
-    OwnerKind,
-    OwnerRef,
-    owner,
-    run_has_live_operation,
-)
+from .owner_liveness import OwnerKind, OwnerRef, owner
 
 __all__ = [
-    "ADOPTION_WINDOW",
-    "OWNER_SETTLE_GRACE",
-    "SPARK_PRESENCE_WINDOW",
-    "Owner",
-    "OwnerKind",
-    "OwnerRef",
     "ReservationOwner",
-    "owner",
     "release_dead_owner_reservations",
     "reservation_owner",
-    "run_has_live_operation",
 ]
 
 _NOUNS = {

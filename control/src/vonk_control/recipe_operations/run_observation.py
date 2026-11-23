@@ -33,10 +33,8 @@ from .interfaces import (
 )
 from .observation_helpers import _aware
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _parent_recovery as _parent_recovery,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
+    _parent_recovery,
 )
 from .rank_authority import _run_accepted_ranks, _run_is_one_shot
 

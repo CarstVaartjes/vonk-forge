@@ -14,11 +14,11 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import RunState
-from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ArtifactLifecycleGate
 from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )

@@ -13,6 +13,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import (
+    ProgressAlarmCode,
     WaitOwnerKind,
     WaitReason,
     WaitResumeCondition,
@@ -22,7 +23,7 @@ from .. import agent_operation_states
 from ..agent_operation_facts import attempt_is_live, aware
 from ..gpu.health import GPU_HEALTH_CODES
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operations.blockers import BlockingOperation, ProgressAlarmCode, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..operations.progress import stored_progress
 from ..persisted_waits import read_wait, write_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS

@@ -20,6 +20,10 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_agent_protocol.wire_model import OperationProgress
+
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from ..auth import MUTATION_ROLES
 from ..bounded_json import require_integer, require_sequence
@@ -31,17 +35,11 @@ from ..operations.blockers import OperationBlocker
 from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
-    OperationProgress,
 )
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from ..recipe_operations.availability_intent import RecipeAvailabilityIntent
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
-from ..stored.json_values import Residue
 from ..strict_json import StrictJSONModel, read_stored_model
 from .availability_contract import (
     RecipeImageAvailabilityArtifact,
@@ -716,7 +714,5 @@ __all__ = [
     "RecipeOperationResponse",
     "RecipeOperatorRequest",
     "RecipeOperatorResponse",
-    "RecipeUpdateRequest",
-    "RecipeUpdateResponse",
     "install_recipe_operator_routes",
 ]

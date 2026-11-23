@@ -65,13 +65,12 @@ from pydantic import ValidationError
 from sqlalchemy import event, inspect
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ProgressAlarmCode
 
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .models.fleet import FleetProfileApplication
 from .operations.blockers import (
     OperationBlocker,
-    ProgressAlarmCode,
     ProgressStall,
     StallMark,
     StallWait,

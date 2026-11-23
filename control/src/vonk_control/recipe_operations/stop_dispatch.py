@@ -67,10 +67,8 @@ from .intent import _shared_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .progress import (
-    _role_phases as _role_phases,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _topology_order as _topology_order,  # noqa: PLC0414 -- shared helper export
+    _role_phases,
+    _topology_order,
 )
 from .results import _validated_result
 from .run_transitions import end_unfinished_run

@@ -325,7 +325,7 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert lost.next_action_at is not None
     # Its next look is at the bounded backoff's ceiling: later than a short
     # wait re-check, since each look rewrites the row under its node locks.
-    from vonk_control.lifecycle.core import RECOVERY, WAIT_STEP
+    from vonk_control.recovery_policy import RECOVERY, WAIT_STEP
 
     wait = RECOVERY.next_attempt(
         operation.id, WAIT_STEP, clock.now, ongoing_intent=True
