@@ -20,8 +20,8 @@ from vonk_control.distribution import (
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 
-from .agent_api_support import NODE_A, NODE_B, agent_headers
-from .agent_api_support import agent_system as _agent_system
+from .test_agent_api import NODE_A, NODE_B, agent_headers
+from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
 

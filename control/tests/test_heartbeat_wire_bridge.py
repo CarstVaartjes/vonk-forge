@@ -9,8 +9,8 @@ from vonk_agent_protocol import AgentDirective
 
 from tests.wire_probes import prebuilt_probe
 
-from .agent_api_support import NODE_A, STOP_PAYLOAD, agent_headers, parent
-from .agent_api_support import agent_system as _agent_system
+from .test_agent_api import NODE_A, STOP_PAYLOAD, agent_headers, parent
+from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
 

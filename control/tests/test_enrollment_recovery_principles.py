@@ -461,7 +461,7 @@ def test_authenticated_renewal_route_recovers_across_controller_replacement(
     from vonk_control.api import create_app
     from vonk_control.enrollment import EnrollmentService
 
-    from .agent_api_support import (
+    from .test_agent_api import (
         NODE_A,
         CurrentAgentClient,
         Jobs,

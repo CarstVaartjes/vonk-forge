@@ -29,8 +29,8 @@ from vonk_control.models import AgentOperation, RecipeRun, ResourceReservation, 
 from vonk_control.recipe_operations import run_transitions
 from vonk_control.recipe_stop_payloads import RecipeStopAuthorityError
 
-from .agent_api_support import NODE_A, agent_headers, agent_system  # noqa: F401
 from .test_absent_run_release import _report_absent
+from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import (
     NOW,
     complete_started_recipe,

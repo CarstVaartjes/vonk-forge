@@ -759,7 +759,7 @@ def test_authenticated_observation_producer_repairs_between_passes(
     from sqlalchemy import select
     from vonk_control.models import AgentCertificate, RunNode
 
-    from .agent_api_support import agent_headers, make_agent_system
+    from .test_agent_api import agent_headers, make_agent_system
 
     base, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     observer_root = tmp_path / "observer"

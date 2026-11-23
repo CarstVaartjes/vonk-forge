@@ -719,8 +719,8 @@ def test_production_result_handler_only_schedules_worker(
     from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
     from vonk_control.settings import Settings
 
-    from .agent_api_support import agent_headers
     from .runtime_identity_support import claim_agent
+    from .test_agent_api import agent_headers
     from .test_lifecycle_preflight import _clear
     from .test_runtime_preflight import result as passing_result
 

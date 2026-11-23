@@ -16,7 +16,7 @@ from sqlalchemy import select
 from vonk_control.agent_api import ended_runs
 from vonk_control.models import RecipeRun, RunNode
 
-from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
 # The run rows carry only the plan fields this boundary reads.
 pytestmark = pytest.mark.usefixtures("damaged_json_rows")

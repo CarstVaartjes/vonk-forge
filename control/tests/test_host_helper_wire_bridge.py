@@ -20,14 +20,14 @@ from vonk_control.host_helper_authority import HostHelperGrantIssuer
 
 from tests.wire_probes import prebuilt_probe
 
-from .agent_api_support import (
+from .test_agent_api import (
     NODE_A,
     PACKAGED_RUNTIME_IDENTITY,
     STOP_PAYLOAD,
     agent_headers,
     parent,
 )
-from .agent_api_support import agent_system as _agent_system
+from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
 

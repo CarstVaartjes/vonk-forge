@@ -16,7 +16,7 @@ from vonk_agent_protocol.enrollment import (
 
 from tests.wire_probes import prebuilt_probe
 
-from .agent_api_support import (
+from .test_agent_api import (
     NODE_A,
     NODE_C,
     PACKAGED_RUNTIME_IDENTITY,
@@ -25,7 +25,7 @@ from .agent_api_support import (
     enrollment_grant,
     valid_enrollment_body,
 )
-from .agent_api_support import agent_system as _agent_system
+from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
 

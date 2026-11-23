@@ -28,7 +28,7 @@ from vonk_control.models import (
 )
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 
-from .agent_api_support import (
+from .test_agent_api import (
     NODE_A,
     NODE_C,
     PACKAGED_RUNTIME_IDENTITY,
@@ -38,9 +38,9 @@ from .agent_api_support import (
     enrollment_grant,
     make_agent_system,
     parent,
+    telemetry_payload,
     valid_enrollment_body,
 )
-from .test_agent_api_part1 import telemetry_payload
 from .test_operator_acceptance_postgres import DropFirstResponse
 
 

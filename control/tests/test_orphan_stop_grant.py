@@ -26,7 +26,7 @@ from vonk_control.host_helper_authority import (
 )
 from vonk_control.models import AgentCertificate, Job, RecipeRun, RunNode
 
-from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
 pytestmark = pytest.mark.usefixtures("damaged_json_rows")
 
