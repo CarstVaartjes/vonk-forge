@@ -196,7 +196,7 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     # Full collection includes prerequisite/lane markers; only image and wire
     # bridges have their own regular CI jobs.
     suite = (ROOT / "scripts/test").read_text()
-    assert 'suite_markers="not built_image"' in suite
+    assert 'suite_markers="not built_image and not corpus_acceptance"' in suite
     # Shards are split by file without a collection pass; the wire bridges and
     # the consumer corpus boundaries are the only files the control shards
     # leave out, and each has its own regular CI job.

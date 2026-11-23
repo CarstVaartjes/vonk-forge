@@ -1099,6 +1099,43 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
+  corpus-acceptance:
+    # The whole-corpus catalog import into fresh PostgreSQL takes about 35 s
+    # alone but over 100 s beside the shards' parallel workers, so it runs here
+    # by itself against its own budget; the control shards deselect it.
+    name: Corpus acceptance
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Provide the built canonical recipe library
+        uses: ./.github/actions/recipe-library
+        with:
+          build: "true"
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull the pinned test images once
+        run: scripts/pull-test-images postgres python
+      - name: Run the corpus acceptance tests alone
+        run: scripts/test acceptance
+
   control-image-build:
     # Builds the Controller (api) and worker images once, with the buildx GHA
     # cache, then runs the fast built_image checks against them. Those tests
@@ -1656,7 +1693,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, control-image-build, web-suite, nas-install, agent-package, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
+    needs: [changes, lint, member-web, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, consumer-probe, control-suite, corpus-acceptance, control-image-build, web-suite, nas-install, agent-package, client-compatibility-report, installed-cli-proof, model-cache-unknown-expiry, oci-link-fallback, privileged-helper-oci-process, profile-effect-consumer, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

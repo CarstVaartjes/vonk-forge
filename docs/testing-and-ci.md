@@ -279,6 +279,15 @@ and fails in CI. `scripts/test-local --with-image-build` builds the two images
 first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
+The whole-corpus catalog acceptance
+(`test_fresh_postgres_imports_typed_canonical_model_recipe_api`) carries
+`@pytest.mark.corpus_acceptance`. It takes about 35 s alone but over 100 s beside
+the shards' `-n 4` workers, against its 60 s budget, so the control shards
+deselect it (`-m "not corpus_acceptance"`) and the "Corpus acceptance" CI job
+runs only marked tests, alone, with PostgreSQL and the built recipe library
+(`scripts/test acceptance`). The budget is unchanged. The job is selected with
+the control area and the CI gate requires it.
+
 The protocol is an editable workspace member, so no test or
 `uv sync --project control` / `uv run --project control` command needs a wheel.
 `scripts/build-control-wheel` only builds the ignored protocol wheel under
