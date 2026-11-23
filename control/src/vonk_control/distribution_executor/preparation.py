@@ -30,6 +30,7 @@ from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..profile_read_observation import profile_read
 from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import RuntimeImageBuildInput
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,
@@ -38,7 +39,6 @@ from ..run_switch_contract.phase_results import (
 )
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_contract.progress import RunSwitchChildProgress
-from ..run_switch_observation_contract import RuntimeImageBuildInput
 from ..run_switch_operations.interfaces import PhaseExecution
 from ..run_switch_operations.publish import _persist_run_switch_runtime_image_reference
 from ..runtime_image_preparation.contracts import RuntimeImageReceipt

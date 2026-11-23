@@ -42,11 +42,11 @@ from ..run_admission import (
     PORT_ADMISSION_CODES,
 )
 from ..run_switch_contract.evidence import RunSwitchReason
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.requests import RunSwitchPreviewRequest
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchObservedImageIdentity,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import RunSwitchPreviewRequest
 from ..stored.states import CatalogRevisionState
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision, _is_artifact_phase

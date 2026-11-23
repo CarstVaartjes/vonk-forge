@@ -58,11 +58,11 @@ from ..run_admission import (
 )
 from ..run_switch_contract.operations import RunSwitchAwaitedInventory
 from ..run_switch_contract.phase_results import RunSwitchFinalVerifyResult
-from ..run_switch_progress import RECOVERY_STALL_WINDOW
-from ..run_switch_progress import (
+from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from ..run_switch_contract.progress_view import (
     _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
 )
-from ..run_switch_progress import (
+from ..run_switch_contract.progress_view import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError

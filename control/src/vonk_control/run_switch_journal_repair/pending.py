@@ -13,11 +13,11 @@ from vonk_agent_protocol import (
 from ..journal_models import RunSwitchJournalRepairPending
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_identity_contract import RunSwitchCancellation
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.identity import RunSwitchCancellation
+from ..run_switch_contract.journal import (
     RunSwitchJournalRepairPendingState,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_operations.results import _persisted_result
 from ..stall_window import stall_deadline
 from .discovery import REPAIR_WAIT, _candidate

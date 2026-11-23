@@ -129,14 +129,14 @@ from ..recipe_lifecycle_contract import (
     RecipeOperationStoppedResult,
 )
 from ..recipe_update_batches.contract import RecipeUpdateDocument, RecipeUpdateFailure
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.journal import (
     JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from .documents import RouteClaimMarker
 from .json_values import bind
 
@@ -326,7 +326,7 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
-from ..run_switch_identity_contract import RunSwitchCancellation
+from ..run_switch_contract.identity import RunSwitchCancellation
 
 bind(
     "run_switch_journal_repairs",

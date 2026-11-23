@@ -72,14 +72,14 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..operations.blockers import OperationBlocker, make_blocker
 from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_contract.progress import RunSwitchMemberReceipt
-from ..run_switch_contract.vocabulary import RunSwitchMemberState
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchStoredChildIdentity,
     RunSwitchStoredIdentity,
     RunSwitchStoredLifecycle,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.progress import RunSwitchMemberReceipt
+from ..run_switch_contract.vocabulary import RunSwitchMemberState
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
 from .composite import aggregate

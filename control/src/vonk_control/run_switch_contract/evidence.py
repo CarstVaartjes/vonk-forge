@@ -20,8 +20,8 @@ from vonk_forge_contracts.recipe import Scalar
 
 from ..mapping_parameters import MappingParameters
 from ..operations.blockers import SwapShortfallEvidence
-from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
+from .identity import NodeId, UuidId
 from .requests import MemoryUsageUncertainty, SparkGroupNode
 from .vocabulary import (
     Digest,

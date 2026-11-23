@@ -46,14 +46,14 @@ from vonk_control.recipe_runtime_specs import (
     split_option_choices,
 )
 from vonk_control.run_switch_contract.evidence import RunSwitchPhase
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
-from vonk_control.run_switch_observation_contract import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.progress_view import _merge_progress_evidence
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-from vonk_control.run_switch_progress import _merge_progress_evidence
 from vonk_control.stored.json_values import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document

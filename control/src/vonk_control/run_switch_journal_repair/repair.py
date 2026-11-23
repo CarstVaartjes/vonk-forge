@@ -21,12 +21,12 @@ from ..journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPendi
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..persisted_waits import clear_wait, read_wait
-from ..run_switch_contract.operations import RunSwitchOperationResult
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
     RunSwitchJournalRepairEvidence,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_operations.results import _persisted_result
 from .discovery import (
     REPAIR_WAIT,

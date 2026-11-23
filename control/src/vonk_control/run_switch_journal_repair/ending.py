@@ -21,11 +21,11 @@ from ..machine_states import reservation_live
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.journal import (
     JournalRepairDisposition,
     RunSwitchJournalRepairEndEvidence,
 )
+from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
 from ..stored.json_values import read_row_column
 from .discovery import _candidate, _discover, _fingerprint, journal_document
 from .pending import _pending

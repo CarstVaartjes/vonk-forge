@@ -20,6 +20,10 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.progress import stored_progress
 from ..recipe_progress import current_recipe_progress_attribution
+from ..run_switch_contract.journal import (
+    JournalRepairPurpose,
+    NativeProgressWitness,
+)
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import (
     RunSwitchRuntimeImageResult,
@@ -27,10 +31,6 @@ from ..run_switch_contract.phase_results import (
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
-)
-from ..run_switch_journal_contract import (
-    JournalRepairPurpose,
-    NativeProgressWitness,
 )
 from ..stored.json_values import read_row_column
 

@@ -12,26 +12,26 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
-from .lifecycle.evidence import (
+from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
 )
-from .lifecycle.run_switch import (
+from ..lifecycle.run_switch import (
     set_member_state,
 )
-from .operations.progress import project_progress
-from .run_switch_contract.evidence import RunSwitchPhase
-from .run_switch_contract.operations import RunSwitchOperationResult
-from .run_switch_contract.plans import RunSwitchPlan
-from .run_switch_contract.progress import (
+from ..operations.progress import project_progress
+from ..stall_window import last_progress_at, stall_deadline
+from .evidence import RunSwitchPhase
+from .observation import (
+    RunSwitchObservedEvidence,
+)
+from .operations import RunSwitchOperationResult
+from .plans import RunSwitchPlan
+from .progress import (
     RunSwitchMemberProgress,
     RunSwitchMemberReceipt,
     RunSwitchProgress,
 )
-from .run_switch_observation_contract import (
-    RunSwitchObservedEvidence,
-)
-from .stall_window import last_progress_at, stall_deadline
 
 #: Preparation, transfer and verification end after this long without progress.
 RECOVERY_STALL_WINDOW = timedelta(hours=1)
@@ -78,11 +78,11 @@ def _merge_measured_evidence(
     now: datetime | None = None,
 ) -> None:
     """Merge typed measured observations while retaining exact phase ownership."""
-    from .run_switch_operations.image_receipts import (
+    from ..run_switch_operations.image_receipts import (
         _plan_target_node_ids,
         _planned_transfer_parts,
     )
-    from .run_switch_operations.result_helpers import _observe_progress
+    from ..run_switch_operations.result_helpers import _observe_progress
 
     if isinstance(evidence, RunSwitchObservedEvidence):
         payload = evidence
@@ -178,7 +178,7 @@ def _merge_measured_evidence(
 def _complete_phase_progress(
     progress: RunSwitchOperationResult, plan: RunSwitchPlan, phase: RunSwitchPhase
 ) -> None:
-    from .run_switch_operations.image_receipts import (
+    from ..run_switch_operations.image_receipts import (
         _planned_transfer_bytes,
         _planned_transfer_parts,
     )
@@ -219,7 +219,7 @@ def _complete_phase_progress(
 def _complete_operation_progress(
     plan: RunSwitchPlan, progress: RunSwitchOperationResult
 ) -> RunSwitchOperationResult:
-    from .run_switch_operations.image_receipts import _planned_transfer_bytes
+    from ..run_switch_operations.image_receipts import _planned_transfer_bytes
 
     total, member_totals = _planned_transfer_bytes(plan)
     if total is not None:
@@ -255,12 +255,12 @@ def _progress_view(
     node_ids: Sequence[str] | None = None,
 ) -> RunSwitchProgress:
     """Project durable typed progress without advancing the operation."""
-    from .run_switch_operations.image_receipts import (
+    from ..run_switch_operations.image_receipts import (
         _plan_target_node_ids,
         _planned_transfer_bytes,
     )
-    from .run_switch_operations.ownership import _UNKNOWN_MEMBER_NODE_ID
-    from .run_switch_operations.result_helpers import _progress_operation_state
+    from ..run_switch_operations.ownership import _UNKNOWN_MEMBER_NODE_ID
+    from ..run_switch_operations.result_helpers import _progress_operation_state
 
     node_ids = (
         list(_plan_target_node_ids(plan))

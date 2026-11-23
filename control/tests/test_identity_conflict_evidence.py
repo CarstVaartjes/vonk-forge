@@ -19,7 +19,7 @@ from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
-from vonk_control.run_switch_progress import RECOVERY_STALL_WINDOW
+from vonk_control.run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_recipe_operations import _CanonicalImageTransport, read_recipe

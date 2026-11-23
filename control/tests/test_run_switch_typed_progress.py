@@ -7,11 +7,11 @@ import pytest
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter, _stored_child
 from vonk_control.lifecycle.types import State
 from vonk_control.models.jobs import Job
-from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
-from vonk_control.run_switch_observation_contract import (
+from vonk_control.run_switch_contract.observation import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchStoredIdentity,
 )
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_operations.result_helpers import (
     _persisted_result,
     _read_progress,

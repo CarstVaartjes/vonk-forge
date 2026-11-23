@@ -28,11 +28,11 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..models.jobs import Job
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_contract.vocabulary import RunSwitchAction, RunSwitchPlacementAction
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchStoredIdentity,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.vocabulary import RunSwitchAction, RunSwitchPlacementAction
 from ..strict_json import (
     read_stored_document,
 )

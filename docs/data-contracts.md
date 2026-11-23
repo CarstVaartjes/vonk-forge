@@ -242,9 +242,9 @@ module defines its own.
 | `control/src/vonk_control/run_switch_contract/progress.py` | controller-contract | 6 | Run switch contract: progress. |
 | `control/src/vonk_control/run_switch_contract/phase_results.py` | controller-contract | 22 | Run switch contract: phase results. |
 | `control/src/vonk_control/run_switch_contract/operations.py` | controller-contract | 5 | Run switch contract: operations. |
-| `control/src/vonk_control/run_switch_identity_contract.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
-| `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
-| `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
+| `control/src/vonk_control/run_switch_contract/identity.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
+| `control/src/vonk_control/run_switch_contract/journal.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
+| `control/src/vonk_control/run_switch_contract/observation.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime/spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
@@ -266,7 +266,7 @@ module defines its own.
 
 ### Narrow Run/Switch journal repair evidence
 
-`run_switch_journal_contract.py` owns the typed append-only evidence in
+`run_switch_contract/journal.py` owns the typed append-only evidence in
 `run_switch_journal_repairs.evidence`. `Job.result` remains the sole live
 Run/Switch checkpoint. The evidence stores the original SQL document's explicit
 canonical text (including nulls), original/corrected digests and exact native

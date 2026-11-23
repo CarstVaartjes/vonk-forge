@@ -182,7 +182,7 @@ def _journal_documents():
     import hashlib
     from datetime import UTC, datetime
 
-    from vonk_control.run_switch_journal_contract import (
+    from vonk_control.run_switch_contract.journal import (
         JournalRepairPurpose,
         NativeProgressWitness,
         RunSwitchJournalRepairEndEvidence,
@@ -240,7 +240,7 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
         RunSwitchJournalRepairPending,
     )
     from vonk_control.models.jobs import Job
-    from vonk_control.run_switch_journal_contract import (
+    from vonk_control.run_switch_contract.journal import (
         RunSwitchJournalRepairEndEvidence,
         RunSwitchJournalRepairPendingState,
     )

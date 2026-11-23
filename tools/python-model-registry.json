@@ -514,15 +514,15 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_identity_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/identity.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_journal_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/journal.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_observation_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/observation.py",
       "kind": "controller-contract",
       "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
     },

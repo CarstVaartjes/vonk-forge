@@ -28,14 +28,14 @@ from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
 from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import (
+    RunSwitchObservedImageIdentity,
+)
 from ..run_switch_contract.operations import (
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_observation_contract import (
-    RunSwitchObservedImageIdentity,
-)
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationUnknown
 from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,

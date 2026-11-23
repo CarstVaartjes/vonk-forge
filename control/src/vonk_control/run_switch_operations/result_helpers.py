@@ -34,6 +34,10 @@ from ..recovery_policy import (
     kind_for_failure_fields,
 )
 from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import (
+    RunSwitchObservedEvidence,
+    RunSwitchStoredLifecycle,
+)
 from ..run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
@@ -44,17 +48,13 @@ from ..run_switch_contract.phase_results import (
 )
 from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_contract.progress import RunSwitchMemberReceipt
+from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
 from ..run_switch_contract.vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,
     RunSwitchProgressState,
     RunSwitchSubphase,
 )
-from ..run_switch_observation_contract import (
-    RunSwitchObservedEvidence,
-    RunSwitchStoredLifecycle,
-)
-from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..stall_window import stall_deadline
 from .constants import (
     _MEMBER_STATE_ADAPTER,

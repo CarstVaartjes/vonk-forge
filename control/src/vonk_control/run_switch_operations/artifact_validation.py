@@ -16,12 +16,12 @@ from ..preparation_contract import (
     RuntimeImageIdentity,
 )
 from ..run_switch_contract.evidence import RunSwitchPhase
-from ..run_switch_contract.phase_results import RunSwitchVerifyResult
-from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchObservedImageIdentity,
 )
+from ..run_switch_contract.phase_results import RunSwitchVerifyResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from .errors import RunSwitchRetryLater
 from .image_receipts import _require_profile_runtime_image
 from .result_helpers import _phase_result

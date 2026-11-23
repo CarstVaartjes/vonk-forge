@@ -37,13 +37,13 @@ from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )
+from ..run_switch_contract.identity import RunSwitchCancellation
 from ..run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
 )
 from ..run_switch_contract.requests import RunSwitchStopApplyRequest
-from ..run_switch_identity_contract import RunSwitchCancellation
 from ..stored.json_values import read_row_column
 from ..strict_json import (
     read_stored_model,

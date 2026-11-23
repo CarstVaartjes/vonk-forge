@@ -13,10 +13,10 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress_view import _progress_view
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.plan_persistence import _load_plan
 from vonk_control.run_switch_operations.results import _stored_result
-from vonk_control.run_switch_progress import _progress_view
 
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (

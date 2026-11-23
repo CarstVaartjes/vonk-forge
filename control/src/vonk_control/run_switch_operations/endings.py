@@ -32,8 +32,8 @@ from ..run_switch_contract.operations import (
     RunSwitchOperationResult,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..run_switch_progress import RECOVERY_STALL_WINDOW
-from ..run_switch_progress import (
+from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from ..run_switch_contract.progress_view import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import Verdict, stall_deadline

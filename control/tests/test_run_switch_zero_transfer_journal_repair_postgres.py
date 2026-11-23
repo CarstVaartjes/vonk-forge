@@ -30,7 +30,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.run_switch_journal_contract import (
+from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     RunSwitchJournalRepairEvidence,
 )
@@ -640,7 +640,7 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
     with sessions() as session:
         pending = session.get(RunSwitchJournalRepairPending, switch_id)
         if pending is not None:
-            from vonk_control.run_switch_journal_contract import (
+            from vonk_control.run_switch_contract.journal import (
                 RunSwitchJournalRepairPendingState,
             )
 
@@ -672,7 +672,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
 ):
     from uuid import uuid4
 
-    from vonk_control.run_switch_journal_contract import JournalRepairPurpose
+    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -815,7 +815,7 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
     faulty_install,
 ):
     from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_journal_contract import JournalRepairPurpose
+    from vonk_control.run_switch_contract.journal import JournalRepairPurpose
 
     (
         sessions,
@@ -1062,10 +1062,10 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
 
     from sqlalchemy import delete
     from vonk_control.models.operations import AgentOperationAttempt
-    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
-    from vonk_control.run_switch_journal_contract import (
+    from vonk_control.run_switch_contract.journal import (
         RunSwitchJournalRepairPendingState,
     )
+    from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
     from .non_blocking import assert_ended_without_blocking
 
@@ -1203,7 +1203,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         job = session.get(Job, switch_id)
         assert job is not None and job.result == raw
         assert session.get(RunSwitchJournalRepairPending, switch_id) is None
-        from vonk_control.run_switch_journal_contract import (
+        from vonk_control.run_switch_contract.journal import (
             RunSwitchJournalRepairEndEvidence,
         )
 
@@ -1238,7 +1238,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
     from sqlalchemy import event
     from sqlalchemy.engine import ExceptionContext
     from vonk_control.jobs.documents import RunSwitchRunIntent
-    from vonk_control.run_switch_journal_contract import (
+    from vonk_control.run_switch_contract.journal import (
         RunSwitchJournalRepairPendingState,
     )
 
