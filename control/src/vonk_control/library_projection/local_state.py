@@ -285,7 +285,6 @@ def _database_local_state(
     if not digests:
         return {}
     requested_digests = set(digests)
-    recipe_models = self._recipe_model_digests()
     with self._sessions() as session:
         revisions = session.execute(
             select(
@@ -410,9 +409,13 @@ def _database_local_state(
                 RecipeInstallation.id,
                 RecipeInstallation.recipe_revision_id,
                 RecipeInstallation.state,
+                RecipeInstallation.model_content_sha256,
             ).where(
-                recipe_content_membership(
-                    RecipeInstallation.recipe_revision_id, digests
+                or_(
+                    recipe_content_membership(
+                        RecipeInstallation.recipe_revision_id, digests
+                    ),
+                    RecipeInstallation.model_content_sha256.in_(digests),
                 )
             )
         ).all()
@@ -543,6 +546,10 @@ def _database_local_state(
                 total=progress.measurement.total_bytes,
                 wait=read_wait(cache_operation),
             )
+        if state in model_cache_states.words(LifecycleState.CANCELLED):
+            # An operator's cancel says nothing about what is held: the cache
+            # set decides, and with none the digest reads not cached.
+            continue
         controller = (
             "preparing"
             if state in model_cache_states.LIVE
@@ -572,11 +579,15 @@ def _database_local_state(
             controller=controller,
         )
     installation_revision: dict[str, str] = {}
+    installation_model: dict[str, str] = {}
     for (
         installation_id,
         installation_revision_id,
         installation_state,
+        installation_model_digest,
     ) in installations:
+        if installation_model_digest is not None:
+            installation_model[installation_id] = installation_model_digest
         controller = _controller_state(
             {
                 InstallationState.PLANNED: "preparing",
@@ -642,12 +653,9 @@ def _database_local_state(
             if installed_revision_id is not None
             else None
         )
-        # A run serves its recipe and the models the recipe binds, whether or
-        # not its plan names one.
-        for served in (
-            installed_digest,
-            *recipe_models.get(installed_digest or "", ()),
-        ):
+        # A run serves its recipe and the model its installation recorded,
+        # whether or not its plan names one or its recipe is still the head.
+        for served in (installed_digest, installation_model.get(installation_id)):
             self._merge_local(
                 asset_facts,
                 served,

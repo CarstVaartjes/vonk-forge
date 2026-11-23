@@ -19,7 +19,7 @@ from .common import (
     _quoted,
     _request_key,
 )
-from .confirmation import _confirm_action, _require_confirmation
+from .confirmation import _confirm_action
 from .observation import (
     _bounded_timeout,
     _poll_path,
@@ -394,7 +394,6 @@ def _profile(
                 terminal=lambda _: True,
                 attempts=3,
             )
-        _require_confirmation(args, "profile load")
         return _load_profile(
             args,
             client,

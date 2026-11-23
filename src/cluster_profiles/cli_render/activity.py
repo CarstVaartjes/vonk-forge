@@ -5,7 +5,14 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE
+from ..cli_states_generated import (
+    CANCELLED,
+    ENDPOINT_UNAVAILABLE,
+    LIVE_LIFECYCLE_STATES,
+    TERMINAL_LIFECYCLE_STATES,
+    UNKNOWN,
+    UNSUCCESSFUL_LIFECYCLE_STATES,
+)
 from .common import (
     _actions,
     _field,
@@ -103,6 +110,18 @@ def activity_continuation(
     return command
 
 
+def _outcome(state: object) -> str:
+    """The contract's three-way grouping: an operator's cancel is not a failure."""
+
+    if state in UNSUCCESSFUL_LIFECYCLE_STATES:
+        return "unsuccessful"
+    if state == CANCELLED:
+        return CANCELLED
+    if state in TERMINAL_LIFECYCLE_STATES:
+        return "recorded"
+    return "in progress" if state in LIVE_LIFECYCLE_STATES else UNKNOWN
+
+
 def _activity(
     payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
@@ -142,15 +161,20 @@ def _activity(
                         owner_id,
                         "--follow",
                     ]
-            _field(
-                "Reconnect",
-                ENDPOINT_UNAVAILABLE if reconnect is None else shlex.join(reconnect),
-            )
+            # Only work that has not ended can be reconnected to.
+            if operation.get("state") in LIVE_LIFECYCLE_STATES:
+                _field(
+                    "Reconnect",
+                    ENDPOINT_UNAVAILABLE
+                    if reconnect is None
+                    else shlex.join(reconnect),
+                )
             _field("Owner", f"{_text(owner.get('kind'))} {_text(owner.get('id'))}")
             if owner.get("request_id") is not None:
                 _field("Request", owner.get("request_id"))
         _field("Kind", operation.get("kind"))
         _field("State", operation.get("state"))
+        _field("Outcome", _outcome(operation.get("state")))
         if operation.get("projection_issues") is not None:
             for issue in _records(operation, "projection_issues"):
                 _warn(

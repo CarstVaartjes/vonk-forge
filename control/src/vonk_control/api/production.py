@@ -303,7 +303,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         clock=clock,
         events=fleet_event_repository,
         telemetry=telemetry_repository,
-        agent_upgrade_available=upgrade_availability.available,
+        agent_upgrade_available=upgrade_availability.reader,
     )
     visual_fleet_stream = FleetStream(
         fleet_event_repository,

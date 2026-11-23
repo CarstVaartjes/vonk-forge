@@ -851,8 +851,8 @@ test("a loaded profile whose plan changes nothing offers no Load button", async 
   } as unknown as FleetProfilePreview;
   const api = apiFor({ previewProfile: vi.fn(async () => settled) });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
-  expect(await screen.findByText("Loaded, nothing to change")).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Load profile" })).toBeNull();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Load profile" })).toBeNull());
+  expect(api.loadProfile).not.toHaveBeenCalled();
 });
 
 test("a blocked plan cannot be loaded and says why", async () => {

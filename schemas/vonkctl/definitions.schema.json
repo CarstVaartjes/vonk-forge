@@ -6134,7 +6134,7 @@
       "title": "FleetProfilePreparationDecision",
       "type": "object"
     },
-    "FleetProfilePreviewDocument": {
+    "FleetProfilePreviewResponseDocument": {
       "properties": {
         "admission_decisions": {
           "items": {
@@ -6178,8 +6178,7 @@
           "type": "string"
         },
         "next_action": {
-          "$ref": "#/$defs/ProfileLoadAction",
-          "default": "load"
+          "$ref": "#/$defs/ProfileLoadAction"
         },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
@@ -6266,7 +6265,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 2,
+          "const": 3,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -6310,9 +6309,10 @@
         "generated_at",
         "assessments",
         "plan_digest",
-        "effects_digest"
+        "effects_digest",
+        "next_action"
       ],
-      "title": "FleetProfilePreviewDocument",
+      "title": "FleetProfilePreviewResponseDocument",
       "type": "object"
     },
     "FleetProfileReason": {
@@ -11953,7 +11953,7 @@
         "result": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FleetProfilePreviewDocument"
+              "$ref": "#/$defs/FleetProfilePreviewResponseDocument"
             },
             {
               "$ref": "#/$defs/NothingConfirmed"

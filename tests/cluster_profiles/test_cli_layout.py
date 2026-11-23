@@ -492,3 +492,39 @@ def test_a_serving_model_row_names_the_sparks_it_runs_on():
     row = library_render._library_row(item, "model")
     assert "1 Spark" in row
     assert "no" not in row
+
+
+def _activity_lines(printed, state):
+    owner = {"kind": "job", "id": "job-1"}
+    payload = {
+        "operations": [
+            {
+                "id": "op-1",
+                "owner": owner,
+                "kind": "profile.load",
+                "state": state,
+                "created_at": "2026-11-23T00:00:00Z",
+                "node_ids": [],
+            }
+        ],
+        "total": 1,
+        "next_cursor": None,
+    }
+    return printed(_activity, payload, None)
+
+
+@pytest.mark.parametrize(
+    ("state", "outcome", "reconnect"),
+    [
+        ("running", "in progress", True),
+        ("failed", "unsuccessful", False),
+        ("cancelled", "cancelled", False),
+        ("succeeded", "recorded", False),
+    ],
+)
+def test_activity_groups_a_cancel_apart_and_reconnects_only_live_work(
+    printed, state, outcome, reconnect
+):
+    lines = _activity_lines(printed, state)
+    assert f"Outcome: {outcome}" in lines
+    assert any(line.startswith("Reconnect:") for line in lines) is reconnect

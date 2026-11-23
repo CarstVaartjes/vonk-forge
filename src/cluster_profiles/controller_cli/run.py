@@ -15,6 +15,7 @@ from ..cli_outcome import (
 )
 from ..cli_render.common import _text, _words, terminal_text
 from ..cli_select import SelectorError
+from ..cli_states_generated import SUCCEEDED
 from ..control_client.errors import ControlMalformedResponse
 from ..control_client.schema import validate_control_document
 from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
@@ -193,7 +194,7 @@ def _run(
         draft=draft,
     )
     application_state = operation_state(application)
-    if application_state not in {"succeeded", "completed"}:
+    if application_state != SUCCEEDED:
         return {
             "recipe": selector,
             "application": application,

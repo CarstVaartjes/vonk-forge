@@ -29,7 +29,6 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileView,
     profile_load_due,
 )
-from ..fleet_profile_contract.review import ProfileLoadAction
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..model_cache.contract import CachedResourceEstimate
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
@@ -392,18 +391,21 @@ class FleetProfileService:
             ),
             warnings=sorted(set(warnings)),
             next_actions=[
-                f"vonkctl --profile {row.number} profile "
+                f"vonkctl --profile {row.number} "
                 + (
-                    ProfileLoadAction.LOAD.value
+                    "profile load"
                     if profile_load_due(
                         saved=row.revision,
                         loaded=loaded_revision,
-                        update_pending=any(
-                            assignment.recipe_update is not None
-                            for assignment in assignments
+                        assignments=list(
+                            zip(
+                                (choice.desired_state for choice in choices),
+                                assignments,
+                                strict=True,
+                            )
                         ),
                     )
-                    else "endpoint"
+                    else "profile endpoint"
                 )
             ],
             profile_digest=_digest(document),

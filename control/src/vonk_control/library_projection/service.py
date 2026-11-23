@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.qualification_status import QualificationStatus
@@ -186,7 +187,7 @@ class LibraryProjection:
             model_cache_states.BACKOFF: model_cache_states.BACKOFF,
             "succeeded": "succeeded",
             "failed": "failed",
-            "cancelled": "failed",
+            LifecycleState.CANCELLED.value: LifecycleState.CANCELLED.value,
         }.get(state)
         if projected_state is None:
             _note_unreadable("cache operation state", operation_id, state)

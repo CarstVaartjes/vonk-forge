@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -14,7 +15,10 @@ from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
+)
 from vonk_forge_contracts import EndpointAlias
 
 from ..model_cache.contract import CachedResourceEstimate
@@ -326,15 +330,33 @@ class FleetProfileView(StrictModel):
     updated_at: datetime
 
 
-def profile_load_due(*, saved: int, loaded: int | None, update_pending: bool) -> bool:
+_SETTLED = {
+    DesiredAssignmentState.RUNNING: frozenset({ObservedAssignmentState.RUNNING}),
+    DesiredAssignmentState.INSTALLED: frozenset(
+        {ObservedAssignmentState.INSTALLED, ObservedAssignmentState.RUNNING}
+    ),
+}
+
+
+def profile_load_due(
+    *,
+    saved: int,
+    loaded: int | None,
+    assignments: Sequence[tuple[DesiredAssignmentState, FleetProfileAssignmentView]],
+) -> bool:
     """Whether loading this saved profile would apply something new.
 
-    The profile read answers it from what it knows without planning: the saved
-    number is not the loaded one, or a loaded workload runs an older recipe
-    version. The exact plan decides the rest (``ProfileLoadAction``).
+    The profile read answers it without planning: the saved number is not the
+    loaded one, a workload runs an older recipe version, or an assignment is not
+    observed as it is desired. An observation that is not known fails open to
+    due. The exact plan decides the rest (``profile_load_action``).
     """
 
-    return update_pending or loaded not in (saved,)
+    return loaded not in (saved,) or any(
+        view.recipe_update is not None
+        or view.observed_state not in _SETTLED.get(desired, ())
+        for desired, view in assignments
+    )
 
 
 class UnavailableFleetProfileView(StrictModel):

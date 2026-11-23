@@ -43,8 +43,7 @@
       "type": "string"
     },
     "next_action": {
-      "$ref": "definitions.schema.json#/$defs/ProfileLoadAction",
-      "default": "load"
+      "$ref": "definitions.schema.json#/$defs/ProfileLoadAction"
     },
     "plan_digest": {
       "pattern": "^[0-9a-f]{64}$",
@@ -131,7 +130,7 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 2,
+      "const": 3,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -175,8 +174,9 @@
     "generated_at",
     "assessments",
     "plan_digest",
-    "effects_digest"
+    "effects_digest",
+    "next_action"
   ],
-  "title": "vonkctl profile-review document (schema_version 2)",
+  "title": "vonkctl profile-review document (schema_version 3)",
   "type": "object"
 }

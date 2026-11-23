@@ -11,6 +11,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_agent_protocol.agent_words import ProfileAction
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
@@ -87,38 +88,57 @@ class FleetProfileReviewedDecision(StrictModel):
     reasons: list[FleetProfileReason] = Field(max_length=128)
 
 
+def _stops_a_workload(decision: FleetProfileReviewedDecision) -> bool:
+    """Whether loading stops a serving workload: a run stop, or an adopted one."""
+
+    return bool(decision.summary.stops) or any(
+        application.stops for application in decision.effects.adopted
+    )
+
+
+def _changes_something(decision: FleetProfileReviewedDecision) -> bool:
+    """Whether loading does anything beyond keeping what already runs."""
+
+    effects = decision.effects
+    summary = decision.summary
+    return bool(
+        decision.steps
+        or decision.preparation_steps
+        or effects.gpu_clocks
+        or effects.adopted
+        or any(item.action != ProfileAction.KEEP for item in effects.installations)
+        or any(
+            item.action != ProfileAction.KEEP or item.previous_alias is not None
+            for item in effects.runs
+        )
+        or summary.starts
+        or summary.installs
+        or summary.uninstalls
+        or _stops_a_workload(decision)
+    )
+
+
 def profile_load_action(decision: FleetProfileReviewedDecision) -> ProfileLoadAction:
     """The one rule for offering, confirming and describing a load.
 
     A plan loads when it can be admitted now or once the Controller has prepared
-    what it lacks, and it changes something: a start, stop, install, uninstall,
-    placement, build or distribution. It needs a confirmation exactly when it
-    stops a workload.
+    what it lacks, and it changes something. It needs a confirmation exactly
+    when it stops a workload.
     """
 
-    summary = decision.summary
     if not (decision.allowed or decision.waits_for_preparation):
         return ProfileLoadAction.BLOCKED
-    if not any(
-        (
-            summary.starts,
-            summary.stops,
-            summary.installs,
-            summary.uninstalls,
-            summary.placements,
-            summary.builds,
-            summary.distributions,
-        )
-    ):
+    if not _changes_something(decision):
         return ProfileLoadAction.NOTHING_TO_CHANGE
-    return ProfileLoadAction.LOAD_STOPPING if summary.stops else ProfileLoadAction.LOAD
+    return (
+        ProfileLoadAction.LOAD_STOPPING
+        if _stops_a_workload(decision)
+        else ProfileLoadAction.LOAD
+    )
 
 
 class FleetProfilePreview(FleetProfileReviewedDecision):
     generated_at: datetime
-    #: What loading this plan does; derived from its summary, so it never changes
-    #: the reviewed identity. A plan stored without it reads as a plain load.
-    next_action: ProfileLoadAction = ProfileLoadAction.LOAD
     assessments: list[FleetProfileAssignmentAssessment] = Field(max_length=64)
     preparations: list[FleetProfileAssignmentPreparation] = Field(
         default_factory=list, max_length=64
@@ -134,6 +154,25 @@ class FleetProfilePreview(FleetProfileReviewedDecision):
                 name: getattr(self, name)
                 for name in FleetProfileReviewedDecision.model_fields
             }
+        )
+
+
+class FleetProfilePreviewResponse(FleetProfilePreview):
+    """What the review endpoint answers: the stored plan and what loading it does."""
+
+    #: The published review document's own version; the stored plan keeps its own.
+    schema_version: Literal[3] = 3  # type: ignore[assignment]
+    next_action: ProfileLoadAction
+
+    @classmethod
+    def of(cls, preview: FleetProfilePreview) -> FleetProfilePreviewResponse:
+        return cls(
+            **{
+                name: getattr(preview, name)
+                for name in FleetProfilePreview.model_fields
+                if name != "schema_version"
+            },
+            next_action=profile_load_action(preview),
         )
 
 

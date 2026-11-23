@@ -17,6 +17,10 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
     profile_load_due,
 )
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileEffects,
+    FleetProfileRunEffect,
+)
 from vonk_control.fleet_profile_contract.review import (
     FleetProfileReviewedDecision,
     ProfileLoadAction,
@@ -110,7 +114,7 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     reviewed = service.preview(profile.id)
     assert reviewed.allowed
     # A never-loaded profile is offered for loading; the plan has work to do.
-    assert reviewed.next_action in (
+    assert profile_load_action(reviewed) in (
         ProfileLoadAction.LOAD,
         ProfileLoadAction.LOAD_STOPPING,
     )
@@ -1027,7 +1031,17 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
     assert fresh_uncertainty.inventory_evidence_digest == "b" * 64
 
 
-def _plan(*, allowed: bool = True, waits: bool = False, **counts: int):
+def _plan(
+    *,
+    allowed: bool = True,
+    waits: bool = False,
+    steps: int = 0,
+    runs=(),
+    installations=(),
+    adopted=(),
+    gpu_clocks=None,
+    **counts: int,
+):
     summary = {
         name: 0 for name in FleetProfilePlanSummary.model_fields if name != "blockers"
     } | {"blockers": 0}
@@ -1035,22 +1049,54 @@ def _plan(*, allowed: bool = True, waits: bool = False, **counts: int):
         allowed=allowed,
         waits_for_preparation=waits,
         summary=FleetProfilePlanSummary.model_validate(summary | counts),
+        steps=[object()] * steps,
+        preparation_steps=[],
+        effects=FleetProfileEffects.model_construct(
+            runs=list(runs),
+            installations=list(installations),
+            adopted=list(adopted),
+            gpu_clocks=gpu_clocks,
+        ),
     )
+
+
+def _run(action: str = "keep", previous_alias: str | None = None):
+    return FleetProfileRunEffect.model_construct(
+        action=action, previous_alias=previous_alias
+    )
+
+
+def _adopted(*stops: object):
+    return SimpleNamespace(stops=list(stops))
 
 
 @pytest.mark.parametrize(
     ("plan", "expected"),
     [
-        (_plan(already_correct=2), ProfileLoadAction.NOTHING_TO_CHANGE),
-        (_plan(starts=1), ProfileLoadAction.LOAD),
+        (_plan(already_correct=2, runs=[_run()]), ProfileLoadAction.NOTHING_TO_CHANGE),
+        (_plan(starts=1, steps=1), ProfileLoadAction.LOAD),
         (_plan(installs=1), ProfileLoadAction.LOAD),
-        (_plan(starts=1, stops=1), ProfileLoadAction.LOAD_STOPPING),
-        (_plan(allowed=False, waits=True, builds=1), ProfileLoadAction.LOAD),
+        (
+            _plan(starts=1, stops=1, runs=[_run("stop")]),
+            ProfileLoadAction.LOAD_STOPPING,
+        ),
+        # An adopted application's stop confirms, alone or beside a run stop.
+        (_plan(adopted=[_adopted(object())]), ProfileLoadAction.LOAD_STOPPING),
+        (
+            _plan(stops=1, runs=[_run("stop")], adopted=[_adopted(object())]),
+            ProfileLoadAction.LOAD_STOPPING,
+        ),
+        # Work that is not a start, stop, install or uninstall still loads.
+        (_plan(gpu_clocks=[object()]), ProfileLoadAction.LOAD),
+        (_plan(runs=[_run(previous_alias="old")]), ProfileLoadAction.LOAD),
+        (_plan(adopted=[_adopted()]), ProfileLoadAction.LOAD),
+        (_plan(steps=1, already_correct=0), ProfileLoadAction.LOAD),
+        (_plan(allowed=False, waits=True, steps=1), ProfileLoadAction.LOAD),
         (_plan(allowed=False, starts=1), ProfileLoadAction.BLOCKED),
         (_plan(allowed=False, already_correct=1), ProfileLoadAction.BLOCKED),
     ],
 )
-def test_a_plan_is_loaded_only_when_it_changes_something_and_confirmed_only_when_it_stops(
+def test_a_plan_is_loaded_when_it_changes_anything_and_confirmed_when_it_stops_anything(
     plan, expected
 ):
     """One rule for the Load button, its confirmation and the CLI hint."""
@@ -1058,18 +1104,26 @@ def test_a_plan_is_loaded_only_when_it_changes_something_and_confirmed_only_when
     assert profile_load_action(plan) == expected
 
 
+def _assignment(desired, observed, update=None):
+    return (
+        desired,
+        SimpleNamespace(observed_state=observed, recipe_update=update),
+    )
+
+
 @pytest.mark.parametrize(
-    ("revision", "loaded", "pending", "due"),
+    ("saved", "loaded", "assignments", "due"),
     [
-        (7, 7, False, False),
-        (8, 7, False, True),
-        (1, None, False, True),
-        (7, 7, True, True),
+        (7, 7, [_assignment("running", "running")], False),
+        (8, 7, [_assignment("running", "running")], True),
+        (1, None, [], True),
+        (7, 7, [_assignment("running", "running", update=object())], True),
+        (7, 7, [_assignment("running", "degraded")], True),
+        (7, 7, [_assignment("running", "unknown")], True),
+        (7, 7, [_assignment("installed", "running")], False),
     ],
 )
-def test_loading_a_saved_profile_is_due_until_it_is_loaded_at_its_revision(
-    revision, loaded, pending, due
+def test_loading_a_saved_profile_is_due_until_it_is_loaded_and_observed_as_desired(
+    saved, loaded, assignments, due
 ):
-    assert (
-        profile_load_due(saved=revision, loaded=loaded, update_pending=pending) is due
-    )
+    assert profile_load_due(saved=saved, loaded=loaded, assignments=assignments) is due

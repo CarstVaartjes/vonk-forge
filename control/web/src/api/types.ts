@@ -199,7 +199,7 @@ export function readableProfile(profile: FleetProfileRead): profile is FleetProf
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
 export type FleetProfileDeletion = components["schemas"]["FleetProfileDeletion"];
-export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
+export type FleetProfilePreview = components["schemas"]["FleetProfilePreviewResponse"];
 export type FleetProfileEndpoints = components["schemas"]["FleetProfileEndpointsView"];
 export type FleetProfileApplicationView = components["schemas"]["FleetProfileApplicationView"];
 export type FleetProfileLoadInput = components["schemas"]["FleetProfileLoadRequest"];

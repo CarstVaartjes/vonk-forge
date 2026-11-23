@@ -327,7 +327,7 @@
           "$ref": "definitions.schema.json#/$defs/UnavailableFleetProfileViewDocument"
         },
         {
-          "$ref": "definitions.schema.json#/$defs/FleetProfilePreviewDocument"
+          "$ref": "definitions.schema.json#/$defs/FleetProfilePreviewResponseDocument"
         },
         {
           "$ref": "definitions.schema.json#/$defs/FleetProfileApplicationViewDocument"

@@ -31,6 +31,7 @@ from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjec
 from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache import model_artifact_cache
+from vonk_control.model_cache.contract import CacheOperationKind
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import (
     CatalogDocument,
@@ -876,3 +877,68 @@ def test_a_models_cache_state_is_the_same_in_every_view_and_shows_where_it_runs(
     assert detail.local.running_on == [SPARK]
     assert listed.local == cached.local == detail.local
     assert listed.actions == cached.actions == detail.actions
+
+
+def test_a_cancelled_download_is_not_a_failure_and_holds_nothing(cache):
+    """The operator's cancel leaves the recipe not cached: Download is offered
+    (not a retry of a failure) and there is nothing to Remove."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    stopped = world.recipe_set(service, "downloading")
+    cancelled = _operation(
+        stopped.artifact_set_sha256,
+        kind="download",
+        state="cancelled",
+        at=NOW,
+        completed=10,
+    )
+    with sessions.begin() as session:
+        session.add(cancelled)
+    recipe = _recipe(_projection(sessions))
+
+    assert recipe.local.controller == "not_cached"
+    assert recipe.actions == [CacheOperationKind.DOWNLOAD]
+
+
+def test_a_run_of_a_superseded_recipe_revision_still_marks_its_model_serving(cache):
+    """The installation records the model it serves, so a model's Sparks do not
+    depend on its recipe still being the catalog head."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    with sessions.begin() as session:
+        session.add(world.recipe_set(service, "cached"))
+    _serve(world, sessions)
+    with sessions.begin() as session:
+        old = session.get(CatalogDocumentRevision, world.recipe_revision_id)
+        assert old is not None
+        newer = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=old.document_id,
+            kind=old.kind,
+            publisher=old.publisher,
+            slug=old.slug,
+            revision_number=old.revision_number + 1,
+            schema_version=old.schema_version,
+            state="active",
+            document=old.document,
+            content_digest="f" * 64,
+            execution_key=old.execution_key,
+            projected=old.projected,
+            created_by="test",
+            created_at=NOW,
+        )
+        session.add(newer)
+        session.flush()
+        session.execute(
+            update(CatalogDocumentHead)
+            .where(CatalogDocumentHead.kind == old.kind)
+            .where(CatalogDocumentHead.slug == old.slug)
+            .values(active_revision_id=newer.id)
+        )
+    projection = _projection(sessions)
+
+    detail = projection.model_detail("vonk-forge/resolver-model")
+    (listed,) = projection.models(limit=10).models
+    assert detail.local.running_on == listed.local.running_on == [SPARK]

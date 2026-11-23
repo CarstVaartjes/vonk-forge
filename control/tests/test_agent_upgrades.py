@@ -10,17 +10,19 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentUpgradeResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades import package as agent_upgrades_module
+from vonk_control.agent_upgrades.availability import UpgradeAvailability
 from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
 from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )
-from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict, AgentUpgradeInvalid
 from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
@@ -2230,18 +2232,30 @@ def _spark(
 
 def test_a_spark_has_an_upgrade_only_when_it_differs_and_can_take_it():
     """The fleet read says 'upgrade available' by the rollout's own rule."""
-    from vonk_control.agent_upgrades.availability import UpgradeAvailability
+    now = [datetime(2026, 11, 23, tzinfo=UTC)]
+    availability = UpgradeAvailability(lambda: now[0], spawn=lambda work: work())
+    release = {"fails": True}
 
-    availability = UpgradeAvailability(lambda: datetime(2026, 11, 23, tzinfo=UTC))
-    # Before the release is read the answer is unknown, never "nothing to upgrade".
-    assert availability.available(_spark(OLD_IDENTITY)) is None
-    availability.bind(lambda: PACKAGE_MODEL)
-    availability._refresh()
+    def read_release() -> AgentUpgradePackage:
+        if release["fails"]:
+            # Any refusal of the channel must leave the next read able to retry.
+            raise AgentUpgradeInvalid(
+                "release is malformed", reason=InvalidRequestReason.MALFORMED
+            )
+        return PACKAGE_MODEL
 
-    assert availability.available(_spark(OLD_IDENTITY)) is True
-    assert availability.available(_spark(NEW_IDENTITY)) is False
-    assert availability.available(_spark(OLD_IDENTITY, state="revoked")) is False
+    availability.bind(read_release)
+    # While the release cannot be read the answer is unknown, never "nothing to upgrade".
+    assert availability.reader()(_spark(OLD_IDENTITY)) is None
+    release["fails"] = False
+    now[0] += timedelta(minutes=2)
+    availability.reader()
+    available = availability.reader()
+
+    assert available(_spark(OLD_IDENTITY)) is True
+    assert available(_spark(NEW_IDENTITY)) is False
+    assert available(_spark(OLD_IDENTITY, state="revoked")) is False
     other_arch = {**OLD_IDENTITY, "architecture": "linux-amd64"}
-    assert availability.available(_spark(other_arch)) is False
+    assert available(_spark(other_arch)) is False
     # A Spark that has not reported what it runs is unknown, not current.
-    assert availability.available(_spark(None)) is None
+    assert available(_spark(None)) is None

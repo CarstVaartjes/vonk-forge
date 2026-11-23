@@ -307,7 +307,8 @@ test("Serving names the run, its rank and partner as a link; Storage lists model
   const serving = screen.getByRole("region", { name: "Serving" });
   expect(serving).toHaveTextContent("coder");
   expect(serving).toHaveTextContent("Rank 0 of 2, one unit with Garage");
-  await waitFor(() => expect(serving).toHaveTextContent("Speed: Not reported"));
+  // No speed is reported for the alias, so none is shown.
+  expect(serving).not.toHaveTextContent("tok/s");
   fireEvent.click(screen.getByRole("link", { name: "Garage" }));
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/sparks/spk_2");
   const models = screen.getByRole("list", { name: "Models on disk" });

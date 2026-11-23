@@ -252,6 +252,7 @@ export function LibraryPage({
   const [attempt, setAttempt] = useState(0);
   const [fleetAttempt, setFleetAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [pollAttempt, setPollAttempt] = useState(0);
   const [query, setQuery] = useState(
     () => new URL(path, location.origin).searchParams.get("q") ?? "",
   );
@@ -307,13 +308,16 @@ export function LibraryPage({
         .then((value) => {
           if (!controller.signal.aborted) setDetail(viewRecipeDetail(value));
         })
-        .catch(() => undefined);
+        // A failed read must not end the following: read again.
+        .catch(() => {
+          if (!controller.signal.aborted) setPollAttempt((value) => value + 1);
+        });
     }, LIVE_REFRESH_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [api, detail, route]);
+  }, [api, detail, route, pollAttempt]);
   useEffect(() => {
     // The release's words, read once per page. They are informative: without
     // them (none published, or unreachable) the page shows the names.

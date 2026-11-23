@@ -16,16 +16,24 @@ from ..inventory.items import runtime_value
 from ..models.fleet import AgentNode
 from .contract import AgentUpgradePackage
 from .eligibility import EligibilityMixin
-from .errors import AgentUpgradeRetryLater, AgentUpgradeUnavailable
+from .errors import AgentUpgradeConflict
 
 REFRESH_AFTER = timedelta(seconds=60)
 
 
 class UpgradeAvailability:
-    """``available(node)``: True, False, or None while it cannot be told."""
+    """``reader()(node)``: True, False, or None while it cannot be told."""
 
-    def __init__(self, clock: Callable[[], datetime]) -> None:
+    def __init__(
+        self,
+        clock: Callable[[], datetime],
+        *,
+        spawn: Callable[[Callable[[], None]], None] = lambda work: threading.Thread(
+            target=work, daemon=True
+        ).start(),
+    ) -> None:
         self._clock = clock
+        self._spawn = spawn
         self._read_package: Callable[[], AgentUpgradePackage] | None = None
         self._package: AgentUpgradePackage | None = None
         self._read_at: datetime | None = None
@@ -39,7 +47,7 @@ class UpgradeAvailability:
             return
         try:
             self._package = self._read_package()
-        except (AgentUpgradeUnavailable, AgentUpgradeRetryLater):
+        except AgentUpgradeConflict:
             # Keep the last release read; the next stale read tries again.
             pass
         finally:
@@ -49,16 +57,22 @@ class UpgradeAvailability:
     def package(self) -> AgentUpgradePackage | None:
         now = self._clock()
         if self._read_at is None or now - self._read_at > REFRESH_AFTER:
-            threading.Thread(target=self._refresh, daemon=True).start()
+            self._spawn(self._refresh)
         return self._package
 
-    def available(self, node: AgentNode) -> bool | None:
+    def reader(self) -> Callable[[AgentNode], bool | None]:
+        """The answer for one fleet read: the release is looked at once."""
+
         package = self.package()
-        if package is None:
-            return None
-        if runtime_value(node, lambda identity: identity.architecture) is None:
-            # The Spark has not reported what it runs.
-            return None
-        if EligibilityMixin._at_target(node, package):
-            return False
-        return EligibilityMixin._permanent_ineligible_reason(node, package) is None
+
+        def available(node: AgentNode) -> bool | None:
+            if package is None:
+                return None
+            if runtime_value(node, lambda identity: identity.architecture) is None:
+                # The Spark has not reported what it runs.
+                return None
+            if EligibilityMixin._at_target(node, package):
+                return False
+            return EligibilityMixin._permanent_ineligible_reason(node, package) is None
+
+        return available
