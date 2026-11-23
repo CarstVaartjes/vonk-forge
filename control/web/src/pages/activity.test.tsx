@@ -1052,7 +1052,7 @@ it("preserves visible activity when current operation membership is unknown", as
 test("keeps known operation state visible when one fact exceeds its response budget, then refreshes", async () => {
   const user = userEvent.setup();
   const initial = canonicalOperation({
-    state: "running",
+    state: "needs_operator",
     failure: null,
     progress: null,
     recovery: { actions: ["inspect"], uncertain: false },
@@ -1139,7 +1139,20 @@ test("leads with the workload the Controller names, else with the Sparks", async
   ).toBeVisible();
 });
 
-test("Refresh operation is offered for work in progress, not for a finished operation", async () => {
+test("an operation that updates itself offers no Refresh operation", async () => {
+  // Break caught: a manual button on a card that already polls every five seconds.
+  const running = canonicalOperation({
+    id: "live",
+    kind: "recipe.start",
+    state: "running",
+    failure: null,
+  });
+  render(<ActivityPage api={canonicalApi([running])} now={NOW} />);
+  expect(await screen.findByText(/Updates automatically/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Refresh operation" })).toBeNull();
+});
+
+test("Refresh operation is not offered for a finished operation", async () => {
   // Break caught: a completed operation keeps a button that can only re-read the same answer.
   const finished = canonicalOperation({
     id: "done",

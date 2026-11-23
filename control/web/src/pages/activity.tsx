@@ -851,7 +851,6 @@ function ActivityTimeline({
             <article>
               <header>
                 <div>
-                  <span className="activity-category">{activityCategory(event)}</span>
                   <h2>{activityTitle(event)}</h2>
                 </div>
                 <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
@@ -1171,7 +1170,7 @@ function CanonicalOperationDetails({
       ) : (
         detail.recovery?.explanation && <p style={{ margin: 0 }}>{detail.recovery.explanation}</p>
       )}
-      {!operationEnded(detail.state) && (
+      {!operationEnded(detail.state) && (!active || error) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
           <button type="button" className="button secondary" onClick={() => void refresh()}>
             Refresh operation
@@ -1535,7 +1534,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             </div>
             <button
               type="button"
-              className="button"
+              className="button secondary"
               disabled={loading || loadingMore}
               onClick={() => setAttempt((value) => value + 1)}
             >

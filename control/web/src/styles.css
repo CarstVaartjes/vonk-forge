@@ -1146,13 +1146,6 @@ progress {
   justify-content: space-between;
   gap: 1rem;
 }
-.activity-category {
-  color: var(--green-text);
-  font-size: 0.68rem;
-  font-weight: 850;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
 .activity-event h2 {
   margin: 0.2rem 0 0;
   font-size: 1.05rem;
@@ -1196,7 +1189,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-weight: 750;
 }
 .activity-technical dl {
@@ -1252,7 +1245,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
 }
@@ -1522,7 +1515,7 @@ progress {
   width: max-content;
   max-width: 100%;
   cursor: pointer;
-  color: var(--green-text);
+  color: var(--muted);
   font-size: 0.72rem;
 }
 .activity-upgrade-diagnostics details code {
@@ -1572,7 +1565,7 @@ progress {
   min-width: 12rem;
 }
 .activity-table td > small {
-  color: var(--green-text);
+  color: var(--muted);
 }
 .activity-table .activity-time {
   min-width: 11rem;
