@@ -82,5 +82,5 @@ def workload_aliases(
                 RecipeRun, RecipeRun.id == AgentOperation.payload["run_id"].as_string()
             )
             .where(AgentOperation.id.in_([operation.id for operation in operations]))
-        )
+        ).all()
     )

@@ -143,7 +143,7 @@ class StartMixin:
                         ),
                         AgentNodeContact.management_address.is_not(None),
                     )
-                )
+                ).all()
             )
             absent = sorted({node.node_id for node in plan.nodes} - set(presences))
             if absent:

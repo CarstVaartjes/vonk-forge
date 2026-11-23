@@ -84,7 +84,7 @@ class FleetProfileService:
                 select(AgentNodeProfile.node_id, AgentNodeProfile.display_name).where(
                     AgentNodeProfile.node_id.in_(node_ids)
                 )
-            )
+            ).all()
         )
         return _ProfilePageReads(
             selection=self._selected_profile_snapshot(session),

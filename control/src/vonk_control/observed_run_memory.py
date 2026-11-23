@@ -223,7 +223,7 @@ def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]
             MeasuredRolePeak.content_sha256 == content_digest
         )
     )
-    return dict(rows)
+    return dict(rows.all())
 
 
 def recent_best_available(
