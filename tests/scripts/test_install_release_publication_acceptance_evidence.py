@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -518,12 +519,12 @@ def test_acceptance_authority_rejects_missing_native_package_object(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
-def _proof(document: dict) -> dict:
+def _proof(document: dict[str, Any]) -> dict[str, Any]:
     return document["lifecycle"]["proof"]
 
 
 def _set(path: tuple[str, ...], value: object):
-    def tamper(document: dict) -> None:
+    def tamper(document: dict[str, Any]) -> None:
         target = _proof(document)
         for key in path[:-1]:
             target = target[key]
@@ -561,7 +562,7 @@ _SPARK_PROOF_TAMPERING = {
 
 @pytest.mark.parametrize("name", sorted(_SPARK_PROOF_TAMPERING))
 def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_proof(
-    accepted_spark_proof: tuple[Path, Path, dict],
+    accepted_spark_proof: tuple[Path, Path, dict[str, Any]],
     tmp_path: Path,
     name: str,
 ) -> None:

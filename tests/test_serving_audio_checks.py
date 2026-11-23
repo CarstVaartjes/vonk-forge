@@ -13,7 +13,7 @@ import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from threading import Thread
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from vonk_forge_contracts import read_recipe
@@ -46,7 +46,7 @@ def wav(seconds: float, rate: int = 16000, *, data_size: int | None = None) -> b
 AUDIO = wav(1.0)
 
 
-def _checks() -> dict[str, dict]:
+def _checks() -> dict[str, dict[str, Any]]:
     document = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-audio-serving.json")
@@ -65,7 +65,7 @@ SPEAK = CHECKS["speak"]
 
 
 class _Audio(BaseHTTPRequestHandler):
-    seen: ClassVar[list[dict]] = []
+    seen: ClassVar[list[dict[Any, Any]]] = []
     transcript: ClassVar[bytes] = b'{"text":"ask not what your country"}'
 
     def do_POST(self) -> None:
@@ -150,7 +150,7 @@ def test_an_unusable_fixture_is_an_execution_error_before_any_request(
         multipart_body({"model": "m"}, "file", "audio/wav", FIXTURE, fixtures)
 
 
-def _observed(check: dict, body: bytes, kind: str = "application/json"):
+def _observed(check: dict[str, Any], body: bytes, kind: str = "application/json"):
     return evaluate_http_response(
         HttpObservation(200, {"Content-Type": kind}, body), check
     )

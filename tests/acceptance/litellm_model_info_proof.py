@@ -41,7 +41,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 import openai
 
@@ -208,7 +208,7 @@ def check(condition: bool, message: str) -> None:
         raise SystemExit(f"model_info proof failed: {message}")
 
 
-def listed(entries: dict[str, dict], alias: str) -> dict:
+def listed(entries: dict[str, dict[str, Any]], alias: str) -> dict[str, Any]:
     check(alias in entries, f"{alias}: route not listed")
     return entries[alias]
 
@@ -390,7 +390,7 @@ def prove_audio(key: str) -> None:
 
 def prove() -> None:
     client_key = prove_client_key()
-    entries: dict[str, dict] = {}
+    entries: dict[str, dict[str, Any]] = {}
     status, info = call("/v1/model/info")
     check(status == 200 and isinstance(info, dict), f"/v1/model/info answered {status}")
     for entry in info["data"]:  # type: ignore[index]

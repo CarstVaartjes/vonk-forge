@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 # The artifact-job fixtures own the Controller job shapes and their clock.
 from test_cli_artifact_jobs import (  # noqa: F401
@@ -38,13 +39,13 @@ from cluster_profiles.cli_update import CliUpdateError
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "vonkctl"
 
 
-def _validate(kind: DocumentKind, document: dict) -> None:
+def _validate(kind: DocumentKind, document: dict[str, Any]) -> None:
     [path] = SCHEMAS.glob(f"{kind}-v*.schema.json")
     assert path.name == f"{kind}-v{document['schema_version']}.schema.json"
     validator(kind).validate(document)
 
 
-def _run(client, capsys, *argv: str, request_key: str | None = None) -> dict:
+def _run(client, capsys, *argv: str, request_key: str | None = None) -> dict[str, Any]:
     status = cli.main(
         ("--json", *argv),
         control_client=client,

@@ -704,7 +704,9 @@ def _serves_without_admission(tree) -> list[str]:
     return missing
 
 
-def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
+def _unguarded_fixture_imports(
+    node, enclosing: tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...] = ()
+) -> list[str]:
 
     found: list[str] = []
     for child in ast.iter_child_nodes(node):

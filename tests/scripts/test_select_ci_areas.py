@@ -7,6 +7,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -500,7 +501,7 @@ def test_selector_folds_the_scope_into_lane_and_carry(tmp_path, head, accepts) -
     assert "upgrade_inputs=false" in lines
 
 
-def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
+def _pull(ref: str, *, labels=(), fork: bool = False) -> dict[str, Any]:
     base = {"repo": {"full_name": "owner/repo"}}
     head = {"ref": ref, "repo": {"full_name": "fork/repo" if fork else "owner/repo"}}
     names = [{"name": name} for name in labels]

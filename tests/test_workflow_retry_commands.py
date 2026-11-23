@@ -8,6 +8,7 @@ allowlist is read from the script itself.
 import re
 import shlex
 from pathlib import Path
+from typing import Any
 
 import yaml
 from retry_dependency_fetch import acquisition_prefix, locked_pip_shape
@@ -36,7 +37,7 @@ def refused(script: str) -> list[tuple[str, ...]]:
     ]
 
 
-def run_scripts(document: dict) -> list[str]:
+def run_scripts(document: dict[str, Any]) -> list[str]:
     steps = [*document.get("runs", {}).get("steps", [])]
     for job in document.get("jobs", {}).values():
         steps += job.get("steps", [])

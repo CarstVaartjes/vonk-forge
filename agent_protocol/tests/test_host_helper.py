@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -140,7 +141,7 @@ RUN_INSPECT_VECTORS = json.loads(
 @pytest.mark.parametrize(
     "vector", RUN_INSPECT_VECTORS["valid"], ids=lambda vector: vector["name"]
 )
-def test_every_run_inspect_target_is_one_typed_variant(vector: dict) -> None:
+def test_every_run_inspect_target_is_one_typed_variant(vector: dict[str, Any]) -> None:
     """The Rust reader consumes these same vectors byte for byte."""
     request = HostRuntimeRequest.model_validate(vector["request"])
     assert canonical_message(request) == canonical_message(vector["request"])
@@ -154,7 +155,7 @@ def test_every_run_inspect_target_is_one_typed_variant(vector: dict) -> None:
 @pytest.mark.parametrize(
     "vector", RUN_INSPECT_VECTORS["invalid"], ids=lambda vector: vector["name"]
 )
-def test_every_refused_run_inspect_shape_is_refused(vector: dict) -> None:
+def test_every_refused_run_inspect_shape_is_refused(vector: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         HostRuntimeRequest.model_validate(vector["request"])
 

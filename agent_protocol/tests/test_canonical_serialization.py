@@ -5,6 +5,7 @@ import os
 import subprocess
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ConfigDict, Field, JsonValue, RootModel
@@ -62,7 +63,7 @@ def test_canonical_models_keep_required_null_defaults_and_engine_values() -> Non
     assert json.loads(canonical_message(engine)) == engine
 
 
-def job_document() -> dict:
+def job_document() -> dict[str, Any]:
     return json.loads((VECTORS / "recipe-job-run-claim-v1.json").read_text())
 
 

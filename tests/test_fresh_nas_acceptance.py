@@ -627,7 +627,7 @@ def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
     outputs = iter((status, logs))
     commands: list[list[str]] = []
 
-    def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess:
+    def run(_bundle: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
         commands.append(command)
         return next(outputs)
 

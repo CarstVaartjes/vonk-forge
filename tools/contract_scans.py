@@ -29,6 +29,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -206,9 +207,9 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
 
 
 def python_registry_problems(
-    root: Path = ROOT, registry: dict | None = None
+    root: Path = ROOT, registry: dict[str, Any] | None = None
 ) -> list[str]:
-    document: dict = (
+    document: dict[str, Any] = (
         json.loads((root / "tools/python-model-registry.json").read_text())
         if registry is None
         else registry

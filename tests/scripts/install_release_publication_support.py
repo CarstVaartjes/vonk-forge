@@ -11,6 +11,7 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -615,7 +616,7 @@ def _accept_command(
 def accepted_spark_proof(
     tmp_path_factory: pytest.TempPathFactory,
     assembled_publication: Path,
-) -> tuple[Path, Path, dict]:
+) -> tuple[Path, Path, dict[str, Any]]:
     """One assembled publication with a valid NAS report and ARM64 proof."""
 
     tmp_path = tmp_path_factory.mktemp("spark-proof")

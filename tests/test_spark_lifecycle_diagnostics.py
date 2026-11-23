@@ -8,6 +8,7 @@ import json
 import ssl
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -45,7 +46,7 @@ def test_failure_report_survives_every_failure_boundary(
     )
     run = module.SparkLifecycle.__new__(module.SparkLifecycle)
     attempts: list[float] = []
-    cleanup_reports: list[dict] = []
+    cleanup_reports: list[dict[str, Any]] = []
 
     def transport(method, path, _body, _headers, timeout):
         assert method == "GET"
@@ -186,7 +187,7 @@ def test_startup_failure_reports_before_cleanup_and_allows_a_fresh_run(
     run = module.SparkLifecycle.__new__(module.SparkLifecycle)
     run.arguments = arguments
     run._assert_spark_target_is_fresh = lambda: None
-    observed: list[dict] = []
+    observed: list[dict[str, Any]] = []
 
     def start():
         raise TimeoutError

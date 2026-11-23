@@ -12,6 +12,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -34,7 +35,7 @@ R2_WRITERS = ("apt", "candidate", "promote")
 LEVEL = {"none": 0, "read": 1, "write": 2}
 
 
-def load(path: Path) -> dict:
+def load(path: Path) -> dict[str, Any]:
     document = yaml.safe_load(path.read_text())
     # PyYAML reads the bare `on:` key as the boolean True.
     document["on"] = document.pop(True, document.get("on"))
@@ -587,7 +588,7 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
         )
 
 
-def _image_steps() -> list[dict]:
+def _image_steps() -> list[dict[str, Any]]:
     return load(WORKFLOWS / "dev-images.yml")["jobs"]["publish-development-images"][
         "steps"
     ]

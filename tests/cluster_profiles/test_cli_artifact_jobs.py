@@ -1400,7 +1400,7 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
 RECIPE_ID = "00000000-0000-4000-8000-000000000008"
 
 
-def _loaded(alias: str, run_id: str) -> dict:
+def _loaded(alias: str, run_id: str) -> dict[str, Any]:
     return {
         "alias": alias,
         "recipe_id": RECIPE_ID,
@@ -1419,7 +1419,7 @@ class RunClient(ArtifactJobClient):
 
     def __init__(
         self,
-        *loaded: dict,
+        *loaded: dict[str, Any],
         succeed: bool = False,
         ended: int = 0,
         ended_state: str = "failed",

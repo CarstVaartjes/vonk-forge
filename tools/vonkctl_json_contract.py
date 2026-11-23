@@ -307,7 +307,7 @@ def _wrapper(kind: DocumentKind) -> Any:
     )
 
 
-DOCUMENTS: dict[DocumentKind, TypeAdapter] = {
+DOCUMENTS: dict[DocumentKind, TypeAdapter[Any]] = {
     **{kind: TypeAdapter(model) for kind, model in _STAMPED.items()},
     **{kind: TypeAdapter(_wrapper(kind)) for kind in _WRAPPERS},
 }
@@ -340,10 +340,10 @@ DEFINITIONS_FILENAME = "definitions.schema.json"
 _DEFS_PREFIX = "#/$defs/"
 
 
-def _bundled_schema(kind: DocumentKind) -> dict:
+def _bundled_schema(kind: DocumentKind) -> dict[str, Any]:
     """One kind as pydantic exports it: its root plus every definition it uses."""
 
-    schema = cast(dict, _open(DOCUMENTS[kind].json_schema()))
+    schema = cast(dict[str, Any], _open(DOCUMENTS[kind].json_schema()))
     schema["$schema"] = JSON_SCHEMA_DIALECT
     schema["title"] = f"vonkctl {kind} document (schema_version {schema_version(kind)})"
     return schema
@@ -366,10 +366,10 @@ def _retarget(schema: object, old: str, new: str) -> object:
     return schema
 
 
-def definitions_schema() -> dict:
+def definitions_schema() -> dict[str, Any]:
     """Every definition of every kind, once. A name means one definition."""
 
-    definitions: dict[str, dict] = {}
+    definitions: dict[str, dict[str, Any]] = {}
     for kind in DOCUMENTS:
         for name, definition in _bundled_schema(kind).get("$defs", {}).items():
             if definitions.setdefault(name, definition) != definition:
@@ -381,21 +381,22 @@ def definitions_schema() -> dict:
     }
 
 
-def document_schema(kind: DocumentKind) -> dict:
+def document_schema(kind: DocumentKind) -> dict[str, Any]:
     """The published JSON Schema of one kind: its root, definitions by reference."""
 
     schema = _bundled_schema(kind)
     schema.pop("$defs", None)
     return cast(
-        dict, _retarget(schema, _DEFS_PREFIX, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}")
+        dict[str, Any],
+        _retarget(schema, _DEFS_PREFIX, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}"),
     )
 
 
-def bundled(published: dict, definitions: dict) -> dict:
+def bundled(published: dict[str, Any], definitions: dict[str, Any]) -> dict[str, Any]:
     """A published kind with its definitions inlined as local ``$defs``."""
 
     schema = cast(
-        dict,
+        dict[str, Any],
         _retarget(published, f"{DEFINITIONS_FILENAME}{_DEFS_PREFIX}", _DEFS_PREFIX),
     )
     return {**schema, "$defs": definitions["$defs"]}
@@ -430,7 +431,7 @@ def definitions_text() -> str:
     return _text(definitions_schema())
 
 
-def _text(schema: dict) -> str:
+def _text(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 
 

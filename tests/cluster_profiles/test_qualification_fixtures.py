@@ -925,7 +925,9 @@ def _validate_mp4(monkeypatch: pytest.MonkeyPatch, **ranges: float) -> list[list
 
     calls: list[list[str]] = []
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def fake_run(
+        argv: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
         del kwargs
         calls.append(list(argv))
         stdout = json.dumps(_ffprobe_document()).encode()

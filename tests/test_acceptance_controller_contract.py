@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,7 @@ from tests.acceptance.controller_contract import ContractSkew, ControllerContrac
 
 
 def _contract(
-    schema: dict, *, path: str = "/api/things/{number}"
+    schema: dict[str, Any], *, path: str = "/api/things/{number}"
 ) -> ControllerContract:
     return ControllerContract(
         {

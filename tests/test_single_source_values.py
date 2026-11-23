@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -591,7 +592,7 @@ def test_python_targets_agree_across_projects() -> None:
     protocol-consumer step in ci.yml).
     """
 
-    def load(path: str) -> dict:
+    def load(path: str) -> dict[str, Any]:
         return tomllib.loads((ROOT / path).read_text())
 
     root = load("pyproject.toml")

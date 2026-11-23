@@ -19,6 +19,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -1397,7 +1398,9 @@ def _tailnet_service_mapping_addresses(
     document: object,
     *,
     expected_services: set[str],
-) -> tuple[dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]], dict]:
+) -> tuple[
+    dict[str, set[ipaddress.IPv4Address | ipaddress.IPv6Address]], dict[str, Any]
+]:
     if (
         not isinstance(document, dict)
         or not expected_services
@@ -1645,7 +1648,9 @@ def verify_tailscale_services(
         )
 
 
-def assert_candidate_image_graph(services: dict, expected: dict) -> None:
+def assert_candidate_image_graph(
+    services: dict[str, Any], expected: dict[str, Any]
+) -> None:
     """Match each effective Vonk service to the verified candidate overlay."""
     for name, service in services.items():
         image = service.get("image") if isinstance(service, dict) else None

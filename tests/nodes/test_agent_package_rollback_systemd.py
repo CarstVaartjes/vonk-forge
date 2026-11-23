@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE = Path("/var/lib/vonk-forge/package-rollback")
@@ -29,7 +30,10 @@ UNIT = "vonk-forge-package-rollback.service"
 
 
 def run(
-    *args: str, check: bool = True, input: str | None = None, env: dict | None = None
+    *args: str,
+    check: bool = True,
+    input: str | None = None,
+    env: dict[str, Any] | None = None,
 ):
     result = subprocess.run(
         args,
@@ -81,7 +85,7 @@ def receipt_for_nonce(nonce: str):
         return None
 
 
-def build(work: Path, helper: Path, generation: int, fault: str = "") -> dict:
+def build(work: Path, helper: Path, generation: int, fault: str = "") -> dict[str, Any]:
     stage = work / f"stage-{generation}"
     version = f"0.1.1~acceptance.{generation}"
     agent = stage / "usr/lib/vonk-forge/vonk-agent"

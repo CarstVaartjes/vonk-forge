@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from threading import Event, Thread
+from typing import Any
 
 import pytest
 import uvicorn
@@ -985,7 +986,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             check=False,
         )
 
-    def identity() -> dict:
+    def identity() -> dict[str, Any]:
         observed = invoke([str(executable), "--json", "--version"])
         assert observed.returncode == 0, observed.stderr
         return json.loads(observed.stdout)

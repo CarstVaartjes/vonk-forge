@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -47,7 +48,9 @@ def test_helper_rejection_keeps_required_nulls_and_omits_unused_diagnostics() ->
         {"detail": "secret"},
     ],
 )
-def test_helper_response_rejects_untyped_or_unbounded_fields(changes: dict) -> None:
+def test_helper_response_rejects_untyped_or_unbounded_fields(
+    changes: dict[str, Any],
+) -> None:
     with pytest.raises(ValidationError):
         HostHelperResponse.model_validate(
             {

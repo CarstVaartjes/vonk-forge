@@ -14,6 +14,7 @@ import types
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -724,7 +725,7 @@ def test_revision_lookup_retries_a_failed_gh_call(monkeypatch):
     assert carry._revision_through_api("sha") == "rev\n"
 
 
-def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict:
+def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict[str, Any]:
     monkeypatch.delenv("VONK_ACCEPTANCE_TEST_MODE", raising=False)
     output = tmp_path / "report.json"
     monkeypatch.setattr(

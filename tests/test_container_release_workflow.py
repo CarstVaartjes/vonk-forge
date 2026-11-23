@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tarfile
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 import yaml
@@ -1769,7 +1769,7 @@ LITELLM_DOCKERFILE = "deploy/compose/litellm/Dockerfile"
 LITELLM_VERIFY = "scripts/verify-litellm-base-signature"
 
 
-def _builds_litellm(step: dict, matrix: dict) -> bool:
+def _builds_litellm(step: dict[str, Any], matrix: dict[str, Any]) -> bool:
     if not str(step.get("uses", "")).startswith("docker/build-push-action"):
         return False
     file = str(step.get("with", {}).get("file", ""))
