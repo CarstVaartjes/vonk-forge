@@ -478,7 +478,7 @@ def asgi_post(
             message for message in sent if message["type"] == "http.response.start"
         )
         content = b"".join(
-            message.get("body", b"")  # type: ignore[arg-type]
+            message.get("body", b"")
             for message in sent
             if message["type"] == "http.response.body"
         )

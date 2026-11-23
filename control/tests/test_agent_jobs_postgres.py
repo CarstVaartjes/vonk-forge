@@ -584,7 +584,7 @@ def test_postgres_expired_mutating_operation_schedules_bounded_exact_retry(
         )
         assert attempt is not None
         assert aos.attempt_lapsed(attempt)
-        assert session.get(Job, parent_job.id).state == "queued"  # type: ignore[union-attr]
+        assert session.get(Job, parent_job.id).state == "queued"
 
     clock.now = due.replace(tzinfo=UTC)
     second = claim_agent(
@@ -675,7 +675,7 @@ def test_postgres_enqueue_rejects_terminal_parent(service, terminal_state: str) 
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, parent_job.id).state = terminal_state  # type: ignore[union-attr]
+        session.get(Job, parent_job.id).state = terminal_state
 
     with pytest.raises(Exception) as _ending:
         jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -695,7 +695,7 @@ def test_postgres_enqueue_rejects_node_outside_parent_targets(service) -> None:
     jobs = AgentJobService(sessions, clock=clock)
     parent_job = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, parent_job.id).targets = [NODE_A]  # type: ignore[union-attr]
+        session.get(Job, parent_job.id).targets = [NODE_A]
 
     with pytest.raises(Exception) as _ending:
         jobs.enqueue(

@@ -126,7 +126,7 @@ def _watch_services_on(sessions):
     try:
         yield
     finally:
-        ModelCacheService.__init__ = original  # type: ignore[method-assign]
+        ModelCacheService.__init__ = original
         started = [
             service
             for service in built

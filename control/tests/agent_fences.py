@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_control.agent_jobs.evidence import (
-    _failure_result,  # pyright: ignore[reportPrivateUsage]
+    _failure_result,
 )
 from vonk_control.agent_jobs.predicates import (
-    _document,  # pyright: ignore[reportPrivateUsage]
+    _document,
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
@@ -81,6 +81,4 @@ def park_for_operator(
         operation.state = "needs-operator"
         operation.next_action_at = None
         operation.status_reason = reason
-        jobs._aggregate_parent(  # pyright: ignore[reportPrivateUsage]
-            session, operation.parent_job_id
-        )
+        jobs._aggregate_parent(session, operation.parent_job_id)

@@ -1297,7 +1297,7 @@ def test_activity_preserves_issued_effect_while_profile_cancellation_waits(
     assert active is not None
     assert active.pending_children
     child_id = active.pending_children[0].operation_id
-    adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    adapter.request_cancellation = lambda *_args, **_kwargs: None
     adapter.advance = lambda _application_id, **_kwargs: FleetProfileChildOperation(
         id=child_id, state=LifecycleState.RUNNING
     )  # type: ignore[method-assign]
@@ -1353,7 +1353,7 @@ def test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profil
             raise TimeoutError("test did not release the delayed child response")
         return child
 
-    adapter.start = delayed_start  # type: ignore[method-assign]
+    adapter.start = delayed_start
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         worker = pool.submit(service.tick)
@@ -1431,7 +1431,7 @@ def test_pending_cancellation_observation_does_not_suppress_recovery(tmp_path) -
 
     # Keep the issued child unresolved so the cancellation remains pending;
     # the separate real-boundary test covers Run/Switch's cancellation owner.
-    run_switch.cancel = lambda *_args, **_kwargs: run_switch.get(child_id)  # type: ignore[method-assign]
+    run_switch.cancel = lambda *_args, **_kwargs: run_switch.get(child_id)
     service.cancel(
         application.id,
         profile_number=profile.number,
@@ -1595,7 +1595,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert latest_child.pending_children
     active_child_id = latest_child.pending_children[0].operation_id
     observations: list[str] = []
-    adapter.request_cancellation = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    adapter.request_cancellation = lambda *_args, **_kwargs: None
     original_advance = adapter.advance
 
     def observe_pending(

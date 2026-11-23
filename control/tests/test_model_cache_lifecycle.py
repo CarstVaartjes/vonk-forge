@@ -399,7 +399,7 @@ def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_p
     assert incomplete.effect is Effect.NONE
     assert incomplete.reason == WaitReason.SET_INCOMPLETE
     # An unreadable storage is unknown, not a refusal.
-    service.objects_present = lambda payload: None  # type: ignore[method-assign]
+    service.objects_present = lambda payload: None
     assert service._lifecycle.observe(row).effect is Effect.UNKNOWN
 
 

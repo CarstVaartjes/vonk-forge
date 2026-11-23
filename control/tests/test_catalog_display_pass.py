@@ -95,9 +95,9 @@ class World:
         """Republish the same documents and packages with other display."""
         index = copy.deepcopy(self.index)
         if recipe is not None:
-            index["recipes"][0]["display"].update(recipe)  # type: ignore[index]
+            index["recipes"][0]["display"].update(recipe)
         if model is not None:
-            index["catalog_entities"][0]["display"].update(model)  # type: ignore[index]
+            index["catalog_entities"][0]["display"].update(model)
         self.release.publish(index, self.packages)
 
     def sync(self, reader: RecipePackageClient | None = None):

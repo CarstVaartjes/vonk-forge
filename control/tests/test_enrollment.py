@@ -1212,7 +1212,7 @@ def test_local_revocation_precedes_remote_and_retry_calls_only_unconfirmed_seria
     enrollment.revoke_node(NODE_ID, "admin")
     assert authority.revocations == [issued.serial] + ["2"] * 5
     with sessions() as session:
-        assert session.get(AgentCertificate, "2").ca_revoked_at is not None  # type: ignore[union-attr]
+        assert session.get(AgentCertificate, "2").ca_revoked_at is not None
 
 
 @pytest.mark.parametrize("crash_new_revocation", [False, True])
