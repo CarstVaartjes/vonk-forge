@@ -271,13 +271,13 @@ class Worker:
             sources.append(("recipes", self._recipes.tick))
         if self._model_cache is not None:
             sources.append(("model-cache", self._run_model_cache))
-        for service in self._background_services:
-            sources.append(
-                (
-                    _background_source_name(service),
-                    lambda service=service: bool(service()),
-                )
+        sources.extend(
+            (
+                _background_source_name(service),
+                lambda service=service: bool(service()),
             )
+            for service in self._background_services
+        )
         sources.append(("jobs", self._run_generic))
         return sources
 

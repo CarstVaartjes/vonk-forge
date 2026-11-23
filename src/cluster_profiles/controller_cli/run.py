@@ -235,8 +235,10 @@ def _review_lead(number: int, spark_names: list[str], preview: object) -> list[s
     )
     stops = [run.alias for run in effects.runs if run.action != _KEEP]
     for adopted in effects.adopted if not isinstance(effects.adopted, Unset) else ():
-        for stop in adopted.stops if not isinstance(adopted.stops, Unset) else ():
-            stops.append(stop.effect.alias)
+        stops.extend(
+            stop.effect.alias
+            for stop in (adopted.stops if not isinstance(adopted.stops, Unset) else ())
+        )
     stopping = sorted(set(stops))
     return [
         f"Profile edited: {number} ({_text(preview.get('profile_name'))})",

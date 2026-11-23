@@ -487,8 +487,10 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
             inventory = _optional(node.get("inventory"), "inventory").get("freshness")
             if inventory not in {None, "fresh"}:
                 notes.append(f"{name} inventory is {_text(inventory)}")
-        for issue in _projection_issues(node.get("projection_issues")):
-            notes.append(f"{name}: {_text(issue)}")
+        notes.extend(
+            f"{name}: {_text(issue)}"
+            for issue in _projection_issues(node.get("projection_issues"))
+        )
         warnings = node.get("warnings")
         if not isinstance(warnings, list):
             warnings = []

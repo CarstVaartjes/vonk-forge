@@ -98,15 +98,15 @@ def _application_cancellation_view(
                     outcome=LifecycleState.SUCCEEDED.value,
                 )
             )
-        for step in plan.steps[application.current_step :]:
-            cancelled.append(
-                FleetProfileApplicationEffect(
-                    effect_id=f"step:{step.index}",
-                    kind=ProfileProjectionKind.STEP.value,
-                    label=f"Not issued profile step {step.index + 1}: {step.label}",
-                    outcome=ProfileEffectState.NOT_ISSUED.value,
-                )
+        cancelled.extend(
+            FleetProfileApplicationEffect(
+                effect_id=f"step:{step.index}",
+                kind=ProfileProjectionKind.STEP.value,
+                label=f"Not issued profile step {step.index + 1}: {step.label}",
+                outcome=ProfileEffectState.NOT_ISSUED.value,
             )
+            for step in plan.steps[application.current_step :]
+        )
         pending_ids = intent.pending_operation_ids
     else:
         for child in adapter.children:
@@ -129,16 +129,16 @@ def _application_cancellation_view(
                 else completed
             ).append(effect)
         active_ids = {child.operation_id for child in adapter.pending_children}
-        for child in adapter.pending_children:
-            pending.append(
-                FleetProfileApplicationEffect(
-                    effect_id=child.operation_id,
-                    kind=child.kind,
-                    label="Pending Run/Switch child",
-                    operation_id=child.operation_id,
-                    outcome=ProfileEffectState.PENDING.value,
-                )
+        pending.extend(
+            FleetProfileApplicationEffect(
+                effect_id=child.operation_id,
+                kind=child.kind,
+                label="Pending Run/Switch child",
+                operation_id=child.operation_id,
+                outcome=ProfileEffectState.PENDING.value,
             )
+            for child in adapter.pending_children
+        )
         pending_ids = sorted(
             set(adapter.pending_operation_ids) | set(intent.pending_operation_ids)
         )
@@ -171,15 +171,15 @@ def _application_cancellation_view(
             )
         # A later whole-profile step can remain after the adapter's current
         # switch queue; expose that reviewed work as not issued too.
-        for step in plan.steps[application.current_step + 1 :]:
-            cancelled.append(
-                FleetProfileApplicationEffect(
-                    effect_id=f"step:{step.index}",
-                    kind=ProfileProjectionKind.STEP.value,
-                    label=f"Not issued profile step {step.index + 1}: {step.label}",
-                    outcome=ProfileEffectState.NOT_ISSUED.value,
-                )
+        cancelled.extend(
+            FleetProfileApplicationEffect(
+                effect_id=f"step:{step.index}",
+                kind=ProfileProjectionKind.STEP.value,
+                label=f"Not issued profile step {step.index + 1}: {step.label}",
+                outcome=ProfileEffectState.NOT_ISSUED.value,
             )
+            for step in plan.steps[application.current_step + 1 :]
+        )
 
     pending.extend(
         FleetProfileApplicationEffect(

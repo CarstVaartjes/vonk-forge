@@ -271,10 +271,11 @@ def _remove_unused(
             render_payload(document.to_dict(), "model", action="preview")
         _confirm_action(args, f"Remove {len(document.removals)} unused models?")
     submissions: list[Outcome] = []
-    for entry in document.removals:
-        # Sequential on purpose: Controller acceptance holds the cache lock and
-        # shared objects make the order matter (a later review sees the earlier).
-        submissions.append(_submit_one(client, args, factory, entry))
+    # Sequential on purpose: Controller acceptance holds the cache lock and
+    # shared objects make the order matter (a later review sees the earlier).
+    submissions.extend(
+        _submit_one(client, args, factory, entry) for entry in document.removals
+    )
     return UnusedRemoval(
         document.unused_removal,
         document.removals,

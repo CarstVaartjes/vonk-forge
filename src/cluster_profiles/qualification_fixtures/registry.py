@@ -141,10 +141,9 @@ class FixtureRegistry:
             except (FixtureError, KeyError, OSError, TypeError, ValueError):
                 continue
         raw_special = _object(document.get("special_fixtures", {}), "special_fixtures")
-        special = {}
-        for key, item in raw_special.items():
-            if isinstance(item, Mapping):
-                special[key] = item
+        special = {
+            key: item for key, item in raw_special.items() if isinstance(item, Mapping)
+        }
         raw_service_cases = _object(
             document.get("service_case_templates", {}), "service_case_templates"
         )

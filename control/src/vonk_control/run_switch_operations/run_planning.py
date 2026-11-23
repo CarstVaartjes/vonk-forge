@@ -477,16 +477,16 @@ class RunPlanningMixin:
                                     swap=reason.swap,
                                 )
                             )
-                        for reason in item.warnings:
-                            warnings.append(
-                                _as_reason(
-                                    reason.code,
-                                    reason.detail,
-                                    scope="node",
-                                    severity="warning",
-                                    node_ids=(item.node_id,),
-                                )
+                        warnings.extend(
+                            _as_reason(
+                                reason.code,
+                                reason.detail,
+                                scope="node",
+                                severity="warning",
+                                node_ids=(item.node_id,),
                             )
+                            for reason in item.warnings
+                        )
                     if remaining_admission_blockers:
                         blockers.append(
                             _as_reason(

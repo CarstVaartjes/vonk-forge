@@ -480,16 +480,16 @@ def _inspect_compose(path: str, payload: bytes) -> list[SourcePolicyFinding]:
                     "privileged Compose services are forbidden",
                 )
             )
-        for key in ("network_mode", "pid", "ipc", "uts", "userns_mode"):
-            if raw_service.get(key) == "host":
-                findings.append(
-                    _finding(
-                        SourcePolicyCode.HOST_NAMESPACE,
-                        service_path,
-                        None,
-                        f"host {key} is forbidden",
-                    )
-                )
+        findings.extend(
+            _finding(
+                SourcePolicyCode.HOST_NAMESPACE,
+                service_path,
+                None,
+                f"host {key} is forbidden",
+            )
+            for key in ("network_mode", "pid", "ipc", "uts", "userns_mode")
+            if raw_service.get(key) == "host"
+        )
         if raw_service.get("cap_add"):
             findings.append(
                 _finding(

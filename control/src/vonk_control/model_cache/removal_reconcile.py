@@ -599,32 +599,35 @@ class RemovalReconcileMixin:
                     ),
                 )
                 identity_map = {(item.kind, item.sha256): item for item in identities}
-                for gate in session.scalars(
-                    select(ArtifactLifecycleGate).where(
-                        ArtifactLifecycleGate.removal_owner_kind
-                        == "model-cache-operation",
-                        ArtifactLifecycleGate.removal_owner_id.is_not(None),
-                        or_(
-                            and_(
-                                ArtifactLifecycleGate.artifact_kind == "model-set",
-                                ArtifactLifecycleGate.artifact_sha256
-                                == manifest.digest,
-                            ),
-                            and_(
-                                ArtifactLifecycleGate.artifact_kind == "model-object",
-                                ArtifactLifecycleGate.artifact_sha256.in_(
-                                    tuple(item.sha256 for item in manifest.artifacts)
+                accepted_requests.extend(
+                    (
+                        operation.id,
+                        identity_map[(gate.artifact_kind, gate.artifact_sha256)],
+                    )
+                    for gate in session.scalars(
+                        select(ArtifactLifecycleGate).where(
+                            ArtifactLifecycleGate.removal_owner_kind
+                            == "model-cache-operation",
+                            ArtifactLifecycleGate.removal_owner_id.is_not(None),
+                            or_(
+                                and_(
+                                    ArtifactLifecycleGate.artifact_kind == "model-set",
+                                    ArtifactLifecycleGate.artifact_sha256
+                                    == manifest.digest,
+                                ),
+                                and_(
+                                    ArtifactLifecycleGate.artifact_kind
+                                    == "model-object",
+                                    ArtifactLifecycleGate.artifact_sha256.in_(
+                                        tuple(
+                                            item.sha256 for item in manifest.artifacts
+                                        )
+                                    ),
                                 ),
                             ),
-                        ),
-                    )
-                ):
-                    accepted_requests.append(
-                        (
-                            operation.id,
-                            identity_map[(gate.artifact_kind, gate.artifact_sha256)],
                         )
                     )
+                )
             if not observed_request:
                 cache._removal_request_after = None
         changed = 0

@@ -511,10 +511,10 @@ class MetricsRegistry:
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
         ]
-        for state in sorted(_ROUTE_STATES):
-            lines.append(
-                f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
-            )
+        lines.extend(
+            f'vonk_route_state{{state="{state}"}} {1 if state == route_state else 0}'
+            for state in sorted(_ROUTE_STATES)
+        )
         if backup_age is not None:
             lines.extend(
                 (
@@ -566,26 +566,26 @@ class MetricsRegistry:
             gpu_utilization,
         ) in sorted(nodes.items()):
             label = f'node_id="{node_id}"'
-            for state in _CONNECTION_STATES:
-                lines.append(
-                    f'vonk_node_connection_state{{{label},state="{state}"}} '
-                    f"{1 if state == connection_state else 0}"
-                )
-            for state in _CERTIFICATE_STATES:
-                lines.append(
-                    f'vonk_node_certificate_state{{{label},state="{state}"}} '
-                    f"{1 if state == certificate_state else 0}"
-                )
-            for state in _INVENTORY_FRESHNESS:
-                lines.append(
-                    f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
-                    f"{1 if state == inventory_freshness else 0}"
-                )
-            for state in _TELEMETRY_FRESHNESS:
-                lines.append(
-                    f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
-                    f"{1 if state == telemetry_freshness else 0}"
-                )
+            lines.extend(
+                f'vonk_node_connection_state{{{label},state="{state}"}} '
+                f"{1 if state == connection_state else 0}"
+                for state in _CONNECTION_STATES
+            )
+            lines.extend(
+                f'vonk_node_certificate_state{{{label},state="{state}"}} '
+                f"{1 if state == certificate_state else 0}"
+                for state in _CERTIFICATE_STATES
+            )
+            lines.extend(
+                f'vonk_node_inventory_freshness{{{label},state="{state}"}} '
+                f"{1 if state == inventory_freshness else 0}"
+                for state in _INVENTORY_FRESHNESS
+            )
+            lines.extend(
+                f'vonk_node_telemetry_freshness{{{label},state="{state}"}} '
+                f"{1 if state == telemetry_freshness else 0}"
+                for state in _TELEMETRY_FRESHNESS
+            )
             if memory is not None:
                 lines.append(
                     f"vonk_node_inventory_host_memory_free_bytes{{{label}}} {memory}"

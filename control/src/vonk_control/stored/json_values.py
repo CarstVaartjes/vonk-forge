@@ -232,9 +232,11 @@ def json_columns(base: type[DeclarativeBase]) -> list[tuple[str, str]]:
 
     found: list[tuple[str, str]] = []
     for table in base.metadata.sorted_tables:
-        for column in table.columns:
-            if _is_json_type(column.type):
-                found.append((table.name, column.name))
+        found.extend(
+            (table.name, column.name)
+            for column in table.columns
+            if _is_json_type(column.type)
+        )
     return sorted(found)
 
 

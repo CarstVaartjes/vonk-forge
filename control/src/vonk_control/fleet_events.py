@@ -596,9 +596,9 @@ class FleetEventRecorder:
         self, session: Session, _flush_context: object, _instances: object
     ) -> None:
         candidates: list[object] = []
-        for value in session.new:
-            if type(value) in self._tracked_fields:
-                candidates.append(value)
+        candidates.extend(
+            value for value in session.new if type(value) in self._tracked_fields
+        )
         for value in session.dirty:
             fields = self._tracked_fields.get(type(value))
             if fields is None:

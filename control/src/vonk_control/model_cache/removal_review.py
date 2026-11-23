@@ -292,23 +292,25 @@ class RemovalReviewMixin:
         if not selected_sets:
             return ()
         cancelled: list[str] = []
-        for operation_id in session.scalars(
-            select(ModelCacheOperation.id)
-            .where(
-                ModelCacheOperation.kind == "download",
-                ModelCacheOperation.state.in_(model_cache_states.LIVE),
-                ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
+        cancelled.extend(
+            operation_id
+            for operation_id in session.scalars(
+                select(ModelCacheOperation.id)
+                .where(
+                    ModelCacheOperation.kind == "download",
+                    ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                    ModelCacheOperation.artifact_set_sha256.in_(list(selected_sets)),
+                )
+                .order_by(ModelCacheOperation.id)
             )
-            .order_by(ModelCacheOperation.id)
-        ):
             if cache.cancel_operation_in_session(
                 session,
                 operation_id,
                 actor=actor,
                 request_key=str(uuid.uuid5(uuid.UUID(request_key), operation_id)),
                 reason="superseded by a newer model removal request",
-            ):
-                cancelled.append(operation_id)
+            )
+        )
         return tuple(cancelled)
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:

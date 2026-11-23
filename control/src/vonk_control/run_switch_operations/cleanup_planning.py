@@ -298,16 +298,16 @@ class CleanupPlanningMixin:
                     # a removal or an abandonment; the phase executor reads the
                     # same disposition rather than re-deriving it.
                     cleanup_disposition = assessment.disposition
-                    for warning in assessment.warnings:
-                        warnings.append(
-                            _as_reason(
-                                run_switch_code(warning.code),
-                                warning.detail,
-                                scope="operation",
-                                node_ids=node_ids,
-                                severity="warning",
-                            )
+                    warnings.extend(
+                        _as_reason(
+                            run_switch_code(warning.code),
+                            warning.detail,
+                            scope="operation",
+                            node_ids=node_ids,
+                            severity="warning",
                         )
+                        for warning in assessment.warnings
+                    )
             phases = service._phases(
                 action="cleanup",
                 group=group,

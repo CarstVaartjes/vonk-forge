@@ -264,33 +264,33 @@ def _node(
                 )
             )
     warnings.extend(_install_partial_warnings(installed))
-    for detail in stalls:
-        warnings.append(
-            ProjectionReason(
-                code=ProjectionCode.PROFILE_RETRYING,
-                detail=f"A profile load keeps retrying: {detail}"[:256],
-                severity="warning",
-            )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.PROFILE_RETRYING,
+            detail=f"A profile load keeps retrying: {detail}"[:256],
+            severity="warning",
         )
-    for detail in repeating:
-        warnings.append(
-            ProjectionReason(
-                code=ProjectionCode.EVIDENCE_REPEATING,
-                detail=detail,
-                severity=ProfileReasonSeverity.WARNING.value,
-            )
+        for detail in stalls
+    )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.EVIDENCE_REPEATING,
+            detail=detail,
+            severity=ProfileReasonSeverity.WARNING.value,
         )
-    for value in loaded:
-        if value.projection_issue is not None:
-            warnings.append(
-                ProjectionReason(
-                    code=ProjectionCode.RUN_DEGRADED,
-                    detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
-                        :256
-                    ],
-                    severity="warning",
-                )
-            )
+        for detail in repeating
+    )
+    warnings.extend(
+        ProjectionReason(
+            code=ProjectionCode.RUN_DEGRADED,
+            detail=f"{value.title or value.installation_id}: {value.projection_issue}"[
+                :256
+            ],
+            severity="warning",
+        )
+        for value in loaded
+        if value.projection_issue is not None
+    )
     if any(value.healthy is False for value in loaded):
         warnings.append(
             ProjectionReason(
@@ -299,15 +299,15 @@ def _node(
                 severity="warning",
             )
         )
-    for value in loaded:
-        if value.recipe_update is not None:
-            warnings.append(
-                ProjectionReason(
-                    code=RECIPE_UPDATE_AVAILABLE,
-                    detail=value.recipe_update.detail,
-                    severity="info",
-                )
-            )
+    warnings.extend(
+        ProjectionReason(
+            code=RECIPE_UPDATE_AVAILABLE,
+            detail=value.recipe_update.detail,
+            severity="info",
+        )
+        for value in loaded
+        if value.recipe_update is not None
+    )
     labels = {} if profile is None else profile.labels
     projection_issues: list[str] = []
     try:

@@ -176,31 +176,31 @@ def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[CatalogArti
     else:
         assert_never(source)
     result: list[CatalogArtifact] = []
-    for value in definition.files:
-        result.append(
-            CatalogArtifact(
-                id=value.id,
-                path=value.path,
-                kind=provider_kind.value,
-                repository=repository,
-                revision=revision,
-                sha256=value.sha256,
-                download_bytes=value.size_bytes,
-                roles=list(value.roles),
-                release_id=release_id,
-                asset_id=assets.get(value.id),
-                parts=None
-                if value.parts is None
-                else [
-                    CatalogArtifactPart(
-                        path=part.path,
-                        sha256=part.sha256,
-                        download_bytes=part.size_bytes,
-                    )
-                    for part in value.parts
-                ],
-            )
+    result.extend(
+        CatalogArtifact(
+            id=value.id,
+            path=value.path,
+            kind=provider_kind.value,
+            repository=repository,
+            revision=revision,
+            sha256=value.sha256,
+            download_bytes=value.size_bytes,
+            roles=list(value.roles),
+            release_id=release_id,
+            asset_id=assets.get(value.id),
+            parts=None
+            if value.parts is None
+            else [
+                CatalogArtifactPart(
+                    path=part.path,
+                    sha256=part.sha256,
+                    download_bytes=part.size_bytes,
+                )
+                for part in value.parts
+            ],
         )
+        for value in definition.files
+    )
     return result
 
 

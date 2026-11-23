@@ -416,22 +416,22 @@ def reconcile_requested_removals(
                 continue
             if payload.cancellation is not None:
                 continue
-            for gate in session.scalars(
-                select(ArtifactLifecycleGate).where(
-                    ArtifactLifecycleGate.artifact_kind == "runtime-image",
-                    ArtifactLifecycleGate.artifact_sha256.in_(
-                        payload.removal_archives or ()
-                    ),
-                    ArtifactLifecycleGate.removal_owner_kind == "recipe-image-job",
-                    ArtifactLifecycleGate.removal_owner_id.is_not(None),
+            accepted_requests.extend(
+                (
+                    operation.id,
+                    ArtifactIdentity("runtime-image", gate.artifact_sha256),
                 )
-            ):
-                accepted_requests.append(
-                    (
-                        operation.id,
-                        ArtifactIdentity("runtime-image", gate.artifact_sha256),
+                for gate in session.scalars(
+                    select(ArtifactLifecycleGate).where(
+                        ArtifactLifecycleGate.artifact_kind == "runtime-image",
+                        ArtifactLifecycleGate.artifact_sha256.in_(
+                            payload.removal_archives or ()
+                        ),
+                        ArtifactLifecycleGate.removal_owner_kind == "recipe-image-job",
+                        ArtifactLifecycleGate.removal_owner_id.is_not(None),
                     )
                 )
+            )
         if not observed_request:
             self._removal_request_after = None
     changed = 0
