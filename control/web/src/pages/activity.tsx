@@ -14,7 +14,12 @@ import {
   availabilityFailure,
   LibraryAvailabilityFeedback,
 } from "../components/library/library-availability-feedback";
-import { LifecycleState } from "../api/vocabulary.generated";
+import {
+  LIVE_LIFECYCLE_STATES,
+  LifecycleState,
+  TERMINAL_LIFECYCLE_STATES,
+  UNSUCCESSFUL_LIFECYCLE_STATES,
+} from "../api/vocabulary.generated";
 
 /** A wait for a person. */
 export function isOperatorWait(state: string | undefined): boolean {
@@ -38,7 +43,13 @@ import { exactTime, relativeTime } from "../lib/time";
 
 export { relativeTime };
 type ActivityView = "timeline" | "table";
-type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
+type ActivityStatus =
+  | "recorded"
+  | "in_progress"
+  | "attention"
+  | "unsuccessful"
+  | "called_off"
+  | "unknown";
 type ActivitySummary = { request_id: string; actor: string; action: string; targets: string[] };
 type ActivityRecord = ActivitySummary & {
   occurred_at?: string | null | undefined;
@@ -87,40 +98,41 @@ export function activityCategory(event: ActivitySummary): string {
   return CATEGORY_LABELS[category] ?? titleCase(category);
 }
 
+/** The lifecycle words, grouped by the contract's sets: a cancel is the operator's own request, not a failure. */
+function lifecycleStatus(state: string): ActivityStatus | undefined {
+  if (UNSUCCESSFUL_LIFECYCLE_STATES.has(state)) return "unsuccessful";
+  if (state === LifecycleState.CANCELLED) return "called_off";
+  if (state === LifecycleState.NEEDS_OPERATOR) return "attention";
+  if (TERMINAL_LIFECYCLE_STATES.has(state)) return "recorded";
+  if (LIVE_LIFECYCLE_STATES.has(state)) return "in_progress";
+  return undefined;
+}
+
+/** The states of other operation kinds that are not lifecycle words. */
 const OPERATION_STATUS: Record<string, ActivityStatus> = {
-  cancelled: "unsuccessful",
-  canceled: "unsuccessful",
+  canceled: "called_off",
   error: "unsuccessful",
   expired: "unsuccessful",
-  failed: "unsuccessful",
   uncertain: "attention",
   waiting: "in_progress",
-  [LifecycleState.NEEDS_OPERATOR]: "attention",
-  [LifecycleState.BACKOFF]: "in_progress",
-  [LifecycleState.OBSERVING]: "in_progress",
   compensating: "in_progress",
   pending: "in_progress",
   planned: "in_progress",
-  queued: "in_progress",
-  running: "in_progress",
   starting: "in_progress",
   stopping: "in_progress",
   compensated: "recorded",
   completed: "recorded",
-  succeeded: "recorded",
-  // Replaced by a successor operation: not a fault.
-  superseded: "recorded",
 };
 
 /** An operation state as the Activity page classes it; a state not listed here is not known. */
 function operationStatus(state: string): ActivityStatus {
-  return OPERATION_STATUS[state] ?? "unknown";
+  return lifecycleStatus(state) ?? OPERATION_STATUS[state] ?? "unknown";
 }
 
 /** Finished work does not change again; every other state (waiting, uncertain, not known) can. */
 export function operationEnded(state: string): boolean {
   const status = operationStatus(state);
-  return status === "unsuccessful" || status === "recorded";
+  return status === "unsuccessful" || status === "called_off" || status === "recorded";
 }
 
 export function activityStatus(event: ActivitySummary): ActivityStatus {
@@ -134,6 +146,7 @@ export function activityStatus(event: ActivitySummary): ActivityStatus {
 
 function statusLabel(status: ActivityStatus): string {
   if (status === "unsuccessful") return "Unsuccessful";
+  if (status === "called_off") return "Cancelled";
   if (status === "attention") return "Needs review";
   if (status === "in_progress") return "In progress";
   if (status === "unknown") return "Unknown state";
@@ -144,7 +157,7 @@ function statusTone(status: ActivityStatus): "neutral" | "ok" | "warn" | "bad" |
   if (status === "unsuccessful") return "bad";
   if (status === "attention") return "warn";
   if (status === "in_progress") return "info";
-  if (status === "unknown") return "neutral";
+  if (status === "unknown" || status === "called_off") return "neutral";
   return "ok";
 }
 
@@ -154,6 +167,7 @@ const LINKABLE_STATUSES: readonly ActivityStatus[] = [
   "in_progress",
   "attention",
   "unsuccessful",
+  "called_off",
 ];
 
 const OPERATION_STATES = [
@@ -986,7 +1000,7 @@ function ActivityOverview({
       result[activityStatus(event)] += 1;
       return result;
     },
-    { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, unknown: 0 },
+    { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, called_off: 0, unknown: 0 },
   );
   const scope = filtering
     ? `${events.length} matching ${events.length === 1 ? "event" : "events"} from ${loadedCount} loaded`
@@ -1012,6 +1026,10 @@ function ActivityOverview({
       <div>
         <span>Unsuccessful</span>
         <strong>{counts.unsuccessful}</strong>
+      </div>
+      <div>
+        <span>Cancelled</span>
+        <strong>{counts.called_off}</strong>
       </div>
       <div>
         <span>Unknown state</span>
@@ -1180,6 +1198,7 @@ const STATUS_ORDER: Record<ActivityStatus, number> = {
   attention: 0,
   unsuccessful: 1,
   in_progress: 2,
+  called_off: 2,
   unknown: 2,
   recorded: 2,
 };
@@ -1604,6 +1623,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               <option value="in_progress">In progress</option>
               <option value="attention">Needs review</option>
               <option value="unsuccessful">Unsuccessful</option>
+              <option value="called_off">Cancelled</option>
               <option value="unknown">Unknown state</option>
             </select>
           </label>

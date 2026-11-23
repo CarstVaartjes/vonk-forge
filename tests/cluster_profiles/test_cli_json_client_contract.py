@@ -207,7 +207,7 @@ def test_every_kind_is_reachable_from_a_command() -> None:
 def test_a_document_without_a_kind_is_not_stamped() -> None:
     assert stamp({"nodes": []}, None) == {"nodes": []}
     # The review's Controller model owns its version; the stamp leaves it alone.
-    review = {"schema_version": 2, "allowed": True}
+    review = {"schema_version": 3, "allowed": True}
     assert stamp(review, DocumentKind.PROFILE_REVIEW) == review
     assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS
 

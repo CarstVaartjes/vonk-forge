@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { RunState } from "../api/vocabulary.generated";
+import { CacheOperationKind, RunState } from "../api/vocabulary.generated";
 import type {
   ControlApi,
   LibrarySort,
@@ -68,6 +68,8 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     model_selectors: recipe.model_selectors,
     assessment: recipe.assessment,
     qualification: recipe.qualification,
+    local: recipe.local,
+    actions: recipe.actions,
   };
 }
 
@@ -178,6 +180,8 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     creator: detail.creator,
     assessment: detail.assessment,
     qualification: detail.qualification,
+    local: detail.local,
+    actions: detail.actions,
   };
   return {
     generated_at: detail.updated_at,
@@ -192,14 +196,18 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
   };
 }
 
-/** Running runs of this exact recipe revision, as the fleet snapshot reports them. */
-export function withObservedRuns(
+/** Installations and running runs of this exact recipe revision, as the fleet snapshot reports them. */
+export function withObservedFleet(
   detail: LibraryViewRecipeDetail | undefined,
   fleet: VisualFleetSnapshot | undefined,
 ): LibraryViewRecipeDetail | undefined {
   if (!detail || !fleet) return detail;
   const runs = new Map<string, { run_id: string; state: string }>();
-  for (const node of fleet.nodes)
+  const installations = new Set<string>();
+  for (const node of fleet.nodes) {
+    for (const installed of node.installed)
+      if (installed.recipe_revision_id === detail.recipe.recipe_revision_id)
+        installations.add(installed.installation_id);
     for (const run of node.loaded) {
       if (
         run.recipe_revision_id === detail.recipe.recipe_revision_id &&
@@ -207,9 +215,14 @@ export function withObservedRuns(
       )
         runs.set(run.run_id, { run_id: run.run_id, state: run.run_state });
     }
+  }
   return {
     ...detail,
-    operational_state: { ...detail.operational_state, runs: [...runs.values()] },
+    operational_state: {
+      ...detail.operational_state,
+      installations: [...installations],
+      runs: [...runs.values()],
+    },
   };
 }
 
@@ -236,6 +249,7 @@ export function LibraryPage({
   const [attempt, setAttempt] = useState(0);
   const [fleetAttempt, setFleetAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [pollAttempt, setPollAttempt] = useState(0);
   const [query, setQuery] = useState(
     () => new URL(path, location.origin).searchParams.get("q") ?? "",
   );
@@ -270,6 +284,37 @@ export function LibraryPage({
       });
     return () => controller.abort();
   }, [api, attempt, librarySort, libraryUpdated, libraryFits]);
+  // While the Controller reports a live preparation, keep reading until it ends: a
+  // download started elsewhere, or one that outlives this page's own observation,
+  // still shows its progress and its end. Each read schedules the next.
+  useEffect(() => {
+    if (!snapshot || !hasLivePreparation(snapshot)) return;
+    const timer = setTimeout(() => setAttempt((value) => value + 1), LIVE_REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [snapshot, error]);
+  useEffect(() => {
+    if (
+      !detail?.recipe.actions.includes(CacheOperationKind.CANCEL) ||
+      route.kind !== LibraryPath.RECIPES
+    )
+      return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      api
+        .recipeDetail(route.selector, controller.signal)
+        .then((value) => {
+          if (!controller.signal.aborted) setDetail(viewRecipeDetail(value));
+        })
+        // A failed read must not end the following: read again.
+        .catch(() => {
+          if (!controller.signal.aborted) setPollAttempt((value) => value + 1);
+        });
+    }, LIVE_REFRESH_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [api, detail, route, pollAttempt]);
   useEffect(() => {
     // The release's words, read once per page. They are informative: without
     // them (none published, or unreachable) the page shows the names.
@@ -390,7 +435,7 @@ export function LibraryPage({
     [api, route],
   );
   const names = nodeNames;
-  const observedDetail = useMemo(() => withObservedRuns(detail, fleet), [detail, fleet]);
+  const observedDetail = useMemo(() => withObservedFleet(detail, fleet), [detail, fleet]);
   return (
     <div className="library-page">
       <PageHeader
@@ -414,6 +459,7 @@ export function LibraryPage({
           release={snapshot?.library}
           attention={Boolean(snapshot?.storage_observation?.storage_reason)}
         >
+          {snapshot && <LibraryAsOf snapshot={snapshot} />}
           {snapshot && <LibraryStorageObservation snapshot={snapshot} />}
         </CatalogSyncStatusLine>
       </PageHeader>
@@ -496,6 +542,28 @@ export function LibraryPage({
         </LibraryVocabularyProvider>
       )}
     </div>
+  );
+}
+
+const LIVE_REFRESH_MS = 3_000;
+
+/** Whether any model or recipe has a preparation the Controller lets an operator follow and cancel. */
+export function hasLivePreparation(snapshot: LibraryViewSnapshot): boolean {
+  const live = (item: { actions: readonly string[] }) =>
+    item.actions.includes(CacheOperationKind.CANCEL);
+  return (
+    snapshot.models.some((model) => live(model) || model.recipes.some(live)) ||
+    snapshot.unlinked_recipes.some(live)
+  );
+}
+
+/** When the cache state on this page was read; the page refreshes it while anything is preparing. */
+export function LibraryAsOf({ snapshot }: { snapshot: LibraryViewSnapshot }) {
+  return (
+    <p>
+      Cache state as of <Time value={snapshot.generated_at} />
+      {hasLivePreparation(snapshot) ? ", refreshing while a download runs" : ""}.
+    </p>
   );
 }
 

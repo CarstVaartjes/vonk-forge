@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
-import { ActivityPage, activityStatus } from "./activity";
+import { ActivityPage, activityStatus, operationEnded, unsuccessfulCount } from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const REQUEST_ID = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";
@@ -173,6 +173,19 @@ test("uses honest status labels for active and operator-blocked operations", () 
   expect(activityStatus({ ...base, action: "operation.reconcile.succeeded" })).toBe("recorded");
   expect(activityStatus({ ...base, action: "operation.reconcile.superseded" })).toBe("recorded");
   expect(activityStatus({ ...base, action: "operation.reconcile.future-state" })).toBe("unknown");
+  // An operator's own cancel is neither a failure nor a reason to look: it is counted apart.
+  expect(activityStatus({ ...base, action: "operation.reconcile.cancelled" })).toBe("called_off");
+  expect(operationEnded("cancelled")).toBe(true);
+  const at = "2026-08-15T11:58:00Z";
+  expect(
+    unsuccessfulCount(
+      [
+        jobActivity("a", "profile-load", "cancelled", "Profile load cancelled", at),
+        jobActivity("b", "profile-load", "failed", "Profile load failed", at),
+      ],
+      new Map(),
+    ),
+  ).toBe(1);
 });
 
 test("renders friendly timeline labels, honest time metadata, and hidden copyable identifiers", async () => {
@@ -219,7 +232,7 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   const loadedSummary = screen.getByRole("region", { name: "Loaded activity summary" });
   expect(loadedSummary).toHaveTextContent("Summary of 4 loaded events");
   expect(loadedSummary).toHaveTextContent(
-    "Recorded1In progress1Needs review1Unsuccessful1Unknown state0",
+    "Recorded1In progress1Needs review1Unsuccessful1Cancelled0Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "unsuccessful");
@@ -228,7 +241,7 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   const statusSummary = screen.getByRole("region", { name: "Matching activity summary" });
   expect(statusSummary).toHaveTextContent("Summary of 1 matching event from 4 loaded");
   expect(statusSummary).toHaveTextContent(
-    "Recorded0In progress0Needs review0Unsuccessful1Unknown state0",
+    "Recorded0In progress0Needs review0Unsuccessful1Cancelled0Unknown state0",
   );
 
   await user.selectOptions(screen.getByLabelText("Status"), "attention");
@@ -241,7 +254,7 @@ test("keeps summaries in sync with filters and offers a recoverable empty state"
   const emptyState = screen.getByText("No results match these filters").closest("section")!;
   expect(emptyState).toBeVisible();
   expect(screen.getByRole("region", { name: "Matching activity summary" })).toHaveTextContent(
-    "Recorded0In progress0Needs review0Unsuccessful0Unknown state0",
+    "Recorded0In progress0Needs review0Unsuccessful0Cancelled0Unknown state0",
   );
   await user.click(within(emptyState).getByRole("button", { name: "Clear filters" }));
   expect(screen.getByRole("heading", { name: /Recipe start finished$/ })).toBeVisible();

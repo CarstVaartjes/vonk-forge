@@ -12,7 +12,7 @@ import {
 } from "../cache-removal/cache-removal-operations";
 import { CacheRemovalReviewDetails } from "../cache-removal/cache-removal-review";
 
-/** Choose retention, inspect the Controller decision, then accept that review. */
+/** One click opens the Controller's review; Confirm accepts exactly that review, like a model's. */
 export function LibraryRecipeRemoveAction({
   api,
   selector,
@@ -30,6 +30,7 @@ export function LibraryRecipeRemoveAction({
   } | null>(null);
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [withModel, setWithModel] = useState(false);
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
   const toast = useToast();
@@ -38,6 +39,7 @@ export function LibraryRecipeRemoveAction({
     setReview(null);
     setRemoval(null);
     setConfirming(false);
+    setWithModel(false);
     setBusy(false);
     setError("");
     return () => abort.current?.abort();
@@ -67,7 +69,7 @@ export function LibraryRecipeRemoveAction({
   );
 
   const remove = useCallback(async () => {
-    if (!review || review.blockers.length || typeof review.with_model !== "boolean") return;
+    if (!review?.submittable || typeof review.with_model !== "boolean") return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -132,7 +134,15 @@ export function LibraryRecipeRemoveAction({
   if (!confirming) {
     return (
       <div className="library-cache-action">
-        <button type="button" className="button secondary" onClick={() => setConfirming(true)}>
+        <button
+          type="button"
+          className="button secondary compact"
+          disabled={busy}
+          onClick={() => {
+            setConfirming(true);
+            void reviewRemoval(false);
+          }}
+        >
           Remove recipe
         </button>
         {error && (
@@ -145,30 +155,35 @@ export function LibraryRecipeRemoveAction({
   }
   return (
     <div className="library-cache-action">
-      <button
-        type="button"
-        className="button secondary"
-        disabled={busy}
-        onClick={() => void reviewRemoval(false)}
-      >
-        Keep the model
-      </button>
-      <button
-        type="button"
-        className="button secondary"
-        disabled={busy}
-        onClick={() => void reviewRemoval(true)}
-      >
-        Remove the model too
-      </button>
+      <label>
+        <input
+          type="checkbox"
+          checked={withModel}
+          disabled={busy}
+          onChange={(event) => {
+            setWithModel(event.target.checked);
+            void reviewRemoval(event.target.checked);
+          }}
+        />{" "}
+        Also remove unused models
+      </label>
       {busy && <span role="status">Waiting for Controller…</span>}
+      {!busy && !review && (
+        <button
+          type="button"
+          className="button secondary compact"
+          onClick={() => void reviewRemoval(withModel)}
+        >
+          Review again
+        </button>
+      )}
       {review && (
         <>
           <CacheRemovalReviewDetails review={review} />
           <button
             type="button"
-            className="button secondary"
-            disabled={busy || review.blockers.length > 0}
+            className="button secondary compact"
+            disabled={busy || !review.submittable}
             onClick={() => void remove()}
           >
             Confirm remove
@@ -177,11 +192,12 @@ export function LibraryRecipeRemoveAction({
       )}
       <button
         type="button"
-        className="button secondary"
+        className="button secondary compact"
         disabled={busy}
         onClick={() => {
           setConfirming(false);
           setReview(null);
+          setWithModel(false);
         }}
       >
         Cancel

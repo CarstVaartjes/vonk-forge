@@ -14,6 +14,8 @@ from typing import cast
 from ..cli_outcome import SubmissionAcceptance
 from ..cli_render.dispatch import render_payload
 from ..cli_states_generated import (
+    PROFILE_LOAD,
+    PROFILE_NOTHING_TO_CHANGE,
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
     PROFILE_REVISION_CONFLICT,
@@ -164,7 +166,14 @@ def _review_and_submit_profile_load(
                     for line in lead(preview):
                         print(line)
                 render_payload(preview, "profile", action="preview")
-        _confirm_action(args, question)
+        action = preview.get("next_action")
+        if action == PROFILE_NOTHING_TO_CHANGE:
+            # Everything already matches: nothing is submitted, and that is not a failure.
+            return preview
+        if action != PROFILE_LOAD:
+            # A load that stops a serving workload asks, and so does one the
+            # Controller did not classify.
+            _confirm_action(args, question)
         try:
             if reviewed is not None:
                 reviewed.save()
@@ -229,6 +238,8 @@ def _load_profile(
     }:
         return result
     if getattr(args, "detach", False):
+        return result
+    if result.get("next_action") == PROFILE_NOTHING_TO_CHANGE:
         return result
     application_id = cast(str, result["id"])
 

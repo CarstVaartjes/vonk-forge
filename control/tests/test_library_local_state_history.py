@@ -18,6 +18,7 @@ from sqlalchemy import String, column, create_engine, event, func, or_, select, 
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
@@ -25,6 +26,7 @@ from vonk_control.library.contract import (
     LibraryLocalProgress,
     LibraryLocalState,
     model_actions,
+    recipe_actions,
 )
 from vonk_control.library_projection import local_state
 from vonk_control.library_projection.service import LibraryProjection
@@ -524,11 +526,37 @@ def test_model_actions_follow_cache_state_and_held_files():
     assert actions("failed", held) == [download, remove]
     assert actions("not_cached", none, installed_on_sparks=True) == [download, remove]
     assert actions("unknown") == []
-    # A live preparation owns the row; an idle partial set is still partial.
+    # A live preparation owns the row: it can be followed and cancelled, nothing
+    # else. Without an operation to name there is nothing to follow.
+    live = LibraryLocalProgress(
+        state=LifecycleState.RUNNING, operation_id=str(uuid.uuid4())
+    )
+    cancel, follow = CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW
+    assert actions("preparing", held, preparation=live) == [cancel, follow]
     assert actions("preparing", held, preparation=preparation("running")) == []
+    # An idle partial set is still partial.
     assert actions("preparing", held, preparation=preparation("failed")) == [
         download,
         remove,
     ]
     assert actions("preparing", held) == [download, remove]
     assert actions("cached", held, preparation=preparation("succeeded")) == [remove]
+
+
+def test_recipe_actions_follow_the_recipes_own_cache_state():
+    download, remove = CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE
+    cancel, follow = CacheOperationKind.CANCEL, CacheOperationKind.FOLLOW
+
+    def actions(controller, **local):
+        return recipe_actions(LibraryLocalState(controller=controller, **local))
+
+    assert actions("not_cached") == [download]
+    assert actions("cached") == [remove]
+    # Partial files of a failed download can be dropped or tried again.
+    assert actions("failed") == [download, remove]
+    assert actions("not_cached", running_on=["spk_" + "a" * 32]) == [download, remove]
+    assert actions("unknown") == []
+    live = LibraryLocalProgress(
+        state=LifecycleState.QUEUED, operation_id=str(uuid.uuid4())
+    )
+    assert actions("preparing", preparation=live) == [cancel, follow]

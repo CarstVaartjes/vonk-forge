@@ -82,15 +82,45 @@ ASSET_REMOVE = "remove"
 ASSET_RETAIN_SHARED = "retain-shared"
 ASSET_RETAIN_REFERENCED = "retain-referenced"
 ASSET_RETAIN_OBSERVATION_UNAVAILABLE = "retain-observation-unavailable"
+PROFILE_LOAD = "load"
+PROFILE_NOTHING_TO_CHANGE = "nothing_to_change"
 ACTION_DOWNLOAD = "download"
 ACTION_REMOVE = "remove"
-CACHE_NOT_CACHED = "not_cached"
-CACHE_FAILED = "failed"
+ACTION_CANCEL = "cancel"
+ACTION_FOLLOW = "follow"
 JOB_KIND_CLEANUP = "recipe.cleanup.v2"
 ASSET_VERIFIED = "verified"
 ASSET_MODEL_SET = "model-set"
 ASSET_MODEL_OBJECT = "model-object"
 ASSET_RUNTIME_IMAGE = "runtime-image"
+
+# The lifecycle states that are terminal.
+TERMINAL_LIFECYCLE_STATES = frozenset(
+    {
+        "succeeded",
+        "failed",
+        "cancelled",
+        "superseded",
+    }
+)
+
+# The lifecycle states that are live.
+LIVE_LIFECYCLE_STATES = frozenset(
+    {
+        "queued",
+        "running",
+        "observing",
+        "backoff",
+        "needs-operator",
+    }
+)
+
+# The lifecycle states that are unsuccessful.
+UNSUCCESSFUL_LIFECYCLE_STATES = frozenset(
+    {
+        "failed",
+    }
+)
 
 # The shared HTTP status disposition table, first match wins:
 # (first status, last status, disposition); anything else is observed.

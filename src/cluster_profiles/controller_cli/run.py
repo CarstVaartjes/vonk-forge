@@ -15,6 +15,7 @@ from ..cli_outcome import (
 )
 from ..cli_render.common import _text, _words, terminal_text
 from ..cli_select import SelectorError
+from ..cli_states_generated import PROFILE_NOTHING_TO_CHANGE, SUCCEEDED
 from ..control_client.errors import ControlMalformedResponse
 from ..control_client.schema import validate_control_document
 from ..generated_control.models.fleet_profile_effects import FleetProfileEffects
@@ -192,8 +193,10 @@ def _run(
         ),
         draft=draft,
     )
-    application_state = operation_state(application)
-    if application_state not in {"succeeded", "completed"}:
+    # A plan that changes nothing submits nothing: the workload already runs.
+    already_running = application.get("next_action") == PROFILE_NOTHING_TO_CHANGE
+    application_state = SUCCEEDED if already_running else operation_state(application)
+    if application_state != SUCCEEDED:
         return {
             "recipe": selector,
             "application": application,

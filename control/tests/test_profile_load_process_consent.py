@@ -18,7 +18,7 @@ from .test_profile_load_installed_cli import (
     _process_environment,
     _run_pty,
 )
-from .test_profile_load_submission import _profile_api
+from .test_profile_load_submission import _stopping_profile_api
 
 
 @pytest.mark.lane
@@ -32,7 +32,9 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     mode: str,
     expected_status: int,
 ) -> None:
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, preview = _stopping_profile_api(
+        tmp_path, postgres_engine
+    )
     digest = preview.get("plan_digest")
     assert isinstance(digest, str)
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):
@@ -109,10 +111,8 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     assert not stdout
     assert "Request key" not in stderr
     assert headers["Authorization"].removeprefix("Bearer ") not in stderr
-    if mode == "redirected":
-        assert abort_calls == []
-    else:
-        assert abort_calls == [("POST", "/api/profile/1/preview", None)]
+    # The plan is read to learn that it stops a workload; nothing is submitted.
+    assert abort_calls == [("POST", "/api/profile/1/preview", None)]
 
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
