@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
+    UNSUCCESSFUL_LIFECYCLE_STATES,
     LifecycleState,
     LifecycleSubject,
     adopt_state,
@@ -34,6 +35,16 @@ def test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal() -> Non
     ]
     assert LifecycleState.SUPERSEDED in TERMINAL_LIFECYCLE_STATES
     assert LifecycleState.NEEDS_OPERATOR not in TERMINAL_LIFECYCLE_STATES
+
+
+def test_a_cancel_or_a_replacement_is_terminal_but_not_a_failure() -> None:
+    """Every client groups operations by these sets, so a cancel is never counted
+    as a failure."""
+
+    assert UNSUCCESSFUL_LIFECYCLE_STATES == {LifecycleState.FAILED}
+    assert UNSUCCESSFUL_LIFECYCLE_STATES < TERMINAL_LIFECYCLE_STATES
+    assert LifecycleState.CANCELLED in TERMINAL_LIFECYCLE_STATES
+    assert LifecycleState.CANCELLED not in UNSUCCESSFUL_LIFECYCLE_STATES
 
 
 @pytest.mark.parametrize("subject", list(LifecycleSubject))

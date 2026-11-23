@@ -1,4 +1,4 @@
-import { LifecycleState } from "../../api/vocabulary.generated";
+import { LifecycleState, TERMINAL_LIFECYCLE_STATES } from "../../api/vocabulary.generated";
 import { compareWire, displayRatio } from "../../api/contract-numeric";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRemovalReview, ControlApi, ModelCacheOperatorResponse } from "../../api/types";
@@ -17,7 +17,6 @@ import {
 } from "../cache-removal/cache-removal-operations";
 import { CacheRemovalReviewDetails } from "../cache-removal/cache-removal-review";
 
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;
 const MAX_POLL_ATTEMPTS = 180;
 
@@ -104,7 +103,7 @@ export function LibraryCacheAction({
       setWaiting(current);
       let attempts = 0;
       while (
-        !TERMINAL_STATES.has(current.state) &&
+        !TERMINAL_LIFECYCLE_STATES.has(current.state) &&
         current.operation_id &&
         attempts < MAX_POLL_ATTEMPTS
       ) {
@@ -117,7 +116,7 @@ export function LibraryCacheAction({
       }
       if (controller.signal.aborted) return;
       setBusy(false);
-      if (!TERMINAL_STATES.has(current.state)) {
+      if (!TERMINAL_LIFECYCLE_STATES.has(current.state)) {
         // Still queued or retrying: the Controller carries on without this page.
         setPhase("Still preparing; the Controller keeps going in the background.");
         return;

@@ -13,7 +13,11 @@ import {
 import type { WireNumber } from "../../api/contract-numeric";
 import { validateControlParameters } from "../../api/contract-json";
 import { ApiError } from "../../api/client";
-import { ProfileAction, ProfileDocumentState } from "../../api/vocabulary.generated";
+import {
+  ProfileAction,
+  ProfileDocumentState,
+  TERMINAL_LIFECYCLE_STATES,
+} from "../../api/vocabulary.generated";
 import { canonicalRecipeSelector, readableProfile } from "../../api/types";
 import type {
   ControlApi,
@@ -66,10 +70,9 @@ type ProfileDraft = {
 type FleetEntry = { id: string; name: string; state: string };
 type PendingProfileLoad = { requestKey: string; reviewedEffectsDigest: string };
 
-const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
 /** A superseded load that names its successor is not an end: the latest-load observation continues under the successor. */
 const ended = (application: Pick<FleetProfileApplicationView, "state" | "superseded_by">) =>
-  TERMINAL_STATES.has(application.state) &&
+  TERMINAL_LIFECYCLE_STATES.has(application.state) &&
   !(application.state === "superseded" && application.superseded_by);
 
 function stringField(value: unknown, key: string): string {

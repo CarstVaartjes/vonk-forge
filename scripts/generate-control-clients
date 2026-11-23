@@ -77,7 +77,13 @@ def typescript_vocabulary() -> str:
 
     import enum
 
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        LIVE_LIFECYCLE_STATES,
+        TERMINAL_LIFECYCLE_STATES,
+        UNSUCCESSFUL_LIFECYCLE_STATES,
+        LifecycleState,
+        LifecycleVocabulary,
+    )
     from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 
     lines = [
@@ -130,6 +136,20 @@ def typescript_vocabulary() -> str:
             f"(typeof {words.__name__})[keyof typeof {words.__name__}];"
         )
         lines.append("")
+    # The one grouping of operation states every client reads: it ended, it
+    # has not, or it ended as a failure (a cancel or a replacement is neither).
+    for name, states in (
+        ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
+        ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
+        ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
+    ):
+        members = ", ".join(
+            json.dumps(state.value) for state in LifecycleState if state in states
+        )
+        lines.append(
+            f"export const {name}: ReadonlySet<string> = new Set([{members}]);"
+        )
+    lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

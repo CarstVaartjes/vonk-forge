@@ -92,6 +92,34 @@ ASSET_MODEL_SET = "model-set"
 ASSET_MODEL_OBJECT = "model-object"
 ASSET_RUNTIME_IMAGE = "runtime-image"
 
+# The lifecycle states that are terminal.
+TERMINAL_LIFECYCLE_STATES = frozenset(
+    {
+        "succeeded",
+        "failed",
+        "cancelled",
+        "superseded",
+    }
+)
+
+# The lifecycle states that are live.
+LIVE_LIFECYCLE_STATES = frozenset(
+    {
+        "queued",
+        "running",
+        "observing",
+        "backoff",
+        "needs-operator",
+    }
+)
+
+# The lifecycle states that are unsuccessful.
+UNSUCCESSFUL_LIFECYCLE_STATES = frozenset(
+    {
+        "failed",
+    }
+)
+
 # The shared HTTP status disposition table, first match wins:
 # (first status, last status, disposition); anything else is observed.
 HTTP_STATUS_DISPOSITIONS = (

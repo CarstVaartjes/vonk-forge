@@ -40,6 +40,9 @@ def cli_words() -> str:
         EnrollmentGrantState,
     )
     from vonk_agent_protocol.lifecycle_vocabulary import (
+        LIVE_LIFECYCLE_STATES,
+        TERMINAL_LIFECYCLE_STATES,
+        UNSUCCESSFUL_LIFECYCLE_STATES,
         LifecycleState,
         OutcomeKind,
         StopOutcome,
@@ -138,6 +141,24 @@ def cli_words() -> str:
         f"{name} = {json.dumps(getattr(member, 'value', member))}"
         for name, member in words.items()
     ]
+    for name, states in (
+        ("TERMINAL_LIFECYCLE_STATES", TERMINAL_LIFECYCLE_STATES),
+        ("LIVE_LIFECYCLE_STATES", LIVE_LIFECYCLE_STATES),
+        ("UNSUCCESSFUL_LIFECYCLE_STATES", UNSUCCESSFUL_LIFECYCLE_STATES),
+    ):
+        lines += [
+            "",
+            f"# The lifecycle states that are {name.split('_')[0].lower()}.",
+            f"{name} = frozenset(",
+            "    {",
+            *(
+                f'        "{state.value}",'
+                for state in LifecycleState
+                if state in states
+            ),
+            "    }",
+            ")",
+        ]
     lines += [
         "",
         "# The shared HTTP status disposition table, first match wins:",

@@ -13,6 +13,7 @@ from ..cli_states_generated import (
     ACTION_REMOVE,
     CACHE_FAILED,
     CACHE_NOT_CACHED,
+    LIVE_LIFECYCLE_STATES,
     UNKNOWN,
     QualificationOutcome,
     QualificationStatus,
@@ -214,9 +215,6 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field("Quantization", item.get("quantization"))
 
 
-_ACTIVE_PREPARATION = {"queued", "running", "pending", "preparing"}
-
-
 def _cache_word(value: object) -> str:
     return _text(value).replace("_", " ")
 
@@ -333,7 +331,7 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
     resources = _object(item.get("resources"), "resources")
     preparation = _optional(local.get("preparation"), "preparation")
     cache = _cache_word(local.get("controller"))
-    if preparation.get("state") in _ACTIVE_PREPARATION:
+    if preparation.get("state") in LIVE_LIFECYCLE_STATES:
         cache = progress_line(
             {"progress": preparation, "blockers": preparation.get("blockers")}
         ).replace(" | ", ": ")
@@ -509,7 +507,7 @@ def _library(
                 _object(item.get("local"), "local").get("preparation"), "preparation"
             )
             operation = preparation.get("operation_id")
-            if preparation.get("state") in _ACTIVE_PREPARATION and operation:
+            if preparation.get("state") in LIVE_LIFECYCLE_STATES and operation:
                 _field(
                     "Follow",
                     f"vonkctl {noun} progress {shlex.quote(str(operation))} --follow",
