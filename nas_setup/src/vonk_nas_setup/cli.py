@@ -64,7 +64,7 @@ def run(argv: list[str] | None = None) -> None:
         allow_abbrev=False,
     )
     parser.add_argument("--template", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("."))
+    parser.add_argument("--output", type=Path, default=Path())
     parser.add_argument("--upgrade", action="store_true")
     parser.add_argument("--answers-file", type=Path)
     args = parser.parse_args(argv)

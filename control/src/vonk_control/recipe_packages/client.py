@@ -1169,7 +1169,7 @@ class RecipePackageClient:
             archive_path = (
                 Path(getattr(self, "_archive_path", ""))
                 if getattr(self, "_archive_path", None)
-                else Path(".")
+                else Path()
             )
         closure_path = self._materialize_closure(files, package_digest, archive_path)
         source_bundle: bytes | None = None

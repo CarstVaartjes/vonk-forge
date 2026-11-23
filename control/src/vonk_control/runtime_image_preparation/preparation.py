@@ -343,7 +343,7 @@ def _prepare_from_build(
         architecture=architecture,
         runtime_interface=runtime_interface,
         runtime_interface_label=runtime_interface_label,
-        archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
+        archive_path=str(getattr(storage, "root", Path()) / archive_sha),
         recorded_at=_timestamp(now),
         build_id=build_id,
         build_input_sha256=recorded_build_input,
