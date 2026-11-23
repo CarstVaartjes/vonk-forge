@@ -58,8 +58,8 @@ from vonk_control.unused_storage_collection.service import UnusedStorageCollecto
 from vonk_forge_contracts import ModelDefinition
 
 from .display_fixtures import create_draft
+from .model_cache_support import _artifact
 from .test_catalog_entities import _model
-from .test_model_cache import _artifact
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
 VALUES = (0, 9, 10, 2**63 - 1, 2**63, 10**199 + 123)

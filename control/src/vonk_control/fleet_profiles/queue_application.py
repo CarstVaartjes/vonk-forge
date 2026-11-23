@@ -49,12 +49,6 @@ from ..models.fleet import (
     FleetProfileSelection,
 )
 from ..preparation_contract import RuntimeImageIdentity
-from ..profile_capacity import (
-    release_replaced_profile_claims,
-    reserve_profile_disk,
-    reserve_profile_memory,
-    reserve_profile_ports,
-)
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
@@ -64,6 +58,12 @@ from ..workload_intent import allocate_workload_intent, raise_workload_intent
 from . import states as fleet_profile_states
 from .assessment_support import (
     _require_recovery_preparations,
+)
+from .capacity import (
+    release_replaced_profile_claims,
+    reserve_profile_disk,
+    reserve_profile_memory,
+    reserve_profile_ports,
 )
 from .contracts import (
     FleetProfileAdmissionEffectBusy,

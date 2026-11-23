@@ -23,7 +23,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .node_contacts import contact_row
-from .test_recipe_routes import NOW, MutableClock, setup
+from .recipe_routes_support import NOW, MutableClock, setup
 
 
 def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
@@ -339,7 +339,7 @@ def test_publication_deferral_contention_continues_without_traceback(
     from vonk_agent_protocol import SecurityRefusalError
     from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
-    from .test_recipe_routes import add_running_run
+    from .recipe_routes_support import add_running_run
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     later = add_running_run(
@@ -419,16 +419,16 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     from .agent_fences import fenced_attempt
-    from .recipe_stop_fixtures import recipe_stop_payload
-    from .runtime_identity_support import claim_agent
-    from .test_agent_jobs import COMMIT, parent
-    from .test_recipe_operations import NOW as OPERATION_NOW
-    from .test_recipe_operations import (
+    from .agent_jobs_support import COMMIT, parent
+    from .recipe_operations_support import NOW as OPERATION_NOW
+    from .recipe_operations_support import (
         _issue_exact_stop_grant,
         installed_recipe,
         setup_services,
         started_recipe,
     )
+    from .recipe_stop_fixtures import recipe_stop_payload
+    from .runtime_identity_support import claim_agent
 
     sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine
@@ -665,7 +665,7 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.route_state == RouteState.WITHDRAWN
         assert run.state == RunState.RUNNING
-    from .test_recipe_routes import add_running_run
+    from .recipe_routes_support import add_running_run
 
     fresh = add_running_run(
         routes, run_id, alias="qwen", route_state=RouteState.PENDING, identity=9

@@ -25,12 +25,12 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import _issued_job
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .runtime_identity_support import claim_agent
+from .test_artifact_job_lifecycle import _issued_job
 
 
 def _selected_profile_grant(tmp_path, reason="superseded by newer workload intent"):

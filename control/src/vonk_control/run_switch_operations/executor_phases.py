@@ -25,13 +25,13 @@ from vonk_agent_protocol import (
 from ..cluster_mappings import (
     ClusterMappingPlan,
 )
+from ..fleet_profiles.capacity import (
+    prepared_profile_installation,
+)
 from ..install_admission.contracts import InstallAdmissionBusy, InstallPreflightExpired
 from ..logging import redact_text
 from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
 from ..offline_stops import pending_run_stop_nodes
-from ..profile_capacity import (
-    prepared_profile_installation,
-)
 from ..recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeInstallPreflightExpired,

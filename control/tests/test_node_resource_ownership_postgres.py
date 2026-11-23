@@ -184,8 +184,8 @@ def test_archived_measurement_lock_does_not_block_install_admission(
     """Catches locking telemetry history as if it were current admission evidence."""
     from vonk_control.models.execution import RecipeInstallation
 
-    from .test_recipe_operations import NOW as now
-    from .test_recipe_operations import setup_services
+    from .recipe_operations_support import NOW as now
+    from .recipe_operations_support import setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine

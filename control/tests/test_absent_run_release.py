@@ -11,7 +11,7 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

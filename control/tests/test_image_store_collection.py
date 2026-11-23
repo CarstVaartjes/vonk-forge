@@ -26,8 +26,8 @@ from vonk_control.oci_image_store import StoredImage
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_builds_support import setup as recipe_build_setup
 from .runtime_image_fixtures import place_test_image
-from .test_recipe_builds import setup as recipe_build_setup
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 NODE = "spk_" + "1" * 32

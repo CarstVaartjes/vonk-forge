@@ -14,12 +14,12 @@ from vonk_agent_protocol import (
 )
 
 from .content_identity import same_image
+from .fleet_profiles.capacity import reservation_visible
 from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from .machine_states import rank_installed
 from .models.cache import RecipeBuild
 from .models.execution import InstallationNode, RecipeInstallation, ResourceReservation
 from .owner_liveness import OwnerKind, build_holds_disk
-from .profile_capacity import reservation_visible
 from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,

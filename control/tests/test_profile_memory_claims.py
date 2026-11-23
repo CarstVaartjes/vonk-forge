@@ -21,9 +21,9 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.resource_planning.types import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_profile_installed_execution import _drive_to_job
 from .test_profile_port_claims import _load, _ready_profile
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
 @pytest.mark.parametrize("node_count", [1, 2])

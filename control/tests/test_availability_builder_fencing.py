@@ -18,8 +18,8 @@ from vonk_control.models.fleet import User
 from vonk_control.models.jobs import Job
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_builds_support import _write_controller_build_receipt
 from .test_build_cancellation_recovery import _evidence, _services
-from .test_recipe_builds import _write_controller_build_receipt
 
 
 @pytest.mark.parametrize(

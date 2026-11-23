@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.scripts import test_install_release_publication as publication
+from tests.scripts import install_release_publication_support as publication
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"

@@ -34,20 +34,20 @@ from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
+from .model_cache_support import _artifact, _download
+from .recipe_operations_support import (
+    NOW,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .test_catalog_revision_collection import NODE, Catalog
-from .test_model_cache import _artifact, _download
 from .test_model_removal_reference_lifecycle import (
     _one_model,
     _register_model,
     _removal_service,
 )
 from .test_model_removal_worker_postgres import _prepare_removal_target
-from .test_recipe_operations import (
-    NOW,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
 
 
 def submit_model_download(cache: ModelCacheService, tmp_path: Path) -> None:
@@ -516,7 +516,7 @@ def test_profile_or_running_workload_retains_model_and_installation(
         assert revision is not None
         recipe_selector = f"{revision.publisher}/{revision.slug}"
     if saved_profile:
-        from .test_unused_storage_collection import _profile
+        from .unused_storage_collection_support import _profile
 
         world = object.__new__(Catalog)
         world.sessions = sessions

@@ -29,6 +29,7 @@ from ..admission_locking import (
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes,
 )
+from ..fleet_profiles.capacity import inherited_profile_disk
 from ..inventory.items_contract import InventorySnapshotKind
 from ..machine_states import reservation_live
 from ..models.cache import RecipeBuild
@@ -37,7 +38,6 @@ from ..models.execution import InstallationNode, RecipeInstallation, ResourceRes
 from ..models.fleet import AgentNode
 from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..models.telemetry import NodeSnapshot
-from ..profile_capacity import inherited_profile_disk
 from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     installation_plan_document,

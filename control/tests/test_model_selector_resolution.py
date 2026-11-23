@@ -22,7 +22,7 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 
 from .display_fixtures import create_draft
-from .test_model_cache import _artifact, _canonical_model, _download
+from .model_cache_support import _artifact, _canonical_model, _download
 
 NOW = datetime(2026, 10, 18, tzinfo=UTC)
 

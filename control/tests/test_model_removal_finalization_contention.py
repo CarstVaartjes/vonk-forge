@@ -16,7 +16,7 @@ from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ModelCacheSet
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
-from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
+from .model_cache_support import _artifact, _canonical_model, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
     _register_model,
     _removal_service,

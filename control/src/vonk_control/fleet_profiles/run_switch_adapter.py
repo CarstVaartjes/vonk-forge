@@ -41,7 +41,6 @@ from ..models.execution import ResourceReservation
 from ..models.fleet import FleetProfileApplication
 from ..models.telemetry import NodeInventorySnapshot
 from ..preparation_contract import RuntimeImageIdentity
-from ..profile_capacity import plan_kept_runs
 from ..recipe_operations.runtime_specs import resolve_recipe_entities
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.plans import RunSwitchAssessment
@@ -56,6 +55,7 @@ from ..run_switch_operations.service import RunSwitchOperationService
 from .assessment_support import (
     _disk_shortfalls,
 )
+from .capacity import plan_kept_runs
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
     FleetProfileInvalid,

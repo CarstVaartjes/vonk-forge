@@ -26,7 +26,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import ArtifactDistributionAssignment
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
-from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
+from .agent_api_support import NODE_A, NODE_B, agent_system  # noqa: F401
 from .test_distribution_executor import _phase, _plan
 
 
@@ -75,7 +75,7 @@ def test_concurrent_workers_reclaim_a_grant_without_mutating_its_identity(
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
 
-    from .test_agent_api import make_agent_system
+    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)
@@ -269,7 +269,7 @@ def test_a_renewal_that_lands_during_expiry_survives(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
     """Expiry is decided on a read; a renewal committed since must not be undone."""
-    from .test_agent_api import make_agent_system
+    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)
@@ -310,7 +310,7 @@ def test_a_renewal_that_lands_during_expiry_survives(
 def test_an_unrenewed_lapsed_grant_is_marked_expired(tmp_path, postgres_engine) -> None:
     """The deadline read from the row matches the stored one exactly, so the
     conditional expiry really lands (no timezone or microsecond mismatch)."""
-    from .test_agent_api import make_agent_system
+    from .agent_api_support import make_agent_system
 
     system = make_agent_system(tmp_path, engine=postgres_engine)
     transfer = _transfer(system)
