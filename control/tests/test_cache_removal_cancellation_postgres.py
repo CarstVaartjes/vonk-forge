@@ -12,6 +12,8 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
@@ -22,7 +24,6 @@ from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .model_cache_support import _artifact, _canonical_model, _download
 from .recipe_image_availability_support import _add_revision, _recipe, _runtime

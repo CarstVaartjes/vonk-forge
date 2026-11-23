@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.distribution import DistributionObject

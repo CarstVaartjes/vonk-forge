@@ -13,6 +13,8 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import require_mapping
 from vonk_control.jobs.documents import (
@@ -46,7 +48,6 @@ from vonk_control.runtime_image_preparation.contracts import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
-from vonk_forge_contracts import RecipeDefinition
 
 from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (

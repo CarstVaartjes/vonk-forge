@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_agent_protocol.state_machines import ReservationState, RunState
 

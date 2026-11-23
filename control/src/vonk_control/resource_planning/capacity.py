@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
+from vonk_forge_contracts.memory_admission import evaluate_memory_admission
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
@@ -15,7 +17,6 @@ from vonk_agent_protocol.swap import (
     swap_reaches,
     usable_swap_bytes,
 )
-from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
 from ..operations.blockers import SwapShortfallEvidence
 from .reasons import _reason, _same_memory_kind

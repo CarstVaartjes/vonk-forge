@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx2
 import pytest
 from sqlalchemy import create_engine
+
 from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
     CapabilityUnavailableReply,

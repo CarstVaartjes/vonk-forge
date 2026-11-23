@@ -8,13 +8,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
 )
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_api_support import (
     NODE_A,

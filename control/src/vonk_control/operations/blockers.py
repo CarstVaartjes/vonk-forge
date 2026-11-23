@@ -22,6 +22,7 @@ from pydantic import (
     ValidationError,
     model_serializer,
 )
+
 from vonk_agent_protocol.contracts import DigestText
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_BIGINT
 from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode

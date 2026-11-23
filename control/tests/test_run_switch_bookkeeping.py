@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job

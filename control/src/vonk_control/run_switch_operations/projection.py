@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy.orm import object_session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 
 from ..jobs import states as job_states

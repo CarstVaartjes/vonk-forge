@@ -14,6 +14,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     FailureLogTail,

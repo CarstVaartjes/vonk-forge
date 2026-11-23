@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx2
 import pytest
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.model_cache.artifacts import ArtifactSpec
 from vonk_control.model_cache.service import ModelCacheService
 

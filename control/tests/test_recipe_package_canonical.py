@@ -13,6 +13,10 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from scripts.canary_package import canary_package_path
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
@@ -31,10 +35,6 @@ from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_packages.contracts import RecipePackageError
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_control.source_policy import inspect_build_source_policy
-
-from scripts.canary_package import canary_package_path
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import publish_displays, reword
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

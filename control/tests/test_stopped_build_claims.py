@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentOperation as WireOperation
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import ReservationState

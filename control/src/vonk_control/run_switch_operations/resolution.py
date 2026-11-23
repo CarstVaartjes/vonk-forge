@@ -10,11 +10,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState
-from vonk_forge_contracts import ModelDefinition
 
 from ..categorized_errors import BookkeepingUnknown
 from ..cluster_mappings import (

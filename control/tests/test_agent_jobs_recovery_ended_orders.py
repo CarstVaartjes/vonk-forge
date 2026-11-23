@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentResult,
@@ -524,6 +525,7 @@ def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service
         assert canonical_message(typed) != accepted
         assert column_message(stored, "payload") == canonical_message(typed)
     from sqlalchemy import update
+
     from vonk_control.lifecycle.evidence import Residue
 
     with sessions.begin() as session:
@@ -743,6 +745,7 @@ def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_sta
 def test_reusable_preflight_survives_operation_history_collection(service) -> None:
     """Catches treating a historical command receipt as current capability storage."""
     from sqlalchemy import delete
+
     from vonk_control.runtime.preflight import (
         admission_blockers,
         latest_result,

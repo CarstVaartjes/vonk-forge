@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

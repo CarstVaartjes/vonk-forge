@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.state_machines import (
     MACHINE_ALIASES,

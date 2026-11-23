@@ -7,6 +7,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
+
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileChildJobKind,

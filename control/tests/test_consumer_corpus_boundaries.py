@@ -18,6 +18,12 @@ from cryptography.hazmat.primitives import serialization
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
+
+from cluster_profiles.generated_control.api.default import get_job
+from cluster_profiles.generated_control.client import AuthenticatedClient
+from cluster_profiles.generated_control.models.job_detail_response import (
+    JobDetailResponse as GeneratedJobDetailResponse,
+)
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
@@ -39,12 +45,6 @@ from vonk_control.operation_api.contracts import (
     OperationPage,
 )
 from vonk_control.operations.item_contract import OperationItem, OperationResultFacts
-
-from cluster_profiles.generated_control.api.default import get_job
-from cluster_profiles.generated_control.client import AuthenticatedClient
-from cluster_profiles.generated_control.models.job_detail_response import (
-    JobDetailResponse as GeneratedJobDetailResponse,
-)
 
 from .agent_api_support import NODE_A, agent_headers, make_agent_system, parent
 from .cross_language_consumer_corpus import (

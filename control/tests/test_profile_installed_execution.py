@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
+
+from cluster_profiles.control_client.schema import validate_control_document
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
@@ -59,8 +61,6 @@ from vonk_control.storage_demands import (
 )
 from vonk_control.unused_storage_collection.common import _STORAGE_WAIT_CODES
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-
-from cluster_profiles.control_client.schema import validate_control_document
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .run_switch_operations_support import (

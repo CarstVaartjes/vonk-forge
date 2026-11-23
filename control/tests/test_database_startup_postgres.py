@@ -8,6 +8,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
 from sqlalchemy.engine import Connection, Engine
+
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.db import startup as startup_owner
@@ -88,6 +89,7 @@ def test_contact_move_rolls_back_on_interruption_and_restarts(
     import pytest
     from sqlalchemy import event, insert, inspect, text
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.db import node_facts
     from vonk_control.model_primitives import Base
     from vonk_control.models.fleet import AgentNode, AgentNodeContact
@@ -213,6 +215,7 @@ def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
     import pytest
     from sqlalchemy import event, insert, inspect, select, text
     from sqlalchemy.orm import sessionmaker
+
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.db import node_facts
     from vonk_control.inventory.items import inventory_items
@@ -322,6 +325,7 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
 
     from sqlalchemy import insert, inspect
     from sqlalchemy.orm import sessionmaker
+
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.inventory.items import inventory_items, record_runtime
     from vonk_control.model_primitives import Base
@@ -391,6 +395,7 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
 ) -> None:
     """Catches a moved JSON owner permanently refusing every subsequent report."""
     from sqlalchemy import update
+
     from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.inventory.items import inventory_items
     from vonk_control.models.fleet import AgentNode
@@ -445,6 +450,7 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
     from datetime import timedelta
 
     from sqlalchemy import text
+
     from vonk_agent_protocol.inventory import InventoryRequest
     from vonk_control.inventory.repository import InventoryRepository
 

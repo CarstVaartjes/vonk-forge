@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -707,6 +708,7 @@ def test_production_result_handler_only_schedules_worker(
 ):
     """Production's synchronous Composite executor must never run inside POST /result."""
     from fastapi.testclient import TestClient
+
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_api.common import AgentApiServices
     from vonk_control.api import production

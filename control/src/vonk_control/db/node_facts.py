@@ -77,6 +77,7 @@ def move_runtime_facts(connection: Connection) -> None:
 
     from pydantic import ValidationError
     from sqlalchemy import insert, select
+
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.contracts import AgentOperation, canonical_message
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -240,6 +241,7 @@ def move_resource_facts(connection: Connection) -> None:
     import uuid
 
     from sqlalchemy import insert, select
+
     from vonk_agent_protocol.contracts import canonical_message
     from vonk_agent_protocol.telemetry import HostResourceSample
 

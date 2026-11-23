@@ -18,6 +18,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationStatus,
+)
+
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import CursorCodec, TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -29,10 +34,6 @@ from vonk_control.catalog.sync_contract import (
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_primitives import Base
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
-from vonk_forge_contracts.qualification_status import (
-    PublishedQualificationStatusView,
-    QualificationStatus,
-)
 
 from .signed_recipe_release import signed_recipe_releases
 from .test_catalog_display_pass import World
@@ -200,12 +201,13 @@ def test_sync_records_the_published_measured_memory_for_admission_only():
     the Library's ``projected`` block; a complete view without it withdraws it.
     """
     from sqlalchemy import select
-    from vonk_control.catalog.revision_contract import published_steady_peaks
-    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,
         PublishedRoleMemory,
     )
+
+    from vonk_control.catalog.revision_contract import published_steady_peaks
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

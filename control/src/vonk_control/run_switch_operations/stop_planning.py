@@ -8,6 +8,7 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode

@@ -12,6 +12,7 @@ from fastapi import (
     Depends,
     FastAPI,
 )
+
 from vonk_agent_protocol.capability_reply import ControllerCapability
 
 from ..agent_api.common import AgentApiServices, EnrollmentRateLimiter

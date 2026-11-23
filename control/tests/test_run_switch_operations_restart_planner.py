@@ -16,6 +16,8 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import RunState
@@ -59,7 +61,6 @@ from vonk_control.run_switch_operations.image_receipts import (
     _planned_transfer_bytes,
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_operations_support import (
     NOW,
@@ -730,6 +731,8 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
     """Catches eviction fitting each rank by fetching every catalog head's JSON."""
     from collections import Counter
 
+    from vonk_forge_contracts import document_sha256, read_recipe
+
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
     from vonk_control.fleet_profile_contract.definitions import (
         FleetProfileAssignmentInput,
@@ -739,7 +742,6 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
         build_production_fleet_profile_service,
     )
     from vonk_control.models.catalog import CatalogDocument
-    from vonk_forge_contracts import document_sha256, read_recipe
 
     decoded = Counter()
 

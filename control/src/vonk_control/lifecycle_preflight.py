@@ -15,6 +15,7 @@ from pydantic import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (

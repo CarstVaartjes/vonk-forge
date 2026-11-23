@@ -27,6 +27,8 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.auth import CursorCodec
@@ -53,7 +55,6 @@ from vonk_control.recipe_packages import client as recipe_packages
 from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import read_recipe
 
 from .signed_recipe_release import SignedRecipeRelease
 from .signed_recipe_release import _verify as _test_signature

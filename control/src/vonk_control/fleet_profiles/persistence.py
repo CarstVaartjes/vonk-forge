@@ -8,10 +8,11 @@ from datetime import datetime, timedelta
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.agent_words import ProfileAction, ProfileProjectionKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

@@ -10,6 +10,7 @@ from enum import StrEnum
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..artifact_reference_scan.model_sets import _selectors_revisions

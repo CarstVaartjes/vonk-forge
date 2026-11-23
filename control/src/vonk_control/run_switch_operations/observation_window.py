@@ -14,8 +14,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.owner_liveness import Owner, OwnerKind, OwnerRef, owner
 
 from ..admission_locking import AdmissionLockBusy

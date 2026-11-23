@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import ConfigDict, Field
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.wire_model import OperationProgress
-
 from vonk_control.lifecycle.evidence import Residue
 
 from ..jobs.documents import AvailabilityJobResult, AvailabilityModelChild

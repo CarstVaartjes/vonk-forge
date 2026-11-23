@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from starlette.types import Message
+
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

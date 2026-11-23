@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

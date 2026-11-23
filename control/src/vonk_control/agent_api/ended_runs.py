@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
 from vonk_control.enrollment.responses import _now
 
 from ..logging import log_event

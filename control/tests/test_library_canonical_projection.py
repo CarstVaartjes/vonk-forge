@@ -11,6 +11,16 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    published_json,
+    read_model_display,
+    read_recipe_display,
+)
+
+from tests.recipe_library_source import recipe_library_root
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.entities import CatalogEntityService
@@ -36,16 +46,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    published_json,
-    read_model_display,
-    read_recipe_display,
-)
-
-from tests.recipe_library_source import recipe_library_root
 
 from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword
 from .runtime_image_fixtures import place_test_image
@@ -1381,6 +1381,7 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     from datetime import timedelta
 
     from sqlalchemy import event
+
     from vonk_control.library_projection import catalog, local_state
 
     index = json.loads((ROOT / "catalog-index.json").read_text())
@@ -1531,6 +1532,8 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    import tests
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.api import _managed_sync
     from vonk_control.catalog.service import CatalogService
@@ -1538,8 +1541,6 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     from vonk_control.library_projection.service import LibraryProjection
     from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore
-
-    import tests
 
     # Keep the Controller test package and its pass clocks while loading the
     # shared acceptance consumer; restore package search paths after this test.

@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import read_model
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -35,7 +37,6 @@ from vonk_control.runtime_image_preparation.preparation import (
     stored_runtime_image_resolver,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import read_model
 
 from .display_fixtures import reword
 from .preflight_fixtures import record_passing_preflight

@@ -8,12 +8,13 @@ from pathlib import Path
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheSet
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .model_cache_support import _artifact, _canonical_model, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (

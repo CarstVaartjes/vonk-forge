@@ -35,6 +35,9 @@ from pathlib import Path
 
 from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
+from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
+
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
@@ -44,8 +47,6 @@ from vonk_agent_protocol.contracts import (
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
-from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
-from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
 from .catalog.revision_contract import BuildSecurityProjection
 from .image_store_collection import GRACE

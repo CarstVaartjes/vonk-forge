@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as AgentCompiledExecutionPlan,
 )

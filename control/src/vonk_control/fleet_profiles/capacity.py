@@ -20,6 +20,7 @@ from uuid import UUID, uuid5
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import MemoryPool

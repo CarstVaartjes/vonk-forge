@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from pydantic import BaseModel
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJob,
     CompiledSecurityMount,

@@ -8,6 +8,8 @@ import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_control.auth import Actor
 from vonk_control.gateway.keys import (
@@ -17,7 +19,6 @@ from vonk_control.gateway.keys import (
     install_gateway_key_routes,
 )
 from vonk_control.strict_json import ControllerAPIRoute
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 
 @pytest.fixture(autouse=True)
@@ -792,6 +793,7 @@ def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
     import asyncio
 
     from fastapi import HTTPException
+
     from vonk_control.gateway.keys import keep_default_key
 
     class Service:

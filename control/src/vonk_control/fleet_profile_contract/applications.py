@@ -10,6 +10,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )

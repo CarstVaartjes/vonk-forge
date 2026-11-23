@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     RecipeRunDispositionValue,
 )

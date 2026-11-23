@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     FailureStage,
     ProfileChildPhase,

@@ -9,9 +9,9 @@ from typing import Self
 
 from httpx import Response
 from httpx2 import Response as Response2
-from vonk_control.fleet_projection.common import FleetSnapshot
 
 from cluster_profiles.control_client.transfers import ControlClient
+from vonk_control.fleet_projection.common import FleetSnapshot
 
 type ObservationHTTPResponse = Response | Response2
 

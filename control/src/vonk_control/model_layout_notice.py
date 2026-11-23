@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.contracts import AgentOperation as Operation

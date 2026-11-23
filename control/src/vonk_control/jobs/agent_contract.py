@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydantic import Field
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from ..strict_json import StrictModel

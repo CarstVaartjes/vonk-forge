@@ -19,6 +19,11 @@ from typing import Self
 import pytest
 from sqlalchemy import Engine, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    ModelDisplay,
+    RecipeDisplay,
+)
+
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -38,10 +43,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import (
-    ModelDisplay,
-    RecipeDisplay,
-)
 
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_package_transport import _canonical_package_fixture

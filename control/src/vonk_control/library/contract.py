@@ -15,15 +15,6 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
-from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
-from vonk_agent_protocol.state_machines import (
-    InstallationState,
-    PlacementInstallState,
-    PlacementLoadState,
-    RunState,
-    machine_adopter,
-)
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -33,6 +24,16 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
+
+from vonk_agent_protocol.reason_codes.catalog import LibraryProjectionCode
+from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    PlacementInstallState,
+    PlacementLoadState,
+    RunState,
+    machine_adopter,
+)
 
 from ..catalog.revision_contract import (
     ModelRevisionProjection,

@@ -11,6 +11,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache import model_artifact_cache
@@ -19,7 +21,6 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_forge_contracts import document_sha256
 
 from .model_cache_support import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model

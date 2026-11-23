@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_control.model_cache.input_contracts import FixtureArtifact
 from vonk_control.operations.contract import AvailabilityOperationFailure
 

@@ -10,6 +10,8 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -19,7 +21,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipeImageCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_forge_contracts import RecipeDefinition
 
 from ..admission_locking import (
     AdmissionLockBusy,

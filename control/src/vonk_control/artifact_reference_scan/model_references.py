@@ -7,6 +7,7 @@ from itertools import chain
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, load_only
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
+
 from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import InventoryRequest
@@ -458,6 +459,7 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
 def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_engine):
     """Catches applying generic request replay to credential issuance at the security edge."""
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.auth import TokenCodec
     from vonk_control.browser_auth import BrowserAuthService
     from vonk_control.model_primitives import Base

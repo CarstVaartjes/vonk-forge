@@ -13,6 +13,7 @@ from typing import Annotated
 from pydantic import ConfigDict, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 from ..catalog.queries import active_head_revision

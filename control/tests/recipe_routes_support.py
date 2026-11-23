@@ -10,6 +10,12 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
@@ -32,11 +38,6 @@ from vonk_control.models.routes import (
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .display_fixtures import reword
 from .node_contacts import contact_row

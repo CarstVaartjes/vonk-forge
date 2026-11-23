@@ -13,6 +13,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256, read_recipe_display
+
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_sequence
 from vonk_control.catalog.service import CatalogService
@@ -30,10 +34,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.recipe_packages.client import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import document_sha256, read_recipe_display
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 

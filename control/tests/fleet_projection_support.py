@@ -6,6 +6,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import (
@@ -16,7 +18,6 @@ from vonk_control.models.telemetry import (
     NodeInventorySnapshot,
     NodeTelemetrySample,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .telemetry_support import telemetry_with_resources
 

@@ -10,6 +10,7 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, SessionTransaction
+
 from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
@@ -315,6 +316,7 @@ def test_key_receipts_replay_without_repeating_external_effects(
 ):
     """Catches losing key acceptance or treating transport uncertainty as success."""
     import httpx2
+
     from vonk_control.gateway.keys import GatewayKeyService
 
     from .test_gateway_keys import MASTER, FakeLiteLlm

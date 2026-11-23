@@ -6,6 +6,7 @@ import json
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.bounded_json import require_mapping

@@ -15,6 +15,8 @@ from contextlib import contextmanager
 import pytest
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import PrebuiltImage, RecipeDefinition
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog import entities
 from vonk_control.catalog.revision_contract import (
@@ -24,7 +26,6 @@ from vonk_control.catalog.revision_contract import (
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_forge_contracts import PrebuiltImage, RecipeDefinition
 
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_import_recovery import NOW, _cores, _projection, _request_import

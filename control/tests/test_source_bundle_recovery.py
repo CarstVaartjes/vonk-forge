@@ -8,6 +8,8 @@ from importlib.resources import files
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
@@ -23,7 +25,6 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
 )
 from vonk_control.source_policy import enforce_build_source_policy
-from vonk_forge_contracts import RecipeDefinition
 
 
 def _service(store, archive):

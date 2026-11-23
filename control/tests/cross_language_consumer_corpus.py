@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
+from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
+
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.error_response import (
@@ -26,7 +28,6 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileInput,
 )
 from vonk_control.operation_api.contracts import JobDetailResponse
-from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
 
 NODE = "spk_" + "1" * 32
 FENCE = "11111111-1111-4111-8111-111111111111"

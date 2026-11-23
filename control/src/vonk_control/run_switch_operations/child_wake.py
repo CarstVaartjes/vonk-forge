@@ -26,6 +26,7 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from ..jobs import states as job_states

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
+
 from vonk_control.contract_graph import (
     ContractGraphError,
     discover_contracts,

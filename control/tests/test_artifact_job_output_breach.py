@@ -11,6 +11,7 @@ import hashlib
 from dataclasses import dataclass, field
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,

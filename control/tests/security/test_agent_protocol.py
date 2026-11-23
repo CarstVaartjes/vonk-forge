@@ -14,6 +14,7 @@ from textwrap import dedent
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import (
     MAX_DOCUMENT_BYTES,
     AgentClaim,

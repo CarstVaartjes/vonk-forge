@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control import source_bundles
@@ -184,6 +185,7 @@ def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
     postgres_engine,
 ):
     from sqlalchemy.orm import sessionmaker
+
     from vonk_agent_protocol.contracts import canonical_message
     from vonk_agent_protocol.source_bundles import SourceBundleManifest
     from vonk_control.model_primitives import Base
@@ -260,6 +262,7 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
 
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.model_primitives import Base

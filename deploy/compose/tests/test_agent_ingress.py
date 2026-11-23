@@ -9,6 +9,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
+
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 from vonk_control.agent_api.common import MAX_RECIPE_IMAGE_BYTES
 from vonk_control.api.common import (
@@ -22,7 +24,6 @@ from vonk_control.artifact_jobs.api import (
 )
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.gateway.route_grants import GatewayInferenceRoute
-from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"

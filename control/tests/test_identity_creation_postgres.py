@@ -13,6 +13,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
@@ -43,7 +45,6 @@ from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
 )
-from vonk_forge_contracts import document_sha256
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .recipe_operations_support import installed_recipe, setup_services

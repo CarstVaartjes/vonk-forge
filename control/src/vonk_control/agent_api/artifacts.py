@@ -11,12 +11,12 @@ from typing import cast
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
+
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
-
 from vonk_control.enrollment.responses import _now
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 

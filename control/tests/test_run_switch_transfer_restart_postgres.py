@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,

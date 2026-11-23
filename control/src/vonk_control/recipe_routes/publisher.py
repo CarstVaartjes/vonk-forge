@@ -11,10 +11,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
+
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownError
 from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_agent_protocol.state_machines import GatewayRouteState
-from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..gateway.litellm import (

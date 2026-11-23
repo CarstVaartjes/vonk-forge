@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
@@ -18,8 +21,6 @@ from vonk_agent_protocol.reason_codes.model_cache import (
     ModelCacheBlockerCode,
     ModelCacheCode,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
-from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_retry import bounded_attempts
 from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision

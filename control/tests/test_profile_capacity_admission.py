@@ -11,6 +11,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
+
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
@@ -49,8 +51,6 @@ from vonk_control.storage_demands import (
     STORAGE_EVICTING,
     STORAGE_INSUFFICIENT,
 )
-
-from cluster_profiles.cli_render.dispatch import render_payload
 
 from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_fleet_profile_api import _client, _headers

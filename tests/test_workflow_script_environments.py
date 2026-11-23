@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.installer_release import (
     InstallerCandidateArtifacts,
@@ -372,13 +373,12 @@ def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
     import json
     from types import SimpleNamespace
 
+    import tests.acceptance.test_spark_lifecycle as canary
     from vonk_agent_protocol.agent_state import (
         NativeRenewalClock,
         NativeRenewalEvidence,
         RenewalHelperManifest,
     )
-
-    import tests.acceptance.test_spark_lifecycle as canary
 
     helper = tmp_path / "helper"
     helper.write_bytes(b"verified native helper")

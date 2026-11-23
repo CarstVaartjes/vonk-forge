@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+
 from vonk_control.logging import (
     configure_controller_logging,
     log_event,

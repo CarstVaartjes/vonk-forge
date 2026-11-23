@@ -7,8 +7,9 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-import vonk_control.distributed_recovery as recovery_module
 from sqlalchemy import func, select
+
+import vonk_control.distributed_recovery as recovery_module
 from vonk_control.distributed_recovery.authority import _enqueue_recovery_stop
 from vonk_control.distributed_recovery.common import _decode_phases, _RecoveryAuthority
 from vonk_control.distributed_recovery.singleton import _accepted_start_authority

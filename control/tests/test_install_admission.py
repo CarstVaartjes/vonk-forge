@@ -7,6 +7,13 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.contracts import canonical_message
@@ -40,12 +47,6 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
 from vonk_control.recipe_operations.runtime_specs import ResolvedRecipe
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    read_recipe,
-)
 
 from .display_fixtures import legacy_model_display, model_display_denying
 from .preflight_fixtures import record_passing_preflight

@@ -9,9 +9,9 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from tests.spark_lifecycle_runner_support import _module
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 
 def _failed_profile_application(reason: str) -> dict[str, object]:

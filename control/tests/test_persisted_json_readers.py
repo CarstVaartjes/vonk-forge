@@ -3,6 +3,7 @@
 import json
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.route_activation import ActivationMarker

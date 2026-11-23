@@ -159,6 +159,8 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+    from vonk_forge_contracts import RecipeDefinition
+
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
@@ -166,7 +168,6 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     from vonk_control.harnesses.canonical import validate_runtime_policy
     from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore
-    from vonk_forge_contracts import RecipeDefinition
 
     lifecycle = _module()
     original = lifecycle._canonical_canary_fixture(Path(library))

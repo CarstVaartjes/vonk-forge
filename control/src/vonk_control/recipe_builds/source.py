@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from sqlalchemy import case, func, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode

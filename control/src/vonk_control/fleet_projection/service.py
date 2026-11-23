@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.state_machines import (
@@ -15,7 +16,6 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
-
 from vonk_control.owner_liveness import SPARK_PRESENCE_WINDOW
 
 from ..auth import CursorError

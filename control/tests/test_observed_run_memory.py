@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select, update
 from sqlalchemy import inspect as sa_inspect
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
@@ -483,12 +484,13 @@ def _publish_measured(
     sessions, installation, now, peak, *, exceeds=False, declared=225
 ):
     """The signed catalog's measured steady peak for the installation's one role."""
-    from vonk_control.catalog.entities import CatalogEntityService
-    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts.qualification_status import (
         PublishedMeasuredMemory,
         PublishedRoleMemory,
     )
+
+    from vonk_control.catalog.entities import CatalogEntityService
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with sessions() as session:
         revision = session.scalars(

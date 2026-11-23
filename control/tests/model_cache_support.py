@@ -15,12 +15,13 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_control.bounded_json import text
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_forge_contracts import ModelDefinition
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 

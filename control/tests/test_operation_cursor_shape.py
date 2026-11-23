@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_control.auth import CursorError, TokenCodec
 from vonk_control.operation_api.providers import merge_operation_providers
 

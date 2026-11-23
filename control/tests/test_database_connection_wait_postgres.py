@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import QueuePool
+
 from vonk_control.db import connections as connection_owner
 from vonk_control.db.startup import initialize_database
 from vonk_control.settings import DATABASE_WAIT_BUDGETS

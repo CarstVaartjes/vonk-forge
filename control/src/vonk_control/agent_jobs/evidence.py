@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy import String, cast, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,

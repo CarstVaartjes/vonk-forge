@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState

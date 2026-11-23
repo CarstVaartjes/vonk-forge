@@ -3,7 +3,6 @@ from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 from cluster_profiles.cli_render.activity import (
     activity_continuation,
@@ -41,6 +40,7 @@ from cluster_profiles.generated_control.models.gpu_clock_observation import (
 from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
     GpuClockUnavailable,
 )
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
@@ -135,9 +135,8 @@ def test_every_controller_command_has_a_registered_presentation() -> None:
 
 def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
     # Catches discarding temperature when utilisation is unsupported.
-    from vonk_agent_protocol.telemetry import GpuUnavailableReason
-
     from cluster_profiles.cli_render.fleet import _gpu
+    from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
     assert (
         _gpu(

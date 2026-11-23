@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -25,6 +24,8 @@ from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_package_paths,
 )
+
+from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 
 from ..catalog.revision_contract import read_model_set
 from ..harnesses.canonical import compile_canonical_harness

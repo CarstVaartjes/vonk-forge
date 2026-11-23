@@ -11,11 +11,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState, ReservationState
-from vonk_forge_contracts import ModelDefinition
 
 from ..attempt_residues import unowned_never_installed
 from ..catalog.revision_contract import published_steady_peaks

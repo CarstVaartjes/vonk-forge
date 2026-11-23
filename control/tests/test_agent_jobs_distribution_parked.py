@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (

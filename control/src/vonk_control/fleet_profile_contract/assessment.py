@@ -9,9 +9,10 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_forge_contracts import EndpointAlias
+
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
-from vonk_forge_contracts import EndpointAlias
 
 from ..preparation_contract import (
     CompatibilityIdentity,

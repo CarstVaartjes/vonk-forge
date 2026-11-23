@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import (
     CatalogEntityService,
@@ -28,7 +30,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reword
 

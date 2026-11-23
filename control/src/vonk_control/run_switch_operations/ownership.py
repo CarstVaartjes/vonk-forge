@@ -8,10 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
 from vonk_control.run_switch_operations.results import _persisted_result
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows

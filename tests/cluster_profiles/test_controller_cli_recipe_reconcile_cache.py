@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 from controller_cli_support import FakeClient, _model_detail, _removal_review, run
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 
 from cluster_profiles import cli
 from cluster_profiles.cli_render.dispatch import render_payload
@@ -31,6 +30,7 @@ from cluster_profiles.generated_control.models.job_operator_receipt_action impor
     check_job_operator_receipt_action,
 )
 from control.tests.consumer_outcomes import not_adopted
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
 
 _REVIEW_DIGEST = "b" * 64
 

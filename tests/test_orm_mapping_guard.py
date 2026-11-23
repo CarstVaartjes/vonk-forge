@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import JSON, Column, ForeignKey, MetaData, String, Table, inspect
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.types import TypeDecorator
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.telemetry import HostResourceSample

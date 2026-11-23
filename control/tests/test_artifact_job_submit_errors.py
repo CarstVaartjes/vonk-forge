@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,
     RequestValidationProblem,

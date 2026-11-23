@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.lifecycle.adapter import Dispatch
 from vonk_control.lifecycle.core import (

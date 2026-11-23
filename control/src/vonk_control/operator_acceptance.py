@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     OperatorActionName,

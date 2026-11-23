@@ -3,6 +3,7 @@
 import re
 
 from fastapi import HTTPException, Query, Response
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from .api_availability import AVAILABILITY_ERRORS

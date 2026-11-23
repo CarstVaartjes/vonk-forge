@@ -6,9 +6,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 import vonk_control.recipe_image_availability.cancellation as availability_module
 import vonk_control.recipe_image_availability.requests as availability_requests
-from sqlalchemy import select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profiles import queue_application as profile_module
 from vonk_control.jobs.documents import AvailabilityRuntime
@@ -30,7 +32,6 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_operations.availability_intent import RecipeBuildDependency
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
 from vonk_control.recipe_operations.runtime_specs import RUNTIME_INTERFACE
-from vonk_forge_contracts import RecipeDefinition
 
 from .test_build_cancellation_recovery import (
     _active_claims,

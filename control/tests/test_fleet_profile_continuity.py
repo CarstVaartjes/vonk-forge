@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
@@ -298,10 +299,11 @@ def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
 
 def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes():
     """A projection refresh must not replace the exact recipe already accepted."""
+    from vonk_forge_contracts import RecipeDefinition
+
     from vonk_control.catalog.entities import CatalogEntityService
     from vonk_control.fleet_profiles.persistence import _stored_recipe
     from vonk_control.models.catalog import CatalogDocumentRevision
-    from vonk_forge_contracts import RecipeDefinition
 
     sessions, service, _adapter, first, original, _ = _world()
     assert original.progress.intended_profile is not None

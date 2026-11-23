@@ -18,8 +18,9 @@ from functools import partial
 
 from pydantic import Field, model_validator
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.state_machines import RunState
 from vonk_forge_contracts import EndpointAlias
+
+from vonk_agent_protocol.state_machines import RunState
 
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..library.contract import UuidId

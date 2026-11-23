@@ -8,6 +8,7 @@ from typing import (
 from typing import cast as typing_cast
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState

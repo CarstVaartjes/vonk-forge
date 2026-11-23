@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,

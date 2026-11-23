@@ -50,16 +50,16 @@ def test_cli_packages_the_generated_admin_openapi_contract() -> None:
 
 def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
     import httpx2
-    from vonk_agent_protocol.error_response import BoundedErrorResponse
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_control.operator_projection_api.contracts import FleetActionResponse
-    from vonk_control.strict_json import serialize_json_value
 
     from cluster_profiles.generated_control.api.default import (
         enroll_fleet_node,
         resume_job,
     )
     from cluster_profiles.generated_control.client import Client
+    from vonk_agent_protocol.error_response import BoundedErrorResponse
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_control.operator_projection_api.contracts import FleetActionResponse
+    from vonk_control.strict_json import serialize_json_value
 
     client = Client(base_url="https://control.invalid")
     producer = FleetActionResponse(action="enroll", state=LifecycleState.SUCCEEDED)

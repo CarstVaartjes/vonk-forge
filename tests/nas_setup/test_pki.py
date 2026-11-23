@@ -15,6 +15,7 @@ from asn1crypto import keys, pem
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+
 from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 from vonk_nas_setup.pki import (
     generate_pki,

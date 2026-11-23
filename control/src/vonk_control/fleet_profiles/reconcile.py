@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import case, func, select, true
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,

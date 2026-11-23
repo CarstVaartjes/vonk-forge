@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from pydantic import TypeAdapter
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..run_switch_contract.evidence import RunSwitchPhase

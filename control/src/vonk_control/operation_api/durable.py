@@ -10,6 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ActivationMarker
@@ -18,7 +19,6 @@ from vonk_agent_protocol.state_machines import (
     EndpointState,
     GatewayRouteState,
 )
-
 from vonk_control.operator_receipt_contract import JobOperatorReceipt
 from vonk_control.wait_contract import QueueWait
 

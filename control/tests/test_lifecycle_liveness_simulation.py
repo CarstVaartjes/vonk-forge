@@ -24,6 +24,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.fleet_profile_contract.applications import (

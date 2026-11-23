@@ -9,6 +9,7 @@ from typing import TypedDict
 
 import pytest
 from pydantic import JsonValue, TypeAdapter, ValidationError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import ApplySwapOperation, parse_host_operation
 from vonk_agent_protocol.inventory import HostSettings, InventoryRequest
@@ -148,6 +149,7 @@ def test_only_an_agent_that_reports_swap_gets_a_signed_swap_grant(
 ) -> None:
     """An older agent's strict reader would refuse the field; a newer one needs it."""
     from cryptography.hazmat.primitives.asymmetric import ed25519
+
     from vonk_agent_protocol.inventory import InventoryVerdict
     from vonk_control.host_helper_authority import (
         HostHelperGrantIssuer,

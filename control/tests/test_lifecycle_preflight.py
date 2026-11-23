@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import delete, select
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
@@ -321,6 +322,7 @@ def test_removed_node_is_a_terminal_preflight_blocker(tmp_path):
 
 def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path):
     from cryptography.hazmat.primitives.asymmetric import ed25519
+
     from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
     from vonk_agent_protocol.host_helper import (
         ContainerRuntimeAction,

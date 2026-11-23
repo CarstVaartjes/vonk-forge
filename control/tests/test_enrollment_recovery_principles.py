@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     SecurityRefusalReason,

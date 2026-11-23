@@ -13,6 +13,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,

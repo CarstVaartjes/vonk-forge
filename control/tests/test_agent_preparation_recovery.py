@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, timedelta
 
 import pytest
+
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
 from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES

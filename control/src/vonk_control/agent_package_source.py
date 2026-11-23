@@ -1,6 +1,7 @@
 """Exact published source package resolution; no version or current-release fallback."""
 
 import httpx2
+
 from vonk_agent_protocol.package_source import AgentPackageSource
 
 

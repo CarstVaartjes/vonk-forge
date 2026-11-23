@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import ConfigDict, Field, model_serializer
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import (
     EnrollmentGrantState,

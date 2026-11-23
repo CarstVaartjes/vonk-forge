@@ -8,10 +8,9 @@ control/tests/test_api_failure_classification.py. This scan prevents new direct
 import ast
 from pathlib import Path
 
+from control.tests.parsed_sources import parse_file
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-
-from control.tests.parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[1]
 

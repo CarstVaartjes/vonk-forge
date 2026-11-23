@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileDocumentState,

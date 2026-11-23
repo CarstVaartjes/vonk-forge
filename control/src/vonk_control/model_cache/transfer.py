@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import httpx2
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationMemberProgress
 

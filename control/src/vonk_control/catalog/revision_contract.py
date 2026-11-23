@@ -10,9 +10,6 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, Field, ValidationError
-from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_forge_contracts import (
     ModelDefinition,
     PrebuiltImage,
@@ -41,6 +38,10 @@ from vonk_forge_contracts.recipe import (
     RecipeTopology,
     RecipeValidation,
 )
+
+from vonk_agent_protocol.build_import import RecipeBuildOptions
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..bounded_json import require_mapping
 from ..strict_json import StrictJSONModel, serialize_json_value, stored_document_detail

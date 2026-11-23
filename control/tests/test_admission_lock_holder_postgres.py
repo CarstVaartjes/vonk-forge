@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import (
     AdmissionLockBusy,

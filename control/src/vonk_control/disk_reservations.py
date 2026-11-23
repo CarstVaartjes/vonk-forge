@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.state_machines import InstallationState, ReservationState
 
 from .content_identity import same_image

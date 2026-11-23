@@ -10,6 +10,8 @@ import errno
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
@@ -17,7 +19,6 @@ from vonk_control import run_admission
 from vonk_control.failure_classification import disposition
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
-from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import installed_recipe, setup_services
 

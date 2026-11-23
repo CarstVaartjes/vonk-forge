@@ -14,6 +14,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import Actor
@@ -39,7 +41,6 @@ from vonk_control.models.cache import (
 from vonk_control.models.catalog import (
     CatalogDocumentHead,
 )
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import create_draft
 from .model_cache_support import (

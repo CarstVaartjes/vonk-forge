@@ -6,6 +6,9 @@ import hashlib
 import json
 
 import pytest
+
+from cluster_profiles import cli
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
@@ -18,9 +21,6 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-
-from cluster_profiles import cli
-from cluster_profiles.cli_render.dispatch import render_payload
 
 from .test_cli_cache_removal_review import (
     _accept_response_contracts,  # noqa: F401

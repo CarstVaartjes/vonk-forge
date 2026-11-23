@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
@@ -22,8 +24,6 @@ from vonk_agent_protocol.recipe_jobs import (
 )
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.operations import AgentOperation
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_operation
 from .artifact_jobs_support import running_artifact_service

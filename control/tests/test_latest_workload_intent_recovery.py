@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeDone

@@ -12,6 +12,7 @@ from sqlalchemy.exc import (
     OperationalError,
     ProgrammingError,
 )
+
 from vonk_agent_protocol.agent_words import AgentClientDecision
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode

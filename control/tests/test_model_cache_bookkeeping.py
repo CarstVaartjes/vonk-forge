@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.model_cache.catalog_helpers import _validate_source
 from vonk_control.models.cache import (
     ModelCacheOperation,

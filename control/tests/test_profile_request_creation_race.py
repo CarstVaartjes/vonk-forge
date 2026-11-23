@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

@@ -104,6 +104,7 @@ def admin_openapi_schema(app: FastAPI) -> ExternalSchemaDocument:
 
 def _contract_component_schemas() -> dict[str, ExternalSchemaDocument]:
     from pydantic.json_schema import models_json_schema
+
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
     from vonk_agent_protocol.outcome import ErrorCatalog
     from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary

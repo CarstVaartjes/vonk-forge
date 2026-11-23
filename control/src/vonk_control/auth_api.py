@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+
 from vonk_agent_protocol.http_failure import TransientReason
 
 from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec

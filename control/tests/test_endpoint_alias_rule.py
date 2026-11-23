@@ -15,8 +15,12 @@ import pkgutil
 import types
 from typing import Annotated, Any, Union, get_args, get_origin
 
-import vonk_control
 from pydantic import BaseModel, TypeAdapter, ValidationError
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
+import cluster_profiles
+import vonk_control
 from vonk_control.contract_graph import schema_application
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
@@ -28,10 +32,6 @@ from vonk_control.gateway.route_bundle_contract import (
     RouteBundleDocument,
     RouteIdentityDocument,
 )
-from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
-
-import cluster_profiles
 
 ACCEPTED = ("a", "chat-" + "x" * (ENDPOINT_ALIAS_MAX_LENGTH - len("chat-")))
 REFUSED = (

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, RunState

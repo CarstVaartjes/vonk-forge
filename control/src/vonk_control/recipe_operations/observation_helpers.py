@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
@@ -24,7 +25,6 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
-
 from vonk_control.owner_liveness import run_has_live_operation
 
 from ..fleet_profiles.stop_authority import (

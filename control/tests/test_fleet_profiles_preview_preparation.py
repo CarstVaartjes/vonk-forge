@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
@@ -36,7 +38,6 @@ from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.preparation_contract import (
     RolloutPreparation,
 )
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .fleet_profiles_support import (
     NOW,

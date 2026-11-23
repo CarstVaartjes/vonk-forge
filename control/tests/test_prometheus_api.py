@@ -14,6 +14,7 @@ import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette import status
+
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.swap import SwapObservation

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import (
     EnrollmentObservationReply,

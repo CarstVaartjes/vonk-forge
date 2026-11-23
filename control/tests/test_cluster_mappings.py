@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
@@ -26,7 +28,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 

@@ -9,15 +9,15 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import document_sha256
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 

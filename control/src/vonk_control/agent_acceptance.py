@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import Response
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.contracts import (
     AgentClaim,

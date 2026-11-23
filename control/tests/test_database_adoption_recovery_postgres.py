@@ -15,6 +15,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
+
 from vonk_control.db import startup as startup_owner
 from vonk_control.db.connections import run_with_database_startup_retry
 from vonk_control.db.constants import _STARTUP_ADVISORY_LOCK

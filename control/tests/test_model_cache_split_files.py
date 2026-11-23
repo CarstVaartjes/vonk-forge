@@ -21,6 +21,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import _execution_projection
 from vonk_control.model_cache.artifacts import (
@@ -32,7 +34,6 @@ from vonk_control.model_cache.artifacts import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 MODEL = "c" * 64

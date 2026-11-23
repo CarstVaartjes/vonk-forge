@@ -12,6 +12,7 @@ from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
+
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .auth import CursorError

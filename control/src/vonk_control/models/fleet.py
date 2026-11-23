@@ -33,7 +33,6 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
     machine_check,
 )
-
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 

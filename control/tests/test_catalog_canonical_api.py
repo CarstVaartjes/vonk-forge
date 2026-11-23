@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+
 from vonk_control.auth import Actor
 from vonk_control.catalog.api import install_catalog_routes
 

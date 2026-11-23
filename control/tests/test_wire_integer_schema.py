@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
+
 from vonk_agent_protocol.failure_evidence import MAX_DROPPED_COUNT, FailureLogTail
 from vonk_control.openapi_numbers import install_canonical_openapi
 
@@ -62,6 +63,7 @@ def test_openapi_numeric_constraints_reject_only_out_of_bound_values() -> None:
 
     from fastapi import Query
     from pydantic import BaseModel, Field
+
     from vonk_control.openapi_numbers import canonical_openapi
 
     class NumericRules(BaseModel):

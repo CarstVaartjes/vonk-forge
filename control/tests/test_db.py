@@ -8,12 +8,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.db import connections as connection_owner
 
 
 def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
     from alembic.config import Config
     from alembic.script import ScriptDirectory
+
     from vonk_control import db
     from vonk_control.db.constants import _ALEMBIC_CONFIG
 
@@ -67,6 +69,7 @@ def test_upgrade_schema_runs_the_linear_alembic_head(
     monkeypatch, tmp_path: Path
 ) -> None:
     from alembic import command
+
     from vonk_control.db.connections import upgrade_schema
 
     config_file = tmp_path / "alembic.ini"
@@ -417,6 +420,7 @@ def test_worker_database_wait_never_deadlocks_the_api_schema_upgrade(
     import time
 
     from sqlalchemy import text
+
     from vonk_control.db.connections import wait_for_database
     from vonk_control.model_primitives import Base
 

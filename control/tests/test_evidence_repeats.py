@@ -16,6 +16,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     SecurityRefusalReason,

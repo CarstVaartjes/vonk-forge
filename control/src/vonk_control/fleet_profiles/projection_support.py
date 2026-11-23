@@ -10,6 +10,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeTopology
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
@@ -23,8 +26,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-from vonk_forge_contracts import RecipeDefinition
-from vonk_forge_contracts.recipe import RecipeTopology
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract.applications import (

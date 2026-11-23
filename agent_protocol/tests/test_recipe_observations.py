@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentProtocolError
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 

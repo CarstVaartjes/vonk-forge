@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.contracts import AgentProtocolError, canonical_message
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.telemetry import TelemetryRequest

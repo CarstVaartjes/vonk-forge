@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.admission_locking import AdmissionLockBusy, admission_wait_exhausted
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.install_admission.contracts import InstallAdmissionBusy

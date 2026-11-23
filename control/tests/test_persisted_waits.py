@@ -9,12 +9,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
+
+from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
-
-from tests.signed_recipe_release import signed_recipe_releases
 
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
@@ -186,6 +186,7 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
 ) -> None:
     """Catches an upgrade discarding running work or treating NULL waits as failure."""
     from sqlalchemy import inspect
+
     from vonk_control.db.schema import reconcile_schema
     from vonk_control.models.jobs import JobAttempt
 
@@ -265,6 +266,7 @@ def test_every_durable_wait_owner_has_identity_and_projection() -> None:
     from datetime import UTC, datetime
 
     from sqlalchemy import Integer
+
     from vonk_agent_protocol.lifecycle_vocabulary import (
         WaitOwnerKind,
         WaitReason,

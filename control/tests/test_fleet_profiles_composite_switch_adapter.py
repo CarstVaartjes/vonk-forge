@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, create_engine, select, update
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.fleet_profile_contract.applications import (

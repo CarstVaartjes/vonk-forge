@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode

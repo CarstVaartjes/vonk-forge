@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode

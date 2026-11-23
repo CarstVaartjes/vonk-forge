@@ -8,6 +8,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, TypeAdapter, field_validator
 from sqlalchemy import Row
+from vonk_forge_contracts import (
+    EndpointAlias,
+    RecipeDefinition,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.failure_evidence import ModelStoreLayoutFault
@@ -29,10 +34,6 @@ from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
 from vonk_agent_protocol.wire_model import (
     MAX_TELEMETRY_CAPACITY_BYTES,
     strict_json_datetime,
-)
-from vonk_forge_contracts import (
-    EndpointAlias,
-    RecipeDefinition,
 )
 
 from ..catalog.revision_contract import read_catalog_document

@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.jobs import Job

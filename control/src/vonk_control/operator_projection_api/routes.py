@@ -10,10 +10,10 @@ from fastapi import FastAPI, HTTPException, Path, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
+
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
-
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from ..agent_upgrades.contract import AgentUpgradeRequestIntent

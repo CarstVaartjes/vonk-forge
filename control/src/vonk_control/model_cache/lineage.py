@@ -24,9 +24,10 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Session, load_only
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
+
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
 from ..models.catalog import CatalogDocumentRevision

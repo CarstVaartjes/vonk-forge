@@ -16,6 +16,8 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
+
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import (
@@ -42,7 +44,6 @@ from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
 from .display_fixtures import create_draft, display_of
 

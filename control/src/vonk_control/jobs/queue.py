@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import ColumnElement, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

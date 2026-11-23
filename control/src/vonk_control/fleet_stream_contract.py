@@ -13,8 +13,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_event_contract import (

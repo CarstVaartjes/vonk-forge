@@ -10,6 +10,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode

@@ -8,6 +8,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select, true
+
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,

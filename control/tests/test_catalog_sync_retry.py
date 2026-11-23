@@ -5,6 +5,7 @@ from concurrent.futures import Executor, Future
 import pytest
 from psycopg.errors import InFailedSqlTransaction
 from sqlalchemy.exc import InternalError
+
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_control.catalog.sync import (

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
@@ -791,6 +792,7 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
             assert row.progress.get("retry_due_at") is None
             assert row.current_operation_id is None
             from sqlalchemy import select
+
             from vonk_control.models.execution import ResourceReservation
 
             assert (

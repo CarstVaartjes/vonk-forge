@@ -24,6 +24,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

@@ -13,6 +13,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_forge_contracts.model import ModelFile
+from vonk_forge_contracts.recipe import Scalar
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -23,10 +28,6 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, read_recipe
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
-from vonk_forge_contracts.model import ModelFile
-from vonk_forge_contracts.recipe import Scalar
 
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,

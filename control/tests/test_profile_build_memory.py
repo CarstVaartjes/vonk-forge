@@ -7,6 +7,7 @@ from uuid import UUID, uuid4, uuid5
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode

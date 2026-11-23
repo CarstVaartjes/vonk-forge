@@ -332,11 +332,10 @@ def test_peer_broken_submission_response_reconciles_the_original_without_replay(
 def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted(
     monkeypatch, repair, fault
 ):
-    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-
     from cluster_profiles.cli_states_generated import SUCCEEDED
     from cluster_profiles.control_client.errors import ControlObservationUnavailable
     from tests.cluster_profiles.controller_cli_support import FakeClient, run
+    from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
     key = "11111111-1111-4111-8111-111111111111"
     application = "33333333-3333-4333-8333-333333333333"

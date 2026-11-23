@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.browser_auth import (
     BrowserAuthService,
 )

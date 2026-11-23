@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError

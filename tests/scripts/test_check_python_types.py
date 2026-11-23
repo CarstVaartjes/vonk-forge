@@ -13,6 +13,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
 from vonk_control.typecheck_contract import TypecheckException
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -5,6 +5,7 @@ from datetime import UTC, timedelta
 from pathlib import Path
 
 from sqlalchemy import Engine
+
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,

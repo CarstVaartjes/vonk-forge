@@ -15,6 +15,7 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy.orm import Session
+
 from vonk_control.catalog.revision_collection import (
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,

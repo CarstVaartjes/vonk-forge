@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,

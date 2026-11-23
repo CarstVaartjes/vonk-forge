@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_agent_protocol.package_upgrade import PackageRollbackSource
 

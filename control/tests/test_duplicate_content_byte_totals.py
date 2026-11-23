@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+
 from vonk_agent_protocol.distribution import DistributionAssignment, DistributionObject
 from vonk_control.distribution.types import plan_objects
 from vonk_control.distribution_executor.identity import DistributionIdentity

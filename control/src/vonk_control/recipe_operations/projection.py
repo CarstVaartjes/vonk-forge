@@ -9,6 +9,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentInstallResult,

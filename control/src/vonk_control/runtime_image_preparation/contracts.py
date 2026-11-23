@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import Field, ValidationError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (

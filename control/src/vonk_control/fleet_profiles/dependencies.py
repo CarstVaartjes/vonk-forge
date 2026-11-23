@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import cast as _typing_cast
 
 from pydantic import TypeAdapter
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,

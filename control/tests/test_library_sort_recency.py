@@ -24,6 +24,9 @@ from typing import Literal
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
+from tests.recipe_library_source import recipe_library_root
 from vonk_control.auth import CursorError, TokenCodec
 from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_primitives import Base
@@ -32,9 +35,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
-
-from tests.recipe_library_source import recipe_library_root
 
 ROOT = recipe_library_root()
 

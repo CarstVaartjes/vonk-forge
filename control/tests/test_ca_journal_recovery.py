@@ -2,10 +2,11 @@
 
 import json
 
-import vonk_control.enrollment.issuance as issuance_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+
+import vonk_control.enrollment.issuance as issuance_module
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService

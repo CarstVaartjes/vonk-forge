@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentFailureResult,

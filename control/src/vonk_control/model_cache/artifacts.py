@@ -9,9 +9,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 from pydantic import ValidationError
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
-from vonk_forge_contracts.model import ModelReference
 
 from ..bounded_json import require_integer, require_mapping
 from ..strict_json import serialize_json_value

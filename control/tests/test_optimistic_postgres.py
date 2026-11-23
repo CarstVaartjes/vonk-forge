@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.jobs.queue import JobService, StaleAttempt

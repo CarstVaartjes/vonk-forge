@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..model_cache.contract import DIGEST_PATTERN, UUID_PATTERN

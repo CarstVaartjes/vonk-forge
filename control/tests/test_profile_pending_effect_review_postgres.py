@@ -11,6 +11,7 @@ import hashlib
 from copy import deepcopy
 
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,

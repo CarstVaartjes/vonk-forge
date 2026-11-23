@@ -10,6 +10,7 @@ import pytest
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 from sqlalchemy import select
+
 from vonk_control.models.fleet import FleetProfileApplication
 
 from .test_profile_load_installed_cli import (

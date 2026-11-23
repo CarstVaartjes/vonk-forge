@@ -14,6 +14,8 @@ from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
@@ -78,7 +80,6 @@ from vonk_control.recipe_operations.start_payloads import (
 from vonk_control.recipe_operations.stop_payloads import (
     stop_payload_from_start,
 )
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_grant_requests import (
     JOB_RUN_GRANT_REQUESTS,
@@ -1161,6 +1162,7 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
 
     if state == "delivery-only":
         from sqlalchemy import select
+
         from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
         with service._sessions.begin() as session:

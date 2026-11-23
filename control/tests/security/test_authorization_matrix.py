@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from starlette.routing import Route
+
 from vonk_control.api.application import create_app
 from vonk_control.auth import MUTATION_ROLES, TokenCodec
 

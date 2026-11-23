@@ -6,6 +6,7 @@ from typing import Any, ClassVar
 
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
 from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,

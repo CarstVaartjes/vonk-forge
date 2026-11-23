@@ -20,6 +20,7 @@ from typing import cast
 import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.attempt_residues import (
     LEFTOVER_GRACE,
     AttemptResidueReconciler,
@@ -721,6 +722,7 @@ def _uninstalls(load, installation_id: str) -> list[Job]:
 def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     """Catches retrying busy ownership on every tick or never revisiting it."""
     from sqlalchemy import create_engine
+
     from vonk_control.install_admission.contracts import InstallAdmissionBusy
     from vonk_control.model_primitives import Base
 

@@ -1,6 +1,7 @@
 """Typed records owned by Run/Switch orchestration."""
 
 from pydantic import BaseModel, ConfigDict
+
 from vonk_agent_protocol.state_machines import RouteState, RunState
 
 

@@ -9,6 +9,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
+
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.step_ca import StepCAIssuancePending

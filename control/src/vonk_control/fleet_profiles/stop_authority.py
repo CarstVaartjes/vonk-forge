@@ -12,6 +12,7 @@ from typing import Literal, get_args
 from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import NodeId

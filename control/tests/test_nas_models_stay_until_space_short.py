@@ -10,11 +10,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.models.execution import RecipeRun
 from vonk_control.storage_demands import StorageDemands
-from vonk_forge_contracts import document_sha256
 
 from .model_cache_support import _artifact, _canonical_model, _download
 from .test_catalog_revision_collection import Catalog

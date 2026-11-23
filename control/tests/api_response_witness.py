@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from jsonschema import Draft202012Validator, FormatChecker
 from starlette.types import Receive, Scope, Send
+
 from vonk_control.contract_graph import discover_contracts, schema_application
 
 _active_trace: ContextVar[dict | None] = ContextVar(

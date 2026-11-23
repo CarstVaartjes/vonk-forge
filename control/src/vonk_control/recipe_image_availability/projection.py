@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -16,7 +17,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
-
 from vonk_control.lifecycle.evidence import Residue
 
 from ..categorized_errors import InvalidValue, MissingRecord

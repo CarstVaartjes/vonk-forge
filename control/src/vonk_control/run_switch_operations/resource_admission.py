@@ -10,8 +10,9 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_forge_contracts import ModelDefinition
+
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from ..fleet_profiles.capacity import kept_runs
 from ..model_cache.errors import ModelCacheError

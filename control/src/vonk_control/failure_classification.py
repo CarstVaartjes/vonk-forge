@@ -30,6 +30,7 @@ from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from sqlalchemy.orm.exc import StaleDataError
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (

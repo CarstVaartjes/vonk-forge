@@ -12,12 +12,12 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.state_machines import AssetAvailability
-
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_model_removal_contract import FleetModelRemovalEffects

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
@@ -152,6 +153,7 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
 ) -> None:
     """Catches repeating or failing an unobserved user effect, and parking rebuildable work."""
     from sqlalchemy.orm import Session
+
     from vonk_control.lifecycle.types import Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)
@@ -817,6 +819,7 @@ def test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt(
 def test_unknown_build_effect_retries_after_the_observation_budget(kind) -> None:
     """Rebuildable work must not inherit the irreversible user-job observation loop."""
     from sqlalchemy.orm import Session
+
     from vonk_control.lifecycle.types import Claimed, Lifecycle, Observed
 
     now = datetime(2026, 10, 6, tzinfo=UTC)

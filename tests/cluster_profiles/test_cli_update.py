@@ -1040,6 +1040,10 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     from sqlalchemy import create_engine
     from sqlalchemy.exc import SQLAlchemyError
     from sqlalchemy.orm import sessionmaker
+
+    from cluster_profiles import runtime_identity
+    from cluster_profiles.control_client.transfers import ControlClient
+    from cluster_profiles.runtime_identity import verified_wheel_identity
     from vonk_control import api as api_module
     from vonk_control import build_identity
     from vonk_control.api.application import create_app
@@ -1051,10 +1055,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     from vonk_control.operation_api.openapi import admin_openapi_schema
     from vonk_control.worker import loop as worker_module
     from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-    from cluster_profiles import runtime_identity
-    from cluster_profiles.control_client.transfers import ControlClient
-    from cluster_profiles.runtime_identity import verified_wheel_identity
 
     workspace, environment, executable, python, candidate_wheel = (
         transition_signed_update_tool

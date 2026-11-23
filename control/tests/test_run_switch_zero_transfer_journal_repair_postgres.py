@@ -10,6 +10,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
@@ -444,6 +445,7 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
         # Explicit corruption negatives, under the seed-only guard. The initial
         # cross-domain fault above is always produced by the genuine old merger.
         from sqlalchemy import delete
+
         from vonk_control.models.fleet import AgentNode
         from vonk_control.models.operations import AgentOperationAttempt
 
@@ -481,6 +483,7 @@ def test_startup_adds_evidence_storage_without_replacing_issued_checkpoint(
     faulty_install, postgres_engine
 ):
     from sqlalchemy import inspect
+
     from vonk_control.db.startup import initialize_database
 
     (
@@ -1058,6 +1061,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     from uuid import uuid4
 
     from sqlalchemy import delete
+
     from vonk_control.models.operations import AgentOperationAttempt
     from vonk_control.run_switch_contract.journal import (
         RunSwitchJournalRepairPendingState,
@@ -1234,6 +1238,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
     from psycopg.errors import LockNotAvailable
     from sqlalchemy import event
     from sqlalchemy.engine import ExceptionContext
+
     from vonk_control.jobs.documents import RunSwitchRunIntent
     from vonk_control.run_switch_contract.journal import (
         RunSwitchJournalRepairPendingState,

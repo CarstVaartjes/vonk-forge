@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select, update
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 

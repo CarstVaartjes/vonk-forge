@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.state_machines import CatalogSyncState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.queries import active_head_revision
@@ -20,7 +22,6 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .display_fixtures import model_entry
 from .test_model_removal_reference_lifecycle import _one_model

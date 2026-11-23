@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from pydantic import StringConstraints, model_validator
+
 from vonk_agent_protocol.enrollment import CertificateGeneration
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import (

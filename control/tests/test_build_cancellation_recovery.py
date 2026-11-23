@@ -7,6 +7,8 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import ResourceReservation
@@ -20,7 +22,6 @@ from vonk_control.recipe_operations.execution_contract import parse_stored_build
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_builds_support import (
     RecordingQueue,

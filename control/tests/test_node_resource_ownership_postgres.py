@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import event, inspect, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.telemetry import HostResourceSample, TelemetrySample
 from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
@@ -227,6 +228,7 @@ def test_recent_memory_reads_the_validated_byte_contract(
     from datetime import timedelta
 
     from sqlalchemy import update
+
     from vonk_control.models.fleet import AgentNode
     from vonk_control.observed_run_memory import recent_best_available
     from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS

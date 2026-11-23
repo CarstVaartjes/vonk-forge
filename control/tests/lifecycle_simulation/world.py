@@ -21,6 +21,9 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from tests.display_fixtures import reword
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
@@ -37,9 +40,6 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-
-from tests.display_fixtures import reword
 
 from ..recipe_operations_support import ConcurrentPublisher, setup_services
 from ..run_switch_operations_support import (

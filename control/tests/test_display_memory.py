@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.display_memory import (

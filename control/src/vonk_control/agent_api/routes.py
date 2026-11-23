@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+
 from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest, ExpiredRenewRequest
 
 from ..openapi_numbers import install_canonical_openapi

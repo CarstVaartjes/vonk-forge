@@ -28,6 +28,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import read_model, read_recipe
+
 from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog.api import CATALOG_OPERATION_IDS, install_catalog_routes
 from vonk_control.catalog.service import CatalogService
@@ -50,7 +52,6 @@ from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import read_model, read_recipe
 
 from .recipe_library_source import recipe_library_root
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases

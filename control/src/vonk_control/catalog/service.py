@@ -12,10 +12,6 @@ from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.catalog import CatalogCode
-from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -34,6 +30,10 @@ from vonk_forge_contracts.qualification_status import (
     PublishedQualificationStatusView,
 )
 
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.catalog import CatalogCode
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_control.models.catalog import CatalogDocumentRevision
 
 from ..admission_locking import ConstraintReplay, admitting

@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentOperation as WireOperation
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 

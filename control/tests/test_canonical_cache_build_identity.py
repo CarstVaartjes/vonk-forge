@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_control.catalog.entities import (
     model_document_projection,
     recipe_document_projection,
@@ -22,7 +24,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.recipe_builds.common import derive_build_input_identity
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 

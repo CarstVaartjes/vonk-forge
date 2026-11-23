@@ -3,6 +3,7 @@
 from typing import Literal
 
 from starlette.responses import Response
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 

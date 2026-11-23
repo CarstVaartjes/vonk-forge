@@ -9,6 +9,7 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import UninstallPlanCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode

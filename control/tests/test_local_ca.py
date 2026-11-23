@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
 from vonk_control.agent_api.common import AgentApiServices
@@ -421,6 +422,7 @@ def test_issue_refuses_foreign_node_identity(local_ca):
 def test_local_journal_retention_preserves_recovery_and_live_revocations(local_ca):
     """Catches early receipt/CRL deletion, unbounded pruning and immortal PENDING."""
     from sqlalchemy import select
+
     from vonk_control.models.fleet import (
         LocalCertificateIssuance,
     )

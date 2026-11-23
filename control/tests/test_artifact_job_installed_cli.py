@@ -13,6 +13,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from packaging.requirements import Requirement
 from sqlalchemy import select
+
+from cluster_profiles.cli_json_contract import DocumentKind
 from vonk_agent_protocol.recipe_jobs import (
     RecipeJobFile,
     RecipeJobRunResult,
@@ -31,8 +33,6 @@ from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.strict_json import ControllerAPIRoute
-
-from cluster_profiles.cli_json_contract import DocumentKind
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .conftest import load_tools_module

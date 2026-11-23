@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -192,6 +193,7 @@ def test_owner_contention_after_activation_keeps_completion_and_generation(
 ) -> None:
     """Catches dropping the completion decision on the first NOWAIT refusal."""
     from sqlalchemy.exc import OperationalError
+
     from vonk_control.recipe_routes import service as service_module
 
     routes, runtime, applied, run_id = setup(tmp_path, engine=postgres_engine)

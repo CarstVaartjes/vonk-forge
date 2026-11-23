@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 import httpx2
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 
 from ..bounded_retry import bounded_attempts

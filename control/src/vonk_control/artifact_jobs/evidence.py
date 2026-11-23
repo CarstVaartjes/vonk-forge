@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Literal, get_args
 
 from pydantic import ConfigDict, Field
+
 from vonk_agent_protocol.contracts import canonical_message
 
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown

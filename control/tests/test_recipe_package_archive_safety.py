@@ -25,12 +25,12 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
-from vonk_control.recipe_packages import client as recipe_packages
-from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 Member = tuple[tarfile.TarInfo, bytes | None]
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)

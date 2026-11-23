@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
@@ -314,6 +315,7 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     from datetime import timedelta
 
     from sqlalchemy import select
+
     from vonk_control.models.jobs import Job
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
@@ -399,6 +401,7 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
 ):
     """A lost committed response must not reserve or dispatch the workload twice."""
     from sqlalchemy import select
+
     from vonk_control.models.execution import (
         RecipeInstallation,
         RecipeRun,

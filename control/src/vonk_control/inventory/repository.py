@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import field_validator
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import (
     InventoryRequest,

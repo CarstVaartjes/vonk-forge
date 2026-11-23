@@ -286,6 +286,7 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
     from datetime import UTC, datetime
 
     from sqlalchemy import create_engine, insert, text
+
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.state_machines import NodeIdentityState
     from vonk_control.model_primitives import Base
@@ -489,6 +490,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
@@ -580,6 +582,7 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService

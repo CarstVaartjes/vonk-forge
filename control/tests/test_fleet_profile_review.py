@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import inspect, select
+
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
@@ -37,8 +39,6 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.preparation_contract import RolloutPreparation
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
-
-from cluster_profiles.cli_render.dispatch import render_payload
 
 from .fleet_profiles_support import (
     NOW,

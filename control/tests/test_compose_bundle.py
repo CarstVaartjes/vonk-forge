@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from vonk_control.compose_bundle import ENVIRONMENT_VARIABLE, compose_bundle
 from vonk_control.metrics.registry import MetricsRegistry
 

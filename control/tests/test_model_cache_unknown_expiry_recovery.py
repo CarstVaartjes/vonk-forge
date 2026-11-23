@@ -13,6 +13,8 @@ from uuid import uuid4
 from pytest import CaptureFixture
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles.cli_render.dispatch import render_payload
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.types import Effect, Outcome, Reported, State
@@ -21,8 +23,6 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.operation_api.responses import operation_detail_response
-
-from cluster_profiles.cli_render.dispatch import render_payload
 
 from .model_cache_support import _artifact
 from .non_blocking import assert_no_orphaned_holds

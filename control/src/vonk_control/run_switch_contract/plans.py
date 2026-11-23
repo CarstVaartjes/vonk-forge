@@ -10,8 +10,9 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_forge_contracts import EndpointAlias
+
+from vonk_agent_protocol.gpu_clock import GpuClockRange
 
 from ..preparation_contract import RolloutPreparation
 from ..strict_json import StrictModel

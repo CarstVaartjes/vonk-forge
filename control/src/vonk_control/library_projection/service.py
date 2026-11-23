@@ -7,9 +7,10 @@ from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.qualification_status import QualificationStatus
+
+from vonk_agent_protocol.state_machines import AssetAvailability
 
 from ..auth import CursorCodec
 from ..catalog.revision_contract import (

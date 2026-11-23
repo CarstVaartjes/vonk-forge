@@ -45,6 +45,7 @@ class _SchemaJobs:
 
 def _schema(*, include_browser_auth: bool) -> dict[str, object]:
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.api.application import create_app
     from vonk_control.auth import TokenCodec
     from vonk_control.browser_auth import BrowserAuthService
@@ -86,6 +87,11 @@ def typescript_vocabulary() -> str:
         "// vonk_agent_protocol.reason_codes and Controller contracts. Do not edit.",
         "",
     ]
+    from vonk_forge_contracts.qualification_status import (
+        QualificationOutcome,
+        QualificationStatus,
+    )
+
     from vonk_control.cache_removal_review import CacheAssetDisposition
     from vonk_control.fleet_model_removal_contract import (
         FleetRemovalDisposition,
@@ -94,10 +100,6 @@ def typescript_vocabulary() -> str:
     from vonk_control.model_cache.contract import (
         CacheOperationKind,
         ModelStorageObservationReason,
-    )
-    from vonk_forge_contracts.qualification_status import (
-        QualificationOutcome,
-        QualificationStatus,
     )
 
     word_types = [

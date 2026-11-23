@@ -9,6 +9,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import pytest
+
 from vonk_control.compiled_execution_plan import VerifiedRuntimeImage
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.oci_image_store import OciImageStore, StoredImage

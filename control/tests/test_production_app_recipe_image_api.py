@@ -8,6 +8,8 @@ from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_control.api.production import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import production as availability_production
@@ -23,7 +25,6 @@ from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _recipe_projection
 

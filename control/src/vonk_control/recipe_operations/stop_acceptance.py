@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.contracts import canonical_message

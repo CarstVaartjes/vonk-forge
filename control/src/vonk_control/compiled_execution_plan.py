@@ -30,6 +30,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledArtifact,
     CompiledArtifactMount,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.route_activation import ActivationMarker
 

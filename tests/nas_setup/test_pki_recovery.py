@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup import publication
 from vonk_nas_setup.environment import parse_environment, render_environment

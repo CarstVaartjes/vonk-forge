@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.outcome import ErrorCatalog, OutcomeCatalog, OutcomeEvidence

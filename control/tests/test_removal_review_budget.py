@@ -33,6 +33,8 @@ from types import ModuleType
 import pytest
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.catalog import revision_collection as catalog_revision_collection
 from vonk_control.model_cache.contract import CacheManifest
@@ -58,7 +60,6 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _availability_payload
 from .recipe_operations_support import NOW, installed_recipe, setup_services

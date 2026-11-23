@@ -10,12 +10,11 @@ import json
 from enum import Enum
 from pathlib import Path
 
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
-
 from cluster_profiles.generated_control.models.reason_code_vocabulary import (
     ReasonCodeVocabulary as GeneratedVocabulary,
 )
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 
 
 def test_reason_producer_store_generated_consumer_roundtrip(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownError
 from vonk_agent_protocol.route_activation import (

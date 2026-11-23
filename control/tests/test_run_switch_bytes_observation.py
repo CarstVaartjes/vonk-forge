@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.contracts import AgentProgress
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

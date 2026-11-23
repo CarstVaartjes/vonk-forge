@@ -4,6 +4,8 @@ import io
 
 import pytest
 from sqlalchemy import select, update
+
+from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_control.models.cache import RecipeBuild
@@ -12,8 +14,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.prebuilt_images import executable_build_key
 from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.source_bundles import generate_source_bundle
-
-from tests.signed_recipe_release import signed_recipe_releases
 
 from .non_blocking import assert_no_orphaned_holds
 from .recipe_builds_support import setup

@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
@@ -27,7 +29,6 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .test_fleet_profile_api import _headers

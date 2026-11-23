@@ -8,9 +8,10 @@ from typing import (
     TypeGuard,
 )
 
-from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDefinition
+
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from ..cluster_mappings import (
     ClusterMappingPlacement,

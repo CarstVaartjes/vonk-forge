@@ -9,6 +9,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,

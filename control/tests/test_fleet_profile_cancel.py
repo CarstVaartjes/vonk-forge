@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,

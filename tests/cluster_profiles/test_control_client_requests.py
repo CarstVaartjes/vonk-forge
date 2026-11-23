@@ -19,15 +19,6 @@ from typing import Self, cast
 
 import httpx2
 import pytest
-from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
-from vonk_control.observation.transfer import (
-    OBSERVATION_MEDIA_TYPE,
-    ObservationTransferChunk,
-    ObservationTransferComplete,
-    ObservationTransferStart,
-    _record,
-    observation_response,
-)
 
 from cluster_profiles import cli
 from cluster_profiles.control_client.errors import (
@@ -53,6 +44,15 @@ from cluster_profiles.generated_control.models.fleet_profile_scope_preview impor
     FleetProfileScopePreview,
 )
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
+from vonk_control.fleet_projection.common import FleetSnapshot as OwnedFleetSnapshot
+from vonk_control.observation.transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferChunk,
+    ObservationTransferComplete,
+    ObservationTransferStart,
+    _record,
+    observation_response,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -1429,6 +1429,9 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
 def test_preview_recovery_uses_canonical_transport_before_any_load(
     tmp_path, binding, fault_count
 ):
+    from cluster_profiles.controller_cli.profile_load import (
+        _review_and_submit_profile_load,
+    )
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.fleet_profile_contract.applications import (
         FleetProfileApplicationProgress,
@@ -1436,10 +1439,6 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
     )
     from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
     from vonk_control.strict_json import serialize_json_value
-
-    from cluster_profiles.controller_cli.profile_load import (
-        _review_and_submit_profile_load,
-    )
 
     key = "11111111-1111-4111-8111-111111111111"
     application = FleetProfileApplicationView(
@@ -1514,10 +1513,9 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
 def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     tmp_path, observation_clock, exhaust_budget
 ):
+    from cluster_profiles.controller_cli.observation import _poll_path
     from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.observation.transfer import ObservationTransferError
-
-    from cluster_profiles.controller_cli.observation import _poll_path
 
     snapshot = {
         "authority_revision": "a" * 64,

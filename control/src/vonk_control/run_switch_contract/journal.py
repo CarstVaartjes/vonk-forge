@@ -9,6 +9,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.wire_model import OperationProgress
 

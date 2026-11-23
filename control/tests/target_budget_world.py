@@ -29,6 +29,8 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.service import ModelCacheService
@@ -51,7 +53,6 @@ from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _availability_payload
 from .recipe_operations_support import NOW, installed_recipe, setup_services

@@ -7,6 +7,7 @@ from importlib.resources import files
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import AssetAvailability
 from vonk_control.auth import CursorCodec
@@ -239,6 +240,7 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations(clea
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_exact_ingress_restores_missing_root_and_selected_consumer():
     from sqlalchemy import delete
+
     from vonk_control.catalog.queries import active_head_revision
     from vonk_control.models.catalog import CatalogDocument, CatalogDocumentHead
 

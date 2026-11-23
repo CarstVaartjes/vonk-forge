@@ -18,9 +18,10 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
-import vonk_agent_protocol
 from fastapi import FastAPI
 from pydantic import BaseModel
+
+import vonk_agent_protocol
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult, RecipeStartResult
 from vonk_agent_protocol.inventory import InventoryRequest

@@ -10,9 +10,10 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from vonk_forge_contracts import EndpointAlias
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-from vonk_forge_contracts import EndpointAlias
 
 from ..strict_json import StrictModel
 from .identity import NodeId, UuidId

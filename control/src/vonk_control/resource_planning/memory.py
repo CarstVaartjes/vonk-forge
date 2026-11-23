@@ -6,15 +6,16 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
 
-from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.compiled_execution_plan import MemoryKind
-from vonk_agent_protocol.inventory import MemoryPool
-from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.qualification_status import PublishedRoleMemory
 from vonk_forge_contracts.recipe import (
     RecipeMemoryResources,
 )
+
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
+from vonk_agent_protocol.inventory import MemoryPool
+from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 
 from .demand import _resource_evidence, resource_demand
 from .memory_kinds import memory_reservation_kind, memory_reservation_kinds

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService

@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from cluster_profiles.control_client.schema import validate_control_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -57,8 +59,6 @@ from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
-
-from cluster_profiles.control_client.schema import validate_control_document
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
@@ -874,6 +874,7 @@ def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
     """Catches a loaded profile hiding the Controller's recovery explanation."""
     from datetime import UTC, datetime, timedelta
 
+    from cluster_profiles.cli_render.dispatch import render_payload
     from vonk_agent_protocol.agent_words import ProfileDocumentState
     from vonk_agent_protocol.lifecycle_vocabulary import (
         WaitOwnerKind,
@@ -882,8 +883,6 @@ def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
     )
     from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.wait_contract import QueueWait
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     now = datetime(2026, 10, 22, 12, 55, tzinfo=UTC)
     wait = QueueWait(

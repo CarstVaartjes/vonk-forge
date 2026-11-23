@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.inventory import InventoryVerdict
@@ -164,8 +165,9 @@ def test_live_operation_protects_file_identity_without_a_matching_cache_owner(
     world,
 ) -> None:
     """Catches resolving live work only through a disposable cache index."""
-    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts import document_sha256, read_model
+
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     model_id = world.revision("weights", 1, kind="model")
     with world.sessions.begin() as session:
@@ -204,9 +206,10 @@ def test_missing_model_dependency_defers_collection_instead_of_authorizing_parti
     """An incomplete definition graph is unknown, never a complete permission
     to remove the dependency's Spark objects.
     """
-    from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_forge_contracts import document_sha256, read_model
     from vonk_forge_contracts.model import ModelReference
+
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     model_id = world.revision("weights", 1, kind="model")
     with world.sessions.begin() as session:

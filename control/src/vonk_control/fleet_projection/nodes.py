@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, TypeAdapter
+
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.gpu_clock import (
     GpuClockApplyState,

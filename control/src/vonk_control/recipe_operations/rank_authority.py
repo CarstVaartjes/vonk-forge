@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildRequest,
@@ -20,7 +22,6 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profiles.stop_authority import (
     ProfileJobRunStopJob,

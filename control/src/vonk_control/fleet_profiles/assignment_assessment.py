@@ -11,11 +11,12 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.state_machines import (
     InstallationState,
     ObservedAssignmentState,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from ..cluster_mappings import mapping_option_choices
 from ..content_identity import catalog_reference_membership

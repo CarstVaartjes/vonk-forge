@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
+
 from vonk_agent_protocol.contracts import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,

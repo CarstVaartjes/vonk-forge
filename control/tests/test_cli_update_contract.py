@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from cluster_profiles import runtime_identity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
@@ -18,8 +20,6 @@ from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.operation_api.openapi import admin_openapi_schema
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-from cluster_profiles import runtime_identity
 
 
 class Jobs:

@@ -8,6 +8,8 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, create_engine, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
+
+from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -34,8 +36,6 @@ from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.models.telemetry import (
     NodeTelemetryLatest,
 )
-
-from tests.observation_transfer_peer import observation_document
 
 from .fleet_projection_support import (
     NODE_A,

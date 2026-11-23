@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_jobs import (
@@ -46,7 +48,6 @@ from vonk_control.recipe_operations.errors import (
     RecipeRequestInvalid,
 )
 from vonk_control.recipe_operations.interfaces import RecipeOperationView
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .artifact_jobs_support import (
     MutableClock,

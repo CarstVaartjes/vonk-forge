@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import CatalogEntityService
@@ -20,7 +22,6 @@ from vonk_control.model_cache.persistence import _manifest_of
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .model_cache_support import _artifact, _canonical_model, _download

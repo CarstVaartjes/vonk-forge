@@ -15,6 +15,8 @@ from typing import Literal
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
@@ -65,7 +67,6 @@ from vonk_control.run_switch_operations.interfaces import (
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import (

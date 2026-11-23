@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, stored_words
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 

@@ -23,6 +23,8 @@ from typing import Any
 import httpx2
 import pytest
 from sqlalchemy import Engine, select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.distribution_executor.preparation import (
@@ -41,7 +43,6 @@ from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.run_switch_operations.artifact_validation import (
     _validate_artifact_execution,
 )
-from vonk_forge_contracts import document_sha256
 
 from .recipe_operations_support import setup_services
 

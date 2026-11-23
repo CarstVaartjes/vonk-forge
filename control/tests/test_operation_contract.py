@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, insert
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

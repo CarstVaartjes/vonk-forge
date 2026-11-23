@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_observations import (
@@ -46,8 +48,6 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.source_bundles import SourceBundleStore
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row

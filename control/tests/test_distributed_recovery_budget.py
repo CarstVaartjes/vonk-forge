@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import RunState

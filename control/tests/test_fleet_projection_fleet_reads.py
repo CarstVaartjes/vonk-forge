@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.agent_contacts import record_contact

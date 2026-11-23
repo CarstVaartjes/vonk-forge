@@ -7,11 +7,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, get_args
 
-from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_forge_contracts.recipe import (
     RecipeDiskResources,
     Scalar,
 )
+
+from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 
 from ..operations.blockers import SwapShortfallEvidence
 from ..run_switch_contract.vocabulary import RunSwitchChangeEffect

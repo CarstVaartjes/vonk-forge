@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
@@ -481,6 +482,7 @@ def test_a_retrying_application_reports_waiting_with_its_blockers(
     from datetime import timedelta
 
     from sqlalchemy import delete
+
     from vonk_control.models.telemetry import NodeInventorySnapshot
 
     sessions, lifecycle, service, _profile, _desired, application, _child, _nodes = (
@@ -698,9 +700,10 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
 
     import copy
 
+    from vonk_forge_contracts import RecipeDefinition, document_sha256
+
     from vonk_control.models.cache import RecipeBuild
     from vonk_control.recipe_builds.common import RecipeBuildPlan
-    from vonk_forge_contracts import RecipeDefinition, document_sha256
 
     sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -994,8 +997,9 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
 
     import copy
 
-    from vonk_control.models.cache import RecipeBuild
     from vonk_forge_contracts import document_sha256
+
+    from vonk_control.models.cache import RecipeBuild
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2

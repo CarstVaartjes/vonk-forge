@@ -16,6 +16,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.execution_plan_service import (
@@ -23,7 +25,6 @@ from vonk_control.execution_plan_service import (
 )
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
-from vonk_forge_contracts import document_sha256
 
 from .catalog_launch_fixtures import load_inputs
 from .display_fixtures import create_draft

@@ -105,6 +105,7 @@ def test_sql_removal_gate_with_missing_owner_is_detected(owner_kind):
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
+
     from vonk_control.model_primitives import Base
     from vonk_control.models.cache import ArtifactLifecycleGate
 

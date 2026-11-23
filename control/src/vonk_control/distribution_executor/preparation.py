@@ -10,6 +10,7 @@ from threading import RLock
 from typing import Any, cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,

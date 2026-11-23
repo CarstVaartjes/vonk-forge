@@ -7,6 +7,12 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, inspect, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+)
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import GpuHealth, MemoryPool
@@ -35,11 +41,6 @@ from vonk_control.run_admission import (
     allocate_service_port,
     require_admissible,
     run_port_demand,
-)
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
-    read_model,
 )
 
 from .display_fixtures import legacy_model_display, model_display_denying

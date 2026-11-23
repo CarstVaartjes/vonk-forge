@@ -12,7 +12,6 @@ import json
 from typing import cast
 
 import pytest
-from vonk_control.fleet_profiles.projection_support import _effective_option_choices
 from vonk_forge_contracts import RecipeDefinition
 
 from cluster_profiles.control_client.errors import ControlClientError
@@ -21,6 +20,7 @@ from cluster_profiles.controller_cli.profile_authoring import _profile_save
 from cluster_profiles.generated_control.models.fleet_profile_input import (
     FleetProfileInput,
 )
+from vonk_control.fleet_profiles.projection_support import _effective_option_choices
 
 from .recipe_library_source import recipe_library_root
 

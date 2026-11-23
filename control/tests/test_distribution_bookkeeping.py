@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.outcome import SecurityRefusalError

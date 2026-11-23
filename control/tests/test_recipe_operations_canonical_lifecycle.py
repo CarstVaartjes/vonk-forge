@@ -17,6 +17,12 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_agent_protocol.recipe_operations import RecipeInstallPayload
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import (
@@ -31,11 +37,6 @@ from vonk_control.models.execution import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.progress import _recipe_model_identities
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .recipe_operations_support import (
     NOW,

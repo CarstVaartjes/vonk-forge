@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,

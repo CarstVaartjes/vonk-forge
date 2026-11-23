@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ObservationCause
 

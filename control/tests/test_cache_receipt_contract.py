@@ -3,6 +3,7 @@
 # ruff: noqa: F811 - pytest fixture is imported by name
 
 import pytest
+
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
@@ -73,6 +74,7 @@ def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
     with pytest.raises(UnknownOutcomeError):
         ModelCacheObjectSource.from_service(cache).objects_for_set(digest)
     from sqlalchemy import select
+
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.models.cache import ModelCacheOperation
 
@@ -102,6 +104,7 @@ def test_a_set_the_nas_evicted_still_compiles_without_a_download(
     Spark already holds: after eviction that waited or downloaded it again.
     A set over bytes the NAS still holds is recorded for a later copy."""
     from sqlalchemy import delete, select
+
     from vonk_control.distribution.sources import verified_model_receipts
     from vonk_control.models.cache import (
         ModelCacheOperation,

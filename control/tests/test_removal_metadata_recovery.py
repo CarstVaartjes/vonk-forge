@@ -13,6 +13,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import AssetAvailability
@@ -198,6 +199,7 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
     """Catches refusing removal before durable intent or unlinking on an unknown scan."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.model_primitives import Base
     from vonk_control.recipe_image_availability import (
         removal_execution as image_execution,
@@ -535,6 +537,7 @@ def test_recipe_receipt_observation_is_request_owned(
     """Catches receipt admission veto, unverified deletion and permanently owned bytes."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.model_primitives import Base
     from vonk_control.models.cache import ArtifactLifecycleGate
     from vonk_control.runtime_image_preparation.storage import (

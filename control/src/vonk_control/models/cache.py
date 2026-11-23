@@ -18,10 +18,10 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
-from vonk_agent_protocol.state_machines import machine_check
 from vonk_forge_contracts import CatalogVocabulary
 
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.state_machines import machine_check
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 

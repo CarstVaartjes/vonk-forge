@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import RecipeInstallation, ResourceReservation
@@ -339,6 +340,7 @@ def test_install_admission_reschedules_contended_dependencies_without_partial_cl
 ):
     """Contention before the reservation query is still a retryable admission wait."""
     from sqlalchemy import text
+
     from vonk_control.install_admission.contracts import InstallAdmissionBusy
     from vonk_control.models.fleet import AgentNode
 

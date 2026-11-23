@@ -26,6 +26,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from vonk_agent_protocol.gpu_clock import GpuClockObservation
 from vonk_agent_protocol.inventory import (
     GpuHealth,

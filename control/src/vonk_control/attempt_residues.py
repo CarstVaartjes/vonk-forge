@@ -64,6 +64,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -73,7 +74,6 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
-
 from vonk_control.owner_liveness import ADOPTION_WINDOW
 
 from .agent_operation_facts import aware as _aware

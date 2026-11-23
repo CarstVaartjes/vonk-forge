@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_control.agent_outcome import stored_report
@@ -17,8 +19,6 @@ from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.models.execution import InstallationNode, RunNode
 from vonk_control.models.operations import AgentOperation
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_api_support import NODE_A, agent_headers
 from .agent_api_support import agent_system as _agent_system

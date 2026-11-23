@@ -9,6 +9,7 @@ from hashlib import sha256
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
     BootstrapResult,

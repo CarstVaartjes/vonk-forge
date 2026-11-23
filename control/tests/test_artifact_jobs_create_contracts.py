@@ -11,6 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+
 from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -55,8 +58,6 @@ from vonk_control.recipe_operations.errors import (
 )
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.workload_intent import allocate_workload_intent
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .artifact_jobs_support import (
     _agent_queue,

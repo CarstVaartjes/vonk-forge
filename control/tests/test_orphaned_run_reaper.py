@@ -16,6 +16,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import delete, event, insert, select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_jobs.endings import end_unobserved_order

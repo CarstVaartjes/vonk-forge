@@ -15,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_agent_protocol.contracts import AgentDirective, AgentProgress, AgentResult
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
@@ -38,7 +39,6 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode as Code
-
 from vonk_control.enrollment.responses import _issued_response, _json_response
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 

@@ -11,6 +11,7 @@ from typing import (
 from pydantic import ValidationError
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.sql.elements import ColumnElement
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

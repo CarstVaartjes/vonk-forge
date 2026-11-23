@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel
+
 from vonk_agent_protocol.contracts import canonical_message
 
 from ..lifecycle.evidence import Residue

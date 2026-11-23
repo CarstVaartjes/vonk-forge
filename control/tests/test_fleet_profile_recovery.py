@@ -6,6 +6,7 @@ import json
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.lifecycle.evidence import Residue
 
 from .fleet_profiles_support import _uuid
@@ -92,6 +93,7 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
 
     from pydantic import ValidationError
+
     from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 
     _sessions, _lifecycle, service, _profile, _desired, original, _child, _nodes = (

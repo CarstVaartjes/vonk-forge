@@ -1,13 +1,14 @@
 import pytest
 from pydantic import TypeAdapter
+from vonk_forge_contracts.model import Slug
+from vonk_forge_contracts.recipe import RecipeIdentity
+
 from vonk_control.auth import (
     Actor,
     CursorError,
     TokenCodec,
 )
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
-from vonk_forge_contracts.model import Slug
-from vonk_forge_contracts.recipe import RecipeIdentity
 
 
 def test_signed_token_round_trip_and_tamper_rejection() -> None:

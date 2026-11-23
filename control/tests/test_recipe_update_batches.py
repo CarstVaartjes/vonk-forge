@@ -13,6 +13,8 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
@@ -31,7 +33,6 @@ from vonk_control.recipe_image_availability.view_contract import (
 from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
 from .insert_collision_support import collide_inserts
@@ -601,13 +602,13 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
 
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
+
+    from cluster_profiles.cli import main
+    from cluster_profiles.control_client.transfers import ControlClient
     from vonk_control.auth import Actor
     from vonk_control.recipe_image_availability.api import (
         install_recipe_operator_routes,
     )
-
-    from cluster_profiles.cli import main
-    from cluster_profiles.control_client.transfers import ControlClient
 
     _, recipes, now, fresh = update_env
     service = fresh()

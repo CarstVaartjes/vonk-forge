@@ -15,6 +15,7 @@ from weakref import WeakKeyDictionary
 
 from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session
+
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 
 _Key = tuple[str, str]

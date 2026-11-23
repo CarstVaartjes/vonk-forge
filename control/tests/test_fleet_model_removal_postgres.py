@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.contracts import AgentOperation, canonical_message
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -27,7 +29,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .model_cache_support import _artifact, _download
@@ -305,8 +306,9 @@ def test_shared_content_is_retained_on_nas_and_spark(
 
 def _refreshed_model(sessions, document_id: str, stored: object, digest: str) -> str:
     """Publish a metadata-only revision of a model; returns the new head digest."""
-    from vonk_control.catalog.entities import CatalogEntityService
     from vonk_forge_contracts import ModelDefinition, document_sha256
+
+    from vonk_control.catalog.entities import CatalogEntityService
 
     definition = ModelDefinition.model_validate(stored)
     document = reworded(definition, "refreshed").model_dump(mode="json")

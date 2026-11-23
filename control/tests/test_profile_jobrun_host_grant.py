@@ -5,6 +5,7 @@ import hashlib
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,

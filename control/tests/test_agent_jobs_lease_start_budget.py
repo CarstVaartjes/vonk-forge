@@ -10,6 +10,7 @@ from datetime import UTC, timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.contracts import AgentResult, canonical_message

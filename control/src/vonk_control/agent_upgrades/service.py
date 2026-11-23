@@ -7,6 +7,7 @@ from datetime import datetime
 
 import httpx2
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
 from ..agent_jobs.service import AgentJobService

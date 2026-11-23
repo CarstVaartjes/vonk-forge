@@ -12,6 +12,7 @@ import threading
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, label_transaction
 from vonk_control.fleet_profile_contract.applications import (

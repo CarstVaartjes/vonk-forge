@@ -10,6 +10,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
 from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..strict_json import StrictModel

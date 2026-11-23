@@ -13,6 +13,7 @@ from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     BoundedErrorResponse,

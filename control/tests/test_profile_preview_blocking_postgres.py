@@ -7,6 +7,7 @@ from threading import Event
 
 import pytest
 from sqlalchemy import select, text, update
+
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control import source_bundles
 from vonk_control.catalog.revision_contract import (
@@ -160,6 +161,7 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):
     """Catches a new projection writer silently committing in autocommit mode."""
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.fleet_profiles.read_observation import profile_read
     from vonk_control.model_primitives import Base
     from vonk_control.models.fleet import AgentNode, AgentNodeContact

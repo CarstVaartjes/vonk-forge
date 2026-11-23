@@ -3,6 +3,7 @@
 import pytest
 from fastapi import APIRouter, Response
 from fastapi.testclient import TestClient
+
 from vonk_control.contract_graph import ContractGraphError, _routes, schema_application
 from vonk_control.operator_acceptance import (
     operator_acceptance,

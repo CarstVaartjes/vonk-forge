@@ -10,6 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.observation_transfer_peer import fleet_authority
+from tests.test_observation_transfer import NOW, Projection, _large_snapshot
+from tests.test_platform_observation import Jobs
+from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -17,11 +22,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
-
-from tests.observation_transfer_peer import fleet_authority
-from tests.test_observation_transfer import NOW, Projection, _large_snapshot
-from tests.test_platform_observation import Jobs
-from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

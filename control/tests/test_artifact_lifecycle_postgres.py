@@ -7,6 +7,7 @@ from threading import Event
 import pytest
 from sqlalchemy import Engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,

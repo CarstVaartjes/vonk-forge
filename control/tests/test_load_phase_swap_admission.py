@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.lifecycle_vocabulary import (

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -15,7 +16,6 @@ from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeErro
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
-
 from vonk_control.lifecycle.evidence import Residue
 
 from ..failure_classification import is_definite, is_redownload

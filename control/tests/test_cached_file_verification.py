@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import pytest
+
 from vonk_control.cached_file_verification import CachedFileVerifier
 
 

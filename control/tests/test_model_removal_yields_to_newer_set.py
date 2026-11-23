@@ -8,12 +8,13 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
-from vonk_forge_contracts import document_sha256
 
 from .model_cache_support import _artifact, _download, _remove_model
 from .removal_settle import advance_until_ended

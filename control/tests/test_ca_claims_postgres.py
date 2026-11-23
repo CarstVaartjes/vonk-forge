@@ -9,6 +9,7 @@ from threading import Event
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.db.connections import build_engine
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService

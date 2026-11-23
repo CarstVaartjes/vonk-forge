@@ -10,6 +10,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.distribution.filesystem import (
@@ -25,7 +27,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode, FleetProfile
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32

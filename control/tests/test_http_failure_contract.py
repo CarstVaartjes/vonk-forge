@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
+
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.agent_api import common
 from vonk_control.api import middleware

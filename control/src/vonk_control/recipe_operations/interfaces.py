@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress

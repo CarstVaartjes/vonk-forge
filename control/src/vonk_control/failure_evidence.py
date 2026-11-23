@@ -25,6 +25,7 @@ from pydantic import (
 )
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     LOG_TAIL_BYTES,

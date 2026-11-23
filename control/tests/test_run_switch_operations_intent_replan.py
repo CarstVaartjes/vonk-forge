@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState

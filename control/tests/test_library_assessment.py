@@ -13,6 +13,11 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from cluster_profiles.cli import main
+from cluster_profiles.cli_render.dispatch import render_payload
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.auth import Actor, TokenCodec
@@ -33,11 +38,6 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, document_sha256
-
-from cluster_profiles.cli import main
-from cluster_profiles.cli_render.dispatch import render_payload
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor

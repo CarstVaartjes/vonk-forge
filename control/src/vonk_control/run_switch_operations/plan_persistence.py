@@ -11,6 +11,7 @@ from typing import (
 )
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import canonical_message
 
 from ..artifact_jobs.lifecycle import (

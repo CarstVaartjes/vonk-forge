@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.models.routes import RoutePublication
@@ -649,6 +650,7 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, damage):
     from sqlalchemy import select, update
+
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.models.catalog import CatalogDocumentRevision
     from vonk_control.models.execution import RecipeInstallation, RunNode
@@ -752,6 +754,7 @@ def test_authenticated_observation_producer_repairs_between_passes(
     from datetime import timedelta
 
     from sqlalchemy import select
+
     from vonk_control.models.execution import RunNode
     from vonk_control.models.fleet import AgentCertificate
 

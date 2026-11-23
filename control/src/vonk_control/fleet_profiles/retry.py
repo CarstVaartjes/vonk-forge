@@ -11,6 +11,7 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import object_session
+
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileOperationKind,

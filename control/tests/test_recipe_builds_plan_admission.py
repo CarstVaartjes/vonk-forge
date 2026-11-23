@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, select
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.contracts import AgentClaim, canonical_message
@@ -50,7 +52,6 @@ from vonk_control.recipe_operations.execution_contract import parse_stored_build
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .recipe_builds_support import (
     RecordingQueue,

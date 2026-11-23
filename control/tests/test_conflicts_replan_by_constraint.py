@@ -12,6 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Index, PrimaryKeyConstraint, UniqueConstraint, event, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.admission_locking import (
     CONSTRAINTS,
     Conflict,

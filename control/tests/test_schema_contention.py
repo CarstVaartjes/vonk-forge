@@ -8,6 +8,7 @@ import pytest
 from psycopg.errors import DeadlockDetected, LockNotAvailable, UndefinedObject
 from sqlalchemy import Column, Index, Integer, MetaData, Table, create_engine
 from sqlalchemy.exc import DBAPIError
+
 from vonk_control.db import startup
 from vonk_control.db.connections import _DatabaseStartupContention
 from vonk_control.db.schema import reconcile_schema

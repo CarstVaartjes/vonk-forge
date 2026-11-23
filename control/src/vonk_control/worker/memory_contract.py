@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import Annotated, Final, Literal
 
 from pydantic import Field
+
 from vonk_agent_protocol.wire_model import WireModel
 
 #: One top-allocation list never exceeds this many entries.

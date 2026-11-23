@@ -11,6 +11,13 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import (
+    PrebuiltImage,
+    RecipeApi,
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog import entities
 from vonk_control.catalog.revision_contract import (
@@ -25,12 +32,6 @@ from vonk_control.models.catalog import (
     CatalogDocumentRevision,
 )
 from vonk_control.models.execution import RecipeInstallation, RecipeRun
-from vonk_forge_contracts import (
-    PrebuiltImage,
-    RecipeApi,
-    RecipeDefinition,
-    document_sha256,
-)
 
 from .display_fixtures import reword
 from .test_catalog_entities import (

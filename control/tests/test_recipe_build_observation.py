@@ -6,6 +6,7 @@ import io
 
 import pytest
 from sqlalchemy import update
+
 from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_control.recipe_builds.service import RecipeBuildService

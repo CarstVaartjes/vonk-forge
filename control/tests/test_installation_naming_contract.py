@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from typing import Annotated, get_args, get_origin
 
 from pydantic import BaseModel
+
 from vonk_agent_protocol.inventory import InstallationId
 from vonk_control.owner_liveness import INSTALLATION_PAYLOAD_PATHS
 from vonk_control.stored.json_values import bindings

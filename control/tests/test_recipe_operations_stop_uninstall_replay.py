@@ -13,6 +13,11 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+)
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import (
@@ -38,10 +43,6 @@ from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationResult,
-)
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
 )
 
 from .recipe_operations_support import (
@@ -272,6 +273,7 @@ def test_stop_replay_lock_wait_returns_the_committed_undispatched_stop(
     """A creation race whose replay hits the lock wait answers with the Stop that
     committed, not a raw database error."""
     from sqlalchemy.exc import OperationalError
+
     from vonk_control.admission_locking import ConstraintReplay
     from vonk_control.recipe_operations.interfaces import UndispatchedStopView
 

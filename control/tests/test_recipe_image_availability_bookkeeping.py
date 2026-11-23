@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
@@ -35,7 +37,6 @@ from vonk_control.recipe_image_availability.view_contract import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.json_values import read_row_column
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_image_availability_support import (
     _add_revision,
@@ -693,6 +694,7 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
 ) -> None:
     """A read fault must not turn verified image availability into a refusal."""
     from sqlalchemy.exc import SQLAlchemyError
+
     from vonk_control.jobs.documents import AvailabilityModelChild
     from vonk_control.model_cache.errors import ModelCacheError
     from vonk_control.strict_json import serialize_json_value

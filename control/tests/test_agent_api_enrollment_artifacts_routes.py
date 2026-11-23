@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient
 from sqlalchemy import delete
+
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import EnrollmentObservationReply
@@ -379,12 +380,11 @@ def test_cli_enrollment_file_and_recovery_use_the_actual_authority(
     from email.message import Message as EmailMessage
     from urllib.error import URLError
 
+    from cluster_profiles import cli
+    from cluster_profiles.control_client.transfers import ControlClient
     from vonk_control.operator_projection_api.wiring import (
         build_fleet_operator_services,
     )
-
-    from cluster_profiles import cli
-    from cluster_profiles.control_client.transfers import ControlClient
 
     from .test_enrollment import csr, evidence
 
@@ -576,10 +576,9 @@ def test_fleet_detail_reports_the_claimed_agent_build_and_updates_it(
     agent_system, capsys
 ):
     """An upgrade result is not proof of the binary that most recently claimed."""
+    from cluster_profiles.cli_render.dispatch import render_payload
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     projection = FleetProjection(services.sessions, clock=clock)
@@ -617,6 +616,7 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     agent_system, capsys
 ):
     """Catches dropping the whole clock when decoded JSON contains metric enums."""
+    from cluster_profiles.cli_render.dispatch import render_payload
     from vonk_agent_protocol.gpu_clock import (
         GpuClockMetric,
         GpuClockObservation,
@@ -625,8 +625,6 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     )
     from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
     from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     sample = TelemetrySample(

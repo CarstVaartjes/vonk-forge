@@ -7,6 +7,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from vonk_forge_contracts import (
+    ModelDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
+
 from vonk_control.harnesses.canonical import (
     _distributed_args,
     compile_canonical_harness,
@@ -22,12 +29,6 @@ from vonk_control.runtime.writable_paths import (
     environment,
     telemetry_contract,
     writable_paths,
-)
-from vonk_forge_contracts import (
-    ModelDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
 )
 
 BUILTINS = (

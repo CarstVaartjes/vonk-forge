@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import InvalidHashError, VerificationError
+
 from vonk_agent_protocol.outcome import InvalidRequestError
 
 

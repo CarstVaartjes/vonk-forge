@@ -13,6 +13,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.enrollment import ExpiredRenewRequest
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,

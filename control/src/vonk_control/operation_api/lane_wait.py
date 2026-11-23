@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from ..models.operations import AgentOperation

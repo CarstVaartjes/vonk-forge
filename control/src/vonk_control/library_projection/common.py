@@ -11,8 +11,6 @@ from typing import Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
-from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_agent_protocol.state_machines import AssetAvailability, RunState
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -25,6 +23,8 @@ from vonk_forge_contracts.api_checks import (
     accepted_modalities,
 )
 
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import AssetAvailability, RunState
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..catalog.revision_contract import (

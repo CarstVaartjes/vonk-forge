@@ -10,9 +10,11 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from vonk_forge_contracts import document_sha256, read_recipe
+
 import vonk_control.availability_production.production as availability_production_module
 import vonk_control.runtime.adapters as runtime_adapters_module
-from sqlalchemy import select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -37,7 +39,6 @@ from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import document_sha256, read_recipe
 
 from .display_fixtures import reword
 from .recipe_builds_support import (

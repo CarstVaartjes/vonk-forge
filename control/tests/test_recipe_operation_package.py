@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 
 import pytest
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError

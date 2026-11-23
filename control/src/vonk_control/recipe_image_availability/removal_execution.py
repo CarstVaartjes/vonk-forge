@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

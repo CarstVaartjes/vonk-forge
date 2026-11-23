@@ -11,13 +11,13 @@ from pathlib import Path
 
 import uvicorn
 from sqlalchemy.orm import sessionmaker
+
+from tests.fleet_profiles_support import _SwitchAdapter
+from tests.test_fleet_profiles_canonical import NOW
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
-
-from tests.fleet_profiles_support import _SwitchAdapter
-from tests.test_fleet_profiles_canonical import NOW
 
 
 def _app(trace_path: Path):

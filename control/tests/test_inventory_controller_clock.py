@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, select
+
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.models.fleet import AgentCertificate, AgentNodeContact
 from vonk_control.models.telemetry import NodeInventorySnapshot

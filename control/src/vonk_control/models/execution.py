@@ -21,6 +21,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
 from vonk_agent_protocol.job_limits import MAX_TIMEOUT_SECONDS
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_agent_protocol.state_machines import (
@@ -31,8 +33,6 @@ from vonk_agent_protocol.state_machines import (
     RunState,
     machine_check,
 )
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
-
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 

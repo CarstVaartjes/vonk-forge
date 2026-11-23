@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode

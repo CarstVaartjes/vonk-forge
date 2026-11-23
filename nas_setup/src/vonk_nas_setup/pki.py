@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
 from vonk_agent_protocol.installer_setup import NasStepCaControllerRequest
 
 _VALIDITY = timedelta(days=397)

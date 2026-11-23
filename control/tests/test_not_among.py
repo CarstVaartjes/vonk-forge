@@ -6,6 +6,7 @@ import re
 
 import pytest
 from sqlalchemy import Engine, column, create_engine, select, table, text
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     LifecycleState,

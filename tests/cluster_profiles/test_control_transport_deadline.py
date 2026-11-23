@@ -29,6 +29,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response, _not_adopted
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.transfers import ControlClient
+from control.tests.test_observation_transfer import _large_snapshot
 from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
@@ -38,11 +43,6 @@ from vonk_control.observation.transfer import (
     observation_response,
 )
 from vonk_control.strict_json import serialize_json_value
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.errors import ControlTransportError
-from cluster_profiles.control_client.transfers import ControlClient
-from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
 

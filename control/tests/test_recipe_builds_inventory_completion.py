@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Table, select
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.availability_production.production import (
@@ -31,7 +33,6 @@ from vonk_control.recipe_operations.observation_helpers import record_build_evid
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_builds_support import (
     RecordingQueue,

@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Route
+
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec

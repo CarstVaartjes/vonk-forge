@@ -17,8 +17,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import vonk_control.catalog.service as catalog_service_module
 from sqlalchemy import select, update
+from vonk_forge_contracts import (
+    ModelDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationQualityNote,
+)
+
+import vonk_control.catalog.service as catalog_service_module
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_control.catalog.entities import (
     CatalogEntityService,
@@ -42,19 +55,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.models.execution import MeasuredRolePeak, RecipeRun
 from vonk_control.observed_run_memory import observed_role_peaks
-from vonk_forge_contracts import (
-    ModelDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
-)
-from vonk_forge_contracts.qualification_status import (
-    PublishedQualificationStatusView,
-    QualificationQualityNote,
-)
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import signed_recipe_releases
 
 from .display_fixtures import create_draft
 from .test_catalog_sync import _fixture, _sync
@@ -413,8 +413,9 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
 ) -> None:
     """The refresh re-validates what it wrote: an api block's required nullable
     member (max_input_tokens) must survive it, not be dropped as a None."""
-    from vonk_control.catalog.entities import CatalogEntityService as Entities
     from vonk_forge_contracts import read_recipe_api
+
+    from vonk_control.catalog.entities import CatalogEntityService as Entities
 
     sessions, _service, reader, item = _fixture(tmp_path)
     for entity in reader.snapshot.catalog_entities:

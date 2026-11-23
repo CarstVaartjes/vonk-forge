@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx2
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import TokenCodec

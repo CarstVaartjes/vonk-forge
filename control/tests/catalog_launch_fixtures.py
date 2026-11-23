@@ -24,6 +24,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from vonk_forge_contracts import (
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+    read_recipe,
+)
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -37,13 +45,6 @@ from vonk_control.execution_plan_service import _bind_runtime_artifacts, _placem
 from vonk_control.models.mapping import ClusterMappingNode
 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.recipe_operations.start_payloads import start_peer_addresses
-from vonk_forge_contracts import (
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    read_model,
-    read_recipe,
-)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 INPUTS = Path(__file__).resolve().parent / "fixtures" / "catalog_launch"

@@ -21,7 +21,6 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import CatalogModelEntry, CatalogRecipeEntry
 from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,
@@ -30,6 +29,8 @@ from vonk_forge_contracts.catalog_reader import (
     SkippedEntry,
     UnrecognisedWordReport,
 )
+
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 
 from ..catalog.revision_contract import PublishedDocument
 from ..catalog.sync_contract import ManagedCatalogSyncProblem

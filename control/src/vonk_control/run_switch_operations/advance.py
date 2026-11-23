@@ -9,6 +9,7 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileChildPhase,
@@ -17,7 +18,6 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
 from vonk_control.run_switch_operations.results import _persisted_result
 
 from ..admission_locking import (

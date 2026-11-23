@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.contracts import (

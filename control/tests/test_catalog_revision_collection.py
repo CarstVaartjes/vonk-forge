@@ -32,6 +32,9 @@ from sqlalchemy import (
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
@@ -76,8 +79,6 @@ from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 OLD = NOW - GRACE - timedelta(hours=2)

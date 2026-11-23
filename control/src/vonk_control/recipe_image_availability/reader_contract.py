@@ -13,8 +13,9 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
+
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..jobs.documents import AvailabilityJobPayload
 from ..model_cache.contract import (

@@ -28,6 +28,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,

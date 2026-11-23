@@ -16,6 +16,8 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
@@ -69,7 +71,6 @@ from vonk_control.revision_images import revision_images
 from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_builds_support import _write_controller_build_receipt
 from .recipe_builds_support import setup as _build_setup

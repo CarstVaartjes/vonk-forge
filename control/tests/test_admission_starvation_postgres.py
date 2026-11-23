@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,

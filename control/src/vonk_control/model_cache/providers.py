@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import httpx2
+
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from .catalog_helpers import (

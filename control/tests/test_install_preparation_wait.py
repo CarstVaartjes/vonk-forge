@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import read_recipe
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
@@ -22,7 +24,6 @@ from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import read_recipe
 
 from .recipe_operations_support import _CanonicalImageTransport
 from .run_switch_operations_support import _cold_compile_switch

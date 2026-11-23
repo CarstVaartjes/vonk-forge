@@ -5,6 +5,7 @@ from typing import get_args
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

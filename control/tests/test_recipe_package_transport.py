@@ -20,6 +20,21 @@ from hypothesis import strategies as st
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
+    PACKAGE_MEDIA_TYPE,
+    ChatApi,
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+    published_json,
+)
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationStatus,
+)
+from vonk_forge_contracts.unrecognised import read_context
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipePackageCode
@@ -53,20 +68,6 @@ from vonk_control.recipe_packages.contracts import (
 from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import (
-    CONTRACT_MAJOR,
-    PACKAGE_MEDIA_TYPE,
-    ChatApi,
-    ModelDefinition,
-    RecipeDefinition,
-    document_sha256,
-    published_json,
-)
-from vonk_forge_contracts.qualification_status import (
-    PublishedQualificationStatusView,
-    QualificationStatus,
-)
-from vonk_forge_contracts.unrecognised import read_context
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope

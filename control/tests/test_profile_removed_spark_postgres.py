@@ -6,6 +6,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import DesiredAssignmentState

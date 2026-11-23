@@ -13,6 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -28,7 +30,6 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.recipe_operations.availability_intent import RecipeRetryIntent
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import RecipeDefinition
 
 from .display_fixtures import reworded
 from .recipe_image_availability_support import _add_revision, _recipe, _runtime

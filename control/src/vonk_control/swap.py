@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.swap import SwapIntent, default_swap
 
 from .models.fleet import FleetProfileSelection

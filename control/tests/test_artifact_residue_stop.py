@@ -8,6 +8,7 @@ from datetime import datetime
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select, text
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,

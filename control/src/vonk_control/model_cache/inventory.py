@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
+
 from vonk_agent_protocol.reason_codes.model_cache import (
     CacheReferenceReason,
     ModelCacheCode,

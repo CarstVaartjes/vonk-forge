@@ -17,12 +17,13 @@ import json
 from typing import Any, get_args
 
 import pytest
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
+from vonk_forge_contracts.recipe import RecipeJobInterface
+
 from vonk_agent_protocol.compiled_execution_plan import validate_compiled_execution_plan
 from vonk_control.harnesses.canonical_metadata import (
     CANONICAL_HARNESSES,
 )
-from vonk_forge_contracts import document_sha256, read_model, read_recipe
-from vonk_forge_contracts.recipe import RecipeJobInterface
 
 from .catalog_launch_fixtures import (
     PAYLOADS,

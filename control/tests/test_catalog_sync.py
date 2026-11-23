@@ -8,13 +8,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control.catalog.entities as catalog_entities_module
-import vonk_control.catalog.service as catalog_service_module
-import vonk_control.catalog.sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+)
+
+import vonk_control.catalog.entities as catalog_entities_module
+import vonk_control.catalog.service as catalog_service_module
+import vonk_control.catalog.sync as catalog_sync_module
+from tests.recipe_library_source import recipe_library_root
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.api import ManagedCatalogSyncResponse, _managed_sync
 from vonk_control.catalog.queries import active_head_revision
@@ -50,13 +57,6 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
     parse_source_bundle,
 )
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
-)
-
-from tests.recipe_library_source import recipe_library_root
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .display_fixtures import reword
 

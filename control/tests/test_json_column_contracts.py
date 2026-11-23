@@ -21,6 +21,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, JsonValue
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
 from vonk_control.db.connections import build_engine
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_primitives import Base
@@ -235,6 +236,7 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
 
     from sqlalchemy import text
     from sqlalchemy.exc import StatementError
+
     from vonk_control.journal_models import (
         RunSwitchJournalRepair,
         RunSwitchJournalRepairPending,

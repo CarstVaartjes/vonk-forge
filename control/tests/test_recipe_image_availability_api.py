@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor
@@ -637,6 +638,7 @@ def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
+
     from vonk_control.model_primitives import Base
     from vonk_control.runtime_image_preparation.storage import (
         FilesystemRuntimeImageStorage,

@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.revision_contract import (
@@ -44,7 +46,6 @@ from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
 from vonk_control.stored.json_values import write_guard_mode
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .model_cache_support import _canonical_model, _canonical_recipe
 from .test_library_local_state_history import _cache_set, _operation

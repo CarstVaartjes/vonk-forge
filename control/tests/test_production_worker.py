@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import (
     AgentFailureKind,

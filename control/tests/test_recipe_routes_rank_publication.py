@@ -12,6 +12,11 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from vonk_forge_contracts import (
+    EndpointAlias,
+)
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import SupervisorPhase
@@ -50,10 +55,6 @@ from vonk_control.recipe_routes.shared import (
     RecipeRouteNotReady,
     route_publication_owner_lock_statement,
 )
-from vonk_forge_contracts import (
-    EndpointAlias,
-)
-from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from .node_contacts import contact_row
 from .observed_actions import observe_action

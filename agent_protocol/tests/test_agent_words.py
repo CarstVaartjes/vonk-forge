@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.agent_words import (
     RETIRED_PROGRESS_PHASE_SPELLINGS,
     TRANSFER_PHASES,

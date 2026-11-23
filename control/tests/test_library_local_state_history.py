@@ -18,6 +18,8 @@ from sqlalchemy import String, column, create_engine, event, func, or_, select, 
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
@@ -35,7 +37,6 @@ from vonk_control.operations.blockers import make_blocker
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.strict_json import serialize_json_value
-from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 10, 24, 12, tzinfo=UTC)
 _KINDS = ("download", "download", "repair", "remove")

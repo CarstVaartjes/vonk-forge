@@ -6,8 +6,9 @@ import json
 from collections.abc import Mapping
 
 from pydantic import ValidationError
-from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_forge_contracts import RecipeDefinition
+
+from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 
 from ..resource_planning_contract import (
     ResourceRecipeProjection,

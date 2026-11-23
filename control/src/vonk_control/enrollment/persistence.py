@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
@@ -21,7 +22,6 @@ from vonk_agent_protocol.state_machines import (
     EnrollmentRecordState,
     NodeIdentityState,
 )
-
 from vonk_control.enrollment.contract import EnrollmentRotationClaim
 
 from ..agent_contacts import ensure_contact

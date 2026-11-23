@@ -13,6 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles.cli_json_contract import DocumentKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
@@ -57,8 +59,6 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.operation_api.durable import durable_operation_services
-
-from cluster_profiles.cli_json_contract import DocumentKind
 
 from .conftest import load_tools_module
 from .fleet_profiles_support import _installed_pair_plan

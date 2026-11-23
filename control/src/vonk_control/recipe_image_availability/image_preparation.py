@@ -9,6 +9,8 @@ from datetime import UTC, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -16,8 +18,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
-
 from vonk_control.lifecycle.evidence import Residue
 
 from ..artifact_jobs.lifecycle import (

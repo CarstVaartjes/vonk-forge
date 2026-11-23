@@ -7,6 +7,14 @@ from copy import deepcopy
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import document_sha256
+
+from tests.fleet_projection_support import (
+    NODE_A,
+    NOW,
+    _canonical_catalog_documents,
+    _certificate,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
@@ -30,14 +38,6 @@ from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
-)
-from vonk_forge_contracts import document_sha256
-
-from tests.fleet_projection_support import (
-    NODE_A,
-    NOW,
-    _canonical_catalog_documents,
-    _certificate,
 )
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

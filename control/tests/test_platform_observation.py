@@ -12,6 +12,9 @@ from typing import NoReturn, Self
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles import cli
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -21,9 +24,6 @@ from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObserver
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
-
-from cluster_profiles import cli
-from cluster_profiles.control_client.transfers import ControlClient
 
 
 class Jobs:

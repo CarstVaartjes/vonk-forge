@@ -3,9 +3,10 @@ import logging
 from pathlib import Path
 
 import pytest
+from vonk_forge_contracts import CONTRACT_MAJOR
+
 from vonk_control import settings as settings_module
 from vonk_control.settings import Settings, SettingsError
-from vonk_forge_contracts import CONTRACT_MAJOR
 
 _ENVIRONMENT = (
     "VONK_DEPLOYMENT_MODE",

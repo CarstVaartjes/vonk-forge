@@ -8,6 +8,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
@@ -21,7 +23,6 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from ..categorized_errors import BookkeepingUnknown, MissingRecord
 from ..fleet_profile_contract.applications import FleetProfileIntendedConfiguration

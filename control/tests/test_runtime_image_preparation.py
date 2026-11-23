@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.model_primitives import Base
@@ -25,7 +27,6 @@ from vonk_control.runtime_image_preparation.contracts import (
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.runtime_image_preparation.transport import OciLayoutImageTransport
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image, remove_test_image
 

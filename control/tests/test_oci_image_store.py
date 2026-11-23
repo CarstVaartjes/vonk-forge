@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
+
 from vonk_control.oci_image_store import Collection, OciImageStore, StoredImage
 
 pytestmark = pytest.mark.skipif(

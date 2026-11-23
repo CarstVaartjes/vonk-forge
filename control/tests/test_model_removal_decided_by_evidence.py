@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,

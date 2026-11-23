@@ -16,6 +16,8 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -36,7 +38,6 @@ from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .model_cache_support import _artifact, _shared_connection_sessions
 from .pass_budget_clocks import completing_wait, expiring_wait

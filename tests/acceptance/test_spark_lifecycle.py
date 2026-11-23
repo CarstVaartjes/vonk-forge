@@ -34,6 +34,12 @@ from urllib.parse import urlsplit
 
 import yaml
 from pydantic import ValidationError
+
+from cluster_profiles.serving_execution import (
+    HttpObservation,
+    ServingExecutionError,
+    evaluate_http_response,
+)
 from vonk_agent_protocol.agent_state import (
     NativeRenewalAction,
     NativeRenewalEvidence,
@@ -48,12 +54,6 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,
-)
-
-from cluster_profiles.serving_execution import (
-    HttpObservation,
-    ServingExecutionError,
-    evaluate_http_response,
 )
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))

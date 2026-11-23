@@ -9,9 +9,9 @@ from typing import (
 from typing import cast as typing_cast
 
 from sqlalchemy import String, and_, cast, func, literal, or_, select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-
 from vonk_control.run_switch_operations.results import _persisted_result
 
 from ..bounded_json import require_integer

@@ -2,6 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobInputFile, manifest_document
 

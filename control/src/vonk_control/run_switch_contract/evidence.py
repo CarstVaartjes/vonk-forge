@@ -12,11 +12,12 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from vonk_forge_contracts import EndpointAlias
+from vonk_forge_contracts.recipe import Scalar
+
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.inventory import MemoryPool
-from vonk_forge_contracts import EndpointAlias
-from vonk_forge_contracts.recipe import Scalar
 
 from ..mapping_parameters import MappingParameters
 from ..operations.blockers import SwapShortfallEvidence

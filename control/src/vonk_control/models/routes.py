@@ -14,8 +14,8 @@ from sqlalchemy import (
     String,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol.state_machines import RoutePublicationState, machine_check
 
+from vonk_agent_protocol.state_machines import RoutePublicationState, machine_check
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 

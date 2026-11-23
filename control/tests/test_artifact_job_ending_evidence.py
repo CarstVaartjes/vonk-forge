@@ -14,6 +14,7 @@ from datetime import UTC
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction

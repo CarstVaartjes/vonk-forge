@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason

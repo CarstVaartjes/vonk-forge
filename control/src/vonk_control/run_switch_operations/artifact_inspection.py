@@ -10,6 +10,7 @@ from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileReasonSeverity,

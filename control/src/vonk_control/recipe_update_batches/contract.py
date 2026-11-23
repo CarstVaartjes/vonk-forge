@@ -12,10 +12,10 @@ from pydantic import (
     Field,
     model_validator,
 )
+
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
-
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult

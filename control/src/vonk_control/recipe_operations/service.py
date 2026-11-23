@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 
 from ..categorized_errors import (

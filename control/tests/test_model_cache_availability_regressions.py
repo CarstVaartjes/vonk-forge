@@ -16,6 +16,8 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import ModelDefinition, document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.bounded_json import (
     require_integer,
@@ -38,7 +40,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_control.settings import MODEL_CACHE_PARALLEL_DOWNLOADS
-from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 
@@ -898,6 +899,7 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
 ) -> None:
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
+
     from vonk_control.auth import Actor
     from vonk_control.model_cache.api import install_model_operator_routes
 

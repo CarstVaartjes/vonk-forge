@@ -10,6 +10,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, select
+from vonk_forge_contracts import (
+    read_recipe,
+)
+
 from vonk_agent_protocol.contracts import AgentInstallResult, canonical_message
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -44,9 +48,6 @@ from vonk_control.recipe_operations.errors import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_forge_contracts import (
-    read_recipe,
-)
 
 from .recipe_operations_support import (
     NOW,

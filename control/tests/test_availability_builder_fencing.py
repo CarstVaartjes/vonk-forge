@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,

@@ -6,6 +6,7 @@ import uuid
 from dataclasses import replace
 
 import httpx2
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

@@ -5,6 +5,7 @@ import os
 import subprocess
 
 import pytest
+
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
 

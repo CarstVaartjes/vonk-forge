@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select, text
+
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message

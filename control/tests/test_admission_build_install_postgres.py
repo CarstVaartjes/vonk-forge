@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from sqlalchemy import event, select
+
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import RecipeInstallation
@@ -183,6 +184,7 @@ def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
     from datetime import UTC, datetime
 
     from sqlalchemy.orm import Session
+
     from vonk_agent_protocol.state_machines import ReservationState
     from vonk_control.models.execution import ResourceReservation
 

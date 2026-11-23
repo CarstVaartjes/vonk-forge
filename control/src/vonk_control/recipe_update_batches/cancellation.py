@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.exc import DBAPIError
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

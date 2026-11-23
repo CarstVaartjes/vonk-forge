@@ -6,8 +6,9 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
+
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
 from ..catalog.revision_contract import (

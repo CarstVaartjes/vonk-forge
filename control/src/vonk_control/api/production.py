@@ -11,11 +11,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol.capability_reply import ControllerCapability
-from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 import vonk_control
+from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 
 from ..agent_jobs.contracts import controller_result_consumer
 from ..agent_services import build_agent_services

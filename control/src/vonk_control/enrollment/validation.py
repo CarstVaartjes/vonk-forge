@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
+
 from vonk_agent_protocol.enrollment import (
     EnrollmentEvidence,
 )

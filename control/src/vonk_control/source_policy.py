@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 import yaml
+
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode, SourcePolicyCode
 
 from .source_bundles import GeneratedSourceBundle

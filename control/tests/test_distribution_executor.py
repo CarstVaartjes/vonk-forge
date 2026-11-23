@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload, canonical_message
 from vonk_agent_protocol.distribution import DistributionObject
@@ -86,7 +88,6 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import read_stored_model
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .agent_jobs_support import distribution_payload

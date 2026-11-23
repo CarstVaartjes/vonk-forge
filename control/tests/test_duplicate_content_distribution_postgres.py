@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.distribution.service import DistributionService
@@ -190,6 +191,7 @@ def test_a_grant_registers_after_the_nas_evicted_its_set(
 ) -> None:
     """A Spark holding the files gets the image: its grant needs no NAS set."""
     from sqlalchemy import delete
+
     from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 
     set_digest, model_source, distribution, identity, image = _world(

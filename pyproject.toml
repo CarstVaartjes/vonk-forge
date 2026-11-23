@@ -59,6 +59,10 @@ extend-exclude = [
 # Python scripts without a .py suffix.
 extend-include = ["rust/fuzz/seed-corpus"]
 
+[tool.ruff.lint.isort]
+# Classification must not depend on the generated client being present.
+known-first-party = ["cluster_profiles", "vonk_control", "vonk_agent_protocol", "vonk_nas_setup"]
+
 [tool.pyright]
 # One checker for the whole repository. scripts/check-python-types runs it from
 # the control environment, which carries the union of both projects'

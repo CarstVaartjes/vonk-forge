@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.contract import (
@@ -31,8 +34,6 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
-from vonk_forge_contracts.model import ModelReference
 
 from .display_fixtures import reword
 from .model_cache_support import (

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
+
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 

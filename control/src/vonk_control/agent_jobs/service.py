@@ -9,6 +9,7 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (

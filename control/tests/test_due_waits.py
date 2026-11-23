@@ -11,6 +11,8 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import JSON, Column, MetaData, Table, cast, inspect, literal, null, text
 from sqlalchemy.orm import sessionmaker
+
+from tests.signed_recipe_release import signed_recipe_releases
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
@@ -21,8 +23,6 @@ from vonk_control.persisted_waits import schedule_wait
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
 from vonk_control.worker.loop import Worker
-
-from tests.signed_recipe_release import signed_recipe_releases
 
 from .test_persisted_waits import NOW, _job
 
@@ -521,6 +521,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
+
     from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.models.operations import AgentOperation

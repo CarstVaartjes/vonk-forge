@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.gpu_clock import (
     GpuClockIntent,
     GpuClockRange,

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup.cli import open_private_answers
 from vonk_nas_setup.filesystem import SetupError

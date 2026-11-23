@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy.exc import OperationalError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, AdmissionLockBusy

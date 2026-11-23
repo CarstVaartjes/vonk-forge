@@ -11,6 +11,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx2
 from sqlalchemy import and_, func, or_, select
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

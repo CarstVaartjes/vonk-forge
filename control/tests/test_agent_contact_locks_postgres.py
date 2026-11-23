@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import (
     AgentResult,
     RecipeStartResult,

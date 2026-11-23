@@ -6,9 +6,10 @@ import json
 import uuid
 
 import pytest
-import vonk_control.catalog.revision_collection as collection
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
+
+import vonk_control.catalog.revision_collection as collection
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

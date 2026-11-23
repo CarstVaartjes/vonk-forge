@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import AgentFailureKind, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,

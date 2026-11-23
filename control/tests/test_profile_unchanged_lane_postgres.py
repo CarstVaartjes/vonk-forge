@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState, RunState
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline

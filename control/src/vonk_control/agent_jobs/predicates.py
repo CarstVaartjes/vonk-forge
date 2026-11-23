@@ -14,6 +14,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
+
 from vonk_agent_protocol.contracts import (
     AgentOperation,
     canonical_message,

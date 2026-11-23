@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
-from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_forge_contracts import CatalogVocabulary
 
+from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..api_availability import AVAILABILITY_ERRORS

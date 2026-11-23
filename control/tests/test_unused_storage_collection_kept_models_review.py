@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
+from vonk_forge_contracts.model import ModelReference
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache.service import ModelCacheService
@@ -39,7 +41,6 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
-from vonk_forge_contracts.model import ModelReference
 
 from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, Catalog

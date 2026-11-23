@@ -9,6 +9,7 @@ from typing import Protocol
 
 from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -17,7 +18,6 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState, RunState
-
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
 from ..categorized_errors import InvalidValue

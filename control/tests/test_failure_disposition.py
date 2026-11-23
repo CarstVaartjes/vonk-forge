@@ -14,6 +14,10 @@ from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
+
+from cluster_profiles import cli_states_generated as cli_words
+from cluster_profiles.control_client.common import observation_disposition
+from cluster_profiles.control_client.errors import ControlHTTPError
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
@@ -56,10 +60,6 @@ from vonk_control.model_cache.errors import (
     ModelCacheStorageUnknown,
 )
 from vonk_control.recovery_policy import RECOVERY, RecoveryPolicy, schedule
-
-from cluster_profiles import cli_states_generated as cli_words
-from cluster_profiles.control_client.common import observation_disposition
-from cluster_profiles.control_client.errors import ControlHTTPError
 
 from .test_lifecycle_core import FakeAdapter
 
@@ -577,6 +577,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
     from sqlalchemy.orm.exc import StaleDataError
+
     from vonk_agent_protocol.state_machines import RouteState
     from vonk_control.models.execution import RecipeRun
     from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker

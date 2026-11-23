@@ -20,6 +20,8 @@ from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
+from vonk_forge_contracts import read_recipe, read_recipe_api
+
 from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import GatewayRouteState, RoutePublicationState
 from vonk_control.gateway import route_model_info as module
@@ -48,7 +50,6 @@ from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.runtime_specs import split_option_choices
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeEndpoint
-from vonk_forge_contracts import read_recipe, read_recipe_api
 
 FIXTURES = Path(__file__).parent / "fixtures" / "route_model_info"
 EXAMPLES = files("vonk_forge_contracts").joinpath("examples")
@@ -313,6 +314,7 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
 def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> None:
     """Record the facts beside the run's revision the way the catalog sync does."""
     from sqlalchemy import select, update
+
     from vonk_control.catalog.revision_contract import (
         read_catalog_document,
         rederive_projection,
@@ -394,6 +396,7 @@ def test_the_published_route_carries_its_recipes_facts_and_never_depends_on_them
 
 def _choose_an_unknown_option(service) -> None:
     from sqlalchemy import update
+
     from vonk_control.models.mapping import ClusterMapping
 
     with service.sessions.begin() as session:
@@ -498,6 +501,7 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
 ) -> None:
     """A restarted run is a route change: its facts are read again, not frozen."""
     from sqlalchemy import update
+
     from vonk_agent_protocol.state_machines import RouteState as RunRouteState
     from vonk_control.models.execution import RecipeRun, RunNode
 

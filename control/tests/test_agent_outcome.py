@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import (
     AgentOperation,

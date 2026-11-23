@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentResult,

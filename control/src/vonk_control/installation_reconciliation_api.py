@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from .auth import MUTATION_ROLES, Actor

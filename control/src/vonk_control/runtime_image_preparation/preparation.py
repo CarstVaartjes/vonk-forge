@@ -8,9 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from ..content_identity import ImageContent, same_image
 from ..models.cache import RecipeBuild

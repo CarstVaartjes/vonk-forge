@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_runtime_image_preparation import (

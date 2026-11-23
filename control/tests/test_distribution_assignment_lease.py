@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
@@ -35,6 +36,7 @@ def _register_grant_independently(database_url, mapping, now, start):
     not shared in-process state, owns coordination between the workers."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.distribution_assignment import NodeDistributionAssignment
 
     assignment = NodeDistributionAssignment.parse(mapping)

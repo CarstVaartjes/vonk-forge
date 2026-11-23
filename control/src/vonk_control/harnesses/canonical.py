@@ -15,14 +15,15 @@ from collections.abc import Mapping, Sequence
 from math import isfinite
 from pathlib import Path
 
-from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
-from vonk_agent_protocol.telemetry import EngineFormat
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.recipe import MAX_RUNTIME_ARGV_TOKEN_BYTES
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_models,
 )
+
+from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+from vonk_agent_protocol.telemetry import EngineFormat
 
 from ..platform_ports import rebind_port_argument, serving_port
 from ..runtime.spec_contract import SpecArtifact, SpecModelIdentity, SpecModelMount

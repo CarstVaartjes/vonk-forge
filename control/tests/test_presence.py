@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_control.agent_contacts import record_contact
 from vonk_control.auth import AgentIdentity, AgentSource

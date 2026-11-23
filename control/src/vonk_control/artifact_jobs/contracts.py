@@ -12,6 +12,8 @@ from typing import Literal, NoReturn
 
 from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -49,7 +51,6 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_forge_contracts import RecipeDefinition, RecipeDisplay, read_recipe
 
 from ..compiled_artifact_contract import (
     ArtifactSlotContract,

@@ -12,6 +12,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_forge_contracts.model import ModelFile, ModelReference
+
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -52,13 +60,6 @@ from vonk_control.runtime.spec_contract import RuntimeSpec
 from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptWire,
 )
-from vonk_forge_contracts import (
-    RecipeDefinition,
-    document_sha256,
-    read_recipe,
-)
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
-from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from .canonical_recipe_fixtures import canonical_example
 

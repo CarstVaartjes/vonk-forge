@@ -71,6 +71,7 @@ def refresh_inventory(sessions, now) -> None:
     """Publish current physical fixture evidence after advancing an injected clock."""
 
     from sqlalchemy import select
+
     from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
@@ -203,6 +204,7 @@ def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     its installed ranks keep that image there. No profile of this recipe names
     it and no load of this recipe reuses it."""
     from sqlalchemy import select
+
     from vonk_control.install_admission.identity import _primary_model_sha256
     from vonk_control.models.cache import RecipeBuild
     from vonk_control.models.execution import InstallationNode, RecipeInstallation

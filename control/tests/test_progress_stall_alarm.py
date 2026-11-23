@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,

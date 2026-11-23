@@ -4,6 +4,7 @@ import json
 
 import pytest
 from pydantic import ValidationError
+
 from vonk_agent_protocol.host_helper import (
     ConfirmPackageActivationOperation,
     InstallVonkDebOperation,

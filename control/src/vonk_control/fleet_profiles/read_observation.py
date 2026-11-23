@@ -19,6 +19,7 @@ from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from ..categorized_errors import BookkeepingUnknown

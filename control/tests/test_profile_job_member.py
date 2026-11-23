@@ -17,6 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import func, select
+
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
+from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
@@ -46,9 +49,6 @@ from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
-
-from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
-from cluster_profiles.fleet_qualification_campaign_cli.profiles import _serving_run
 
 from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.invariants import ENDED

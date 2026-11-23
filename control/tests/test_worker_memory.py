@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from vonk_control.metrics.registry import MetricsRegistry
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.worker.loop import Worker
@@ -244,6 +245,7 @@ def test_metrics_export_bounded_worker_gauges_and_trace_growth(tmp_path) -> None
 def test_production_worker_reports_every_declared_component(tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.jobs.queue import JobService
     from vonk_control.model_cache.service import ModelCacheService

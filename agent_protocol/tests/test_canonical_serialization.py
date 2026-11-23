@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ConfigDict, Field, JsonValue, RootModel
+
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentProtocolError,

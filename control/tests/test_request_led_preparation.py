@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
 from vonk_control.fleet_profiles.assessment_support import (
     _assignments_needing_preparation,
 )

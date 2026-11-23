@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import httpx2
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.package_source import AgentPackageSource
 

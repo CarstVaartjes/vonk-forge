@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import InstallationBytes
 from vonk_agent_protocol.state_machines import InstallationNodeState

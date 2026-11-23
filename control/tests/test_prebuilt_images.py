@@ -16,6 +16,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_forge_contracts import RecipeDefinition
+
+from tests.recipe_builds_support import RecordingQueue
+from tests.recipe_library_source import recipe_library_root
+from tests.runtime_image_fixtures import place_test_image
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -62,12 +68,6 @@ from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import RecipeDefinition
-
-from tests.recipe_builds_support import RecordingQueue
-from tests.recipe_library_source import recipe_library_root
-from tests.runtime_image_fixtures import place_test_image
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report

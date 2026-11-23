@@ -12,6 +12,8 @@ import pytest
 from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
@@ -49,7 +51,6 @@ from vonk_control.models.fleet import (
     FleetProfileApplication,
     User,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reworded
 from .runtime_identity_support import (
@@ -1760,6 +1761,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     """A stalled receipt cannot hold a profile response or be called per assignment."""
     from threading import Event
 
+    from tests.fleet_profiles_support import _assessment, _exact_preparation
     from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
     from vonk_control.categorized_errors import BookkeepingUnknown
     from vonk_control.fleet_profiles.read_observation import (
@@ -1770,8 +1772,6 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     from vonk_control.runtime_image_preparation.storage import (
         FilesystemRuntimeImageStorage,
     )
-
-    from tests.fleet_profiles_support import _assessment, _exact_preparation
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1964,6 +1964,7 @@ def test_profile_read_preserves_observer_progress_and_next_check():
 
 def test_profile_preview_preserves_cache_inspection_progress():
     """Catches replacing the inspector's actual wait with a generic cache message."""
+    from tests.fleet_profiles_support import _assessment, _exact_preparation
     from vonk_agent_protocol.agent_words import (
         ProfileReasonSeverity,
         RunSwitchReasonScopeName,
@@ -1971,8 +1972,6 @@ def test_profile_preview_preserves_cache_inspection_progress():
     from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
     from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
     from vonk_control.run_switch_contract.evidence import RunSwitchReason
-
-    from tests.fleet_profiles_support import _assessment, _exact_preparation
 
     sessions = _sessions()
     _seed(sessions)

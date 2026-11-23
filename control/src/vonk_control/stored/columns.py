@@ -12,6 +12,14 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
+from vonk_forge_contracts import (
+    CatalogVocabulary,
+    ModelDefinition,
+    ModelDisplay,
+    RecipeDefinition,
+    RecipeDisplay,
+)
+
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     RunSwitchReasonScopeName,
@@ -38,13 +46,6 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import (
-    CatalogVocabulary,
-    ModelDefinition,
-    ModelDisplay,
-    RecipeDefinition,
-    RecipeDisplay,
-)
 
 from ..agent_upgrades.contract import (
     AgentUpgradeRolloutPayload,

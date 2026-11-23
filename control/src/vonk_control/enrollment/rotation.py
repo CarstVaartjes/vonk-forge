@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRecordState,
     CertificateRotationState,
     NodeIdentityState,
 )
-
 from vonk_control.enrollment.contract import (
     EnrollmentRotationClaim,
     EnrollmentRotationRecoveryClaim,

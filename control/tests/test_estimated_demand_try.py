@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
+
 from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
@@ -24,7 +26,6 @@ from vonk_control.resource_planning.types import (
     PlannedStopRelease,
     SwapCapacity,
 )
-from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .test_resource_planning import (
     _SPARK_POOL,

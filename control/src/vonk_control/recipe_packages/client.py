@@ -18,7 +18,6 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     PACKAGE_SCHEMA_VERSION,
@@ -34,6 +33,8 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
 from vonk_forge_contracts.resolver import validate_recipe_models
+
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 
 from ..catalog.sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import (

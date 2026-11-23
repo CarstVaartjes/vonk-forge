@@ -9,7 +9,6 @@ from typing import assert_never
 from urllib.parse import quote, urlsplit
 
 from pydantic import ValidationError
-from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -22,6 +21,8 @@ from vonk_forge_contracts.model import (
     ModelReference,
     ModelSource,
 )
+
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_json import require_mapping
 from ..catalog.revision_contract import read_shared_catalog_document

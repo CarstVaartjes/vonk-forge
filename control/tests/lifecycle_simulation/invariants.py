@@ -17,6 +17,7 @@ from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.outcome import (
     InvalidRequestError,
     SecurityRefusalError,

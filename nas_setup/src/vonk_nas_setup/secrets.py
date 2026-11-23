@@ -10,6 +10,7 @@ from urllib.parse import quote
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from vonk_agent_protocol.installer_setup import (
     NasGeneratedSecrets,
     NasInstallTemplate,

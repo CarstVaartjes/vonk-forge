@@ -62,6 +62,7 @@ def test_route_publication_waits_for_key_grants_then_heals(
     import pytest
     from sqlalchemy import event
     from sqlalchemy.exc import SQLAlchemyError
+
     from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.gateway.keys import GatewayKeyCreated, GatewayKeyService
 
@@ -177,6 +178,7 @@ def test_route_publication_waits_for_key_grants_then_heals(
 
 def test_worker_waits_for_api_publication_without_gateway_authority(tmp_path):
     import pytest
+
     from vonk_control.gateway.route_grants import require_existing_recipe_routes
     from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
     from vonk_control.recipe_routes.shared import RecipeRouteNotReady

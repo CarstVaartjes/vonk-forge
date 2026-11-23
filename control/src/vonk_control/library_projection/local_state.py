@@ -18,6 +18,7 @@ from sqlalchemy import (
     values,
 )
 from sqlalchemy.orm import load_only
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError

@@ -12,6 +12,15 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
+
+from tests.test_fleet_stream import (
+    NODE_ID,
+    NOW,
+    _events,
+    _operation_draft,
+    _production_stream_store,
+)
+from tests.test_observation_transfer import _app_peer, _large_snapshot
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
@@ -22,15 +31,6 @@ from vonk_control.observation.transfer import (
 )
 from vonk_control.strict_json import serialize_json_value
 from vonk_control.telemetry.samples import TelemetryRepository
-
-from tests.test_fleet_stream import (
-    NODE_ID,
-    NOW,
-    _events,
-    _operation_draft,
-    _production_stream_store,
-)
-from tests.test_observation_transfer import _app_peer, _large_snapshot
 
 
 async def _collect(response: ObservationTransferResponse) -> str:

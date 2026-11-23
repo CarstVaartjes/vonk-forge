@@ -2,6 +2,7 @@
 
 import pytest
 from sqlalchemy.exc import OperationalError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.journal_models import RunSwitchJournalRepairPending
@@ -27,6 +28,7 @@ def test_database_observation_failure_ends_and_accepts_fresh(
     from uuid import uuid4
 
     from psycopg.errors import SerializationFailure
+
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
     from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
@@ -56,6 +58,7 @@ def test_database_observation_failure_ends_and_accepts_fresh(
     _, restarted = _measured_profile_service(sessions, lifecycle)
     with sessions() as session:
         from sqlalchemy import select
+
         from vonk_control.models.operations import AgentOperationAttempt
 
         # The repair clock waits on the child's live owner: it runs out only

@@ -24,6 +24,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment, unavailable
@@ -48,7 +50,6 @@ from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.models.cache import ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .pass_budget_clocks import PassClock
@@ -542,9 +543,10 @@ def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_en
 
     from importlib import resources
 
+    from vonk_forge_contracts import document_sha256
+
     from vonk_control.model_cache.service import ModelCacheService
     from vonk_control.models.catalog import CatalogDocumentHead
-    from vonk_forge_contracts import document_sha256
 
     from .recipe_operations_support import setup_services
 
@@ -882,9 +884,8 @@ def test_production_owner_survives_storage_hang_failure_and_recovers(
     """A stuck/raising walk never stops the library owner; the same owner heals it."""
     from datetime import timedelta
 
-    from vonk_control.api.production import LibraryObservations
-
     from cluster_profiles.cli_render.dispatch import render_payload
+    from vonk_control.api.production import LibraryObservations
 
     original, sessions, *_ = assessed_library
     model = original.models().models[0]

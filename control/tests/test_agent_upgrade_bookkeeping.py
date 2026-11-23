@@ -18,6 +18,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_upgrades.errors import AgentUpgradeInvalid

@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.build_import import RecipeBuildCleanupEvidence
 from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -1234,6 +1235,7 @@ def test_installation_cleanup_names_the_recorded_digest_after_its_revision_is_go
     installation's bytes remain, and their cleanup names the digest the
     installation's accepted plan recorded instead of blocking for ever."""
     from sqlalchemy import delete
+
     from vonk_control.models.catalog import CatalogDocumentRevision
 
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)

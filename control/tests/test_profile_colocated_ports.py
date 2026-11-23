@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import select, update
+
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ResourceReservation

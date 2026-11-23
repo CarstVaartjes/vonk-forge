@@ -224,6 +224,7 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
     from cryptography.hazmat.primitives.asymmetric import padding, rsa
     from jsonschema import Draft202012Validator
     from pydantic import ValidationError
+
     from vonk_agent_protocol.installer_release import InstallerReleaseManifest
 
     inputs = _inputs(tmp_path)

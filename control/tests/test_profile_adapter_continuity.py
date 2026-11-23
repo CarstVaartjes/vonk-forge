@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput

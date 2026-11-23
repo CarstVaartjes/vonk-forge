@@ -11,6 +11,7 @@ from pydantic import (
     StringConstraints,
     TypeAdapter,
 )
+
 from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..recipe_image_availability.clocks_contract import readable_or_none

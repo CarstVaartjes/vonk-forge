@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     StringConstraints,
 )
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"

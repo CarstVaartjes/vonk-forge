@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.models.execution import RecipeRun
 
 from .artifact_jobs_support import _configure_artifact_recipe

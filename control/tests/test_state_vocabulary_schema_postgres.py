@@ -15,6 +15,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.exc import IntegrityError
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.db.schema import reconcile_schema
 from vonk_control.model_primitives import Base

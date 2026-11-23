@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,

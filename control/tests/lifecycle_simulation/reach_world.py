@@ -36,6 +36,8 @@ from typing import Any
 
 import httpx2
 from sqlalchemy import Engine, select
+from vonk_forge_contracts import document_sha256
+
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
@@ -53,7 +55,6 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
-from vonk_forge_contracts import document_sha256
 
 from ..recipe_operations_support import ConcurrentPublisher
 from ..run_switch_operations_support import (

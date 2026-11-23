@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
+
 from vonk_control.model_cache.persistence import (
     _manifest_of,
     _store_operation_payload,

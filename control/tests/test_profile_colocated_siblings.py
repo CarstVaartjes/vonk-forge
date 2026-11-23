@@ -19,8 +19,9 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control
 from sqlalchemy import select
+
+import vonk_control
 from vonk_control.fleet_profile_contract.effects import (
     FleetProfileEffects,
     FleetProfileInstallationEffect,

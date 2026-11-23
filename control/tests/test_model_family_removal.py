@@ -19,6 +19,9 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
+from vonk_forge_contracts import document_sha256, read_model, read_recipe
+
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_control.catalog.entities import CatalogEntityService, _digest
 from vonk_control.catalog.entities import _execution_projection as execution_of
 from vonk_control.catalog.revision_contract import (
@@ -38,9 +41,6 @@ from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )
-from vonk_forge_contracts import document_sha256, read_model, read_recipe
-
-from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 from .test_catalog_sync import ROOT, _fixture, _sync
 from .test_model_facts_split import NOW, _artifact_key, _store

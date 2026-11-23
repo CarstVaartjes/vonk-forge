@@ -1,7 +1,8 @@
-import vonk_control.models  # noqa: F401 -- loads every mapped table onto Base.metadata
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
+
+import vonk_control.models  # noqa: F401 -- loads every mapped table onto Base.metadata
 from vonk_control.db.connections import postgresql_connect_args
 from vonk_control.model_primitives import Base
 

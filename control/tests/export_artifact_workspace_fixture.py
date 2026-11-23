@@ -9,6 +9,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from vonk_forge_contracts import RecipeDefinition
+
+from tests.artifact_jobs_support import _mapping, running_artifact_service
+from tests.recipe_operations_support import NOW
+from tests.test_platform_observation import Jobs
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import ArtifactJobCreate
@@ -24,11 +29,6 @@ from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import RecipeRun
 from vonk_control.strict_json import serialize_json_value
-from vonk_forge_contracts import RecipeDefinition
-
-from tests.artifact_jobs_support import _mapping, running_artifact_service
-from tests.recipe_operations_support import NOW
-from tests.test_platform_observation import Jobs
 
 INITIAL = 9_007_199_254_740_993
 EDITED = 9_007_199_254_740_995

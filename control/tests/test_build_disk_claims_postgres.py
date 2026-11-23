@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import AgentOperation as WireOperation
 from vonk_agent_protocol.contracts import canonical_message
@@ -151,6 +152,7 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
 ):
     """A released envelope cannot let a due retry oversubscribe a later load."""
     from sqlalchemy import select
+
     from vonk_agent_protocol.contracts import (
         AgentFailureKind,
         AgentFailureResult,

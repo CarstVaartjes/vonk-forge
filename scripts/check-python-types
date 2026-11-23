@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from pydantic import ValidationError
+
 from vonk_control.typecheck_contract import (
     PyrightReport,
     PyrightSeverity,

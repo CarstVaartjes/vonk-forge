@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, WaitReason
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter

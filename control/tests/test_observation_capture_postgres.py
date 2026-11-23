@@ -18,6 +18,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message, Scope
+
+from cluster_profiles.observation_transfer_reader import receive_observation
+from tests.observation_transfer_peer import observation_document
+from tests.test_platform_observation import Jobs
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -33,10 +37,6 @@ from vonk_control.observation.platform import PlatformObservation, PlatformObser
 from vonk_control.observation.transfer import ObservationTransferRecord
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.strict_json import serialize_json_value
-
-from cluster_profiles.observation_transfer_reader import receive_observation
-from tests.observation_transfer_peer import observation_document
-from tests.test_platform_observation import Jobs
 
 NODE = "spk_" + "1" * 32
 

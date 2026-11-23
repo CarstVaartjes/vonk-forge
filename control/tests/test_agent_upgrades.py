@@ -8,6 +8,7 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentUpgradeResult, canonical_message
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome

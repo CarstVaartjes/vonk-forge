@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, get_args
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,

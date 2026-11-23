@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
+from vonk_forge_contracts import RecipeDefinition
+
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
@@ -15,7 +17,6 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.fleet import AgentNode, User
 from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_forge_contracts import RecipeDefinition
 
 from .canonical_recipe_fixtures import canonical_example
 from .test_catalog_revision_collection import NODE, Catalog

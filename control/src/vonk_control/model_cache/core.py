@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session
+
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..lifecycle.evidence import BookkeepingReason, Damaged, Residue, read_or_rebuild

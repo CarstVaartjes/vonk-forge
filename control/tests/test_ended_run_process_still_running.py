@@ -13,6 +13,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+
 from vonk_control.agent_api import ended_runs
 from vonk_control.models.execution import RecipeRun, RunNode
 

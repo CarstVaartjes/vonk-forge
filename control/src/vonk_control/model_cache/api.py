@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import ErrorCategory, WaitReason
 from vonk_agent_protocol.outcome import (
@@ -15,7 +16,6 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from ..api_availability import AVAILABILITY_ERRORS

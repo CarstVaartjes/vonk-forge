@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Annotated
 
 from pydantic import Field, StringConstraints
+
 from vonk_agent_protocol.host_tuning import HostTuning, HostUnit, InstalledUnit
 
 from ..strict_json import StrictModel

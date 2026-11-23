@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.contracts import AgentResult, AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

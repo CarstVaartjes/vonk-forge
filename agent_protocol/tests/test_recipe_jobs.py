@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentProtocolError,

@@ -6,6 +6,7 @@ from collections.abc import Collection
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,

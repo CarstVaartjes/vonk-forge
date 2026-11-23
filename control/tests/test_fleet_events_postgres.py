@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_control import fleet_events
 from vonk_control.fleet_event_contract import JobPayload
 from vonk_control.fleet_events import (

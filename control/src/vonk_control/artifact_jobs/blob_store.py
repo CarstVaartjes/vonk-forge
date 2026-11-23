@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

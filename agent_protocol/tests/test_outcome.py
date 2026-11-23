@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,

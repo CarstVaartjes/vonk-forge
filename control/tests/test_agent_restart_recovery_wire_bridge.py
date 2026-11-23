@@ -24,6 +24,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.wire_probes import prebuilt_probe
 from vonk_agent_protocol.agent_state import (
     AgentExecutorProbeMode,
     AgentExecutorProbeRequest,
@@ -43,8 +45,6 @@ from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.models.operations import AgentOperation
-
-from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent

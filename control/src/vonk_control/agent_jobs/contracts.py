@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentOperation,

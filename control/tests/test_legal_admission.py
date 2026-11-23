@@ -1,8 +1,9 @@
 """License notices must never become technical admission authority."""
 
 import pytest
-from vonk_control.legal_admission import territorial_admission
 from vonk_forge_contracts import ModelDisplay, read_model_display
+
+from vonk_control.legal_admission import territorial_admission
 
 from .display_fixtures import model_display_denying
 

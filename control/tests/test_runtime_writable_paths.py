@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.runtime.writable_paths import (

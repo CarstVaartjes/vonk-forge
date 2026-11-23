@@ -15,9 +15,9 @@ from typing import TypedDict, Unpack
 
 import pytest
 import yaml
-from vonk_nas_setup.compose import resolve_compose
 
 from tests.acceptance.runtime import AcceptanceError, reclaim_gateway_journal
+from vonk_nas_setup.compose import resolve_compose
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"

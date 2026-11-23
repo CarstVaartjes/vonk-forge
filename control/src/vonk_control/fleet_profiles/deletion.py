@@ -7,6 +7,7 @@ from typing import cast as _typing_cast
 from uuid import NAMESPACE_OID, uuid5
 
 from sqlalchemy import delete, select, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
 from ..admission_locking import AdmissionRowLock, lock_admission_rows

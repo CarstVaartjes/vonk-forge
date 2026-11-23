@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from pydantic import BaseModel
+
 from vonk_agent_protocol.package_source import AgentPackageSource
 
 from ..models.jobs import Job

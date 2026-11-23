@@ -6,6 +6,7 @@ from enum import StrEnum
 from typing import Literal
 
 from pydantic import ConfigDict
+
 from vonk_agent_protocol.wire_model import WireModel
 
 from ..fleet_profiles.stop_authority import (

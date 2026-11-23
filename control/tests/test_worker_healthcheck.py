@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
+
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder

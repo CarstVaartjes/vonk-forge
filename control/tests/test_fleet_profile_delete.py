@@ -7,6 +7,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
 from vonk_control.fleet_profiles.service import FleetProfileService

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import TelemetrySample
 from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES

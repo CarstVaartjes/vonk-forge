@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from hypothesis import example, given
 from hypothesis import strategies as st
 from sqlalchemy import event, select
+
 from vonk_agent_protocol.agent_words import (
     AgentClientDecision,
 )
@@ -60,6 +61,7 @@ def test_upload_storage_failure_preserves_agent_authority(
 ):
     # Catches NAS storage faults incorrectly sending an agent to re-enrollment.
     from fastapi import HTTPException
+
     from vonk_control.agent_api.common import _prepare_recipe_image_upload
 
     root = tmp_path / "managed"
@@ -109,6 +111,7 @@ def test_upload_storage_changed_entry_retries_then_repairs(
 ):
     # Catches a swap after cleanup producing a terminal 409 or blocking on a FIFO.
     from fastapi import HTTPException
+
     from vonk_control.agent_api import common
 
     outside = tmp_path / "outside"
@@ -143,6 +146,7 @@ def test_publication_permission_failure_retries_then_succeeds(
 ):
     # Catches publication permission failures incorrectly revoking agent authority.
     from fastapi import HTTPException
+
     from vonk_control.agent_api import common
 
     temporary = tmp_path / ".identity.upload"
@@ -230,10 +234,9 @@ def test_display_memory_agent_vectors_reobserve_through_http_store_and_cli(
     agent_system, capsys
 ):
     """Catches lost JSON enum evidence, sticky advice, or inventing unknown bytes."""
+    from cluster_profiles.cli_render.dispatch import render_payload
     from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
     from vonk_control.fleet_projection.service import FleetProjection
-
-    from cluster_profiles.cli_render.dispatch import render_payload
 
     client, services, _, clock = agent_system
     vectors = json.loads(

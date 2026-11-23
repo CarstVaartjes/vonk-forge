@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
 from ..categorized_errors import InvalidValue

@@ -20,6 +20,7 @@ from hypothesis import HealthCheck, settings
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+
 from vonk_control.model_primitives import Base
 from vonk_control.stored.json_values import install_write_guard
 
@@ -550,9 +551,10 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
 def shared_catalog_parses_unchanged() -> Iterator[None]:
     """Readers share one parse per catalog content identity; none may mutate it."""
     yield
+    from vonk_forge_contracts import read_model, read_recipe
+
     from vonk_control.bounded_json import require_mapping
     from vonk_control.catalog import revision_contract as contract
-    from vonk_forge_contracts import read_model, read_recipe
 
     changed = [
         f"{kind} {digest}"

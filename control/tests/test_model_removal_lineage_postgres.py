@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
+from vonk_forge_contracts import document_sha256
+
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
@@ -16,7 +18,6 @@ from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .model_cache_support import _canonical_model

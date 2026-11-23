@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentPayload,
@@ -435,6 +436,7 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     # left the cancelled job's container behind. A JobRun's container belongs
     # to its job and run, never to the Spark's intent.
     from cryptography.hazmat.primitives.asymmetric import ed25519
+
     from vonk_agent_protocol.host_helper import (
         ContainerRuntimeAction,
         ExecuteContainerRuntimeRequestOperation,
@@ -496,6 +498,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     # Wrong implementation: an accepted cancellation's Stop kept its grant or
     # receipt after its node was revoked or its exact document changed.
     from cryptography.hazmat.primitives.asymmetric import ed25519
+
     from vonk_agent_protocol.host_helper import ContainerRuntimeAction
     from vonk_agent_protocol.recipe_operations import RecipeStopPayload
     from vonk_control.host_helper_authority import (

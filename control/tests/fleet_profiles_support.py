@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from sqlalchemy import Table, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.applications import (
@@ -48,7 +50,6 @@ from vonk_control.run_switch_contract.evidence import (
     SparkFitNode,
 )
 from vonk_control.run_switch_contract.plans import RunSwitchAssessment
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_recipe_execution_contract import _installation_plan

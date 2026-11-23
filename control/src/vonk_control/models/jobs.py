@@ -20,8 +20,8 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.wait_contract import WaitEvidence
 

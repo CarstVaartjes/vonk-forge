@@ -13,6 +13,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import InstallationState, ReservationState
 

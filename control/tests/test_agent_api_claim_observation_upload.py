@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import event
 from starlette.types import Message
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_control.api.application import create_app
@@ -31,7 +33,6 @@ from vonk_control.models.catalog import (
 )
 from vonk_control.models.fleet import AgentCertificate, AgentNode
 from vonk_control.source_bundles import generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_api_support import NODE_A, NODE_B, Jobs, agent_headers
 from .node_contacts import contact_row

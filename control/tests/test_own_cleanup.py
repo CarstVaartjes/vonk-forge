@@ -21,6 +21,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, insert, inspect, select, update
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (

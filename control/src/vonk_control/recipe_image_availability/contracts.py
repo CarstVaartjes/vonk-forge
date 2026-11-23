@@ -23,6 +23,8 @@ from typing import Any, Protocol
 
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition, read_recipe
+
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -42,7 +44,6 @@ from vonk_agent_protocol.reason_codes.recipes import (
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 from vonk_agent_protocol.wire_model import OperationCheckpoint, OperationProgress
-from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from ..admission_locking import is_admission_contention
 from ..cache_removal_review import (

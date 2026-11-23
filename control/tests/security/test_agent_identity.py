@@ -4,6 +4,7 @@ import asyncio
 import threading
 
 import pytest
+
 from vonk_control.auth import (
     AgentIdentity,
     AgentSource,
@@ -270,6 +271,7 @@ def test_agent_handler_reuses_the_middleware_validation(
     from typing import Any, cast
 
     from fastapi.testclient import TestClient
+
     from vonk_control.agent_api import common
     from vonk_control.api import middleware
     from vonk_control.api.application import create_app

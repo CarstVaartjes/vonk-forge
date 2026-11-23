@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
+
+from cluster_profiles import cli
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileDefinition,
@@ -37,8 +39,6 @@ from vonk_control.observation.transfer import (
     ObservationTransferResponse,
     observation_response,
 )
-
-from cluster_profiles import cli
 
 from .observation_transfer_peer import observation_document
 

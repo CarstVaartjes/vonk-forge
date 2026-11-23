@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.agent_words import ProfileEffectState
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.distribution import DistributionObject

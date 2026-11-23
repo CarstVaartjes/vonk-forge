@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.orm import Session
+
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
-
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
 from ..categorized_errors import InvalidValue

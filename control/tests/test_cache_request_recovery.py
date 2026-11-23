@@ -23,6 +23,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from cluster_profiles.cli import main
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
 from vonk_control.auth import Actor
@@ -40,9 +43,6 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-
-from cluster_profiles.cli import main
-from cluster_profiles.control_client.transfers import ControlClient
 
 from .model_cache_support import _artifact
 from .recipe_image_availability_support import (

@@ -24,6 +24,7 @@ as observations.
 from __future__ import annotations
 
 from pydantic import ValidationError
+
 from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,

@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+
+from cluster_profiles.cli_render.progress import progress_line
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
@@ -41,8 +43,6 @@ from vonk_control.operation_api.responses import (
     operation_detail_response,
 )
 from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
-
-from cluster_profiles.cli_render.progress import progress_line
 
 from .agent_fences import fenced_operation
 from .package_upgrade_fixtures import source_transport

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.capability_reply import ControllerCapability
 
 from .agent_api.common import AgentApiServices

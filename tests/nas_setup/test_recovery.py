@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
+
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_nas_setup import publication
 from vonk_nas_setup.environment import parse_environment

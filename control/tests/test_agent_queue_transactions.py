@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select, update
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.definitions import UnavailableFleetProfileView

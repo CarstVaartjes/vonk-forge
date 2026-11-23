@@ -8,6 +8,8 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -25,7 +27,6 @@ from vonk_control.models.fleet import (
 )
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
 from .fleet_profiles_support import (

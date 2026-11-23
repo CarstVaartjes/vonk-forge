@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Event, Lock
 
 import httpx2
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 

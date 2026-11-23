@@ -23,13 +23,14 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.orm import Mapped, Session, mapped_column
-from vonk_agent_protocol.state_machines import machine_check
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
     read_model_display,
     read_recipe_display,
 )
+
+from vonk_agent_protocol.state_machines import machine_check
 
 from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
 from ..model_primitives import Base, _lower_hex

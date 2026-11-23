@@ -22,6 +22,15 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from vonk_forge_contracts import RecipeDefinition, RecipeDisplay
+from vonk_forge_contracts.display import KnobDisplay
+from vonk_forge_contracts.recipe import (
+    RecipeFileSlot,
+    RecipeJobInterface,
+    RecipeJobKnob,
+    RecipeSetting,
+)
+
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
@@ -33,14 +42,6 @@ from vonk_agent_protocol.job_limits import (
     MAX_TIMEOUT_SECONDS,
 )
 from vonk_agent_protocol.recipe_jobs import MediaType, canonical_media_types
-from vonk_forge_contracts import RecipeDefinition, RecipeDisplay
-from vonk_forge_contracts.display import KnobDisplay
-from vonk_forge_contracts.recipe import (
-    RecipeFileSlot,
-    RecipeJobInterface,
-    RecipeJobKnob,
-    RecipeSetting,
-)
 
 from .strict_json import StrictJSONModel
 

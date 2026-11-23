@@ -15,6 +15,7 @@ from typing import Any, Final, Literal
 
 from starlette.responses import Response
 from starlette.types import Scope
+
 from vonk_agent_protocol.outcome import InvalidRequestError, SecurityRefusalError
 
 from .cursor_contract import MAX_CURSOR_LENGTH

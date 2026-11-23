@@ -11,6 +11,8 @@ import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+
+from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import InventoryRequest
@@ -48,8 +50,6 @@ from vonk_control.models.telemetry import (
     NodeTelemetrySample,
 )
 from vonk_control.recipe_operations.execution_contract import installation_plan_document
-
-from tests.observation_transfer_peer import observation_document
 
 from .fleet_projection_support import (
     NODE_A,

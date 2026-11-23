@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
 from vonk_agent_protocol.agent_words import FailureStage, ProfileEffectState
 from vonk_agent_protocol.contracts import AgentInstallResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState

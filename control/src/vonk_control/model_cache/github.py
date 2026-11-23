@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 import httpx2
 from pydantic import ValidationError
+
 from vonk_agent_protocol.lifecycle_vocabulary import (
     OperatorActionName,
     SecurityRefusalReason,

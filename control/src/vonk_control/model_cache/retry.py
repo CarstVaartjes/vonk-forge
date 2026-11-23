@@ -6,6 +6,7 @@ import hashlib
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
+
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,

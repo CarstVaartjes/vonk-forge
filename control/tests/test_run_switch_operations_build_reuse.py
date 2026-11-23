@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select, update
+from vonk_forge_contracts import RecipeDefinition, document_sha256
+
 from vonk_agent_protocol.state_machines import InstallationState
 from vonk_control.catalog.revision_contract import (
     read_recipe_projection,
@@ -52,7 +54,6 @@ from vonk_control.run_switch_operations.interfaces import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .recipe_operations_support import NOW, installed_recipe, setup_services
