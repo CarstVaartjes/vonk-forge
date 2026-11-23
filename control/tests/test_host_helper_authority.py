@@ -11,13 +11,14 @@ from typing import Any, TypedDict
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, select
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (
@@ -97,6 +98,7 @@ from .agent_grant_requests import (
     own_stop_grant_request,
     vector,
 )
+from .artifact_jobs_support import _configure_artifact_recipe
 
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
@@ -410,8 +412,6 @@ def runtime_service(
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
     if operation_kind == "recipe.job.run.v1":
-        from .artifact_jobs_support import _configure_artifact_recipe
-
         _configure_artifact_recipe(recipe_raw)
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
     recipe_document = recipe_raw
@@ -1173,10 +1173,6 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
     )
 
     if state == "delivery-only":
-        from sqlalchemy import select
-
-        from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-
         with service._sessions.begin() as session:
             row = session.scalar(
                 select(AgentOperation).where(

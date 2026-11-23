@@ -24,6 +24,7 @@ from .fleet_profiles_support import _exact_cleanup_profile
 from .recipe_operations_support import installed_recipe, started_recipe
 from .test_fleet_profile_review import _replace_run
 from .test_profile_capacity_admission import _capacity_profile
+from .test_profile_installed_execution import _profile_service
 
 
 def test_direct_load_replans_after_installation_finishes_during_admission(
@@ -72,7 +73,6 @@ def test_direct_load_replans_after_installation_finishes_during_admission(
 
     # Reconstruct the service: the durable worker, not the submitting process,
     # owns the retry and the re-plan.
-    from .test_profile_installed_execution import _profile_service
 
     recovered, _ = _profile_service(sessions, lifecycle)
     for _ in range(4):

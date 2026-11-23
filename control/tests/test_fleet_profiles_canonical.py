@@ -28,6 +28,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_control.catalog import revision_contract as contract
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (
     rederive_projection,
@@ -43,6 +44,7 @@ from vonk_control.fleet_profile_contract.definitions import (
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles import read_observation as observation
+from vonk_control.fleet_profiles import read_observation as profile_read_observation
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.fleet_profiles.projection_support import _profile_document
 from vonk_control.fleet_profiles.read_observation import (
@@ -79,6 +81,7 @@ from vonk_control.runtime_image_preparation.storage import (
 
 from .display_fixtures import create_draft, reworded
 from .fleet_profiles_support import _SwitchAdapter
+from .pass_budget_clocks import completing_wait, expiring_wait
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -1288,8 +1291,6 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
 ):
     """A save must not resolve and parse the same selector per assignment and view."""
 
-    import vonk_control.catalog.revision_contract as contract
-
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
@@ -1481,8 +1482,6 @@ def test_profile_read_observes_distinct_content_once(
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
 
-    from vonk_control.catalog import revision_contract as contract
-
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions() as session:
         template_row = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
@@ -1545,7 +1544,6 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
-    from vonk_control.fleet_profiles import read_observation as observation
 
     submissions = []
     submit = observation._POOL.submit
@@ -1822,10 +1820,6 @@ def test_profile_storage_wait_is_bounded_and_recovers(
         if endpoint == "preview":
             return service.preview(saved.id)
         return service.read_number(1)
-
-    from vonk_control.fleet_profiles import read_observation as profile_read_observation
-
-    from .pass_budget_clocks import completing_wait, expiring_wait
 
     # The request budget runs out while the receipt is stalled, never by load.
     monkeypatch.setattr(

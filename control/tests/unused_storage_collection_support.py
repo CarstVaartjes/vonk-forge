@@ -41,6 +41,7 @@ from vonk_control.storage_demands import (
     StorageDemands,
 )
 from vonk_control.unused_storage_collection.common import ACTOR
+from vonk_control.unused_storage_collection.references import _utc
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
@@ -292,8 +293,6 @@ def _within_grace(world: Catalog) -> None:
     with world.sessions.begin() as session:
         for model in (RecipeInstallation, InstallationNode, RecipeRun):
             for row in session.scalars(select(model)):
-                from vonk_control.unused_storage_collection.references import _utc
-
                 row.updated_at = NOW - (NOW - _utc(row.updated_at)) / 100
 
 

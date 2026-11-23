@@ -185,7 +185,6 @@ def test_gpu_clock_observation_roundtrips_postgres_and_old_rows_remain_null(
             )
         )
         assert rows[0].gpu_clock is None
-        from sqlalchemy import text
 
         assert (
             session.scalar(

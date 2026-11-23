@@ -11,8 +11,10 @@ import pytest
 from sqlalchemy import Table, select
 from vonk_forge_contracts import RecipeDefinition
 
+from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import SecurityRefusalError
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -30,6 +32,9 @@ from vonk_control.recipe_builds.common import (
     _build_effective_settings,
 )
 from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_image_availability.contracts import (
+    availability_disposition,
+)
 from vonk_control.recipe_operations.observation_helpers import record_build_evidence
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -381,11 +386,6 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
-    from vonk_agent_protocol.agent_words import Disposition
-    from vonk_agent_protocol.outcome import SecurityRefusalError
-    from vonk_control.recipe_image_availability.contracts import (
-        availability_disposition,
-    )
 
     with pytest.raises(SecurityRefusalError) as denied:
         builds.reusable_build_id(revision.id)

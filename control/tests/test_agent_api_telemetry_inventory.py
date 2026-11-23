@@ -14,6 +14,7 @@ from typing import Any, TypedDict, Unpack
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
+from sqlalchemy.orm import make_transient
 from starlette.types import Message
 
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
@@ -668,8 +669,6 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(
         assert attempts == [request.fence] * 4
         assert "grant" not in ended.json()
         if removed is not None:
-            from sqlalchemy.orm import make_transient
-
             make_transient(removed)
             with services.sessions.begin() as session:
                 session.add(removed)

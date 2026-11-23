@@ -66,7 +66,7 @@ from .display_fixtures import reword
 from .model_cache_support import _artifact, _download
 from .pass_budget_clocks import PassClock
 from .recipe_image_availability_support import _recipe_projection
-from .recipe_operations_support import NOW
+from .recipe_operations_support import NOW, setup_services
 from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
@@ -550,13 +550,6 @@ def test_queued_download_progress_is_projected_from_the_persisted_row(
 
 def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_engine):
     """The production database reads the same progress through its JSON operators."""
-
-    from vonk_forge_contracts import document_sha256
-
-    from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.models.catalog import CatalogDocumentHead
-
-    from .recipe_operations_support import setup_services
 
     model = json.loads(
         resources.files("vonk_forge_contracts")

@@ -15,20 +15,26 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import OutcomeDone
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
+from vonk_control.fleet_profiles.run_switch_adapter import (
+    RunSwitchFleetProfileAdapter,
+)
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
-from vonk_control.models.fleet import AgentNode
+from vonk_control.models.fleet import AgentNode, FleetProfileApplication
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
 
 from .agent_fences import fenced_operation
+from .fleet_profiles_support import _uuid
 from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     NOW,
@@ -40,6 +46,9 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
+from .run_switch_operations_support import RecordingArtifactExecutor, _service
+from .test_profile_adapter_parallel_postgres import _stored
+from .test_profile_stop_effect_adoption_postgres import _pending_stop
 
 
 @pytest.fixture
@@ -327,25 +336,6 @@ def test_pending_service_stop_stops_its_run_at_a_newer_generation(
 def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     postgres_engine, tmp_path, monkeypatch, replacement
 ):
-    from vonk_agent_protocol.contracts import AgentResult
-    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
-    from vonk_agent_protocol.outcome import OutcomeDone
-    from vonk_agent_protocol.recipe_operations import RecipeStopResult
-    from vonk_control.agent_jobs.service import AgentJobService
-    from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
-    from vonk_control.fleet_profiles.run_switch_adapter import (
-        RunSwitchFleetProfileAdapter,
-    )
-    from vonk_control.models.fleet import FleetProfileApplication
-
-    from .agent_fences import fenced_operation
-    from .fleet_profiles_support import _uuid
-    from .profile_stop_readmission_support import start_on_released_gang
-    from .recipe_operations_support import _issue_exact_stop_grant
-    from .run_switch_operations_support import RecordingArtifactExecutor, _service
-    from .test_profile_adapter_parallel_postgres import _stored
-    from .test_profile_stop_effect_adoption_postgres import _pending_stop
-
     route_owner = []
     publishers = []
     blocked = [True]
@@ -362,8 +352,6 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 
         def dispatch(*args, **kwargs):
             if blocked[0]:
-                from vonk_control.recipe_operations.errors import RecipeRetryLater
-
                 raise RecipeRetryLater(
                     "injected unavailable dispatch after exact withdrawal"
                 )

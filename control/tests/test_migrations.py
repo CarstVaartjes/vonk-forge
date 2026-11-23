@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from alembic import command
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -169,7 +170,6 @@ def _assert_current_schema(engine) -> None:
             ).scalar_one()
             == "0000_fresh_schema"
         )
-        from alembic.autogenerate import compare_metadata
 
         differences = compare_metadata(
             MigrationContext.configure(connection), Base.metadata

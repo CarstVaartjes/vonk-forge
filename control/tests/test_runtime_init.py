@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from vonk_control import runtime_init
+from vonk_control.gateway.keys import MASTER_KEY_FILE
 from vonk_control.runtime_init import (
     SharedRuntimePaths,
     prepare_shared_volumes,
@@ -354,8 +355,6 @@ def test_gateway_master_key_is_staged_only_outside_worker_volume(
     assert api_key.read_bytes() == master.read_bytes()
     stage_compose_secrets(source, shared, gateway_master_key=api_key)
     assert not stale.exists()
-
-    from vonk_control.gateway.keys import MASTER_KEY_FILE
 
     assert MASTER_KEY_FILE == runtime_init.GATEWAY_MASTER_KEY_PATH
 

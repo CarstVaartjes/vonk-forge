@@ -55,6 +55,7 @@ from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadResult,
 )
+from vonk_control.model_cache.errors import ModelCacheNotFound
 from vonk_control.model_cache.progress import cache_progress, progress_document
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
@@ -1087,8 +1088,6 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
 
         def get_operation(self, operation_id):
             if operation_id != cache_view.id:
-                from vonk_control.model_cache.errors import ModelCacheNotFound
-
                 raise ModelCacheNotFound("model_cache.operation_missing", "missing")
             return cache_view
 

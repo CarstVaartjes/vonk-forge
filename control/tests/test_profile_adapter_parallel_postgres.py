@@ -50,6 +50,7 @@ from .fleet_profiles_support import (
     _uuid,
 )
 from .node_contacts import contact_row
+from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     _issue_exact_stop_grant,
     installed_recipe,
@@ -509,7 +510,6 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
 
     # The old physical gang is free even while the disjoint load stays pending.
     # Exercise normal admission and a fenced native Start on that exact gang.
-    from .profile_stop_readmission_support import start_on_released_gang
 
     fresh_run_id = start_on_released_gang(
         sessions,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 
 def recipe_library_root() -> Path:
     configured = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
@@ -13,8 +15,6 @@ def recipe_library_root() -> Path:
         )
         if os.environ.get("CI", "").lower() == "true":
             raise RuntimeError(message)
-        import pytest
-
         pytest.skip(message, allow_module_level=True)
     root = Path(configured).resolve()
     index = root / "catalog-index.json"
@@ -25,7 +25,5 @@ def recipe_library_root() -> Path:
         )
         if os.environ.get("CI", "").lower() == "true":
             raise FileNotFoundError(message)
-        import pytest
-
         pytest.skip(message, allow_module_level=True)
     return root

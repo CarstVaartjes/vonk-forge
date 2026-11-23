@@ -31,7 +31,11 @@ from vonk_control.lifecycle.agent_operation import (
 )
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import (
+    AgentOperation,
+    AgentOperationAttempt,
+    ArtifactDistributionAssignment,
+)
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .agent_jobs_support import (
@@ -779,8 +783,6 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service) -> None:
     # The first claim renewed the grant. Expire that retained grant while the
     # accepted recovery budget remains open, as a shorter ingress lease can.
     with sessions.begin() as session:
-        from vonk_control.models.operations import ArtifactDistributionAssignment
-
         assignment = session.scalar(select(ArtifactDistributionAssignment))
         assert assignment is not None
         assignment.expires_at = clock.now + timedelta(seconds=60)

@@ -46,6 +46,7 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
@@ -294,7 +295,6 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     result = collector.collect()
     assert lifecycle.removed == [second]
     assert _kept(result, "deferred") == 1
-    from vonk_control.persisted_waits import read_wait
 
     with world.sessions() as session:
         retained = session.get(RecipeInstallation, first)

@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+import vonk_agent_protocol
 from vonk_agent_protocol.contracts import (
     MAX_DOCUMENT_BYTES,
     AgentClaim,
@@ -263,7 +264,6 @@ def test_control_environment_installs_the_workspace_protocol() -> None:
             "project"
         ]["version"]
     )
-    import vonk_agent_protocol
 
     assert Path(vonk_agent_protocol.__file__).is_relative_to(
         ROOT / "agent_protocol/src"

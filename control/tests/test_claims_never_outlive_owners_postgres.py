@@ -80,9 +80,13 @@ from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables
 from .runtime_identity_support import claim_agent
 from .signed_recipe_release import signed_recipe_releases
+from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD
+from .test_agent_jobs_postgres import Clock as AgentJobsClock
 from .test_agent_jobs_postgres import parent as parent_job
 from .test_build_cancellation_recovery import _services
 from .test_catalog_sync import _empty_result, _fixture, _sync
+from .test_enrollment import NODE_ID, RecordingAuthority, csr, enroll
+from .test_enrollment import Clock as EnrollmentClock
 from .test_profile_port_claims import _load, _ready_profile
 from .test_stopped_build_claims import stopped_build_releases_its_resources
 
@@ -321,10 +325,8 @@ def _sync_slot(tmp_path: Path, engine: Engine, ending: str) -> None:
 def _agent_mutation_turn(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A node's mutation turn, when the agent order holding it lost its attempt."""
 
-    from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD, Clock
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = AgentJobsClock()
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
             session.add(
@@ -421,10 +423,8 @@ def _distribution_grant(tmp_path: Path, engine: Engine, ending: str) -> None:
 def _certificate_rotation(tmp_path: Path, engine: Engine, ending: str) -> None:
     """A node's renewal slot, when the process renewing it died mid-issuance."""
 
-    from .test_enrollment import NODE_ID, Clock, RecordingAuthority, csr, enroll
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = EnrollmentClock()
     authority = RecordingAuthority()
     source = enroll(EnrollmentService(sessions, authority, clock=clock))
     authority.renew_error = SystemExit("process death after the provider request")
@@ -582,10 +582,8 @@ def _live_sync_slot(tmp_path: Path, engine: Engine) -> None:
 def _live_agent_mutation_turn(tmp_path: Path, engine: Engine) -> None:
     """A node's mutation turn stays with the order whose attempt is live."""
 
-    from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD, Clock
-
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = AgentJobsClock()
     with sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
             session.add(
@@ -685,14 +683,6 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
     created, but while its renewal is still touching it.
     """
 
-    from .test_enrollment import (
-        NODE_ID,
-        Clock,
-        RecordingAuthority,
-        csr,
-        enroll,
-    )
-
     class BusyAuthority(RecordingAuthority):
         """The CA journal stays busy for the whole first request."""
 
@@ -704,7 +694,7 @@ def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
             return super().observe_node(csr_pem, now, request=request)
 
     sessions = _sessions(engine)
-    clock = Clock()
+    clock = EnrollmentClock()
     authority = BusyAuthority()
     service = EnrollmentService(sessions, authority, clock=clock)
     source = enroll(service)

@@ -128,8 +128,6 @@ def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(
     if boundary == "commit":
         store.delete(occupied.storage_key, occupied.sha256)
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; released claims asserted below
-        import asyncio
-
         asyncio.run(
             store.put_stream(
                 _digest(payload), chunks(), expected_bytes=len(payload), maximum_bytes=8
@@ -281,7 +279,6 @@ def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
         fault.setattr(fcntl, "flock", fail_unlock)
         with pytest.raises(Exception):  # noqa: B017 -- ending witness; no ingress publication and fresh admission below
             # A wrong digest ends after owning temporary bytes and a reservation.
-            import asyncio
 
             async def chunks():
                 yield b"bad!"

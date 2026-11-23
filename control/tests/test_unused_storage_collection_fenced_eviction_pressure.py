@@ -64,6 +64,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import (
     ArtifactDistributionAssignment,
 )
+from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.execution_contract import (
     parse_stored_installation_plan,
 )
@@ -241,7 +242,6 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     if path.exists():
         # Ended sweep owns no gate; a fresh sweep observes bytes and completes.
         fresh = _collector(world, image_cache_root=tmp_path)
-        from vonk_control.persisted_waits import read_wait
 
         with world.sessions() as session:
             gate = session.get(
@@ -562,8 +562,6 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
             )
         )
     with sessions() as session:
-        from vonk_control.unused_storage_collection.references import _installation_kept
-
         evidence = _Evidence.read(session, _REAL_CLOCK)
         assert compiled.artifacts[0].sha256 in evidence.operations
         assert _installation_kept(session, installation_id, evidence) is None

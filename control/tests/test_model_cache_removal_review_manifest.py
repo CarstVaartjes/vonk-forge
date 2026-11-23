@@ -6,9 +6,13 @@ import hashlib
 import json
 import os
 from datetime import UTC
+from email.message import Message
 from importlib.resources import files
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import URLError
+from urllib.parse import quote
 
 import httpx2
 import pytest
@@ -17,6 +21,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
+from cluster_profiles.cli import main
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.model_cache.api import (
@@ -514,14 +520,6 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         observed = api.get(f"/api/model/requests/{key}")
         assert observed.status_code == 200, observed.text
         assert observed.json()["operation_id"] == accepted.id
-
-        from email.message import Message
-        from io import BytesIO
-        from urllib.error import URLError
-        from urllib.parse import quote
-
-        from cluster_profiles.cli import main
-        from cluster_profiles.control_client.transfers import ControlClient
 
         token = tmp_path / "recovery-token"
         token.write_text("fixture-token")

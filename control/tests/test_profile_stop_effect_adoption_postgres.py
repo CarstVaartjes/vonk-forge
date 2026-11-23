@@ -16,6 +16,7 @@ from sqlalchemy import select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
@@ -42,7 +43,9 @@ from vonk_control.models.fleet import (
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.service import RecipeOperationService
-from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored.json_values import read_row_column, write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .fleet_profiles_support import NOW, _node_id, _uuid
@@ -428,10 +431,6 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
     # The old observer's budget has elapsed while the adopted exact effect is
     # still unresolved. Polling before a fresh receipt must preserve that same
     # Stop, not retire it and make the later receipt impossible to consume.
-    from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
-    from vonk_control.run_switch_operations.result_helpers import _read_progress
-    from vonk_control.run_switch_operations.results import _persisted_result
-    from vonk_control.stored.json_values import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.
     # The generic parent observer must not retire its accepted effect merely

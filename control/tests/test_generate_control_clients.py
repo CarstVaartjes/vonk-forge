@@ -137,8 +137,8 @@ def test_pinned_client_generator_round_trips_arbitrary_json_values(
     try:
         # Generated into the temporary directory above, so the module only
         # exists at runtime.
-        from generated_control.models.recipe_http_serving_request import (  # pyright: ignore[reportMissingImports]
-            RecipeHttpServingRequest,
+        serving_request = importlib.import_module(
+            "generated_control.models.recipe_http_serving_request"
         )
 
         values = [
@@ -151,7 +151,10 @@ def test_pinned_client_generator_round_trips_arbitrary_json_values(
         ]
         for value in values:
             payload = {"value": value}
-            assert RecipeHttpServingRequest.from_dict(payload).to_dict() == payload
+            assert (
+                serving_request.RecipeHttpServingRequest.from_dict(payload).to_dict()
+                == payload
+            )
     finally:
         sys.path.pop(0)
 

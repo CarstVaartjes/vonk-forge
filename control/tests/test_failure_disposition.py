@@ -85,6 +85,8 @@ from .deterministic_retries import (
     scan_dispositions,
     scan_rust_dispositions,
 )
+from .recipe_routes_support import NOW as ROUTE_NOW
+from .recipe_routes_support import setup
 from .test_lifecycle_core import FakeAdapter
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
@@ -584,10 +586,8 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
 
-    from .recipe_routes_support import NOW, setup
-
     routes, _runtime, applied, run_id = setup(tmp_path)
-    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: ROUTE_NOW)
     with routes.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None

@@ -71,8 +71,6 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
     assert receipt.exists()
     assert model.exists()
     with world.sessions() as session:
-        from vonk_control.models.execution import RecipeInstallation
-
         row = session.get(RecipeInstallation, live)
         assert row is not None
         assert row.state == InstallationState.INSTALLED

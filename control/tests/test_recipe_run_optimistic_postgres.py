@@ -28,6 +28,7 @@ from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeErro
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs import reconcile as sweep
 from vonk_control.agent_jobs import results as ingress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import verify_schema_is_current
@@ -406,7 +407,6 @@ def test_publication_deferral_contention_continues_without_traceback(
     assert all(record.exc_info is None for record in caplog.records)
     monkeypatch.setattr(routes, "publish_run", publish)
     assert worker._publish_runs((run_id,)) is False
-    from datetime import timedelta
 
     now[0] += timedelta(seconds=5)
     assert worker._publish_runs((run_id,)) is True
@@ -526,8 +526,6 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
             with ThreadPoolExecutor(max_workers=1) as pool:
                 pool.submit(winner).result(timeout=10)
         consume(session, operation, attempt, message)
-
-    from vonk_control.agent_jobs import reconcile as sweep
 
     completed = []
     refresh = sweep.refresh_queue_waits

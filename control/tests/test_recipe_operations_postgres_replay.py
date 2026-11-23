@@ -31,6 +31,7 @@ from vonk_control.install_admission.validation import (
     require_admissible as require_install_admissible,
 )
 from vonk_control.jobs.documents import RecipeStopParent
+from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import (
@@ -1127,7 +1128,6 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
                 )
                 is None
             )
-        from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 
         now[0] += timedelta(minutes=16)
         preparation.run_pending()

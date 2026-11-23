@@ -41,6 +41,7 @@ from vonk_control.persisted_waits import (
     schedule_wait,
     write_wait,
 )
+from vonk_control.run_switch_journal_repair.discovery import _fingerprint
 from vonk_control.stored.json_values import binding_for
 from vonk_control.wait_contract import WaitEvidence
 
@@ -135,7 +136,6 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert "last_progress_at" in raw
         assert raw["last_progress_at"] is None
         assert loaded.result == {"flag": False, "count": 0, "value": None}
-        from vonk_control.run_switch_journal_repair.discovery import _fingerprint
 
         fingerprint = _fingerprint(loaded)
         session.expire(loaded)

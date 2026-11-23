@@ -48,6 +48,7 @@ from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.models.operations import AgentOperation as AgentOperationRow
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_builds.common import (
+    RecipeBuildAdmissionBusy,
     RecipeBuildPlan,
     RecipeBuildResolution,
     RecipeBuildUnknown,
@@ -715,8 +716,6 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     class Operations:
         def build(self, plan, **_kwargs):
             if capacity_busy:
-                from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
-
                 raise RecipeBuildAdmissionBusy
             return SimpleNamespace(
                 id=str(uuid.uuid4()),

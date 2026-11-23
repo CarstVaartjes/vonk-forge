@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs.api import install_artifact_job_routes
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
@@ -652,10 +654,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
             )
 
         if expected_state != "succeeded":
-            from datetime import timedelta
-
-            from vonk_control.agent_jobs.service import AgentJobService
-
             ended_at = service._clock() + timedelta(seconds=3601)
             service._clock = lambda: ended_at
             AgentJobService(sessions, clock=lambda: ended_at).reconcile_orders()

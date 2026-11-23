@@ -1341,10 +1341,6 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
         _capacity_profile(tmp_path, engine)
     )
     if relief is None:
-        from vonk_control.unused_storage_collection.service import (
-            UnusedStorageCollector,
-        )
-
         lifecycle = planner._lifecycle
         assert lifecycle is not None
         planner._clock = lambda: profiles._clock()

@@ -578,9 +578,6 @@ def test_recipe_receipt_observation_is_request_owned(
         service.advance_removals(limit=1)
     if not repair:
         waiting = service.get_operator_request(request_key, actor="operator")
-        from vonk_control.recipe_image_availability.view_contract import (
-            RecipeCacheRemovalStatus,
-        )
 
         assert isinstance(waiting, RecipeCacheRemovalStatus)
         assert waiting.state == LifecycleState.BACKOFF

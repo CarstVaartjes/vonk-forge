@@ -5,6 +5,7 @@ from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.memory_admission import (
     PLATFORM_MEMORY_FLOOR_BYTES,
     evaluate_memory_admission,
@@ -15,7 +16,10 @@ from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.demand import resource_demand
-from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.memory import (
+    memory_capacity_snapshot,
+    memory_requirement,
+)
 from vonk_control.resource_planning.preflight import plan_resource_preflight
 from vonk_control.resource_planning.settings import (
     classify_preparation_effects,
@@ -693,10 +697,6 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
 
 def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     """Catches counting unused files, or sizing a Model the recipe does not pin."""
-
-    from vonk_forge_contracts import ModelDefinition, RecipeDefinition
-
-    from vonk_control.resource_planning.memory import memory_requirement
 
     recipe = RecipeDefinition.model_validate_json(
         resources.files("vonk_forge_contracts")

@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -848,8 +849,6 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
         pass
     assert outside.read_bytes() == payload
     if damage != "directory-sync":
-        import stat
-
         assert stat.S_ISREG(destination.lstat().st_mode)
         assert not destination.is_symlink()
         assert destination.read_bytes() == payload
@@ -858,8 +857,6 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
     assert not destination.is_symlink()
     assert destination.read_bytes() == payload
-    import stat
-
     assert any(stat.S_ISDIR(mode) for mode in synced)
 
 

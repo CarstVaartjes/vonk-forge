@@ -12,6 +12,7 @@ from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.lifecycle.types import Effect
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.models.jobs import Job
@@ -32,6 +33,7 @@ from vonk_control.run_switch_operations.image_receipts import (
     _require_profile_runtime_image,
 )
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.provider import _ADAPTER
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 from .non_blocking import assert_ended_without_blocking
@@ -246,8 +248,6 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             persisted = session.get(Job, operation.operation_id)
             assert persisted is not None
             assert persisted.state == ended.state
-            from vonk_control.lifecycle.types import Effect
-            from vonk_control.run_switch_operations.provider import _ADAPTER
 
             assert ended.result is not None
             assert ended.result.observation_deadline_at == now[0]

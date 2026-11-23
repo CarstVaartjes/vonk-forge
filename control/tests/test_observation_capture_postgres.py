@@ -25,6 +25,7 @@ from tests.test_platform_observation import Jobs
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.cli_update_contract import CliUpdateContract
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db import connections as connection_owner
 from vonk_control.db.connections import build_engine
@@ -384,8 +385,6 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             )
             return
         if resource == "cli/contract":
-            from vonk_control.cli_update_contract import CliUpdateContract
-
             contract = CliUpdateContract.model_validate_json(
                 repaired.content, strict=True
             )

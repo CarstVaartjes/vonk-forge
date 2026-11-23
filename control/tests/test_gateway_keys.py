@@ -500,8 +500,6 @@ def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replace
 
     def unavailable_rename(method, path, **kwargs):
         if path == "/key/update":
-            from vonk_control.gateway.keys import GatewayKeyError
-
             raise GatewayKeyError("injected rename loss")
         return original_request(method, path, **kwargs)
 

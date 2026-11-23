@@ -50,6 +50,8 @@ from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry.samples import TelemetryRepository
 
+from .runtime_identity_support import set_inventory_hostname
+
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 
 
@@ -610,8 +612,6 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
             )
         )
     with sessions.begin() as session:
-        from .runtime_identity_support import set_inventory_hostname
-
         set_inventory_hostname(session, node_id, "spark-3542")
 
     rows = _event_rows(sessions)

@@ -52,12 +52,19 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_operations.image_receipts import (
+    effective_build_receipt,
+)
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.stored.json_values import read_row_column
 
 from .recipe_operations_support import (
     ConcurrentPublisher,
@@ -88,10 +95,6 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
-                from vonk_control.run_switch_operations.image_receipts import (
-                    effective_build_receipt,
-                )
-
                 image = effective_build_receipt(plan, kwargs["progress"])
                 assert image is not None
                 return PhaseExecution(
@@ -373,10 +376,6 @@ def _worker_process(config: dict, crash: str) -> None:
                     )
                 )
                 return
-            from vonk_control.run_switch_contract.operations import (
-                RunSwitchOperationResult,
-            )
-            from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before
             # the accepted observation budget. No real-time sleep or new
