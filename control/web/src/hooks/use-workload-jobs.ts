@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { type ArtifactJob, type ArtifactJobInterface, type ControlApi } from "../api/types";
+import type { ArtifactJob, ArtifactJobInterface, ControlApi } from "../api/types";
 import { jobInterfacesOf } from "../lib/artifact-job";
 import { safeErrorText } from "../lib/error-display";
 

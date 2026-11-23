@@ -329,7 +329,7 @@ test.each(["disconnect", "timeout"])(
         }
         throw new TypeError("connection lost after Controller acceptance");
       }
-      if (request.method === "GET" && url.pathname.endsWith("/requests/" + accepted.request_key)) {
+      if (request.method === "GET" && url.pathname.endsWith(`/requests/${accepted.request_key}`)) {
         return new Response(JSON.stringify(accepted), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -356,7 +356,7 @@ test.each(["disconnect", "timeout"])(
       calls.filter((call) => call.method === "POST" && call.path.endsWith("/remove")),
     ).toHaveLength(1);
     const requestLookup = calls.find((call) =>
-      call.path.endsWith("/requests/" + accepted.request_key),
+      call.path.endsWith(`/requests/${accepted.request_key}`),
     );
     expect(requestLookup?.method).toBe("GET");
     expect(calls[1]?.body).toEqual({

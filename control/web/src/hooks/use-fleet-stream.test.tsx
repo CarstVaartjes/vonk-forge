@@ -70,8 +70,8 @@ class FakeFleetConnection {
   }
 }
 
-const NODE_A = "spk_" + "a".repeat(32);
-const NODE_B = "spk_" + "b".repeat(32);
+const NODE_A = `spk_${"a".repeat(32)}`;
+const NODE_B = `spk_${"b".repeat(32)}`;
 
 function point(gpu: number, nodeId = NODE_A): TelemetryPoint {
   return {

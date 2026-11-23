@@ -58,8 +58,7 @@ export function serializeControlBody(method: string, path: string, value: unknow
   const route = routeFor(method, path);
   const validator = route?.requests["application/json"];
   const text = stringifyContractJson(value);
-  if (!validator || !validator(parseContractJson(text)))
-    throw new ContractViolation(method, path, 0);
+  if (!validator?.(parseContractJson(text))) throw new ContractViolation(method, path, 0);
   return text;
 }
 export function validateControlParameters(

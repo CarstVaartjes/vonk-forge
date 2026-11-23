@@ -6,7 +6,6 @@ import type {
   RecipeDetail,
   VisualFleetNode,
 } from "../../api/types";
-import type { JobWorkloadApi } from "../../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../../hooks/use-workload-reads";
 import { groupByWorkload } from "../../lib/fleet";
 

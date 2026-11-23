@@ -5,15 +5,13 @@ vi.mock("../components/ui/metrics-chart", async (importOriginal) => ({
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { WorkloadsPage } from "./workloads";
-import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
-import { ToastProvider } from "../components/ui/toast";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { spark } from "../test-fixtures/fleet-spark";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
-let attentionUnavailable = false;
-let fleetNow = new Date("2026-09-27T10:00:00Z");
+const attentionUnavailable = false;
+const fleetNow = new Date("2026-09-27T10:00:00Z");
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
     snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },

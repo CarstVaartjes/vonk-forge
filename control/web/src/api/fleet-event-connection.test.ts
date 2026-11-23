@@ -95,7 +95,7 @@ test("reconnects one request at a time using only the applied cursor and server 
   let secondSignal: AbortSignal | null | undefined;
   const fetcher = vi.fn(async (_path: string, init: RequestInit) => {
     requests.push(init);
-    if (requests.length === 1) return response("retry: 2500\n" + frame);
+    if (requests.length === 1) return response(`retry: 2500\n${frame}`);
     secondSignal = init.signal;
     return new Response(
       new ReadableStream({

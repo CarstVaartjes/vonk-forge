@@ -1,4 +1,4 @@
-import { addWire, compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
+import { compareWire, formatWire } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
 import type {

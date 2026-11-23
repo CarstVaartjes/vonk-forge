@@ -15,7 +15,6 @@ import type {
 } from "../api/types";
 import { CatalogSyncStatusLine } from "../components/ui/catalog-sync-status";
 import { Time } from "../components/ui/time";
-import { formatDate } from "../lib/time";
 import { PageHeader } from "../components/ui/page-header";
 import { SkeletonRows } from "../components/ui/skeleton";
 import { LibraryBrowser } from "../components/library/library-browser";
@@ -28,7 +27,7 @@ import {
 } from "../components/library/library-workcell";
 import { nodeDisplayName } from "../lib/fleet";
 import { libraryRoute, modelKey } from "../lib/library-route";
-import { LibraryPath, type LibraryRoute } from "../lib/library-route";
+import { LibraryPath } from "../lib/library-route";
 import "./library.css";
 
 function subview(path: string): LibrarySubview {
