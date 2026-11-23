@@ -229,7 +229,7 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
     load = _load(tmp_path)
     # Agents answer only once the attempt is past its own install plan, so
     # the earlier phases fail with nothing issued to a Spark.
-    late = phase in {"start"}
+    late = phase == "start"
     assert _loop(load, lambda: _at_phase(load, phase), complete=late), phase
     _fail_switch(load)
     _leave_room_for_one_attempt(load)

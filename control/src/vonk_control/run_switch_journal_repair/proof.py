@@ -301,4 +301,4 @@ def _prove(
                 sample=sample,
             )
         )
-    return witnesses if witnesses else None
+    return witnesses or None

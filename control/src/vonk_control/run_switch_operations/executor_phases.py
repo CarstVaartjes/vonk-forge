@@ -751,10 +751,7 @@ class ExecutorPhasesMixin:
                 )
                 waiting = (
                     status.state in STOPPABLE_RUN_STATES
-                    or status.route_state
-                    in {
-                        RouteState.PENDING,
-                    }
+                    or status.route_state == RouteState.PENDING
                 )
                 status_reason = (
                     f"{RunSwitchCode.STOP_VERIFICATION_PENDING}: run {run_id} is "

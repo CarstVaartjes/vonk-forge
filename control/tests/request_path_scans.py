@@ -258,7 +258,7 @@ def _scoped(nodes: list[ast.AST]) -> bool:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if is_limit(node):
                     return True
-                if node.func.attr in {"in_"} and _key(node.func.value):
+                if node.func.attr == "in_" and _key(node.func.value):
                     return True
             if (
                 isinstance(node, ast.Compare)

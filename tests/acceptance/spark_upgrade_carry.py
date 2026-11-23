@@ -1498,7 +1498,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         outside = [
             probe
             for probe in self.evidence.probes
-            if probe.phase not in {"controller-redeploy"}
+            if probe.phase != "controller-redeploy"
         ]
         failures = [probe for probe in outside if not probe.ok]
         consecutive = any(

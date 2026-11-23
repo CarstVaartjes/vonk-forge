@@ -417,7 +417,7 @@ def test_run_repairs_changed_profile_port_bookkeeping(
             workload_intent_ordinal=ordinal,
         )
 
-    if change in ("intent",):
+    if change == "intent":
         with pytest.raises(Exception) as _ending:
             start()
         with sessions.begin() as session:

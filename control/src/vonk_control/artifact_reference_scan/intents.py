@@ -80,7 +80,7 @@ def _installation_plan(
 
 
 def _stated(value: int | None) -> int | None:
-    return value if value else None
+    return value or None
 
 
 def _approved_images(plan: RunSwitchPlan) -> tuple[ImageContent, ...]:

@@ -99,7 +99,7 @@ def _feed_through_the_endpoint(tmp_path: Path, sessions, node_id, now, payload) 
                 AgentCertificate.node_id == node_id
             )
         ).first()
-        serial, fingerprint = found if found else (None, None)
+        serial, fingerprint = found or (None, None)
         if session.get(AgentNodeContact, node_id) is None:
             session.add(AgentNodeContact(node_id=node_id, last_seen_at=now))
         if serial is None:
