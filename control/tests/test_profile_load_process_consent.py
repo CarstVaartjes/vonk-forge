@@ -111,10 +111,8 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     assert not stdout
     assert "Request key" not in stderr
     assert headers["Authorization"].removeprefix("Bearer ") not in stderr
-    if mode == "redirected":
-        assert abort_calls == []
-    else:
-        assert abort_calls == [("POST", "/api/profile/1/preview", None)]
+    # The plan is read to learn that it stops a workload; nothing is submitted.
+    assert abort_calls == [("POST", "/api/profile/1/preview", None)]
 
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
