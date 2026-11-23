@@ -270,11 +270,9 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
 
 # Slow by design: cold-verifies every canonical package, imports the whole
 # corpus into fresh PostgreSQL, validates every API page and restarts the cache.
-# Measured on the CI VM with 334 Models and 400 Recipes: 34 s alone (sync 16 s,
-# Recipe details 8 s, reader prepare 5 s, Model details 4 s); about 100 s under
-# four-way CI contention. No cheaper path keeps the whole-corpus proof, so the
-# budget covers the contended run.
-@pytest.mark.slow(150)
+# Import plus every canonical detail round-trip takes about 55s in the local
+# Linux container; allow 60s for this whole-corpus acceptance.
+@pytest.mark.slow(60)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
