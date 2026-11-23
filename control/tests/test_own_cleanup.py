@@ -647,7 +647,7 @@ def test_an_accepted_stop_stops_its_run_as_it_is_now(
 def _lost_job_run(tmp_path):
     """A one-shot run whose JobRun lost its lease and was cancelled by its
     operator: its container may remain, so the run's Stop must remove it."""
-    from vonk_control import artifact_job_states as ajs
+    from vonk_control.artifact_jobs import states as ajs
 
     from .test_artifact_jobs import (
         MutableClock,

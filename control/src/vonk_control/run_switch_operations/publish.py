@@ -16,7 +16,7 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,

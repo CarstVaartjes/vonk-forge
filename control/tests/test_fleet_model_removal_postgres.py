@@ -812,7 +812,7 @@ def test_lost_owner_authority_expires_before_fresh_reference(
             )
         # Reacquire the exact content reference, rather than proving only that
         # unrelated work can proceed after the failed request.
-        from vonk_control.artifact_lifecycle import (
+        from vonk_control.artifact_jobs.lifecycle import (
             ArtifactIdentity,
             require_reference_open,
         )

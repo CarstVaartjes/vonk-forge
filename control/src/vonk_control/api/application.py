@@ -16,7 +16,7 @@ from vonk_agent_protocol.capability_reply import ControllerCapability
 
 from ..agent_api.common import AgentApiServices, EnrollmentRateLimiter
 from ..agent_api.routes import install_agent_routes
-from ..artifact_job_api import (
+from ..artifact_jobs.api import (
     install_artifact_job_routes,
 )
 from ..artifact_jobs.service import ArtifactJobService

@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.http_failure import TransientReason
 
 from ..agent_operation_facts import aware as _aware
-from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
+from ..artifact_jobs.lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown

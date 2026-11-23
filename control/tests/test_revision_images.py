@@ -382,7 +382,7 @@ def test_a_saved_profile_keeps_the_image_its_recipes_successor_reuses(
 
 def test_saved_profile_selector_remains_editable_during_image_removal(sessions) -> None:
     """Cache availability is enforced by apply; saving logical intent never waits."""
-    from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
+    from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, reserve_removal
     from vonk_control.fleet_profile_contract.definitions import (
         FleetProfileAssignmentInput,
         FleetProfileInput,

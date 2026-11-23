@@ -34,8 +34,17 @@ from vonk_agent_protocol.job_limits import (
     MAX_TIMEOUT_SECONDS,
 )
 
-from .artifact_blob_store import ArtifactBlobStore
-from .artifact_jobs.contracts import (
+from ..auth import Actor, agent_identity_from_scope
+from ..compiled_artifact_contract import ParameterScalar
+from ..download_contract import download_responses, upload_request_body
+from ..operation_api.contracts import bounded_error_responses
+from ..operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
+from .blob_store import ArtifactBlobStore
+from .contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
     ArtifactJobListResponse,
@@ -43,21 +52,12 @@ from .artifact_jobs.contracts import (
     ArtifactJobUnavailableError,
     ArtifactJobView,
 )
-from .artifact_jobs.job_contract import (
+from .job_contract import (
     JOB_CONTRACT_NOT_FOUND,
     ArtifactJobContractResponse,
     JobContractNotFound,
 )
-from .artifact_jobs.service import ArtifactJobService
-from .auth import Actor, agent_identity_from_scope
-from .compiled_artifact_contract import ParameterScalar
-from .download_contract import download_responses, upload_request_body
-from .operation_api.contracts import bounded_error_responses
-from .operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from .service import ArtifactJobService
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"

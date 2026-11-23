@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireOperation
 from vonk_agent_protocol import RecipeJobRunRequest
 
-from .. import artifact_job_states as ajs
+from ..artifact_jobs import states as ajs
 from ..models.execution import ArtifactJob
 from ..models.jobs import Job
 from ..models.operations import AgentOperation

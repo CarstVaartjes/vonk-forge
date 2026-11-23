@@ -19,8 +19,8 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_job_api import install_artifact_job_routes
+from vonk_control.artifact_jobs.api import install_artifact_job_routes
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import Actor
 from vonk_control.models.execution import ArtifactJob

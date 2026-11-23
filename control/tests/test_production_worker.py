@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
+from vonk_control.artifact_jobs.maintenance import ArtifactMaintenanceCadence
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher

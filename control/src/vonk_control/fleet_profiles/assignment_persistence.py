@@ -9,7 +9,7 @@ from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,

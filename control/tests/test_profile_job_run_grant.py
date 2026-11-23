@@ -32,7 +32,7 @@ from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
-from vonk_control.artifact_blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,

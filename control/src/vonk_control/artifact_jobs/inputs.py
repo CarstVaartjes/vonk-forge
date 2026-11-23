@@ -8,13 +8,13 @@ from collections.abc import AsyncIterable
 from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError, WaitReason
 from vonk_agent_protocol.job_limits import MAX_INPUT_FILE_BYTES
 
-from .. import artifact_job_states as ajs
-from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
 from ..models.execution import ArtifactJob, ArtifactJobFile
+from . import states as ajs
+from .blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,

@@ -28,7 +28,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     RunState,
 )
-from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.revision_collection import GRACE, operation_tokens
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
@@ -3416,7 +3416,10 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
     postgres_engine: Engine, tmp_path: Path, monkeypatch, fault: str
 ) -> None:
     """Catches filesystem effects under SQL locks and gates leaked on failure."""
-    from vonk_control.artifact_lifecycle import ArtifactIdentity, require_reference_open
+    from vonk_control.artifact_jobs.lifecycle import (
+        ArtifactIdentity,
+        require_reference_open,
+    )
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)

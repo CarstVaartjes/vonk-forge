@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_control.api.application import create_app
-from vonk_control.artifact_job_api import ArtifactJobCreate
+from vonk_control.artifact_jobs.api import ArtifactJobCreate
 from vonk_control.artifact_jobs.contracts import ArtifactJobListResponse
 from vonk_control.artifact_jobs.job_contract import (
     ArtifactJobContractResponse,

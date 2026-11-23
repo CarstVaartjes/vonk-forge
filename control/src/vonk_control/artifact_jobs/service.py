@@ -35,9 +35,7 @@ from vonk_agent_protocol.job_limits import (
 )
 
 from .. import agent_operation_states as aos
-from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..cluster_mappings import mapping_option_choices
@@ -69,6 +67,7 @@ from ..recipe_start_payloads import (
     bind_compiled_execution_plan,
     start_peer_addresses,
 )
+from . import states as ajs
 from .contracts import (
     ArtifactJobCapabilitiesResponse,
     ArtifactJobError,
@@ -90,6 +89,7 @@ from .contracts import (
     _recipe_interface,
     _validate_inputs_against_contract,
 )
+from .evidence import ArtifactJobResultEvidence, read_result_evidence
 from .job_contract import ArtifactJobContractResponse, read_job_contract
 from .outputs import ArtifactJobService as OutputService
 

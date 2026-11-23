@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, RunState
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnverified,
     clear_removal,

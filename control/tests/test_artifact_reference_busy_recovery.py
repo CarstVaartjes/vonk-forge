@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeImageCode,
 )
-from vonk_control.artifact_lifecycle import ArtifactReferenceUnsettled
+from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnsettled
 from vonk_control.failure_classification import disposition
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline

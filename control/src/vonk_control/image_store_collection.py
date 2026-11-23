@@ -35,7 +35,7 @@ from vonk_agent_protocol import (
     ImageStoreCode,
 )
 
-from .artifact_lifecycle import (
+from .artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,

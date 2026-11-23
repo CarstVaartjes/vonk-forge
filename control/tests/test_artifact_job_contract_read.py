@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
 from vonk_control.api.application import create_app
-from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_job_api import install_artifact_job_routes
+from vonk_control.artifact_jobs.api import install_artifact_job_routes
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.contracts import (
     ArtifactJobInvalid,
     _effective_parameters,

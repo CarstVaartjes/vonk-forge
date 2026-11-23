@@ -25,10 +25,11 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 
-from .. import agent_operation_states, artifact_job_states
+from .. import agent_operation_states
 from ..agent_jobs.retry import superseded_cancellation_deadline
 from ..agent_operation_facts import attempt_is_live
-from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..artifact_jobs import states as artifact_job_states
+from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )

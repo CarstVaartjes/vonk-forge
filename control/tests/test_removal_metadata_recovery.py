@@ -14,9 +14,9 @@ from typing import cast
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import ArtifactLifecycleCode, AssetAvailability, LifecycleState
-from vonk_control.artifact_blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.lifecycle import ArtifactReferenceUnverified
 from vonk_control.artifact_jobs.service import ArtifactJobService
-from vonk_control.artifact_lifecycle import ArtifactReferenceUnverified
 from vonk_control.model_cache import removal_execution
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.contract import CacheManifest

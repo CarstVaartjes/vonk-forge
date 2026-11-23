@@ -35,10 +35,10 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_job_evidence import (
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
 )

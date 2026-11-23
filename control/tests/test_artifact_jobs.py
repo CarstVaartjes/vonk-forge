@@ -30,14 +30,14 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     controller_result_consumer,
     fencing_intent,
 )
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_blob_store import (
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import (
     ArtifactBlobStore,
     ArtifactBlobStoreError,
     StoredArtifactBlob,
@@ -1074,7 +1074,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     completed = service.get(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
-    from vonk_control.artifact_job_api import _view
+    from vonk_control.artifact_jobs.api import _view
 
     response = _view(completed)
     assert response.result_evidence is not None

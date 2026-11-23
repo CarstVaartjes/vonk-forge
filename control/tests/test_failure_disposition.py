@@ -541,7 +541,7 @@ def test_cache_reference_adapter_preserves_typed_unknowns_and_refusals(
 ):
     """A non-retryable effect is not necessarily known; lost authority remains a refusal."""
     from vonk_agent_protocol import ArtifactLifecycleCode
-    from vonk_control.artifact_lifecycle import ArtifactLifecycleError
+    from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
     from vonk_control.model_cache.errors import (
         ModelCacheDeletionFenceLost,
         ModelCacheRemovalOwnerInvalid,

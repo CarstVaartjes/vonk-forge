@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol import AgentResultState
-from vonk_control import artifact_job_states
+from vonk_control.artifact_jobs import states as artifact_job_states
 from vonk_control.models.execution import ArtifactJob, ArtifactJobFile, RecipeRun
 
 from .test_artifact_jobs import (

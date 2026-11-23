@@ -11,7 +11,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import fleet_profile_states
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
 )
 from ..jobs import states as job_states

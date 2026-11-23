@@ -26,9 +26,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .bounded_retry import bounded_async_attempts
-from .categorized_errors import InvalidValue
-from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..bounded_retry import bounded_async_attempts
+from ..categorized_errors import InvalidValue
+from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
 # The reference fence is a short critical section around one blob verification
 # and its durable attachment, so a bounded nonblocking claim is enough: the

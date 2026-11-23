@@ -24,7 +24,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState
-from vonk_control.artifact_lifecycle import ArtifactIdentity, lock_reference_gates
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
 from vonk_control.auth import Actor
 from vonk_control.model_cache.errors import ModelCacheConflict
 from vonk_control.model_cache.service import ModelCacheService

@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     require_reference_open,
 )

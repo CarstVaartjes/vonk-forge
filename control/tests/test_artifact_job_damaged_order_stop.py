@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select
-from vonk_control import artifact_job_states as ajs
+from vonk_control.artifact_jobs import states as ajs
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models.execution import ArtifactJob, RecipeRun
 from vonk_control.models.jobs import Job

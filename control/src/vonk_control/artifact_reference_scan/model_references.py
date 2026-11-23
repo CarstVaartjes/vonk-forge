@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..content_identity import recipe_model_digests, recipes_bound_to

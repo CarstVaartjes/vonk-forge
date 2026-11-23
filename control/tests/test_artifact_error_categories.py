@@ -6,12 +6,12 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from vonk_control.artifact_blob_store import (
+from vonk_control.artifact_jobs.blob_store import (
     ArtifactBlobDigestMismatch,
     ArtifactBlobStore,
 )
 from vonk_control.artifact_jobs.contracts import _translate_blob_error
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
 )
 

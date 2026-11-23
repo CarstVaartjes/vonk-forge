@@ -15,8 +15,8 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
 from vonk_control.failure_evidence import FailureEvidenceService
 
 from .runtime_identity_support import claim_agent

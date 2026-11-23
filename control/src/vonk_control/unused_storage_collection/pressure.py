@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import InstallationState, UnknownOutcomeError, WaitReason
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,

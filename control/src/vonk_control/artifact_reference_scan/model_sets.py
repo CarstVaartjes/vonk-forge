@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     lock_reference_gates,

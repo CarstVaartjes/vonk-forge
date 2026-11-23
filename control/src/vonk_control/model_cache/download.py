@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
     OperatorActionName,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     reference_gate_is_open_nowait,

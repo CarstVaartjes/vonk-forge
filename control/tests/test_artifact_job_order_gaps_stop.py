@@ -26,8 +26,8 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import ArtifactJobView
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter

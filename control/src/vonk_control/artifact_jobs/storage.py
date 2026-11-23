@@ -26,9 +26,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import agent_operation_states as aos
-from .. import artifact_job_states as ajs
-from ..artifact_blob_store import ArtifactBlobStore, StoredArtifactBlob
-from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
@@ -63,6 +60,8 @@ from ..recipe_operations.observation_helpers import reinstall_in_flight
 from ..recipe_operations.service import RecipeOperationService
 from ..settings import ARTIFACT_JOB_RETENTION_SECONDS
 from ..strict_json import read_stored_model
+from . import states as ajs
+from .blob_store import ArtifactBlobStore, StoredArtifactBlob
 from .contracts import (
     ArtifactFileDeclaration,
     ArtifactJobError,
@@ -84,6 +83,7 @@ from .contracts import (
     _recipe_display,
     _record_unservable_run,
 )
+from .evidence import ArtifactJobResultEvidence, read_result_evidence
 
 
 class ArtifactJobService:

@@ -29,7 +29,10 @@ from ..admission_locking import (
     lock_admission_rows,
 )
 from ..agent_operation_facts import aware
-from ..artifact_lifecycle import ArtifactLifecycleError, ArtifactReferenceUnverified
+from ..artifact_jobs.lifecycle import (
+    ArtifactLifecycleError,
+    ArtifactReferenceUnverified,
+)
 from ..cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalBlocker,

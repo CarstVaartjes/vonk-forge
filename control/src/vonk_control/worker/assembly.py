@@ -76,9 +76,9 @@ def assemble_production_worker(
     from ..agent_jobs.persistence import _OrderStore
     from ..agent_jobs.retirement import operator_resume_candidates_in_session
     from ..agent_upgrades.service import AgentUpgradeService
-    from ..artifact_blob_store import ArtifactBlobStore
+    from ..artifact_jobs.blob_store import ArtifactBlobStore
+    from ..artifact_jobs.maintenance import ArtifactMaintenanceCadence
     from ..artifact_jobs.service import ArtifactJobService
-    from ..artifact_maintenance import ArtifactMaintenanceCadence
     from ..attempt_residues import AttemptResidueReconciler
     from ..catalog.revision_collection import CatalogRevisionCollector
     from ..cluster_mappings import ClusterMappingService

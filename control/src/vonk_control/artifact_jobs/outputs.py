@@ -29,10 +29,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states
-from .. import artifact_job_states as ajs
 from ..agent_jobs.retry import result_disposition
-from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
-from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
@@ -49,6 +46,8 @@ from ..lifecycle.types import Effect, Outcome, Reported
 from ..models.execution import ArtifactJob, ArtifactJobFile
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
+from . import states as ajs
+from .blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,
@@ -58,6 +57,7 @@ from .contracts import (
     _validate_outputs_against_contract,
     _validate_outputs_against_limits,
 )
+from .evidence import ArtifactJobResultEvidence
 from .inputs import ArtifactJobService as InputService
 
 

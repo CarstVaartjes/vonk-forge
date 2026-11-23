@@ -565,7 +565,7 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
 ):
     """Catches acknowledging a published blob before its exact job/file attachment commits."""
     from vonk_control.agent_api.common import AgentApiServices
-    from vonk_control.artifact_blob_store import ArtifactBlobStore
+    from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
     from vonk_control.artifact_jobs.service import ArtifactJobService
     from vonk_control.auth import TokenCodec
     from vonk_control.models.execution import ArtifactJobFile

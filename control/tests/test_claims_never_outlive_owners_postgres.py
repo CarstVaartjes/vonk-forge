@@ -36,7 +36,7 @@ from vonk_agent_protocol import (
 from vonk_control import journal_models
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     require_reference_open,

@@ -40,7 +40,7 @@ from vonk_agent_protocol.failure_evidence import (
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from . import agent_operation_states
-from . import artifact_job_states as ajs
+from .artifact_jobs import states as ajs
 from .bounded_json import BoundedJSONError, require_integer, sequence
 from .logging import redact_text
 from .models.cache import ModelCacheOperation

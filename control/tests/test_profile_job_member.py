@@ -27,9 +27,9 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection.service import FleetProjection

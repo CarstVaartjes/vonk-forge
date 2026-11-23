@@ -71,9 +71,9 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states as aos
-from .. import artifact_job_states as ajs
 from ..agent_operation_facts import aware
-from ..artifact_job_evidence import (
+from ..artifact_jobs import states as ajs
+from ..artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
     read_result_evidence,

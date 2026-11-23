@@ -22,8 +22,8 @@ from vonk_agent_protocol import (
     RunState,
     WaitReason,
 )
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
 from vonk_control.distributed_recovery.common import _settle_unrecoverable
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter

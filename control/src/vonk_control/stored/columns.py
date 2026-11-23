@@ -52,7 +52,7 @@ from ..agent_upgrades.contract import (
     AgentUpgradeRolloutPayload,
     AgentUpgradeRolloutResult,
 )
-from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..ca_issuance_contract import CertificateIssuanceBinding
 from ..catalog.revision_contract import (
     ModelRevisionProjection,

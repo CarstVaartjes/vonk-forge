@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, event, select
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactLifecycleError,
     ArtifactLifecycleGate,
 )

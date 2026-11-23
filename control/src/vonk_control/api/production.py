@@ -19,7 +19,7 @@ import vonk_control
 
 from ..agent_jobs.contracts import controller_result_consumer
 from ..agent_services import build_agent_services
-from ..artifact_blob_store import ArtifactBlobStore
+from ..artifact_jobs.blob_store import ArtifactBlobStore
 from ..artifact_jobs.service import ArtifactJobService
 from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES

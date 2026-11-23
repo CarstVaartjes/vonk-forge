@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     RuntimeImageCode,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,

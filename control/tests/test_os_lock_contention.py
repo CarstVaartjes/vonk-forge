@@ -20,8 +20,11 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import WaitReason
-from vonk_control import artifact_blob_store
-from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
+from vonk_control.artifact_jobs import blob_store as artifact_blob_store
+from vonk_control.artifact_jobs.blob_store import (
+    ArtifactBlobStore,
+    ArtifactBlobStoreError,
+)
 from vonk_control.gateway import route_runtime
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.runtime_image_preparation.contracts import (

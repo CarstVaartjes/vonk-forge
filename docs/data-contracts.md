@@ -171,12 +171,12 @@ module defines its own.
 | `control/src/vonk_control/agent_api/common.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
 | `control/src/vonk_control/agent_upgrades/contract.py` | controller-contract | 5 | Package, request intent, plan and result documents of an agent upgrade rollout. |
 | `control/src/vonk_control/jobs/agent_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
-| `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
-| `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
-| `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
+| `control/src/vonk_control/artifact_jobs/blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
+| `control/src/vonk_control/artifact_jobs/api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
+| `control/src/vonk_control/artifact_jobs/evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
 | `control/src/vonk_control/artifact_jobs/contracts.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
 | `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
-| `control/src/vonk_control/artifact_maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
+| `control/src/vonk_control/artifact_jobs/maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
 | `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
 | `control/src/vonk_control/cache_removal_review.py` | declared | 6 | Canonical review contract shared by cache-removal owners and clients. |

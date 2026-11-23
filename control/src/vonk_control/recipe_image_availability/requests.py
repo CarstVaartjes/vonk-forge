@@ -25,7 +25,7 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_forge_contracts import RecipeDefinition
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
     lock_reference_gates,

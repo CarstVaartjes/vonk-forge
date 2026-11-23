@@ -16,7 +16,7 @@ from vonk_control.api.common import (
     _ARTIFACT_OUTPUT_UPLOAD,
     _RECIPE_IMAGE_UPLOAD,
 )
-from vonk_control.artifact_job_api import (
+from vonk_control.artifact_jobs.api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from ..artifact_lifecycle import ArtifactIdentity, lock_reference_gates
+from ..artifact_jobs.lifecycle import ArtifactIdentity, lock_reference_gates
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..models.cache import ModelCacheOperation
 from .contract import CacheOperationKind

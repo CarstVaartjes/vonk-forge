@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,

@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     RemovalOwnerKind,

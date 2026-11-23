@@ -29,7 +29,7 @@ from ..agent_api.common import (
     activation_agent_identity,
     active_agent_identity,
 )
-from ..artifact_job_api import (
+from ..artifact_jobs.api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )

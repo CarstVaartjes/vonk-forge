@@ -25,7 +25,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.types import Message, Receive, Scope, Send
 from vonk_control import terminal_history_collection
 from vonk_control.agent_contacts import record_contact
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     clear_removal,
     reserve_removal,

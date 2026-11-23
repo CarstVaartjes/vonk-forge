@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_job_evidence import read_result_evidence
+from vonk_control.artifact_jobs.evidence import read_result_evidence
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation

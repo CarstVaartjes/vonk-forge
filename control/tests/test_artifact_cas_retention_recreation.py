@@ -11,7 +11,7 @@ from uuid import uuid4
 from sqlalchemy import Engine, select
 from vonk_agent_protocol import RecipeJobRunRequest, recipe_job_manifest_sha256
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.artifact_blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.models.execution import ArtifactJob, ArtifactJobBlob, ArtifactJobFile
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt

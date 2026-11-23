@@ -38,8 +38,10 @@ SECURITY_CLASSES: dict[str, frozenset[SecurityEdge]] = {
     "vonk_control.agent_upgrades.errors:AgentUpgradeRefused": frozenset(
         {_SIGNED, _IDENTITY}
     ),
-    "vonk_control.artifact_blob_store:ArtifactBlobDigestMismatch": frozenset({_DIGEST}),
-    "vonk_control.artifact_blob_store:ArtifactBlobUnsafePath": frozenset({_AUTHZ}),
+    "vonk_control.artifact_jobs.blob_store:ArtifactBlobDigestMismatch": frozenset(
+        {_DIGEST}
+    ),
+    "vonk_control.artifact_jobs.blob_store:ArtifactBlobUnsafePath": frozenset({_AUTHZ}),
     "vonk_control.artifact_jobs.contracts:ArtifactJobRefused": frozenset(
         {_IDENTITY, _AUTHZ, _DIGEST}
     ),

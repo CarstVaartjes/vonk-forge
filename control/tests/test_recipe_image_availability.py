@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, OperationProgress, SecurityRefusalReason
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     check_removal_fence_nowait,
 )

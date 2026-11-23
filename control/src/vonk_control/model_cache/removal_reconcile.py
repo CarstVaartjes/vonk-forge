@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,

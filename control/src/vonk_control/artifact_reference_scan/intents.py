@@ -10,7 +10,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..content_identity import ImageContent, differing_image_fields

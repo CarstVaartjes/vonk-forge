@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     clear_removal,

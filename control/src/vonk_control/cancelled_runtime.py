@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .agent_jobs.stored import column_field, column_value
-from .artifact_job_evidence import read_result_evidence
+from .artifact_jobs.evidence import read_result_evidence
 from .jobs.documents import RecipeStopParent
 from .models.execution import ArtifactJob
 from .models.fleet import AgentNode
