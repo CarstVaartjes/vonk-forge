@@ -10,6 +10,7 @@ import os
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -74,10 +75,9 @@ def _durable_key(directory: Path | None, scope: str) -> str:
 
 def _forget_key(directory: Path | None, scope: str, key: str) -> None:
     root = _request_root(directory) / hashlib.sha256(scope.encode()).hexdigest()
-    try:
+    # terminal identity remains observable; never holds remote resources
+    with suppress(OSError):
         (root / key).unlink(missing_ok=True)
-    except OSError:
-        pass  # terminal identity remains observable; never holds remote resources
 
 
 def _durable_deadline(

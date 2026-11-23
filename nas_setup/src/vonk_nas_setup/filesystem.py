@@ -173,10 +173,9 @@ def atomic_replace(path: Path, content: bytes, mode: int = 0o600) -> None:
             with os.fdopen(descriptor, "wb") as stream:
                 os.fchmod(stream.fileno(), mode)
                 if original:
-                    try:
+                    # Non-root keeps its own ownership; never broaden access.
+                    with suppress(PermissionError):
                         os.fchown(stream.fileno(), original.st_uid, original.st_gid)
-                    except PermissionError:
-                        pass  # Non-root keeps its own ownership; never broaden access.
                 stream.write(content)
                 stream.flush()
                 os.fsync(stream.fileno())

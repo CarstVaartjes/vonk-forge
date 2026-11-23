@@ -15,6 +15,7 @@ import os
 import sys
 import urllib.parse
 import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import Message
@@ -232,11 +233,9 @@ def _mint_token(url: str, password: str) -> tuple[str, datetime]:
     except (UnicodeDecodeError, ValueError):
         raise LoginFailed("the Controller sent an unreadable token") from None
     finally:
-        try:
+        # The browser session expires by itself; the token is what we keep.
+        with suppress(ControlClientError, OSError):
             _post(url, "/api/auth/logout", session)
-        except (ControlClientError, OSError):
-            # The browser session expires by itself; the token is what we keep.
-            pass
     return token, expires_at
 
 
