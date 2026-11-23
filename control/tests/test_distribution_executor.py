@@ -58,6 +58,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.providers import merge_operation_providers
 from vonk_control.operations.item_contract import OperationRow, operation_item
+from vonk_control.operations.progress import project_progress
 from vonk_control.run_switch_contract.evidence import (
     ArtifactStorageImpact,
     RunSwitchPhase,
@@ -212,7 +213,10 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     }
 
 
-def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
+def test_partial_child_replays_and_aggregates_cached_target(
+    agent_system,  # noqa: F811
+    measured_receipt: bool = True,
+) -> None:
     _client, services, _tokens, clock = agent_system
     with services.sessions.begin() as session:
         for node_id in (NODE_A, NODE_B):
@@ -354,6 +358,51 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert isinstance(pending.result, RunSwitchDistributionChildResult)
     assert pending.result.progress.members[0].completed_bytes == 0
     assert isinstance(pending.result.progress.members[0].completed_bytes, int)
+    # A running target-copy child keeps the agent's measured rate and ETA
+    # through projection, and a cached target does not take the overall bar's.
+    sampled = datetime.now(UTC).isoformat()
+    with services.sessions.begin() as session:
+        running = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=first.operation_id)
+            .one()
+        )
+        running.state = "running"
+        running.current_attempt = 1
+        session.add(
+            AgentOperationAttempt(
+                operation_id=running.id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=clock.now,
+                agent_certificate_serial="serial-a",
+                state="running",
+                progress={
+                    "phase": "copying",
+                    "completed_bytes": 5,
+                    "total_bytes": 15,
+                    "total_bytes_known": True,
+                    "bytes_per_second": 1.0,
+                    "smoothed_bytes_per_second": 1.0,
+                    "eta_seconds": 10.0,
+                    "observed_at": sampled,
+                    "last_progress_at": sampled,
+                },
+            )
+        )
+    measuring = executor.get(first.operation_id)
+    assert measuring is not None
+    assert isinstance(measuring.result, RunSwitchDistributionChildResult)
+    if measured_receipt:
+        assert measuring.result.progress.operation is not None
+        overall = project_progress(
+            measuring.result.progress.operation, datetime.now(UTC)
+        )
+        assert overall.smoothed_bytes_per_second == 1.0
+        assert overall.eta_seconds == 10.0
+    with services.sessions.begin() as session:
+        session.query(AgentOperationAttempt).filter_by(operation_id=running.id).delete()
+
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -2071,7 +2120,9 @@ def test_child_persistence_retains_in_place_default_members(
     sessions = agent_system[1].sessions
     event.listen(sessions, "after_flush", check_written_receipt)
     try:
-        test_partial_child_replays_and_aggregates_cached_target(agent_system)
+        test_partial_child_replays_and_aggregates_cached_target(
+            agent_system, measured_receipt=False
+        )
     finally:
         event.remove(sessions, "after_flush", check_written_receipt)
     assert writes, "the selected persistence writer must be exercised"

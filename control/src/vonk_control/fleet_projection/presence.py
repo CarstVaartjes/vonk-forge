@@ -18,7 +18,7 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.mapping import ClusterMappingNode
 from ..recipe_operations.rank_authority import _run_is_one_shot
 from ..recipe_update_batches.notice import recipe_update_notice
-from ..run_readiness import run_not_ready_for_profile
+from ..run_readiness import GroupHealth, group_health, run_not_ready_for_profile
 from ..run_states import ENDED_RUN_STATES
 from ..strict_json import warn_unreadable_once
 from .common import (
@@ -244,6 +244,12 @@ def _loaded_presence(
                     and run.route_error is None
                 ):
                     reason = None  # Its first publication is still in flight.
+            health = group_health(
+                issue=projection_issue is not None,
+                reason=reason,
+                run_state=run.state,
+                rank_states=[node.state for node in nodes],
+            )
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             update = recipe_update_notice(
@@ -271,18 +277,12 @@ def _loaded_presence(
                         rank_state=read_state(RunState, node.state),
                         rank_age_seconds=rank_age,
                         rank_fresh=rank_fresh,
-                        group_state=(
-                            "unavailable"
-                            if projection_issue is not None
-                            else "healthy"
-                            if reason is None
-                            else "degraded"
-                        ),
-                        healthy=None
-                        if projection_issue is not None
-                        else reason is None,
+                        group_state=health.state,
+                        healthy=health.healthy,
                         projection_issue=projection_issue,
-                        degraded_reason=reason,
+                        degraded_reason=None
+                        if health.state is GroupHealth.STARTING
+                        else reason,
                         route_reason=(
                             run.route_error
                             if run.route_state != RouteState.PUBLISHED

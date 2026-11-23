@@ -105,6 +105,14 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "NAS daemon platform-image selection, persisted grace, deletion refusal recovery and lost-network re-attachment.",
     ),
     (
+        "control/tests/test_run_group_health.py",
+        "A starting group is not degraded and raises no attention; a dropped or missing rank still is; no whole-tree scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_follow_feed.py",
+        "Follow view renders the Controller's rate, ETA and per-Spark bars and keeps its terminal and pipe cadence; no whole-tree scan.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_job_receipts.py",
         "Exact operator request replay through the CLI transport; no whole-tree scan.",
     ),

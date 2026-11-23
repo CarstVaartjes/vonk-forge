@@ -15,7 +15,6 @@ from collections.abc import Collection
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import HostSettings
-from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB
 
 from .models.execution import RecipeRun, RunNode
@@ -25,10 +24,8 @@ from .recipe_operations.execution_contract import (
     parse_stored_run_plan,
 )
 from .resource_planning.types import SwapCapacity, SwapHolder
+from .run_states import HOLDING_RUN_STATES, STARTING_RUN_STATES
 from .swap import selected_swap
-
-_LOADING = (RunState.PLANNED, RunState.STARTING)
-_HOLDING = (*_LOADING, RunState.RUNNING)
 
 
 def readable_run_plan(run: RecipeRun) -> StoredRunPlan | None:
@@ -50,7 +47,7 @@ def held_rise(
     by the fleet projection of a loading rank.
     """
 
-    if plan is None or rank_state not in _HOLDING:
+    if plan is None or rank_state not in HOLDING_RUN_STATES:
         return None
     rank = next((node for node in plan.nodes if node.node_id == node_id), None)
     if (
@@ -58,7 +55,7 @@ def held_rise(
         or plan.plan_digest != run.plan_digest
         or rank.load_memory_bytes is None
         # A running service has loaded; a job run loads per job.
-        or not (rank_state in _LOADING or plan.execution_mode is not None)
+        or not (rank_state in STARTING_RUN_STATES or plan.execution_mode is not None)
     ):
         return None
     return SwapHolder(
@@ -86,7 +83,7 @@ def swap_capacity(
         .join(RunNode, RunNode.run_id == RecipeRun.id)
         .where(
             RunNode.node_id == node_id,
-            RunNode.state.in_(_HOLDING),
+            RunNode.state.in_(sorted(HOLDING_RUN_STATES)),
             RecipeRun.id.not_in(excluded_run_ids),
         )
     ):

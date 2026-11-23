@@ -235,7 +235,12 @@ class RunSwitchOperationProvider:
                     item.model_dump(mode="json") for item in operation.blockers
                 ],
                 "wait_reason": (
-                    WaitReason.OBSERVATION_UNAVAILABLE
+                    WaitReason.DEPENDENCY_PENDING
+                    if any(
+                        item.code == WaitReason.DEPENDENCY_PENDING
+                        for item in operation.blockers
+                    )
+                    else WaitReason.OBSERVATION_UNAVAILABLE
                     if any(
                         item.code == RunSwitchCode.EFFECT_UNCERTAIN
                         and item.operation is not None
