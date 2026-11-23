@@ -176,6 +176,8 @@ class LibraryProjection:
         phase: object,
         completed: object,
         total: object,
+        rate: float | None = None,
+        eta: float | None = None,
         wait: QueueWait | None = None,
     ) -> LibraryLocalProgress | None:
         """The progress of one cache operation, or ``None`` when its stored
@@ -204,6 +206,8 @@ class LibraryProjection:
             phase=phase if isinstance(phase, str) else None,
             completed_bytes=completed,
             total_bytes=total,
+            smoothed_bytes_per_second=rate,
+            eta_seconds=eta,
             reason=wait.reason if wait else None,
             blockers=list(wait.blockers) if wait else [],
             next_attempt_at=wait.next_check if wait else None,

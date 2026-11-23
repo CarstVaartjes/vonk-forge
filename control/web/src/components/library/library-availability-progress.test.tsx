@@ -1,6 +1,8 @@
 import { parseContractJson, materialize } from "../../api/contract-numeric";
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
+import type { ControlApi } from "../../api/types";
+import { LibraryPreparation } from "./library-preparation";
 import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 
 test("keeps byte progress and rate separate from file counts", () => {
@@ -151,4 +153,24 @@ test("a rate is shown only from the smoothed field", () => {
     />,
   );
   expect(screen.queryByText(/\/s/)).not.toBeInTheDocument();
+});
+
+test("a Controller preparation shows the server's rate and time remaining", () => {
+  render(
+    <LibraryPreparation
+      api={{} as ControlApi}
+      what="the model"
+      preparation={{
+        state: "running",
+        phase: "downloading",
+        completed_bytes: 42_000_000,
+        total_bytes: 168_000_000,
+        smoothed_bytes_per_second: 87_000_000,
+        eta_seconds: 24 * 60,
+        blockers: [],
+      }}
+    />,
+  );
+  expect(screen.getByText(/83\.0 MiB\/s/)).toBeInTheDocument();
+  expect(screen.getByText(/24m left/)).toBeInTheDocument();
 });

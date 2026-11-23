@@ -9588,6 +9588,23 @@
     "LibraryLocalProgress": {
       "description": "Observable progress for a Controller-local preparation operation.",
       "properties": {
+        "activity": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "waiting",
+                "possibly_stalled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Activity"
+        },
         "blockers": {
           "items": {
             "$ref": "#/$defs/OperationBlocker"
@@ -9601,6 +9618,19 @@
           "minimum": 0,
           "title": "Completed Bytes",
           "type": "integer"
+        },
+        "eta_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eta Seconds"
         },
         "next_attempt_at": {
           "anyOf": [
@@ -9652,6 +9682,19 @@
             }
           ],
           "default": null
+        },
+        "smoothed_bytes_per_second": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Smoothed Bytes Per Second"
         },
         "state": {
           "enum": [
