@@ -454,7 +454,7 @@ def _application(
 
 
 def _real_lifecycle(tmp_path: Path, *, nodes: int = 1, engine: Engine | None = None):
-    from .recipe_operations_support import installed_recipe, setup_services
+    from .test_recipe_operations import installed_recipe, setup_services
 
     sessions, service, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, nodes=nodes, engine=engine

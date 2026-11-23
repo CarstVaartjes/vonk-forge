@@ -44,7 +44,9 @@ from vonk_control.run_switch_contract import (
 from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
 
 from .node_contacts import contact_row
-from .recipe_operations_support import (
+from .runtime_identity_support import claim_agent
+from .test_lifecycle_preflight import _finish
+from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -52,8 +54,6 @@ from .recipe_operations_support import (
     installed_recipe,
     setup_services,
 )
-from .runtime_identity_support import claim_agent
-from .test_lifecycle_preflight import _finish
 from .test_run_switch_operations import (
     MODEL_ARTIFACT,
     MODEL_ARTIFACT_SET,

@@ -19,7 +19,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
 )
 
-from .recipe_operations_support import installed_recipe, setup_services
+from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

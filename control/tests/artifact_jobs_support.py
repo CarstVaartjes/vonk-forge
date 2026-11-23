@@ -34,8 +34,12 @@ from vonk_control.models import (
     AgentOperation,
 )
 
-from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import claim_agent
+from .test_recipe_operations import (
+    NOW,
+    installed_recipe,
+    setup_services,
+)
 
 
 def _cancelling(view) -> bool:

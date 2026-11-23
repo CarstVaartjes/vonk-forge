@@ -37,7 +37,7 @@ from vonk_control.recipe_routes import (
 
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
-from .recipe_operations_support import (
+from .test_recipe_operations import (
     NOW,
     _required,
     installed_recipe,

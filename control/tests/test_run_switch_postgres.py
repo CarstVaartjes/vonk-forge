@@ -40,7 +40,8 @@ from vonk_control.run_switch_operations import _stored_job_plan
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
-from .recipe_operations_support import (
+from .test_lifecycle_preflight import _finish
+from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -50,7 +51,6 @@ from .recipe_operations_support import (
     start_evidence,
     started_recipe,
 )
-from .test_lifecycle_preflight import _finish
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

@@ -332,7 +332,7 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
     from vonk_control.jobs.documents import RunSwitchJobPayload
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import CompleteArtifactInspector, _request
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
@@ -404,7 +404,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -581,7 +581,7 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
         _persisted_result,
     )
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -708,7 +708,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
         _persisted_result,
     )
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -818,7 +818,7 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -926,7 +926,7 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -1016,7 +1016,7 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import (
+    from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,
@@ -1104,7 +1104,7 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
 
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import (
+    from .test_recipe_operations import (
         installed_recipe,
         setup_services,
         started_recipe,

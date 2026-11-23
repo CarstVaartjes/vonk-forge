@@ -38,7 +38,6 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
     _uuid,
 )
-from .recipe_operations_support import installed_recipe, setup_services
 from .runtime_image_fixtures import (
     place_test_image,
     refresh_inventory,
@@ -46,6 +45,7 @@ from .runtime_image_fixtures import (
 )
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
+from .test_recipe_operations import installed_recipe, setup_services
 
 
 def _complete_rebuild(

@@ -260,7 +260,7 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
         release_inactive_run_claims_in_session,
     )
 
-    from .recipe_operations_support import started_recipe
+    from .test_recipe_operations import started_recipe
 
     sessions, service, installation_id, nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine

@@ -63,8 +63,10 @@ from .artifact_jobs_support import (
     submitted_artifact_job,
 )
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
-from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
+from .test_recipe_operations import (
+    NOW,
+)
 
 
 def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_result(

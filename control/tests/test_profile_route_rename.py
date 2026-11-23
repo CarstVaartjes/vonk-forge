@@ -26,7 +26,7 @@ from vonk_control.recipe_routes import RecipeRouteNotReady
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
-from .recipe_operations_support import ConcurrentPublisher
+from .test_recipe_operations import ConcurrentPublisher
 
 _BLOCKERS = {
     "run.port_occupied",

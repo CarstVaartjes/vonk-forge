@@ -58,8 +58,8 @@ from vonk_control.unused_storage_collection import evidence as collector_evidenc
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .recipe_image_availability_support import _availability_payload
-from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_fleet_model_removal_postgres import inventory
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 @dataclass(frozen=True)

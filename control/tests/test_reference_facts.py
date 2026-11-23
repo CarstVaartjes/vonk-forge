@@ -25,8 +25,8 @@ from vonk_control.models import (
 )
 from vonk_control.reference_facts import profiles_naming
 
-from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_fleet_model_removal_postgres import inventory
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_removal_review_budget import (
     _cached_sets,
     _hex,

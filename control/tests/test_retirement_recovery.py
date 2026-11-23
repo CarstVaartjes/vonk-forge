@@ -44,15 +44,15 @@ from vonk_control.stored.json_values import read_row_column
 from .agent_fences import fenced_attempt, fenced_operation
 from .non_blocking import assert_ended_without_blocking
 from .preflight_fixtures import record_passing_preflight
-from .recipe_operations_support import (
+from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
+from .test_recipe_operations import (
     NOW,
     _required,
     installed_recipe,
     setup_services,
     start_evidence,
 )
-from .runtime_identity_support import claim_agent
-from .runtime_image_fixtures import refresh_inventory
 
 #: The stored word of an order or job that waits for a person.
 PARKED = "needs-operator"

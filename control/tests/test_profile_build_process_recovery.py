@@ -57,15 +57,15 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.source_bundles import SourceBundleStore
 
-from .recipe_operations_support import (
+from .runtime_image_fixtures import place_test_image, remove_test_image
+from .test_lifecycle_preflight import _finish as complete_preflight
+from .test_profile_build_memory import _accepted_build_profile
+from .test_recipe_operations import (
     ConcurrentPublisher,
     RecordingQueue,
     _CanonicalModelCache,
     complete_started_recipe,
 )
-from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_lifecycle_preflight import _finish as complete_preflight
-from .test_profile_build_memory import _accepted_build_profile
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

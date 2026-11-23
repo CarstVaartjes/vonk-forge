@@ -42,8 +42,8 @@ from vonk_control.run_switch_operations import (
 )
 
 from .recipe_builds_support import RecordingQueue
-from .recipe_operations_support import complete_started_recipe
 from .test_build_revision_install import _prepared_successor
+from .test_recipe_operations import complete_started_recipe
 
 
 def _foreign_receipt(storage, receipt) -> None:

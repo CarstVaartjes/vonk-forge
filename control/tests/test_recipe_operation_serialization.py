@@ -21,7 +21,7 @@ from vonk_control.recipe_operations.observation_helpers import _RECIPE_PARENT_RE
 from vonk_control.stored.json_values import bindings
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
-from .recipe_operations_support import installed_recipe, setup_services, start_evidence
+from .test_recipe_operations import installed_recipe, setup_services, start_evidence
 
 
 @pytest.mark.parametrize("nodes", [1, 2])

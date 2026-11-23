@@ -24,14 +24,14 @@ from vonk_control.models import AgentOperation, Job
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
 from .agent_jobs_support import COMMIT, parent
-from .recipe_operations_support import (
+from .runtime_identity_support import claim_agent
+from .test_distributed_recovery_budget import _AdvancingClock
+from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
     start_evidence,
 )
-from .runtime_identity_support import claim_agent
-from .test_distributed_recovery_budget import _AdvancingClock
 
 _PREFLIGHT = {
     "source_build": False,

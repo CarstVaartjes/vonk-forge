@@ -24,8 +24,8 @@ from tests.wire_probes import prebuilt_probe
 
 from .agent_fences import fenced_operation
 from .artifact_jobs_support import running_artifact_service
-from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
+from .test_recipe_operations import NOW
 
 
 @pytest.fixture(scope="session")

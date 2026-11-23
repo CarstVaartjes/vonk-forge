@@ -20,7 +20,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
-from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 

@@ -27,7 +27,7 @@ from vonk_control.models import (
 from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .recipe_operations_support import (
+from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

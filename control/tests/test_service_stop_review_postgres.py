@@ -19,7 +19,7 @@ from vonk_control.models import (
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 
-from .recipe_operations_support import (
+from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -330,7 +330,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     from .profile_stop_readmission_support import start_on_released_gang
     from .test_profile_adapter_parallel_postgres import _stored
     from .test_profile_stop_effect_adoption_postgres import _pending_stop
-    from .test_recipe_operations_part5 import _issue_exact_stop_grant
+    from .test_recipe_operations import _issue_exact_stop_grant
     from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
     route_owner = []
@@ -587,7 +587,7 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang
-    from .test_recipe_operations_part5 import _issue_exact_stop_grant
+    from .test_recipe_operations import _issue_exact_stop_grant
 
     sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
         published_service_run

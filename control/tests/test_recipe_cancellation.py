@@ -7,7 +7,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.models import AgentOperation, Job
 
-from .recipe_operations_support import setup_services
+from .test_recipe_operations import setup_services
 
 
 def test_invalid_cancel_has_no_effect_and_valid_cancel_admits_fresh(tmp_path) -> None:
@@ -58,7 +58,7 @@ def test_cancel_waits_for_a_live_order_and_the_order_ends_it(tmp_path) -> None:
     from vonk_control.agent_jobs.persistence import _OrderStore
     from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 
-    from .recipe_operations_support import NOW
+    from .test_recipe_operations import NOW
 
     sessions, service, _queue, mapping, build, _nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping, build)

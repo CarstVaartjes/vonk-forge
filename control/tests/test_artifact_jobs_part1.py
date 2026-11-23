@@ -66,8 +66,12 @@ from .artifact_jobs_support import (
     running_artifact_service,
     submitted_artifact_job,
 )
-from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import claim_agent
+from .test_recipe_operations import (
+    NOW,
+    installed_recipe,
+    setup_services,
+)
 
 
 def test_a_jobrun_is_never_fenced_by_its_sparks_workload_intent() -> None:

@@ -16,10 +16,10 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_routes.service import RecipeRecoveryDeadlineError
 
-from .recipe_operations_support import _required
-from .test_recipe_operations_part4 import (
+from .test_recipe_operations import (
     _queued_distributed_recovery_restart,
     _recovery_deadline,
+    _required,
 )
 
 

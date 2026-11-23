@@ -62,14 +62,14 @@ from .agent_fences import fenced_operation
 from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
 from .fleet_profiles_support import _uuid
 from .profile_due_fixtures import next_profile_due
-from .recipe_operations_support import (
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_fleet_profile_api import _client, _headers
+from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
     started_recipe,
 )
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_fleet_profile_api import _client, _headers
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,

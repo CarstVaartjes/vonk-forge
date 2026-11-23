@@ -18,7 +18,7 @@ from vonk_control.models import Job
 from vonk_control.recipe_operations import RecipeOperationView
 from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
 
-from .recipe_operations_support import NOW, complete_started_recipe, setup_services
+from .test_recipe_operations import NOW, complete_started_recipe, setup_services
 
 
 @pytest.mark.parametrize("composite", [False, True])

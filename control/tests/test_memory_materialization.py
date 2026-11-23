@@ -6,7 +6,11 @@ from sqlalchemy import select
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import AgentOperation, RunNode
 
-from .recipe_operations_support import installed_recipe, setup_services, start_evidence
+from .test_recipe_operations import (
+    installed_recipe,
+    setup_services,
+    start_evidence,
+)
 
 
 def test_rank_launch_does_not_credit_unmeasured_resident_memory(

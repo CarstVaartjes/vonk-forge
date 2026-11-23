@@ -48,9 +48,9 @@ from .fleet_profiles_support import (
     _SwitchAdapter,
 )
 from .non_blocking import assert_ended_without_blocking
-from .recipe_operations_support import started_recipe
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles_part3 import _exact_cleanup_profile
+from .test_recipe_operations import started_recipe
 
 
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
@@ -58,7 +58,7 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
 ):
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -682,7 +682,7 @@ def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .recipe_operations_support import setup_services
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,

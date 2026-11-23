@@ -10,7 +10,7 @@ from vonk_control.models import AgentNode, Job, RecipeBuild, RecipeInstallation
 from vonk_control.recipe_builds import RecipeBuildService
 
 from .recipe_builds_support import setup as setup_build
-from .recipe_operations_support import setup_services
+from .test_recipe_operations import setup_services
 
 
 def test_source_build_plan_writer_and_install_retry_share_builder_admission(

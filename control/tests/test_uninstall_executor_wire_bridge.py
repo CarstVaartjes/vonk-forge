@@ -23,7 +23,6 @@ from vonk_control.models import AgentOperation as StoredOperation
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row
-from .recipe_operations_support import installed_recipe, setup_services
 from .runtime_identity_support import claim_agent
 from .test_agent_restart_recovery_wire_bridge import (
     _probe_request,
@@ -32,6 +31,7 @@ from .test_agent_restart_recovery_wire_bridge import (
     distribution_https,  # noqa: F401
     restart_probe,  # noqa: F401
 )
+from .test_recipe_operations import installed_recipe, setup_services
 
 
 @pytest.mark.parametrize(

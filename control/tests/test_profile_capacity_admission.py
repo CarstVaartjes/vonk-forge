@@ -46,9 +46,9 @@ from vonk_control.storage_demands import (
 
 from cluster_profiles.cli_render import render_payload
 
-from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import _profile_service
+from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
 def _occupying_ports(

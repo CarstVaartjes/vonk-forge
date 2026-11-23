@@ -1442,7 +1442,7 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
         release_inactive_run_claims_in_session,
     )
 
-    from .recipe_operations_support import started_recipe
+    from .test_recipe_operations import started_recipe
 
     sessions, service, installation_id, nodes = _real_lifecycle(tmp_path, nodes=sparks)
     run_id = started_recipe(

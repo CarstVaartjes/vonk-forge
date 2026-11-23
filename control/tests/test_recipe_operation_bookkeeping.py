@@ -74,7 +74,8 @@ from vonk_control.run_admission import RunAdmissionService
 
 from .recipe_builds_support import RecordingQueue as BuildQueue
 from .recipe_builds_support import setup as build_setup
-from .recipe_operations_support import (
+from .recipe_stop_fixtures import recipe_stop_payload
+from .test_recipe_operations import (
     NOW,
     _required,
     complete_started_recipe,
@@ -83,7 +84,6 @@ from .recipe_operations_support import (
     start_evidence,
     started_recipe,
 )
-from .recipe_stop_fixtures import recipe_stop_payload
 
 DAMAGED: dict[str, object] = {"not": "a stored plan"}
 

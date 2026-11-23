@@ -16,7 +16,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _persisted_result, _read_progress
 
-from .recipe_operations_support import NOW, setup_services
+from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_operations import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,

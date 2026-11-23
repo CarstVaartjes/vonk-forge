@@ -19,7 +19,6 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -31,6 +30,7 @@ from .test_profile_load_installed_cli import (
     _process_environment,
     _run_pty,
 )
+from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
