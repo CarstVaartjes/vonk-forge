@@ -100,16 +100,16 @@ observed: no GPU compute process runs (the `nvidia-smi --query-compute-apps`
 reading telemetry takes), because a workload still up holds its own tables. A
 stop that never completes, or one with a GPU process still up, is simply no
 reading and blocks nothing. The agent keeps the first idle-stop reading of the
-boot and the latest and reports them as `HostSettings.memory_fragmentation`
+boot and the latest (two byte values) and reports them as `HostSettings.memory_fragmentation`
 (`MemoryFragmentation`, keyed by `/proc/sys/kernel/random/boot_id`, kept in the
 agent's data directory across agent restarts and begun again after a reboot).
 The Controller (`fleet_projection/memory_fragmentation.py`) advises a reboot
 when `SecPageTables` at the latest idle stop exceeds the first idle stop of this
-boot by more than the margin. Growth is monotonic, so the advice holds until the
-boot changes.
+boot by more than the margin. It compares first with latest only, so the advice
+clears if the latest reading drops back within the margin; it is not latched.
 
-The margin is 1 GiB of large blocks at risk. One unmovable page can pin one
-block, so `n` leftover page-table bytes put `n / page_size * 2 MiB` at risk: at a
+The margin is 512 leftover page-table pages (`grown // page_size > 512`). Each
+unmovable page can pin one 2 MiB block, so 512 pages put 1 GiB at risk: at a
 4 KiB page, 2 MiB of leftover tables. 1 GiB is under 1% of 128 GiB, the order of
 the reported cost. Fewer than two readings give no advice. The Controller
 deploys before the agents (strict readers).

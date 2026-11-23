@@ -5,7 +5,7 @@ launches NCCL with both. When NCCL uses only one, the port gives about 112 of
 200 Gb/s. The agent reports each device's traffic over the window since its
 last report (``FabricDevice``); this compares the two siblings of a port. It is
 advice: nothing is restarted, and a window too short to judge, a sibling that is
-not ACTIVE (the helper never launched it), or no traffic at all give none.
+not ACTIVE (down or without an address, so the helper does not launch it), or no traffic at all give none.
 
 Thresholds, from first principles:
 

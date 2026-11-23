@@ -3176,11 +3176,6 @@
           "title": "Bytes",
           "type": "integer"
         },
-        "name": {
-          "pattern": "^[A-Za-z0-9_.-]{1,32}$",
-          "title": "Name",
-          "type": "string"
-        },
         "port": {
           "pattern": "^[0-9a-f]{2}:[0-9a-f]{2}\\.[0-7]$",
           "title": "Port",
@@ -3194,7 +3189,6 @@
         }
       },
       "required": [
-        "name",
         "port",
         "active",
         "bytes",
@@ -10171,11 +10165,17 @@
           "title": "Boot Id",
           "type": "string"
         },
-        "idle_stop_first": {
-          "$ref": "#/$defs/MemoryPoint"
+        "idle_stop_first_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Idle Stop First Bytes",
+          "type": "integer"
         },
-        "idle_stop_latest": {
-          "$ref": "#/$defs/MemoryPoint"
+        "idle_stop_latest_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Idle Stop Latest Bytes",
+          "type": "integer"
         },
         "page_size_bytes": {
           "maximum": 1073741824,
@@ -10187,32 +10187,10 @@
       "required": [
         "boot_id",
         "page_size_bytes",
-        "idle_stop_first",
-        "idle_stop_latest"
+        "idle_stop_first_bytes",
+        "idle_stop_latest_bytes"
       ],
       "title": "MemoryFragmentation",
-      "type": "object"
-    },
-    "MemoryPoint": {
-      "description": "``SecPageTables`` (/proc/meminfo: the IOMMU and secondary-MMU page\ntables) at one moment.",
-      "properties": {
-        "at": {
-          "format": "date-time",
-          "title": "At",
-          "type": "string"
-        },
-        "sec_page_tables_bytes": {
-          "maximum": 17592186044416,
-          "minimum": 0,
-          "title": "Sec Page Tables Bytes",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "at",
-        "sec_page_tables_bytes"
-      ],
-      "title": "MemoryPoint",
       "type": "object"
     },
     "MemoryUsageUncertainty": {

@@ -5,28 +5,24 @@
       "name": "both rails of both ports carry traffic",
       "fabric_devices": [
         {
-          "name": "rocep1s0f0",
           "port": "01:00.0",
           "active": true,
           "bytes": 3700000000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f0",
           "port": "01:00.0",
           "active": true,
           "bytes": 3600000000,
           "window_seconds": 120
         },
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 3650000000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 3640000000,
@@ -39,14 +35,12 @@
       "name": "one rail flat beside a busy sibling",
       "fabric_devices": [
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 7300000000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 12288,
@@ -59,14 +53,12 @@
       "name": "idle fabric keepalives only",
       "fabric_devices": [
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 20000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 9000,
@@ -79,14 +71,12 @@
       "name": "sibling port down so never launched",
       "fabric_devices": [
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 7300000000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": false,
           "bytes": 0,
@@ -99,14 +89,12 @@
       "name": "window too short to judge",
       "fabric_devices": [
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 7300000000,
           "window_seconds": 10
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 0,
@@ -119,14 +107,12 @@
       "name": "uneven but both in use",
       "fabric_devices": [
         {
-          "name": "rocep1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 7300000000,
           "window_seconds": 120
         },
         {
-          "name": "roceP2p1s0f1",
           "port": "01:00.1",
           "active": true,
           "bytes": 730000000,
@@ -187,21 +173,18 @@
     "window_seconds": 120,
     "expected": [
       {
-        "name": "roceP2p1s0f1",
         "port": "01:00.1",
         "active": true,
         "bytes": 12,
         "window_seconds": 120
       },
       {
-        "name": "rocep1s0f0",
         "port": "01:00.0",
         "active": false,
         "bytes": 0,
         "window_seconds": 120
       },
       {
-        "name": "rocep1s0f1",
         "port": "01:00.1",
         "active": true,
         "bytes": 3200000000,

@@ -124,8 +124,8 @@ class HostSettings(WireModel):
     swap: SwapObservation | None = None
     # None: the agent predates the host checks.
     tuning: HostTuning | None = None
-    # Readings around workload loads and stops since boot; None before the
-    # first one and when the agent could not take any.
+    # SecPageTables after idle workload stops since boot; None before the first
+    # idle stop.
     memory_fragmentation: MemoryFragmentation | None = None
     # Traffic per RDMA device over the window since the last report; empty
     # before the agent has a previous reading.

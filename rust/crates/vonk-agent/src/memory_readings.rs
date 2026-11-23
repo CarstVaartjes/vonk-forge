@@ -17,8 +17,7 @@ use std::{
     sync::Mutex,
 };
 
-use chrono::{SubsecRound, Utc};
-use vonk_agent_protocol::generated::{MemoryFragmentation, MemoryPoint};
+use vonk_agent_protocol::generated::MemoryFragmentation;
 
 const FILE: &str = "memory-readings.json";
 const BOOT_ID: &str = "proc/sys/kernel/random/boot_id";
@@ -61,24 +60,19 @@ impl Ledger {
         else {
             return;
         };
-        let point = MemoryPoint {
-            // The wire carries microseconds.
-            at: Utc::now().trunc_subsecs(6).fixed_offset(),
-            sec_page_tables_bytes,
-        };
         let mut readings = self
             .readings
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let first = match readings.as_ref() {
-            Some(saved) if saved.boot_id == boot => saved.idle_stop_first.clone(),
-            _ => point.clone(),
+            Some(saved) if saved.boot_id == boot => saved.idle_stop_first_bytes,
+            _ => sec_page_tables_bytes,
         };
         let updated = MemoryFragmentation {
             boot_id: boot,
             page_size_bytes: self.page_size,
-            idle_stop_first: first,
-            idle_stop_latest: point,
+            idle_stop_first_bytes: first,
+            idle_stop_latest_bytes: sec_page_tables_bytes,
         };
         let saved = serde_json::to_vec(&updated)
             .map_err(std::io::Error::other)

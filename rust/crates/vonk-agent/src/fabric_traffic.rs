@@ -54,7 +54,6 @@ impl Meter {
                 let after = total(device)?;
                 let first = before.iter().find(|(name, _)| *name == device.name)?.1;
                 Some(FabricDevice {
-                    name: device.name.clone(),
                     port: device.port.clone()?,
                     active: device.active,
                     bytes: after.checked_sub(first)?,

@@ -10,17 +10,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import Field, model_validator
 
 from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
 
 # Memory in bytes, at most telemetry's capacity bound (16 TiB).
 MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]
-
-#: The physically contiguous block size the GPU driver takes. The agent's
-#: ``buddyinfo::LARGE_BLOCK_BYTES`` is the same value (the shared vector
-#: ``memory-fragmentation-v1.json`` pins both).
-LARGE_BLOCK_BYTES = 2 * 1024 * 1024
 
 
 class HostUnit(WireEnum):
@@ -95,14 +90,6 @@ class HostTuning(WireModel):
         return self
 
 
-class MemoryPoint(WireModel):
-    """``SecPageTables`` (/proc/meminfo: the IOMMU and secondary-MMU page
-    tables) at one moment."""
-
-    at: AwareDatetime
-    sec_page_tables_bytes: MemoryBytes
-
-
 class MemoryFragmentation(WireModel):
     """``SecPageTables`` after workload stops that left the Spark idle.
 
@@ -119,9 +106,10 @@ class MemoryFragmentation(WireModel):
     boot_id: Annotated[str, Field(pattern=r"^[0-9a-f-]{36}$")]
     # The running kernel's page size, which turns pages into blocks.
     page_size_bytes: Annotated[int, Field(strict=True, ge=1, le=2**30)]
-    # The first idle stop of this boot and the latest.
-    idle_stop_first: MemoryPoint
-    idle_stop_latest: MemoryPoint
+    # ``SecPageTables`` after the first idle stop of this boot and after the
+    # latest.
+    idle_stop_first_bytes: MemoryBytes
+    idle_stop_latest_bytes: MemoryBytes
 
 
 class FabricDevice(WireModel):
@@ -133,7 +121,6 @@ class FabricDevice(WireModel):
     The Controller compares siblings; nothing here is a verdict.
     """
 
-    name: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,32}$")]
     port: Annotated[str, Field(pattern=r"^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")]
     active: bool
     bytes: MemoryBytes

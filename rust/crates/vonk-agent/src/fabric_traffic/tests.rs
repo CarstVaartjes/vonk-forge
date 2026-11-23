@@ -85,5 +85,5 @@ fn a_counter_that_went_backwards_is_skipped() {
     );
     // Only the device whose counters stayed (at zero) has a delta.
     assert_eq!(observed.len(), 1);
-    assert_eq!(observed[0].name, "rocep1s0f0");
+    assert_eq!(observed[0].port, "01:00.0");
 }

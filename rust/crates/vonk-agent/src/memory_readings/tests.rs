@@ -17,10 +17,6 @@ fn set(root: &Path, boot: &str, sec_kib: u64) {
     .unwrap();
 }
 
-fn sec(point: &MemoryPoint) -> u64 {
-    point.sec_page_tables_bytes
-}
-
 #[test]
 fn the_first_idle_stop_is_kept_and_the_latest_follows() {
     let root = tempfile::tempdir().unwrap();
@@ -35,8 +31,8 @@ fn the_first_idle_stop_is_kept_and_the_latest_follows() {
     set(root.path(), BOOT, 120);
     ledger.stop_ended(true);
     let readings = ledger.snapshot().unwrap();
-    assert_eq!(sec(&readings.idle_stop_first), 100 * 1024);
-    assert_eq!(sec(&readings.idle_stop_latest), 120 * 1024);
+    assert_eq!(readings.idle_stop_first_bytes, 100 * 1024);
+    assert_eq!(readings.idle_stop_latest_bytes, 120 * 1024);
     assert_eq!(readings.page_size_bytes, 4096);
 }
 
@@ -56,7 +52,7 @@ fn the_readings_survive_a_restart_but_not_a_reboot() {
     rebooted.stop_ended(true);
     let readings = rebooted.snapshot().unwrap();
     assert_eq!(readings.boot_id, OTHER_BOOT);
-    assert_eq!(sec(&readings.idle_stop_first), 90 * 1024);
+    assert_eq!(readings.idle_stop_first_bytes, 90 * 1024);
 }
 
 #[test]
@@ -82,10 +78,6 @@ fn the_shared_readings_are_the_contract_the_agent_reports() {
         "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/memory-fragmentation-v1.json"
     ))
     .unwrap();
-    assert_eq!(
-        vector["large_block_bytes"].as_u64(),
-        Some(vonk_agent_protocol::buddyinfo::LARGE_BLOCK_BYTES)
-    );
     for case in vector["cases"].as_array().unwrap() {
         if case["readings"].is_null() {
             continue;

@@ -309,7 +309,7 @@ flat while its sibling is busy over the same window:
   uses, so a rail under 1% is not in use;
 - window: at least 30 s, so an inventory a few seconds after the last one is
   not judged on a handful of packets;
-- a device that is not ACTIVE was never launched and does not count.
+- a device that is not ACTIVE (down, or without an address) is not one the helper launches and does not count.
 
 No traffic, no previous reading, or only one active device give no advice.
 Nothing is restarted. Shared vector: `fabric-devices-v1.json` (agent counter

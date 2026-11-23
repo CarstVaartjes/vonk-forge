@@ -14,45 +14,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
-from vonk_agent_protocol.host_tuning import LARGE_BLOCK_BYTES, MemoryFragmentation
+from vonk_agent_protocol.host_tuning import MemoryFragmentation
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
-from vonk_agent_protocol.swap import GIB
 
 from .common import ProjectionReason
 
-#: The large-block memory a Spark may stand to lose before it is advised to
-#: reboot. One unmovable page can pin one whole large block, so ``n`` leftover
-#: page-table bytes put ``n / page_size`` blocks of ``LARGE_BLOCK_BYTES`` at
-#: risk. 1 GiB is under 1% of a 128 GiB Spark, the order of the decode-speed
-#: cost (1 to 1.5%) reported for leftover mappings; at a 4 KiB page it takes
-#: 2 MiB of leftover page tables to pass it.
-AT_RISK_BYTES = GIB
+#: The margin: 512 leftover page-table pages. Each can pin one 2 MiB block of
+#: free memory, so 512 pages put 1 GiB at risk: under 1% of a 128 GiB Spark,
+#: the order of the decode-speed cost (1 to 1.5%) reported for leftover
+#: mappings. At a 4 KiB page that is 2 MiB of leftover page tables.
+MARGIN_PAGES = 512
 
 
 @dataclass(frozen=True)
 class Fragmentation:
-    #: ``SecPageTables`` gained from the first idle stop of this boot to the
-    #: latest (never negative).
+    #: ``SecPageTables`` at the latest idle stop minus the first of this boot
+    #: (never negative).
     grown_bytes: int
-    #: Large-block memory those bytes can pin.
-    at_risk_bytes: int
-    #: Growth is monotonic, so this holds until the boot changes.
     reboot_advised: bool
 
 
 def assess(readings: MemoryFragmentation) -> Fragmentation:
-    grown = max(
-        0,
-        readings.idle_stop_latest.sec_page_tables_bytes
-        - readings.idle_stop_first.sec_page_tables_bytes,
-    )
-    at_risk = grown // readings.page_size_bytes * LARGE_BLOCK_BYTES
-    return Fragmentation(grown, at_risk, pins_more_than_margin(at_risk))
+    """First versus latest idle stop of this boot. Not latched: the advice
+    clears if the latest reading drops back within the margin."""
+    grown = max(0, readings.idle_stop_latest_bytes - readings.idle_stop_first_bytes)
+    return Fragmentation(grown, grows_past_margin(grown, readings.page_size_bytes))
 
 
-def pins_more_than_margin(at_risk_bytes: int) -> bool:
-    return at_risk_bytes > AT_RISK_BYTES
+def grows_past_margin(grown_bytes: int, page_size_bytes: int) -> bool:
+    return grown_bytes // page_size_bytes > MARGIN_PAGES
 
 
 def memory_fragmentation_warning(host: HostSettings) -> ProjectionReason | None:

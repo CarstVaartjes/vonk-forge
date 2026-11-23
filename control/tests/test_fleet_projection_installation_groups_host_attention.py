@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.host_tuning import LARGE_BLOCK_BYTES, MemoryFragmentation
+from vonk_agent_protocol.host_tuning import MemoryFragmentation
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
@@ -1348,35 +1348,20 @@ def test_memory_fragmentation_readings_decide_the_reboot_advice(
     assert advised is case["fragmented"]
 
 
-def test_page_table_growth_is_judged_by_the_large_blocks_it_can_pin() -> None:
-    assert _fragmentation_vector()["large_block_bytes"] == LARGE_BLOCK_BYTES
-    # One page-table page can pin one whole large block: 2 MiB of leftover
-    # tables at a 4 KiB page, 32 MiB at 64 KiB.
-    for page_size, tables in ((4096, 2 * 1024**2), (65536, 32 * 1024**2)):
-        readings = MemoryFragmentation.model_validate(
-            {
-                "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
-                "page_size_bytes": page_size,
-                "idle_stop_first": {
-                    "at": "2026-11-20T10:05:00Z",
-                    "sec_page_tables_bytes": 0,
-                },
-                "idle_stop_latest": {
-                    "at": "2026-11-20T10:20:00Z",
-                    "sec_page_tables_bytes": tables,
-                },
-            }
-        )
-        assert assess(readings).at_risk_bytes == 1024**3
-        assert not assess(readings).reboot_advised
-        readings = readings.model_copy(
-            update={
-                "idle_stop_latest": readings.idle_stop_latest.model_copy(
-                    update={"sec_page_tables_bytes": tables + page_size}
-                )
-            }
-        )
-        assert assess(readings).reboot_advised
+def test_page_table_growth_is_judged_in_pages_not_bytes() -> None:
+    # 512 leftover pages is the margin at any page size: 2 MiB at 4 KiB, 32 MiB
+    # at 64 KiB; one page more advises a reboot.
+    for page_size in (4096, 65536):
+        for pages, advised in ((512, False), (513, True)):
+            readings = MemoryFragmentation.model_validate(
+                {
+                    "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+                    "page_size_bytes": page_size,
+                    "idle_stop_first_bytes": 1000,
+                    "idle_stop_latest_bytes": 1000 + pages * page_size,
+                }
+            )
+            assert assess(readings).reboot_advised is advised
 
 
 def _rail_vector() -> dict[str, list[dict[str, object]]]:

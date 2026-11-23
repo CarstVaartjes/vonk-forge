@@ -1,6 +1,5 @@
 {
-  "comment": "MemoryFragmentation as the agent reports it in HostSettings, and whether the Controller advises a reboot (host.memory-fragmented). Page size 4096: the margin is 1 GiB of large blocks at risk, which 2 MiB of leftover page tables reach (grown_bytes is latest minus first idle stop). The Rust agent test reads every readings value through the generated contract and checks large_block_bytes against its buddyinfo constant; the Controller test projects each case onto a node.",
-  "large_block_bytes": 2097152,
+  "comment": "MemoryFragmentation as the agent reports it in HostSettings, and whether the Controller advises a reboot (host.memory-fragmented). Page size 4096: the margin is 512 leftover page-table pages (2 MiB), each of which can pin one 2 MiB block (1 GiB); grown_bytes is the latest idle-stop SecPageTables minus the first, never negative. The Rust agent test reads every readings value through the generated contract; the Controller test projects each case onto a node.",
   "cases": [
     {
       "name": "no idle stop yet",
@@ -13,14 +12,8 @@
       "readings": {
         "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
         "page_size_bytes": 4096,
-        "idle_stop_first": {
-          "at": "2026-11-20T10:05:00Z",
-          "sec_page_tables_bytes": 251658240
-        },
-        "idle_stop_latest": {
-          "at": "2026-11-20T10:20:00Z",
-          "sec_page_tables_bytes": 251658240
-        }
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 251658240
       },
       "grown_bytes": 0,
       "fragmented": false
@@ -30,14 +23,8 @@
       "readings": {
         "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
         "page_size_bytes": 4096,
-        "idle_stop_first": {
-          "at": "2026-11-20T10:05:00Z",
-          "sec_page_tables_bytes": 251658240
-        },
-        "idle_stop_latest": {
-          "at": "2026-11-20T10:20:00Z",
-          "sec_page_tables_bytes": 252706816
-        }
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 252706816
       },
       "grown_bytes": 1048576,
       "fragmented": false
@@ -47,14 +34,8 @@
       "readings": {
         "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
         "page_size_bytes": 4096,
-        "idle_stop_first": {
-          "at": "2026-11-20T10:05:00Z",
-          "sec_page_tables_bytes": 251658240
-        },
-        "idle_stop_latest": {
-          "at": "2026-11-20T10:20:00Z",
-          "sec_page_tables_bytes": 253755392
-        }
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 253755392
       },
       "grown_bytes": 2097152,
       "fragmented": false
@@ -64,14 +45,8 @@
       "readings": {
         "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
         "page_size_bytes": 4096,
-        "idle_stop_first": {
-          "at": "2026-11-20T10:05:00Z",
-          "sec_page_tables_bytes": 251658240
-        },
-        "idle_stop_latest": {
-          "at": "2026-11-20T10:20:00Z",
-          "sec_page_tables_bytes": 257949696
-        }
+        "idle_stop_first_bytes": 251658240,
+        "idle_stop_latest_bytes": 257949696
       },
       "grown_bytes": 6291456,
       "fragmented": true
@@ -81,14 +56,8 @@
       "readings": {
         "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
         "page_size_bytes": 4096,
-        "idle_stop_first": {
-          "at": "2026-11-20T10:05:00Z",
-          "sec_page_tables_bytes": 257949696
-        },
-        "idle_stop_latest": {
-          "at": "2026-11-20T10:20:00Z",
-          "sec_page_tables_bytes": 251658240
-        }
+        "idle_stop_first_bytes": 257949696,
+        "idle_stop_latest_bytes": 251658240
       },
       "grown_bytes": 0,
       "fragmented": false
