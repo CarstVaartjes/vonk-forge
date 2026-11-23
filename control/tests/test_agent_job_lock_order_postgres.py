@@ -254,16 +254,14 @@ class _Clock:
 def _before_first_parent_lock(engine, mutation):
     """Mutate between a claim's unlocked hint and its parent Job lock."""
 
+    done = False
+
     def before(_conn, _cursor, statement, _parameters, _context, _many):
-        if (
-            "FROM jobs" in statement
-            and "FOR UPDATE OF jobs" in statement
-            and not before.done
-        ):
-            before.done = True
+        nonlocal done
+        if "FROM jobs" in statement and "FOR UPDATE OF jobs" in statement and not done:
+            done = True
             mutation()
 
-    before.done = False
     event.listen(engine, "before_cursor_execute", before)
     return before
 

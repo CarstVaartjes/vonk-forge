@@ -207,9 +207,11 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     assert fleet_profiles._switch_adapter._run_switch is run_switches
     assert run_switches._artifact_phase_executor is not None
     image_production = next(
-        closer.__self__
-        for closer in worker._background_closers
-        if hasattr(getattr(closer, "__self__", None), "scheduler")
+        owner
+        for owner in (
+            getattr(closer, "__self__", None) for closer in worker._background_closers
+        )
+        if owner is not None and hasattr(owner, "scheduler")
     )
     assert image_production.scheduler is not None
     scheduler = image_production.scheduler
