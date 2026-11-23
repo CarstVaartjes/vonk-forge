@@ -69,27 +69,23 @@ impl Store {
                         &tx.rollback.source.binary_sha256,
                     )
                     .is_ok();
-                tx.phase = if restored {
-                    Phase::RolledBack
-                } else {
-                    Phase::RollbackFailed
-                };
                 if !restored {
                     heal();
                 }
-                tx.updated_at = now()?;
-                tx.outcome = if restored {
-                    Outcome::SourceRestoredAndRestarted
+                let (phase, outcome) = if restored {
+                    (Phase::RolledBack, Outcome::SourceRestoredAndRestarted)
                 } else {
-                    Outcome::SourceRestoreFailed
+                    (Phase::RollbackFailed, Outcome::SourceRestoreFailed)
                 };
-                self.write(&tx)?;
+                self.advance(&mut tx, phase, outcome, now()?)?;
                 return Ok(());
             };
-            tx.phase = Phase::RollingBack;
-            tx.updated_at = timestamp;
-            tx.outcome = Outcome::RestoringCapturedSource;
-            self.write(&tx)?;
+            self.advance(
+                &mut tx,
+                Phase::RollingBack,
+                Outcome::RestoringCapturedSource,
+                timestamp,
+            )?;
             let result = restore(&tx, remaining);
             if result.is_err() {
                 // restore() stopped the agent and helper before dpkg. A failed
@@ -97,15 +93,12 @@ impl Store {
                 // stays in the journal for the Controller to see and re-drive.
                 heal();
             }
-            tx.updated_at = now()?;
-            if result.is_ok() {
-                tx.phase = Phase::RolledBack;
-                tx.outcome = Outcome::SourceRestoredAndRestarted;
+            let (phase, outcome) = if result.is_ok() {
+                (Phase::RolledBack, Outcome::SourceRestoredAndRestarted)
             } else {
-                tx.phase = Phase::RollbackFailed;
-                tx.outcome = Outcome::SourceRestoreFailed;
-            }
-            self.write(&tx)?;
+                (Phase::RollbackFailed, Outcome::SourceRestoreFailed)
+            };
+            self.advance(&mut tx, phase, outcome, now()?)?;
             return result;
         }
     }
@@ -194,6 +187,51 @@ fn start_services() {
         ) {
             eprintln!("vonk-agent-helper: rollback heal: {unit}: {error}");
         }
+    }
+}
+
+/// Every legal move of a package activation transaction. Anything else is
+/// refused and leaves the journal as it is. A failed or interrupted rollback
+/// stays re-drivable: the watchdog resumes it until it finishes.
+const EDGES: &[(Phase, Phase)] = &[
+    (Phase::Armed, Phase::ActivationFailed),
+    (Phase::Armed, Phase::Acknowledged),
+    (Phase::Acknowledged, Phase::Acknowledged),
+    (Phase::Armed, Phase::RollingBack),
+    (Phase::ActivationFailed, Phase::RollingBack),
+    (Phase::RollingBack, Phase::RollingBack),
+    (Phase::RollbackFailed, Phase::RollingBack),
+    (Phase::Armed, Phase::RolledBack),
+    (Phase::ActivationFailed, Phase::RolledBack),
+    (Phase::RollingBack, Phase::RolledBack),
+    (Phase::RollbackFailed, Phase::RolledBack),
+    (Phase::Armed, Phase::RollbackFailed),
+    (Phase::ActivationFailed, Phase::RollbackFailed),
+    (Phase::RollingBack, Phase::RollbackFailed),
+    (Phase::RollbackFailed, Phase::RollbackFailed),
+];
+
+pub(super) fn can_move(from: Phase, to: Phase) -> bool {
+    EDGES.contains(&(from, to))
+}
+
+impl Store {
+    /// The one place a transaction changes phase: checks the edge, stamps the
+    /// outcome and time, and journals it. The caller holds the store lock.
+    pub(super) fn advance(
+        &self,
+        tx: &mut Transaction,
+        to: Phase,
+        outcome: Outcome,
+        at: i64,
+    ) -> Result<(), String> {
+        if !can_move(tx.phase, to) {
+            return Err(format!("illegal activation move {:?} to {to:?}", tx.phase));
+        }
+        tx.phase = to;
+        tx.outcome = outcome;
+        tx.updated_at = at;
+        self.write(tx)
     }
 }
 

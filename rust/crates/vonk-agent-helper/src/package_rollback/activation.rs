@@ -163,10 +163,12 @@ impl Store {
         let _lock = self.lock()?;
         let mut tx = self.read()?;
         if tx.phase == Phase::Armed {
-            tx.phase = Phase::ActivationFailed;
-            tx.outcome = Outcome::CandidateInstallFailed;
-            tx.updated_at = now()?;
-            self.write(&tx)?;
+            self.advance(
+                &mut tx,
+                Phase::ActivationFailed,
+                Outcome::CandidateInstallFailed,
+                now()?,
+            )?;
         }
         Ok(())
     }
@@ -231,10 +233,12 @@ impl Store {
         {
             return Err("candidate is not the installed package".into());
         }
-        tx.phase = Phase::Acknowledged;
-        tx.updated_at = timestamp;
-        tx.outcome = Outcome::ControllerConfirmedActivation;
-        self.write(&tx)
+        self.advance(
+            &mut tx,
+            Phase::Acknowledged,
+            Outcome::ControllerConfirmedActivation,
+            timestamp,
+        )
     }
     pub(super) fn check_acknowledgement(
         &self,
