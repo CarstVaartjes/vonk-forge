@@ -1229,7 +1229,7 @@ def _json_object_without_duplicate_keys(
 ) -> dict[str, object]:
     document: dict[str, object] = {}
     for key, value in pairs:
-        if not isinstance(key, str) or key in document:
+        if not isinstance(key, str) or key in document:  # pyright: ignore[reportUnnecessaryIsInstance]  # JSON keys are re-checked as strings
             raise ValueError("JSON object has duplicate or invalid keys")
         document[key] = value
     return document
@@ -1875,7 +1875,7 @@ def assert_tailscale_services_absent(raw: str) -> None:
     observed = {
         str(row.get("Service", ""))
         for row in _compose_rows(raw)
-        if isinstance(row, dict)
+        if isinstance(row, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # Compose rows are re-checked as objects
     }
     if observed & TAILSCALE_SERVICES:
         raise AcceptanceError(

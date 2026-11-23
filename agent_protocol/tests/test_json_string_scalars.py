@@ -199,7 +199,7 @@ def test_every_strict_protocol_model_reads_uuids_and_timestamps_from_json() -> N
     unbound = {
         model.__qualname__: found
         for model in _strict_models()
-        if isinstance(model.__pydantic_core_schema__, dict)
+        if isinstance(model.__pydantic_core_schema__, dict)  # pyright: ignore[reportUnnecessaryIsInstance]  # an unbuilt model carries a mock schema
         and (found := _unbound_scalars(model.__pydantic_core_schema__))
     }
 

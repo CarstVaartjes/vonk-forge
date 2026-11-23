@@ -196,7 +196,7 @@ def _declared_networks(services: dict[str, dict], networks: dict) -> str:
 def _stamp_bundle_digest(
     services: dict[str, dict], digest: str, networks: dict
 ) -> None:
-    if not isinstance(services, dict):
+    if not isinstance(services, dict):  # pyright: ignore[reportUnnecessaryIsInstance]  # Compose YAML is re-checked as a mapping
         raise TypeError("Compose services are invalid")
     # The worker reads the same site configuration as the API.
     for name in ("control-api", "control-worker"):
