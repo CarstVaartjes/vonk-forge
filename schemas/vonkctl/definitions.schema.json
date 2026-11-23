@@ -3368,6 +3368,18 @@
           ],
           "default": null
         },
+        "agent_upgrade_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Upgrade Available"
+        },
         "connection": {
           "$ref": "#/$defs/NodeConnection"
         },
@@ -6122,7 +6134,7 @@
       "title": "FleetProfilePreparationDecision",
       "type": "object"
     },
-    "FleetProfilePreviewDocument": {
+    "FleetProfilePreviewResponseDocument": {
       "properties": {
         "admission_decisions": {
           "items": {
@@ -6164,6 +6176,9 @@
           "format": "date-time",
           "title": "Generated At",
           "type": "string"
+        },
+        "next_action": {
+          "$ref": "#/$defs/ProfileLoadAction"
         },
         "plan_digest": {
           "pattern": "^[0-9a-f]{64}$",
@@ -6250,7 +6265,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 2,
+          "const": 3,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -6294,9 +6309,10 @@
         "generated_at",
         "assessments",
         "plan_digest",
-        "effects_digest"
+        "effects_digest",
+        "next_action"
       ],
-      "title": "FleetProfilePreviewDocument",
+      "title": "FleetProfilePreviewResponseDocument",
       "type": "object"
     },
     "FleetProfileReason": {
@@ -9808,6 +9824,20 @@
     "LibraryRecipeProjection": {
       "description": "One exact canonical recipe and its model/resource/local projections.",
       "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "download",
+              "remove",
+              "cancel",
+              "follow"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Actions",
+          "type": "array"
+        },
         "alignment": {
           "anyOf": [
             {
@@ -9944,6 +9974,7 @@
         "usage",
         "resources",
         "local",
+        "actions",
         "updated_at",
         "node_count",
         "engine"
@@ -11943,7 +11974,7 @@
         "result": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FleetProfilePreviewDocument"
+              "$ref": "#/$defs/FleetProfilePreviewResponseDocument"
             },
             {
               "$ref": "#/$defs/NothingConfirmed"
@@ -13255,6 +13286,17 @@
       ],
       "title": "PreparationReason",
       "type": "object"
+    },
+    "ProfileLoadAction": {
+      "description": "What a load of the reviewed plan would do, decided once by the Controller.",
+      "enum": [
+        "load",
+        "load_stopping",
+        "nothing_to_change",
+        "blocked"
+      ],
+      "title": "ProfileLoadAction",
+      "type": "string"
     },
     "ProfileReasonCode": {
       "description": "Reasons a fleet profile cannot be applied or is waiting.",
@@ -14804,6 +14846,20 @@
     },
     "RecipeDetailResponseDocument": {
       "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "download",
+              "remove",
+              "cancel",
+              "follow"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Actions",
+          "type": "array"
+        },
         "alignment": {
           "anyOf": [
             {
@@ -14929,7 +14985,7 @@
           "$ref": "#/$defs/LibraryResourceProjection"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -14964,6 +15020,7 @@
         "usage",
         "resources",
         "local",
+        "actions",
         "updated_at",
         "node_count",
         "engine",
@@ -15811,7 +15868,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 3,
+          "const": 4,
           "title": "Schema Version",
           "type": "integer"
         }

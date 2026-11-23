@@ -508,6 +508,9 @@ class CapacityReservations(StrictModel):
 
 class FleetNode(StrictModel):
     agent_runtime: AgentRuntimeIdentity | None = None
+    #: Whether the release's agent differs from what this Spark runs and the
+    #: Spark can take it; null while the release or the Spark's build is unknown.
+    agent_upgrade_available: bool | None = None
     gpu_clock_desired: GpuClockRange | None = None
     gpu_clock_policy: GpuClockPolicy = GpuClockPolicy()
     # Desired beside the policy; actual is inventory.host_settings.swap.

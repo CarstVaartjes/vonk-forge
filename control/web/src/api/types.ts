@@ -97,6 +97,9 @@ export type LibraryViewRecipe = {
   assessment?: components["schemas"]["RecipeReadiness"] | null | undefined;
   // Informative only: null means not yet verified, and nothing gates on it.
   qualification?: RecipeQualification | null | undefined;
+  // The recipe's own cache state and what the Controller says can be done with it.
+  local: components["schemas"]["LibraryLocalState"];
+  actions: components["schemas"]["LibraryRecipeProjection"]["actions"];
   installations?: unknown[];
   runs?: unknown[];
   installation_returned_count?: WireNumber;
@@ -202,7 +205,7 @@ export function readableProfile(profile: FleetProfileRead): profile is FleetProf
 export type FleetProfileInput = components["schemas"]["FleetProfileInput"];
 export type FleetProfileList = components["schemas"]["FleetProfileList"];
 export type FleetProfileDeletion = components["schemas"]["FleetProfileDeletion"];
-export type FleetProfilePreview = components["schemas"]["FleetProfilePreview"];
+export type FleetProfilePreview = components["schemas"]["FleetProfilePreviewResponse"];
 export type FleetProfileEndpoints = components["schemas"]["FleetProfileEndpointsView"];
 export type FleetProfileApplicationView = components["schemas"]["FleetProfileApplicationView"];
 export type FleetProfileLoadInput = components["schemas"]["FleetProfileLoadRequest"];

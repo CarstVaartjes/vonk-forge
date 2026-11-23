@@ -236,10 +236,14 @@ def test_a_gpu_clock_keeps_zero_and_names_a_missing_reading():
 
 
 def test_a_review_is_ready_only_when_allowed_and_waiting_only_for_preparation():
-    assert review_verdict(True, None) is ReviewVerdict.READY
-    assert review_verdict(False, True) is ReviewVerdict.READY_AFTER_PREPARATION
-    assert review_verdict(False, None) is ReviewVerdict.BLOCKED
-    assert review_verdict(None, None) is ReviewVerdict.BLOCKED
+    assert review_verdict(True, None, "load") is ReviewVerdict.READY
+    assert review_verdict(False, True, "load") is ReviewVerdict.READY_AFTER_PREPARATION
+    assert review_verdict(False, None, "blocked") is ReviewVerdict.BLOCKED
+    assert review_verdict(None, None, None) is ReviewVerdict.BLOCKED
+    # What the Controller says loading does outranks what the plan allows.
+    assert review_verdict(True, None, "nothing_to_change") is (
+        ReviewVerdict.NOTHING_TO_CHANGE
+    )
 
 
 def test_unreadable_activity_is_unknown_not_empty():

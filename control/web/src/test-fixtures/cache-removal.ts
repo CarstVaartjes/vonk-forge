@@ -25,6 +25,7 @@ export function cacheRemovalReview(
     blockers: [],
     observed_at: "2026-09-24T12:00:00Z",
     review_digest: "b".repeat(64),
+    submittable: true,
     ...overrides,
   };
 }

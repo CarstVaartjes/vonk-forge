@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SparkPage } from "./spark";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import type { ControlApi } from "../api/types";
@@ -280,7 +280,7 @@ test("a Spark that is not reporting live shows Not reported on every gauge", () 
   expect(screen.getAllByText("Not reported").length).toBeGreaterThanOrEqual(3);
 });
 
-test("Serving names the run, its rank and partner as a link; Storage lists models with their sizes", () => {
+test("Serving names the run, its rank and partner as a link; Storage lists models with their sizes", async () => {
   const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
   nodes = [
     {
@@ -305,11 +305,15 @@ test("Serving names the run, its rank and partner as a link; Storage lists model
     },
     { ...node, id: "spk_2", display_name: "Garage" },
   ];
-  render(<SparkPage api={apiOf()} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
+  const api = apiOf();
+  render(<SparkPage api={api} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
   const serving = screen.getByRole("region", { name: "Serving" });
   expect(serving).toHaveTextContent("coder");
   expect(serving).toHaveTextContent("Rank 0 of 2, one unit with Garage");
-  expect(serving).toHaveTextContent("Decode speed: Not reported");
+  // Once the metric reads have resolved (here they fail), no speed value is shown.
+  await waitFor(() => expect(api.metricsSeries).toHaveBeenCalled());
+  await act(async () => {});
+  expect(serving).not.toHaveTextContent("tok/s");
   fireEvent.click(screen.getByRole("link", { name: "Garage" }));
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/sparks/spk_2");
   const models = screen.getByRole("list", { name: "Models on disk" });
@@ -368,4 +372,44 @@ test("the Logs tab shows the CLI command as a copyable block with one explanator
   expect(
     screen.getByText("Read the same lines, with more history, from a terminal:"),
   ).toBeVisible();
+});
+
+test("the Spark page shows the GPU energy and speed the Controller reports, not a fixed Not reported", async () => {
+  const series = (unit: string, summary: object, labels: object = {}) => ({
+    spec: { metric: "x", title: "Generated tokens", unit, basis: "measured", hint: "" },
+    start: 0,
+    end: 3600,
+    step_seconds: 60,
+    series: [{ labels, points: [], summary }],
+  });
+  const metricsSeries = vi.fn(async (metric: string) =>
+    metric === "gpu_energy"
+      ? series("watt_hours", { total: 1850 })
+      : metric === "output_token_rate"
+        ? series("tokens_per_second", { latest: 41.2 }, { alias: "coder" })
+        : Promise.reject(new Error("none")),
+  );
+  nodes = [
+    {
+      ...node,
+      loaded: [
+        {
+          run_id: "r1",
+          rank: 0,
+          expected_rank_count: 1,
+          title: "GLM",
+          alias: "coder",
+          healthy: true,
+          run_state: "running",
+          installation_id: "i1",
+          member_node_ids: ["spk_1"],
+        },
+      ],
+    },
+  ];
+  render(
+    <SparkPage api={apiOf({ metricsSeries })} id="spk_1" onNavigate={vi.fn()} onGone={vi.fn()} />,
+  );
+  expect(await screen.findByText(/1\.85 kWh/)).toBeVisible();
+  expect(await screen.findByText(/41\.2 tok\/s/)).toBeVisible();
 });

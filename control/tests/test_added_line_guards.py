@@ -3818,6 +3818,35 @@ def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
     assert not _lifecycle_sets(source, {1}, path=owner)
 
 
+@pytest.mark.parametrize(
+    ("path", "source", "flagged"),
+    [
+        ("src/cluster_profiles/x.py", "ENDED = {SUCCEEDED, FAILED, CANCELLED}\n", True),
+        ("src/cluster_profiles/x.py", "ENDED = TERMINAL_LIFECYCLE_STATES\n", False),
+        (
+            "control/web/src/lib/x.ts",
+            'const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);\n',
+            True,
+        ),
+        (
+            "control/web/src/lib/x.ts",
+            "const TERMINAL = new Set([LifecycleState.SUCCEEDED, LifecycleState.FAILED]);\n",
+            True,
+        ),
+        (
+            "control/web/src/lib/x.ts",
+            'const OTHER = new Set(["running", "stopping"]);\n',
+            False,
+        ),
+        ("control/web/src/lib/x.ts", "const T = TERMINAL_LIFECYCLE_STATES;\n", False),
+    ],
+)
+def test_clients_read_the_generated_lifecycle_sets_not_their_own(
+    path: str, source: str, flagged: bool
+) -> None:
+    assert bool(_lifecycle_sets(source, {1}, path=path)) is flagged
+
+
 _INTENT_PATH = "control/src/vonk_control/recipe_operations/persistence.py"
 
 

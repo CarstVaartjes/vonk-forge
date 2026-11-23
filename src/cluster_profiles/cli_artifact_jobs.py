@@ -18,11 +18,10 @@ from pathlib import Path
 from typing import Any, NamedTuple, Protocol, cast, runtime_checkable
 
 from cluster_profiles.cli_states_generated import (
-    CANCELLED,
-    FAILED,
     NEEDS_OPERATOR,
     READY,
     SUCCEEDED,
+    TERMINAL_LIFECYCLE_STATES,
 )
 
 from .cli_files import read_json_document
@@ -76,7 +75,7 @@ _CREATE_FIELDS = {
     "timeout_seconds",
 }
 _INPUT_FIELDS = {"slot", "name"}
-_JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, NEEDS_OPERATOR}
+_JOB_TERMINAL_STATES = TERMINAL_LIFECYCLE_STATES | {NEEDS_OPERATOR}
 _RECOVERY_ATTEMPTS = 3
 _RUN_KEY_NAMESPACE = uuid.UUID("7d0c9a64-3f0e-5b1a-8c52-1f0b6a9e2d41")
 

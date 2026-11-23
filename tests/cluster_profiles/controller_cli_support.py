@@ -393,6 +393,7 @@ def _removal_review(
         "blockers": [],
         "observed_at": "2026-09-24T10:00:00Z",
         "review_digest": "b" * 64,
+        "submittable": False,
     }
 
 

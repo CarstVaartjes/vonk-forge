@@ -7,6 +7,7 @@ import { LibraryRecipeFit } from "./library-recipe-fit";
 import { LibraryRecipeLinks } from "./library-recipe-links";
 import { LibraryRecipeVisual } from "./library-recipe-visual";
 import { RecipeQualificationEvidence } from "./library-recipe-qualification";
+import { LibraryRecipeActions } from "./library-recipe-actions";
 import { RecipeBadges, recipeAttribution, sparkLabel } from "./library-workcell";
 import "./library-recipe-detail.css";
 
@@ -62,11 +63,14 @@ export function LibraryRecipeAuthority({
   api,
   detail,
   onBusyChange,
+  onChanged = () => undefined,
   onNavigate,
 }: {
   api: ControlApi;
   detail: RecipeDetail;
   onBusyChange?: ((busy: boolean) => void) | undefined;
+  /** Re-read the page after a download or removal ended. */
+  onChanged?: (() => void) | undefined;
   onNavigate?: ((event: MouseEvent<HTMLAnchorElement>, path: string) => void) | undefined;
 }) {
   const documents = detail.model_documents;
@@ -84,6 +88,15 @@ export function LibraryRecipeAuthority({
         </div>
         <span className="library-schema-badge">Release {detail.definition.release.version}</span>
       </header>
+      <section className="library-section" aria-label="Recipe cache">
+        <header>
+          <h3>Cache</h3>
+          <span>
+            {CACHE_WORDS[detail.recipe.local.controller] ?? detail.recipe.local.controller}
+          </span>
+        </header>
+        <LibraryRecipeActions api={api} recipe={detail.recipe} onChanged={onChanged} />
+      </section>
       <LibraryRecipeFit detail={detail} />
       <LibraryRecipeAlternatives alternatives={detail.alternatives ?? []} onNavigate={onNavigate} />
       <section className="library-section" aria-label="Models used by Recipe">
