@@ -17,7 +17,6 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_retry import bounded_attempts
 from .artifacts import ArtifactSpec
-from .catalog_helpers import _github_release_asset_binding
 from .constants import (
     _GITHUB_USER_AGENT,
     _MAX_GITHUB_ERROR_METADATA_BYTES,
@@ -28,6 +27,7 @@ from .errors import (
     _retry_after_seconds,
 )
 from .provider_contracts import _GitHubErrorMetadata
+from .providers import _github_release_asset_binding
 from .source_helpers import _is_allowed_github_release_redirect
 
 if TYPE_CHECKING:
