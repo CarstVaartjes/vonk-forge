@@ -24,7 +24,7 @@ from vonk_control.spark_store_retention import store_retention_request
 from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_spark_store_retention import _waiting_load
-from .test_unused_storage_collection import (
+from .unused_storage_collection_support import (
     A_MODEL,
     _collector,
     _head_recipe_naming,

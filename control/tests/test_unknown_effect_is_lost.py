@@ -39,7 +39,7 @@ from .recipe_operations_support import (
     started_recipe,
 )
 from .test_absent_run_release import _report_absent
-from .test_unused_storage_collection import _agents_succeed
+from .unused_storage_collection_support import _agents_succeed
 
 
 def _claims(sessions, run_id: str) -> int:

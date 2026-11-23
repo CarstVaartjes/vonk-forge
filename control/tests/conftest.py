@@ -57,6 +57,11 @@ from .pass_budget_clocks import (
 from .run_switch_operations_support import (  # noqa: F401 - pytest fixtures
     planner_world,
 )
+from .unused_storage_collection_support import (  # noqa: F401 - pytest fixtures
+    cached,
+    squeezed,
+    world,
+)
 
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.
