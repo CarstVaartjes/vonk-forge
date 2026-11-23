@@ -9602,6 +9602,19 @@
           "title": "Completed Bytes",
           "type": "integer"
         },
+        "eta_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eta Seconds"
+        },
         "next_attempt_at": {
           "anyOf": [
             {
@@ -9652,6 +9665,19 @@
             }
           ],
           "default": null
+        },
+        "smoothed_bytes_per_second": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Smoothed Bytes Per Second"
         },
         "state": {
           "enum": [

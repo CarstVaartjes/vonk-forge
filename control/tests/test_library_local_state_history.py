@@ -14,7 +14,17 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import String, column, create_engine, event, func, or_, select, values
+from sqlalchemy import (
+    String,
+    column,
+    create_engine,
+    event,
+    func,
+    or_,
+    select,
+    update,
+    values,
+)
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -73,7 +83,12 @@ def _manifest(model: str, recipe: str | None, verified: Iterable[str]) -> object
     )
 
 
-def _progress(completed: int) -> object:
+def _progress(
+    completed: int,
+    rate: float | None = None,
+    eta: float | None = None,
+    observed_at: datetime = NOW,
+) -> object:
     return serialize_json_value(
         ModelCacheOperationProgress(
             phase="downloading",
@@ -89,6 +104,9 @@ def _progress(completed: int) -> object:
                 total_bytes_known=True,
                 completed_items=0,
                 total_items=1,
+                smoothed_bytes_per_second=rate,
+                eta_seconds=eta,
+                observed_at=observed_at.isoformat(),
             ),
         )
     )
@@ -115,7 +133,14 @@ def _cache_set(
 
 
 def _operation(
-    set_id: str | None, *, kind: str, state: str, at: datetime, completed: int
+    set_id: str | None,
+    *,
+    kind: str,
+    state: str,
+    at: datetime,
+    completed: int,
+    measured: tuple[float, float] | None = None,
+    observed_at: datetime = NOW,
 ) -> ModelCacheOperation:
     # Download and repair payloads carry their identity in the artifact set
     # (ModelCacheDownloadPayload has no top-level digests); ``{}`` is the
@@ -127,7 +152,7 @@ def _operation(
         state=state,
         artifact_set_sha256=set_id,
         payload={},
-        progress=_progress(completed),
+        progress=_progress(completed, *(measured or (None, None)), observed_at),
         actor="test",
         created_at=at,
         updated_at=at,
@@ -425,6 +450,51 @@ def test_a_waiting_download_shows_its_typed_wait_in_the_preparation(tmp_path):
     assert [item.code for item in local.preparation.blockers] == ["access_denied"]
     assert url in local.preparation.blockers[0].detail
     assert local.preparation.next_attempt_at == retry
+
+
+def test_a_preparation_shows_the_fresh_rate_and_eta_but_not_a_stale_one(tmp_path):
+    """The Controller's own measurement reaches the library view while fresh."""
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'rate.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    wanted = _digest("wanted")
+    with sessions.begin() as session:
+        session.add(
+            _cache_set(
+                _digest("good"),
+                wanted,
+                None,
+                "downloading",
+                _manifest(wanted, None, [wanted]),
+            )
+        )
+        session.add(
+            _operation(
+                _digest("good"),
+                kind="download",
+                state="running",
+                at=NOW,
+                completed=40,
+                measured=(2.5, 24.0),
+            )
+        )
+    local = _projection(sessions)
+    fresh = local._database_local_state([wanted])[wanted].preparation
+    assert fresh is not None
+    assert (fresh.smoothed_bytes_per_second, fresh.eta_seconds) == (2.5, 24.0)
+
+    with sessions.begin() as session:
+        session.execute(
+            update(ModelCacheOperation).values(
+                progress=_progress(
+                    40, 2.5, 24.0, observed_at=NOW - timedelta(minutes=5)
+                )
+            )
+        )
+    stale = local._database_local_state([wanted])[wanted].preparation
+    assert stale is not None
+    assert (stale.smoothed_bytes_per_second, stale.eta_seconds) == (None, None)
 
 
 def _plan_work(node: dict[str, object]) -> int:
