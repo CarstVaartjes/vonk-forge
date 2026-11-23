@@ -903,7 +903,7 @@ def own_project(docker: Docker) -> str | None:
     return (labels or {}).get(PROJECT_LABEL)
 
 
-def terminate(signum: int, frame: FrameType | None) -> None:
+def terminate(_signum: int, _frame: FrameType | None) -> None:
     # Unwind through `finally`, so a repair in progress starts its container.
     raise SystemExit(0)
 

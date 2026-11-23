@@ -599,7 +599,8 @@ def test_model_cancel_reconciles_a_lost_acceptance_before_replay() -> None:
         ),
         client,
     )
-    assert status == 0 and payload["state"] == "cancelled", payload
+    assert status == 0, payload
+    assert payload["state"] == "cancelled", payload
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     assert client.calls[0][2] == {
         "request_key": cancel_key,

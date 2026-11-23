@@ -426,7 +426,8 @@ def test_controller_sync_exposes_canonical_library_documents_to_api_and_cli() ->
         ]
 
     cli = _path("VONK_ACCEPTANCE_CLI", str(ROOT / "bin/vonkctl"))
-    assert cli is not None and cli.is_file(), f"vonkctl is missing: {cli}"
+    assert cli is not None, f"vonkctl is missing: {cli}"
+    assert cli.is_file(), f"vonkctl is missing: {cli}"
     cli_env = {
         **os.environ,
         "VONK_CONTROL_URL": base_url,

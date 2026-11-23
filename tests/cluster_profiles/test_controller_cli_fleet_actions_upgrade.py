@@ -333,14 +333,9 @@ def test_watch_shows_updated_resource_and_retains_final_snapshot(
         "usage": [],
         "resources": {"disk_bytes": 42},
     }
-    client = FakeClient(
-        {
-            ("GET", "/api/model/qwen"): [
-                {**common, "local": {"controller": "preparing", "running_on": []}},
-                {**common, "local": {"controller": "cached", "running_on": []}},
-            ]
-        }
-    )
+    preparing = {**common, "local": {"controller": "preparing", "running_on": []}}
+    cached = {**common, "local": {"controller": "cached", "running_on": []}}
+    client = FakeClient({("GET", "/api/model/qwen"): [preparing, cached]})
     status = cli.main(
         (
             "model",
@@ -358,8 +353,17 @@ def test_watch_shows_updated_resource_and_retains_final_snapshot(
     assert status == 2  # A resource watch has a deadline, not an execution outcome.
     assert clock.now == pytest.approx(0.04)
     assert len(client.calls) >= 2
-    assert "preparing" in captured.err and "cached" in captured.err
-    assert "preparing" not in captured.out and "cached" in captured.out
+    # Each observed snapshot is shown as progress; only the final one is the result.
+    shown: list[str] = []
+    for document in (preparing, cached):
+        detail = FakeClient({("GET", "/api/model/qwen"): document})
+        assert cli.main(("model", "detail", "qwen"), control_client=detail) == 0
+        shown.append(capsys.readouterr().out)
+    preparing_text, cached_text = shown
+    assert preparing_text != cached_text
+    assert preparing_text.rstrip() in captured.err
+    assert cached_text.rstrip() in captured.err
+    assert captured.out == cached_text
     assert "accepted work" not in captured.err
 
 

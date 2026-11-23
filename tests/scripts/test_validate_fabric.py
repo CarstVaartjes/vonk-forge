@@ -420,7 +420,6 @@ def test_nccl_rejects_bus_bandwidth_below_regression_floor(validate_module):
         "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
     }
     head = validate_module.Host("node1", "vonk-node-1", fabric, (rail, rail))
-    worker = validate_module.Host("node2", "vonk-node-2", fabric, (rail, rail))
 
     class Runner:
         def remote(self, host, command, *, check=True):
@@ -434,7 +433,7 @@ def test_nccl_rejects_bus_bandwidth_below_regression_floor(validate_module):
             return SimpleNamespace(stdout="", stderr="", returncode=0)
 
     with pytest.raises(validate_module.GateError):
-        validate_module.run_nccl(Runner(), head, worker)
+        validate_module.run_nccl(Runner(), head)
 
 
 def test_nccl_rejects_missing_active_hca(validate_module):
@@ -466,7 +465,7 @@ def test_nccl_rejects_missing_active_hca(validate_module):
             return SimpleNamespace(stdout="", stderr="", returncode=0)
 
     with pytest.raises(validate_module.GateError):
-        validate_module.run_nccl(Runner(), head, worker)
+        validate_module.run_nccl(Runner(), head)
 
 
 @pytest.mark.parametrize(
@@ -702,9 +701,6 @@ def test_native_nccl_launch_uses_restricted_fabric_transport(validate_module):
     head_rail = validate_module.Rail(
         "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.10", "192.168.100.11"
     )
-    worker_rail = validate_module.Rail(
-        "rail100", "enp1s0f1np1", "rocep1s0f1", 3, "192.168.100.11", "192.168.100.10"
-    )
     fabric = {
         "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
         "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
@@ -713,11 +709,8 @@ def test_native_nccl_launch_uses_restricted_fabric_transport(validate_module):
         "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
     }
     head = validate_module.Host("node1", "vonk-node-1", fabric, (head_rail, head_rail))
-    worker = validate_module.Host(
-        "node2", "vonk-node-2", fabric, (worker_rail, worker_rail)
-    )
 
-    command = validate_module.nccl_launch_command(head, worker)
+    command = validate_module.nccl_launch_command(head)
 
     assert "mpirun -np 2 -H localhost:1,vonk-node-2-fabric:1" in command
     assert "$HOME/nccl-tests/build/all_reduce_perf" in command
@@ -803,7 +796,6 @@ def test_nccl_validation_is_worker_first_and_launch_only(validate_module):
         "GLOO_SOCKET_IFNAME": "enp1s0f1np1",
     }
     head = validate_module.Host("node1", "vonk-node-1", fabric, (rail, rail))
-    worker = validate_module.Host("node2", "vonk-node-2", fabric, (rail, rail))
 
     class Runner:
         def __init__(self):
@@ -822,7 +814,7 @@ def test_nccl_validation_is_worker_first_and_launch_only(validate_module):
             return SimpleNamespace(stdout="", stderr="", returncode=0)
 
     runner = Runner()
-    validate_module.run_nccl(runner, head, worker)
+    validate_module.run_nccl(runner, head)
 
     assert [host for host, _ in runner.calls] == ["worker", "head", "head"]
     assert all("ensure_checkout" not in command for _, command in runner.calls)

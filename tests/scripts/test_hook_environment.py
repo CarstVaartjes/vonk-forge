@@ -227,7 +227,10 @@ def test_wire_lane_builds_catalog_before_checking_revision(tmp_path, monkeypatch
         (library / "catalog-index.json").write_text("{}")
 
     monkeypatch.setattr(environment, "run_preparation", build)
-    assert module.resolve_recipe_library(str(library), False) == (library, "pinned")
+    assert module.resolve_recipe_library(str(library), allow_any_revision=False) == (
+        library,
+        "pinned",
+    )
     assert calls == [[str(tmp_path / "scripts/build-recipe-library"), str(library)]]
 
 

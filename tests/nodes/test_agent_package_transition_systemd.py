@@ -289,9 +289,8 @@ class Lane:
                 "attempt_nonce": nonce,
             }
         )
-        assert confirmed and confirmed["status"] == "package-activation-confirmed", (
-            confirmed
-        )
+        assert confirmed, confirmed
+        assert confirmed["status"] == "package-activation-confirmed", confirmed
         assert receipt(nonce, "acknowledged"), f"{label}: not acknowledged"
         self.evidence.append(
             {

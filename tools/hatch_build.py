@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import override
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
@@ -64,6 +65,7 @@ class CustomBuildHook(BuildHookInterface):
         )
         include[str(identity)] = "cluster_profiles/build-identity.json"
 
+    @override
     def finalize(
         self, version: str, build_data: dict[str, object], artifact_path: str
     ) -> None:

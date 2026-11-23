@@ -107,7 +107,7 @@ def verify(
         )
     full = selected.get("full") == "true"
 
-    def expect(job: str, run: bool) -> None:
+    def expect(job: str, *, run: bool) -> None:
         expected = "success" if run else "skipped"
         if results.get(job) != expected:
             errors.append(
@@ -119,7 +119,7 @@ def verify(
         "repository-guards",
         "consumer-probe",
     ):
-        expect(job, full)
+        expect(job, run=full)
 
     # The member tier: the Python check (lint) runs on every pull request, the
     # web check on a member pull request, and rust-quality on a member pull
@@ -129,8 +129,8 @@ def verify(
         errors.append(
             f"rust-changed selection is {rust_changed!r}, expected 'true' or 'false'"
         )
-    expect("lint", True)
-    expect("member-web", not full)
+    expect("lint", run=True)
+    expect("member-web", run=not full)
 
     def chosen(area: str) -> bool:
         return selected.get(area) == "true" and full
@@ -143,11 +143,11 @@ def verify(
             )
         else:
             for job in AREA_JOBS[area]:
-                expect(job, chosen(area))
-    expect("rust-quality", chosen("rust") or (not full and rust_changed == "true"))
-    expect("rust-tests", chosen("rust"))
-    expect("control-image-build", chosen("control") and chosen("nas-install"))
-    expect("controller-spark-wire", chosen("rust") or chosen("control"))
+                expect(job, run=chosen(area))
+    expect("rust-quality", run=chosen("rust") or (not full and rust_changed == "true"))
+    expect("rust-tests", run=chosen("rust"))
+    expect("control-image-build", run=chosen("control") and chosen("nas-install"))
+    expect("controller-spark-wire", run=chosen("rust") or chosen("control"))
     return errors
 
 

@@ -341,7 +341,7 @@ def require_linux_engine() -> str:
 
 
 def resolve_recipe_library(
-    argument: str | None, allow_any_revision: bool
+    argument: str | None, *, allow_any_revision: bool
 ) -> tuple[Path, str]:
     """Return the sibling recipe-library checkout and the pinned revision."""
     candidate = argument or os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
@@ -565,7 +565,7 @@ def main(argv: list[str] | None = None) -> int:
 def run(args: argparse.Namespace) -> int:
     started = time.monotonic()
     library, revision = resolve_recipe_library(
-        args.recipe_library, args.any_recipe_revision
+        args.recipe_library, allow_any_revision=args.any_recipe_revision
     )
     cache = cache_root(args.cache_root)
     docker = shutil.which("docker")

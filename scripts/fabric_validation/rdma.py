@@ -73,10 +73,10 @@ def run_one_rdma(
             return runner.remote(host.ssh_alias, command, check=check)
         return runner.worker_via_fabric(command, check=check)
 
-    def server_call(command, check=True):
+    def server_call(command, *, check=True):
         return call_on(server_host, command, check=check)
 
-    def client_call(command, check=True):
+    def client_call(command, *, check=True):
         return call_on(client_host, command, check=check)
 
     server_pid = server_call(server_command).stdout.strip()

@@ -350,7 +350,16 @@ def _cpu_spark(*, low_clock):
 def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys):
     render_payload(_cpu_spark(low_clock=False), "fleet", action="detail")
     output = capsys.readouterr().out
-    assert "2.1 of 3.9 GHz" in output and "84" in output
+    # The average and maximum clock and the temperature each reach the detail.
+    for field in (
+        "cpu_frequency_avg_mhz",
+        "cpu_frequency_max_mhz",
+        "gpu_temperature_c",
+    ):
+        spark = _cpu_spark(low_clock=False)
+        spark["telemetry"]["sample"][field] //= 2
+        render_payload(spark, "fleet", action="detail")
+        assert capsys.readouterr().out != output, field
 
     render_payload(_cpu_spark(low_clock=True), "fleet", action="detail")
     assert capsys.readouterr().out != output

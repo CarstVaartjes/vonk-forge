@@ -140,7 +140,8 @@ def https_peer(tmp_path, monkeypatch):
             state["calls"].append((self.command, self.path, b""))
             self.respond()
 
-        do_PUT = do_POST
+        def do_PUT(self):
+            self.do_POST()
 
         def respond(self):
             body = state.get("body", b'{"detail":"fixture response"}')

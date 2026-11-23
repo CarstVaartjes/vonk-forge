@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import io
 import json
@@ -1600,11 +1601,15 @@ def test_status_without_envelope_never_authorizes_retry(tmp_path, status, genera
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
+    request = (
+        functools.partial(client.job, "12345678-1234-4123-8123-123456789abc")
+        if generated
+        else functools.partial(
+            client.get, "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+        )
+    )
     with pytest.raises(ControlClientError):
-        if generated:
-            client.job("12345678-1234-4123-8123-123456789abc")
-        else:
-            client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")
+        request()
 
 
 @pytest.mark.parametrize("fault", [500, 503, 429, "timeout", "body_timeout"])
@@ -1713,11 +1718,13 @@ def test_typed_internal_error_is_not_retried(tmp_path, generated):
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
+    request = (
+        functools.partial(client.job, "12345678-1234-4123-8123-123456789abc")
+        if generated
+        else functools.partial(client.get, "/api/model/model/remove-review")
+    )
     with pytest.raises(ControlHTTPError) as caught:
-        if generated:
-            client.job("12345678-1234-4123-8123-123456789abc")
-        else:
-            client.get("/api/model/model/remove-review")
+        request()
     assert len(calls) == 1
     assert caught.value.retryable is False
     assert caught.value.context is not None

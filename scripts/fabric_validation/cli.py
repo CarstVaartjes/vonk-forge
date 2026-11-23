@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             document["rdma"] = run_rdma(runner, head, worker)
             document["latency"] = run_rdma_latency(runner, head, worker)
-            nccl = run_nccl(runner, head, worker)
+            nccl = run_nccl(runner, head)
             document["nccl"] = dataclasses.asdict(nccl)
             if not nccl.passed:
                 raise GateError(nccl.reason or "NCCL failed")

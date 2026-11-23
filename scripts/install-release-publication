@@ -76,7 +76,7 @@ NAS_GATES = {
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
 
 
-def nas_acceptance_modes(test_mode: bool) -> dict[str, str]:
+def nas_acceptance_modes(*, test_mode: bool) -> dict[str, str]:
     # PR acceptance has no tailnet credentials. This only selects the evidence
     # expected by the run-local signer; release acceptance still requires full.
     return {"docker-29.4.3": "disabled", "native": "disabled" if test_mode else "full"}
@@ -1121,7 +1121,8 @@ def accept(arguments: argparse.Namespace) -> None:
             if (
                 lanes != sorted(NAS_ACCEPTANCE_LANES)
                 or not isinstance(tailscale_modes, dict)
-                or tailscale_modes != nas_acceptance_modes(arguments.test_mode)
+                or tailscale_modes
+                != nas_acceptance_modes(test_mode=arguments.test_mode)
                 or any(gate.startswith("spark_") for gate in gates)
             ):
                 raise PublicationError("behavioral gate report is invalid")
@@ -1234,7 +1235,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
             or report.get("tailscale_mode")
-            != nas_acceptance_modes(arguments.test_mode).get(lane)
+            != nas_acceptance_modes(test_mode=arguments.test_mode).get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"
@@ -1260,7 +1261,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
-        "tailscale_modes": nas_acceptance_modes(arguments.test_mode),
+        "tailscale_modes": nas_acceptance_modes(test_mode=arguments.test_mode),
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -1422,7 +1423,7 @@ def _parse_channel_manifest(raw: bytes, public_key: bytes) -> dict[str, str]:
     return values
 
 
-def _atomic_local_copy(source: Path, destination: Path, immutable: bool) -> None:
+def _atomic_local_copy(source: Path, destination: Path, *, immutable: bool) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     content = _safe_bytes(source, "publication source")
     if immutable and destination.exists():
@@ -1657,7 +1658,7 @@ def _copy_publication_entry(
         _atomic_local_copy(
             source,
             filesystem / entry["key"],
-            entry["phase"] not in {"endpoint", "pointer"},
+            immutable=entry["phase"] not in {"endpoint", "pointer"},
         )
     else:
         assert remote is not None
@@ -2105,7 +2106,7 @@ def refresh(arguments: argparse.Namespace) -> None:
         ) as directory:
             source = Path(directory) / "current.manifest"
             source.write_bytes(refreshed)
-            _atomic_local_copy(source, filesystem / pointer_key, False)
+            _atomic_local_copy(source, filesystem / pointer_key, immutable=False)
     else:
         assert remote is not None  # The parser requires exactly one publication target.
         with tempfile.TemporaryDirectory(prefix=".installer-refresh-") as directory:
