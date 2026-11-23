@@ -106,7 +106,7 @@ def _postgres_owned_checks_current(
                 "SELECT conname,convalidated FROM pg_constraint "
                 "WHERE conrelid=to_regclass(%s) AND contype='c'",
                 (table_name,),
-            )
+            ).all()
         )
         return all(
             validated.get(name) is True and actual.get(name) == expression

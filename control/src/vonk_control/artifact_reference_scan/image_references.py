@@ -414,7 +414,7 @@ def _operation_revision_archives(
             select(
                 CatalogDocumentRevision.id, CatalogDocumentRevision.document_id
             ).where(CatalogDocumentRevision.id.in_(sorted(revision_ids)))
-        )
+        ).all()
     )
     held: dict[str, set[str]] = {}
     for archive, document_id in session.execute(
