@@ -50,7 +50,6 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
     <LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={() => undefined} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("Image is used by saved-profile"),
   );
@@ -70,7 +69,6 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
   const api = { recipeRemovalReview, removeRecipe, recipeCacheRequest } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(recipeCacheRequest).toHaveBeenCalledWith(
@@ -78,7 +76,7 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
       expect.anything(),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Keep the model" })).toBeEnabled());
+  fireEvent.click(await screen.findByRole("button", { name: "Review again" }));
   expect(onRemoved).not.toHaveBeenCalled();
   const originalKey = removeRecipe.mock.calls[0]?.[1];
   removeRecipe.mockImplementationOnce(async (selector, request_key, with_model) => ({
@@ -92,7 +90,6 @@ test("a refused removal reconciles its key and admits fresh reviewed removal", a
     state: LifecycleState.SUCCEEDED,
     progress: { phase: ProgressPhase.COMPLETED },
   }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
   expect(removeRecipe.mock.calls[1]?.[1]).not.toBe(originalKey);
@@ -150,7 +147,6 @@ test("a review for another recipe selector cannot be confirmed", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   await waitFor(() =>
     expect(screen.getByRole("alert")).toHaveTextContent("another selector or resource"),
   );
@@ -191,7 +187,6 @@ test("queued and partial cleanup remain visible until the same owner succeeds", 
   } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Removal queued: accepted-cleanup"),
@@ -281,7 +276,6 @@ test("a receipt for another retention choice is reconciled by key and never repo
   const api = { recipeRemovalReview, removeRecipe, recipeCacheRequest } as unknown as ControlApi;
   render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-  fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
   fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
   await waitFor(() =>
     expect(screen.getByRole("status")).toHaveTextContent("Removal receipt not yet confirmed"),
@@ -356,7 +350,6 @@ test.each(["disconnect", "timeout"])(
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove recipe" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep the model" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirm remove" }));
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent("Removal queued: recovered-operation"),

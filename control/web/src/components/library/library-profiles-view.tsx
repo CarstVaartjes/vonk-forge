@@ -520,7 +520,7 @@ export function LibraryProfilesView({
   const [pendingLoad, setPendingLoad] = useState<PendingProfileLoad>();
   const [error, setError] = useState("");
   const [optionsBySelector, setOptionsBySelector] = useState<Record<string, RecipeOption[]>>({});
-  const [confirmingReload, setConfirmingReload] = useState(false);
+  const [confirmingStops, setConfirmingStops] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
@@ -855,9 +855,14 @@ export function LibraryProfilesView({
       ? [{ selector: assignment.selector, detail: assignment.recipe_update.detail }]
       : [],
   );
-  async function reload() {
+  /** One rule for Load and Reload: confirm only when the plan stops a workload, else apply at once. */
+  function loadOrConfirm() {
+    if (preview?.next_action === ProfileLoadAction.LOAD_STOPPING) setConfirmingStops(true);
+    else void load();
+  }
+  async function confirmedLoad() {
     await load();
-    setConfirmingReload(false);
+    setConfirmingStops(false);
   }
 
   async function deleteSelected() {
@@ -1258,21 +1263,21 @@ export function LibraryProfilesView({
               disabled={
                 loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
               }
-              onClick={() => setConfirmingReload(true)}
+              onClick={loadOrConfirm}
             >
               Reload profile
             </button>
           </section>
         )}
-        {confirmingReload && selectedProfile && (
+        {confirmingStops && selectedProfile && (
           <ConfirmDialog
-            title="Reload this profile?"
-            consequence="Reloads the profile with the newest recipe revisions. Running workloads that use an older revision restart to apply it; nothing restarts until you confirm."
-            confirmLabel="Reload profile"
+            title="Load this profile?"
+            consequence={`Loading stops ${stoppedAliases(preview).join(", ") || "running workloads"}; requests to ${stoppedAliases(preview).length === 1 ? "it" : "them"} are interrupted. Nothing stops until you confirm.`}
+            confirmLabel="Load profile"
             command={`vonkctl --profile ${formatWire(selectedProfile.number)} profile load`}
             busy={loadingProfile}
-            onConfirm={() => void reload()}
-            onCancel={() => setConfirmingReload(false)}
+            onConfirm={() => void confirmedLoad()}
+            onCancel={() => setConfirmingStops(false)}
           />
         )}
         {confirmingDelete && selectedProfile && (
@@ -1317,7 +1322,7 @@ export function LibraryProfilesView({
                     disabled={
                       loadingProfile || applicationRunning || (!loadable(preview) && !pendingLoad)
                     }
-                    onClick={() => void load()}
+                    onClick={loadOrConfirm}
                   >
                     {loadingProfile ? "Loading…" : "Load profile"}
                   </button>

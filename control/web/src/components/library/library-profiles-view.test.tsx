@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { LosslessNumber } from "lossless-json";
@@ -450,8 +450,11 @@ test("a profile running an older recipe revision shows an update badge and reloa
       },
     })),
   } as unknown as FleetProfile;
+  // The update restarts a serving workload, so the plan stops something.
+  const stopping = { ...preview, next_action: "load_stopping" } as unknown as FleetProfilePreview;
   const api = apiFor({
     profiles: vi.fn(async () => ({ generated_at: "2026-09-10T00:00:00Z", profiles: [outdated] })),
+    previewProfile: vi.fn(async () => stopping),
   });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
 
@@ -463,11 +466,32 @@ test("a profile running an older recipe revision shows an update badge and reloa
   await user.click(within(notice).getByRole("button", { name: "Reload profile" }));
   expect(api.loadProfile).not.toHaveBeenCalled();
   const dialog = await screen.findByRole("alertdialog");
-  await user.click(within(dialog).getByRole("button", { name: "Reload profile" }));
+  await user.click(within(dialog).getByRole("button", { name: "Load profile" }));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     review: { effects_digest: preview.effects_digest },
   });
+});
+
+test("Load confirms only when the plan stops a workload", async () => {
+  const user = userEvent.setup();
+  const stopping = { ...preview, next_action: "load_stopping" } as unknown as FleetProfilePreview;
+  const api = apiFor({ previewProfile: vi.fn(async () => stopping) });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
+  expect(api.loadProfile).not.toHaveBeenCalled();
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(within(dialog).getByRole("button", { name: "Load profile" }));
+  await waitFor(() => expect(api.loadProfile).toHaveBeenCalledTimes(1));
+});
+
+test("a plan that stops nothing loads in one click, with no dialog", async () => {
+  const user = userEvent.setup();
+  const api = apiFor();
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", { name: "Load profile" }));
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await waitFor(() => expect(api.loadProfile).toHaveBeenCalledTimes(1));
 });
 
 test("deleting a profile asks first, then removes it from the page without stopping anything", async () => {

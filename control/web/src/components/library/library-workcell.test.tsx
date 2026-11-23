@@ -164,7 +164,6 @@ test("removes a recipe only after an explicit model choice", async () => {
   // one before issuing any request.
   fireEvent.click(screen.getAllByRole("button", { name: "Remove recipe" })[0]!);
   expect(removeRecipe).not.toHaveBeenCalled();
-  fireEvent.click(screen.getAllByRole("button", { name: "Keep the model" })[0]!);
   await waitFor(() =>
     expect(screen.getByLabelText("Cache removal review")).toHaveTextContent("42 bytes"),
   );
