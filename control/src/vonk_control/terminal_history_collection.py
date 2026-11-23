@@ -60,9 +60,12 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from .catalog.revision_collection import GRACE, INTERVAL, tokens
+from .evidence_repeats import command_evidence_needed
+from .journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
 from .lifecycle.evidence import Residue
 from .logging import log_event
 from .model_cache.contract import ModelCacheSetState
+from .model_cache.inventory import holds_unique_objects
 from .models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
@@ -289,7 +292,6 @@ def _reserved(owner: InstrumentedAttribute[str]) -> ColumnElement[bool]:
 
 
 def _command_evidence(session: Session, row: Any, _protected: frozenset[str]) -> bool:
-    from .evidence_repeats import command_evidence_needed
 
     return command_evidence_needed(session, row)
 
@@ -362,9 +364,6 @@ def _stop_unproven() -> ColumnElement[bool]:
 
 def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule, ...]:
     """The single rule table. Children precede parents; the order is the pass's."""
-
-    from .journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
-    from .model_cache.inventory import holds_unique_objects
 
     return (
         RetentionRule(

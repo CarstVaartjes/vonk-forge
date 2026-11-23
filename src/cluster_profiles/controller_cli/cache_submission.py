@@ -6,23 +6,19 @@ import argparse
 import shlex
 import uuid
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING
 
 from ..cli_states import (
     CANCEL_ACCEPTED_STATES,
 )
 from ..control_client.errors import ControlClientError, ControlMalformedResponse
 from ..control_client.schema import validate_control_document
-
-if TYPE_CHECKING:
-    from ..generated_control.models.model_cache_operator_response import (
-        ModelCacheOperatorResponse,
-    )
-    from ..generated_control.models.recipe_image_availability_response import (
-        RecipeImageAvailabilityResponse,
-    )
-
-
+from ..generated_control.models.model_cache_operator_response import (
+    ModelCacheOperatorResponse,
+)
+from ..generated_control.models.recipe_image_availability_response import (
+    RecipeImageAvailabilityResponse,
+)
+from ..generated_control.models.recipe_retry_intent import RecipeRetryIntent
 from .cache_removal import _cache_operation_id
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
@@ -104,9 +100,6 @@ def _submit_model_access_resume(
     factory: Callable[[], str],
 ) -> ModelCacheOperatorResponse:
     """Recheck through the Controller, reconciling a lost response by request key."""
-    from ..generated_control.models.model_cache_operator_response import (
-        ModelCacheOperatorResponse,
-    )
 
     operation_id = str(uuid.UUID(args.operation_id))
     key = _request_key(args, factory)
@@ -242,10 +235,6 @@ def _submit_recipe_retry(
     factory: Callable[[], str],
 ) -> RecipeImageAvailabilityResponse:
     """Preserve the owning frozen intent instead of a mutable recipe selector."""
-    from ..generated_control.models.recipe_image_availability_response import (
-        RecipeImageAvailabilityResponse,
-    )
-    from ..generated_control.models.recipe_retry_intent import RecipeRetryIntent
 
     def decode(value: object) -> RecipeImageAvailabilityResponse:
         if not isinstance(value, Mapping):

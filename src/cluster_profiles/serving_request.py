@@ -31,6 +31,14 @@ from collections.abc import Callable, Mapping
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from vonk_forge_contracts.api import (
+    ApiReasoningAlwaysOn,
+    ApiReasoningSwitch,
+    ApiRemainingContext,
+    ApiTokenArgument,
+    ApiTokenValue,
+)
+
 if TYPE_CHECKING:
     from vonk_forge_contracts.api import ChatApi
 
@@ -54,12 +62,6 @@ def _always_on_budget(
     api: ChatApi, argument_value: ArgumentValue | None
 ) -> tuple[bool, int | None]:
     """(is the budget known, the budget); remaining context is known and unbounded."""
-
-    from vonk_forge_contracts.api import (
-        ApiRemainingContext,
-        ApiTokenArgument,
-        ApiTokenValue,
-    )
 
     default = api.default_output_tokens
     if isinstance(default, ApiRemainingContext):
@@ -89,7 +91,6 @@ def bounded_chat_check(
     body = request.get("body") if isinstance(request, dict) else None
     if api is None or fitted.get("kind") != "openai.chat" or not isinstance(body, dict):
         return fitted
-    from vonk_forge_contracts.api import ApiReasoningAlwaysOn, ApiReasoningSwitch
 
     reasoning = api.reasoning
     if isinstance(reasoning, ApiReasoningSwitch):

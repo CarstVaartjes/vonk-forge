@@ -11,6 +11,9 @@ from ..cli_render.common import terminal_text
 from ..cli_select import SelectorError
 from ..control_client.errors import ControlMalformedResponse
 from ..control_client.schema import validate_control_document
+from ..generated_control.models.recipe_revision_projection import (
+    RecipeRevisionProjection,
+)
 from .common import ControllerClient, _quoted
 from .selection import _observe_selection, _selection_remaining
 
@@ -85,10 +88,6 @@ def _apply_option_choices(
         return
     selector = str(assignment["recipe_selector"])
     deadline = time.monotonic() + getattr(args, "timeout_seconds", 30)
-
-    from ..generated_control.models.recipe_revision_projection import (
-        RecipeRevisionProjection,
-    )
 
     def recipe_options():
         detail = client.request(

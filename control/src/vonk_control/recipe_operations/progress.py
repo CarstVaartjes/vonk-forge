@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
+from .errors import RecipeRequestInvalid
+
 if TYPE_CHECKING:
     from .observation_helpers import RecipeParent, _PhaseGroups
 
@@ -264,7 +266,6 @@ def _topology_order(
 
 
 def _canonical_distributed_readiness(document: object) -> bool:
-    from .errors import RecipeRequestInvalid
 
     recipe = _catalog_recipe(document)
     if recipe is None:

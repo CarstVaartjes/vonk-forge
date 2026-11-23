@@ -11,10 +11,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select, text, update
+
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_control import build_identity
 
+from ..identity_insert import insert_identity
 from ..logging import log_event
+from ..models.jobs import ControlProcessHeartbeat
 from ..stall_window import Verdict
 from ..worker_healthcheck import (
     WORKER_READINESS_WINDOW_SECONDS,
@@ -211,11 +216,8 @@ class WorkerHeartbeatRecorder:
         self._register_process_start()
 
     def _register_process_start(self) -> None:
-        from ..build_identity import packaged_runtime_identity
-        from ..identity_insert import insert_identity
-        from ..models.jobs import ControlProcessHeartbeat
 
-        identity = packaged_runtime_identity()
+        identity = build_identity.packaged_runtime_identity()
 
         with self._sessions.begin() as session:
             heartbeat, created = insert_identity(
@@ -242,9 +244,6 @@ class WorkerHeartbeatRecorder:
 
     def record_running_step(self, step: str, started_at: datetime) -> None:
         """Publish the step that is still running, so a slow one is named."""
-        from sqlalchemy import text, update
-
-        from ..models.jobs import ControlProcessHeartbeat
 
         with self._sessions.begin() as session:
             if session.get_bind().dialect.name == "postgresql":
@@ -265,9 +264,6 @@ class WorkerHeartbeatRecorder:
             )
 
     def completed_loop(self) -> None:
-        from sqlalchemy import select
-
-        from ..models.jobs import ControlProcessHeartbeat
 
         completed_at = self._clock()
         if (

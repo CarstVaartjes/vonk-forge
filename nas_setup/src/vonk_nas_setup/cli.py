@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn, TextIO
 
+from pydantic import ValidationError
+
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 
 from .filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
@@ -99,7 +101,6 @@ def run(argv: list[str] | None = None) -> None:
 
 
 def main() -> None:
-    from pydantic import ValidationError
 
     try:
         run()

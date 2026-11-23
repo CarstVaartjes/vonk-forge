@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,19 +14,16 @@ from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import InstallationState
 
+from .fleet_projection.common import ProjectionReason
 from .models.execution import RecipeInstallation
 from .models.operations import AgentOperation, AgentOperationAttempt
 from .stored.json_values import read_row_column
-
-if TYPE_CHECKING:
-    from .fleet_projection.common import ProjectionReason
 
 
 def model_layout_notices(
     session: Session, node_ids: Sequence[str]
 ) -> dict[str, tuple[ProjectionReason, ...]]:
     """A repaired installation clears its notice through normal success."""
-    from .fleet_projection.common import ProjectionReason
 
     rows = session.execute(
         select(AgentOperation, AgentOperationAttempt)

@@ -13,7 +13,7 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileSwitchChildKind
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
@@ -67,7 +67,6 @@ class EndingsMixin:
         remote effects are retained without withdrawing routes.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        from vonk_agent_protocol.agent_words import ProfileChildPhase
 
         from ..agent_jobs.retirement import release_owned_reservations_in_session
 

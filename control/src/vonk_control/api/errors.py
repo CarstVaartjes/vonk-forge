@@ -24,6 +24,8 @@ from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from ..capabilities import CapabilityUnavailableError
 from ..catalog.api import CatalogProblem
 from ..http_errors import TemporaryHTTPError
+from ..library.api import SelectorAmbiguityHTTPError
+from ..logging import redact_text
 from .common import (
     _LOGIN_PATH,
     _bounded_error_content,
@@ -50,7 +52,6 @@ def install_error_handlers(app: FastAPI) -> None:
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
-        from ..library.api import SelectorAmbiguityHTTPError
 
         if isinstance(error, TemporaryHTTPError):
             return Response(
@@ -127,7 +128,6 @@ def install_error_handlers(app: FastAPI) -> None:
             )
         if not request.url.path.startswith(("/agent/", "/api/")):
             return await request_validation_exception_handler(request, error)
-        from ..logging import redact_text
 
         if request.url.path.startswith("/agent/"):
             _log_agent_rejection(

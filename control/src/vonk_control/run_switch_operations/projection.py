@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy.orm import object_session
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
+from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 
 from ..jobs import states as job_states
 from ..models.jobs import Job
@@ -103,7 +104,6 @@ class ProjectionMixin:
                     node_ids=list(job.targets),
                 )
             ]
-        from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 
         if (job.status_reason or "").startswith(JournalRepairCode.EXHAUSTED):
             blockers = [

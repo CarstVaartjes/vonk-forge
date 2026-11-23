@@ -1,7 +1,27 @@
 """One-time transactional adoption of retired per-node fact owners."""
 
-from sqlalchemy import inspect, text
+import hashlib
+import uuid
+from datetime import UTC, datetime
+
+from pydantic import ValidationError
+from sqlalchemy import insert, inspect, select, text
 from sqlalchemy.engine import Connection
+
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.telemetry import HostResourceSample
+
+from ..inventory.items_contract import (
+    AgentInventoryItems,
+    InventorySnapshotKind,
+    PreflightInventoryItem,
+)
+from ..models.fleet import AgentNodeContact
+from ..models.telemetry import NodeInventoryItemsSnapshot, NodeInventoryResourceSnapshot
+from .constants import _LOGGER
 
 # The contact clock that dates each moved fact; a fact without one is kept
 # when the old owner has none (columns re-added by a rolled-back Controller are
@@ -26,7 +46,6 @@ def move_contact_facts(connection: Connection) -> None:
     rollback and an upgrade again, each fact takes the newer value by its
     contact clock, so the rolled-back Controller's contacts are not lost.
     """
-    from ..models.fleet import AgentNodeContact
 
     # Contact facts lived on agent_nodes until owner-approved lock-reduction
     # step 1 moved them; their names are the contact row's columns.
@@ -71,25 +90,6 @@ def move_contact_facts(connection: Connection) -> None:
 
 def move_runtime_facts(connection: Connection) -> None:
     """Adopt old facts once, then remove their columns in the same transaction."""
-    import hashlib
-    import uuid
-    from datetime import UTC, datetime
-
-    from pydantic import ValidationError
-    from sqlalchemy import insert, select
-
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_agent_protocol.contracts import AgentOperation, canonical_message
-    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-    from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-
-    from ..inventory.items_contract import (
-        AgentInventoryItems,
-        InventorySnapshotKind,
-        PreflightInventoryItem,
-    )
-    from ..models.telemetry import NodeInventoryItemsSnapshot
-    from .constants import _LOGGER
 
     inspector = inspect(connection)
     old_columns = {column["name"] for column in inspector.get_columns("agent_nodes")}
@@ -237,16 +237,6 @@ def move_resource_facts(connection: Connection) -> None:
     Receipt identity and the source FK preserve historical observations and
     their retention lifetime. All writes and drops share startup's transaction.
     """
-    import hashlib
-    import uuid
-
-    from sqlalchemy import insert, select
-
-    from vonk_agent_protocol.contracts import canonical_message
-    from vonk_agent_protocol.telemetry import HostResourceSample
-
-    from ..inventory.items_contract import InventorySnapshotKind
-    from ..models.telemetry import NodeInventoryResourceSnapshot
 
     inspector = inspect(connection)
     # Replacement report-only uniqueness was installed by reconciliation.

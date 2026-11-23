@@ -14,6 +14,7 @@ from ..fleet_profile_contract.review import (
     FleetProfileApplicationCancelRequest,
     FleetProfileApplicationView,
 )
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .api import raise_profile_conflict
@@ -32,7 +33,6 @@ def install_profile_application_cancel_route(
     actor_dependency: Any,
     profiles: Any | None,
 ) -> None:
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS[("post", _CANCEL_PATH)] = "cancelProfileApplication"
     _ADMIN_OPERATION_IDS[("get", _CANCEL_RECEIPT_PATH)] = (

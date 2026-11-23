@@ -45,6 +45,7 @@ from vonk_control.operator_receipt_contract import ReceiptPolicy
 
 from ..auth import MUTATION_ROLES, Actor
 from ..capabilities import CapabilityUnavailableError
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from ..runtime_init import GATEWAY_MASTER_KEY_PATH
@@ -1241,7 +1242,6 @@ def install_gateway_key_routes(
     actor_dependency: Any,
     service: GatewayKeyService | None,
 ) -> None:
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS[("get", _KEY_PATH)] = "listGatewayKeys"
     _ADMIN_OPERATION_IDS[("post", _KEY_PATH)] = "createGatewayKey"

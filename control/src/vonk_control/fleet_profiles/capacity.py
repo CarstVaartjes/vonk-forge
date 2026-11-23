@@ -37,6 +37,7 @@ from ..fleet_profile_contract.effects import FleetProfileEffects
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
 from ..jobs import states as job_states
+from ..lifecycle.evidence import Residue
 from ..models.cache import RecipeBuild
 from ..models.execution import RecipeRun, ResourceReservation
 from ..models.fleet import AgentNode, FleetProfileApplication
@@ -900,7 +901,6 @@ def accepted_profile_runtime_image(
     """
     # Keep intent/reference validation with its existing owner. Import at the
     # call boundary because profile orchestration also consumes capacity helpers.
-    from ..lifecycle.evidence import Residue
     from .contracts import FleetProfileConflict
     from .service import FleetProfileService
 

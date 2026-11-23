@@ -31,6 +31,7 @@ from ..fleet_profile_contract.review import (
     FleetProfilePreview,
     FleetProfilePreviewRequest,
 )
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
@@ -82,7 +83,6 @@ def install_fleet_profile_routes(
     profiles: Any | None,
     operations: Any | None = None,
 ) -> None:
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_PROFILE_OPERATION_IDS)
     authenticated = actor_dependency

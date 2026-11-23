@@ -14,6 +14,7 @@ from ..cli_select import SelectorError
 from ..control_client.errors import ControlClientError, ControlMalformedResponse
 from ..control_client.schema import validate_control_document
 from .common import ControllerClient, _profile_number
+from .observation import _bounded_timeout, _poll_path
 from .profile_options import _apply_option_choices, _configure_option_target
 from .selection import (
     _read_concurrently,
@@ -78,7 +79,6 @@ def _read_saved_definition(
     check: Callable[..., None] | None = None,
 ):
     """The saved definition view (revision and definition), readable or retried."""
-    from .observation import _poll_path
 
     def readable_definition(observed: object) -> None:
         try:
@@ -120,7 +120,6 @@ def _profile_save(
     body = validate_control_document(
         "FleetProfileInput", {**definition, "expected_revision": expected}
     )
-    from .observation import _bounded_timeout, _poll_path
 
     deadline = time.monotonic() + _bounded_timeout(args)
     try:
@@ -176,7 +175,6 @@ def _profile_authoring(
         return _profile_save(
             args, client, definition, current_revision=args.expected_revision
         )
-    from .observation import _bounded_timeout
 
     deadline = selection_deadline or (time.monotonic() + _bounded_timeout(args))
 

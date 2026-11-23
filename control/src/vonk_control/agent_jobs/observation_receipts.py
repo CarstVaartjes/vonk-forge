@@ -35,6 +35,7 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
+from ..package_activation import matches_receipt
 from .contracts import _ENDED_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
 from .stored import column_field, column_value
 
@@ -255,7 +256,6 @@ def _upgrade_receipt_current(
     # classifier. Observation itself never records contact or renews the fence.
     from ..agent_upgrades.dispatch import DispatchMixin
     from ..agent_upgrades.stored import _stored_package
-    from ..package_activation import matches_receipt
 
     if isinstance(receipt, AgentUpgradeResult):
         package = _stored_package(parent)

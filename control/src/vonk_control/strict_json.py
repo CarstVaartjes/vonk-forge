@@ -20,6 +20,7 @@ from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
 from .http_errors import MAX_RETRY_AFTER_SECONDS
+from .logging import redact_text
 from .observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
@@ -146,8 +147,6 @@ def _retry_later_response(error: UnknownOutcomeError) -> Response:
     agent, a worker) asks again.  The delay is the error's own hint when it
     carries one, bounded.
     """
-
-    from .logging import redact_text
 
     hint = getattr(error, "retry_after_seconds", None)
     delay = (

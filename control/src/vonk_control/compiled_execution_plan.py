@@ -45,6 +45,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledSecurity,
     CompiledSecurityMount,
     CompiledTopology,
+    validate_compiled_execution_plan,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
@@ -525,9 +526,6 @@ def compile_verified_execution_plan(
 
 def validate_compiled_launch_payload(value: object) -> WireCompiledExecutionPlan:
     """Enforce canonical schema/security validation and the transport ceiling."""
-    from vonk_agent_protocol.compiled_execution_plan import (
-        validate_compiled_execution_plan,
-    )
 
     try:
         encoded = canonical_message(value)

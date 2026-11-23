@@ -3,10 +3,21 @@
 import copy
 from typing import Any
 
-from sqlalchemy import text
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
+from vonk_control import exact_integer_adoption
+from vonk_control.db import node_facts
+
+from .. import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from ..model_primitives import Base
+from ..models.evidence import REPEATED_EVIDENCE_SEQUENCE
 from .connections import _reraise_contention
 from .constants import _LOGGER
 from .schema_helpers import (
@@ -33,13 +44,6 @@ from .schema_helpers import (
 
 def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
     """Differences between the live catalog and the models, minus tolerated ones."""
-    from alembic.autogenerate import compare_metadata
-    from alembic.migration import MigrationContext
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     return [
         difference
@@ -57,18 +61,8 @@ def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
 
 def reconcile_schema(connection: Connection) -> None:
     """Apply safe metadata differences inside the caller's startup transaction."""
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import inspect
 
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..exact_integer_adoption import adopt_exact_integer_columns
-    from ..model_primitives import Base
-    from ..models.evidence import REPEATED_EVIDENCE_SEQUENCE
-
-    adopt_exact_integer_columns(connection)
+    exact_integer_adoption.adopt_exact_integer_columns(connection)
     ops = Operations(MigrationContext.configure(connection))
     differences = _schema_differences(connection)
     drift: SchemaDrift = {kind: [] for kind in SchemaDriftKind}
@@ -515,16 +509,10 @@ def reconcile_schema(connection: Connection) -> None:
     )
     _drop_undeclared_tables(connection, ops)
 
-    from .node_facts import (
-        move_contact_facts,
-        move_resource_facts,
-        move_runtime_facts,
-    )
-
     # Contact first: the runtime move reads the contact clock from its owner.
-    move_contact_facts(connection)
-    move_runtime_facts(connection)
-    move_resource_facts(connection)
+    node_facts.move_contact_facts(connection)
+    node_facts.move_runtime_facts(connection)
+    node_facts.move_resource_facts(connection)
 
     drift[SchemaDriftKind.DEFERRED_CHECK_CONSTRAINT].extend(
         _check_constraint_differences(connection)

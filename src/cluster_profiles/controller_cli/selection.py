@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from ..cli_select import SelectorError
 from ..control_client.errors import (
@@ -18,13 +18,10 @@ from ..control_client.errors import (
     ControlUnauthorized,
 )
 from ..control_client.schema import validate_control_document
-
-if TYPE_CHECKING:
-    from ..generated_control.models.library_recipe_projection import (
-        LibraryRecipeProjection,
-    )
-
-from .common import MAX_PAGE_LIMIT, ControllerClient
+from ..generated_control.models.library_recipe_projection import (
+    LibraryRecipeProjection,
+)
+from .common import MAX_PAGE_LIMIT, ControllerClient, _quoted
 from .submission import _known_http_refusal_status
 
 
@@ -144,9 +141,6 @@ def _scan_recipe_rows(
     client: ControllerClient, *, deadline: float
 ) -> Iterator[LibraryRecipeProjection]:
     """Decode a complete catalogue read before using any partial matches."""
-    from ..generated_control.models.library_recipe_projection import (
-        LibraryRecipeProjection,
-    )
 
     seen_selectors: set[str] = set()
     for raw_recipes in _library_pages(
@@ -259,7 +253,6 @@ def _resolve_recipe_selector(
     if not matches:
 
         def owner_detail():
-            from .common import _quoted
 
             detail = client.request(
                 "GET",

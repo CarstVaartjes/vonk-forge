@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.routing import iter_route_contexts
 from pydantic import BaseModel
 
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -192,7 +193,6 @@ class OperatorReceiptResolver:
     installations: RunSwitchOperationService | None = None
 
     def bind(self, app: FastAPI) -> None:
-        from fastapi.routing import iter_route_contexts
 
         from .strict_json import ControllerAPIRoute
 

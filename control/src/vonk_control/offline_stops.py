@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models.jobs import Job
@@ -60,7 +61,6 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
 
 
 def pending_run_stop_nodes(session: Session, run_id: str) -> frozenset[str]:
-    from sqlalchemy import select
 
     return frozenset(
         node_id

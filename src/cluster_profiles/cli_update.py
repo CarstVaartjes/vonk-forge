@@ -32,6 +32,12 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
+from .control_client.errors import (
+    ControlClientError,
+    ControlForbidden,
+    ControlUnauthorized,
+)
+from .control_client.transfers import ControlClient
 from .control_transport import open_https
 from .runtime_identity import (
     installed_content_identity,
@@ -362,12 +368,6 @@ def run_update(
     )
     if not apply or equal_content:
         return result
-    from .control_client.errors import (
-        ControlClientError,
-        ControlForbidden,
-        ControlUnauthorized,
-    )
-    from .control_client.transfers import ControlClient
 
     # This is an authority observation, not a second compatibility planner.
     # Signed wheel ingress already verified the exact installed bytes. Source

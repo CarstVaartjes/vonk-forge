@@ -10,6 +10,8 @@ from typing import Any, ClassVar
 
 from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
@@ -244,9 +246,6 @@ def _stage(session: Session, row: _EventRow | None) -> None:
 
 def _seed_cursor(connection: Connection) -> None:
     """Recreate a missing cursor row after the newest stored id."""
-
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
     dialect_insert = sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
     last_id = select(func.coalesce(func.max(FleetStreamEvent.id), 0)).scalar_subquery()

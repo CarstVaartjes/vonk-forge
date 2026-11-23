@@ -10,15 +10,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 import vonk_control
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_control.availability_production import production
+from vonk_control.gateway import route_runtime
 
 from ..agent_jobs.contracts import controller_result_consumer
 from ..agent_services import build_agent_services
+from ..agent_upgrades.service import AgentUpgradeService
 from ..artifact_jobs.blob_store import ArtifactBlobStore
 from ..artifact_jobs.service import ArtifactJobService
 from ..auth import CursorCodec, TokenCodec
@@ -29,23 +33,47 @@ from ..catalog.service import CatalogService
 from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
+from ..db.connections import build_engine, session_factory
 from ..distribution_executor.preparation import CompositeDistributionPhaseExecutor
+from ..execution_plan_service import ControllerExecutionPlanService
 from ..failure_evidence import FailureEvidenceService
+from ..fleet_events import FleetEventRepository
+from ..fleet_profiles.factory import build_production_fleet_profile_service
+from ..fleet_projection.service import FleetProjection
+from ..fleet_stream import FleetStream
 from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway.route_grants import recipe_key_routes
+from ..install_admission.service import InstallAdmissionService
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from ..jobs.queue import JobService
 from ..library.assessment import LibraryAssessment
 from ..library_projection.service import LibraryProjection
-from ..logging import configure_controller_logging
-from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
+from ..logging import configure_controller_logging, log_event, redact_text
+from ..metrics.registry import (
+    MetricsRegistry,
+    OperationalMetricsCollector,
+    read_runnable_job_ages,
+)
 from ..model_cache.api import register_model_cache_operation_provider
 from ..model_cache.service import ModelCacheService
+from ..models.jobs import Job
 from ..observation.platform import PlatformObserver
+from ..operation_api.durable import durable_operation_services
 from ..operator_projection_api.wiring import build_fleet_operator_services
+from ..presence import ManagementAddressPolicy
 from ..recipe_builds.service import RecipeBuildService
 from ..recipe_operations.operation_worker import RecipeOperationWorker
 from ..recipe_operations.service import RecipeOperationService
+from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
+from ..recipe_routes.service import RecipeRouteService
+from ..run_admission import RunAdmissionService
 from ..run_switch_operations.service import RunSwitchOperationService
+from ..runtime_image_preparation.preparation import (
+    make_runtime_image_receipt_preparer,
+    stored_runtime_image_resolver,
+)
+from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+from ..runtime_image_preparation.transport import OciLayoutImageTransport
 from ..settings import (
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
@@ -60,6 +88,8 @@ from ..settings import (
     Settings,
 )
 from ..source_bundles import DatabaseSourceBundleStore
+from ..telemetry.samples import TelemetryRepository
+from ..worker.memory import read_worker_memory_report, worker_memory_report_path
 from .application import create_app
 from .common import _LOGGER, SpaFiles
 
@@ -209,7 +239,6 @@ async def _keep(
 
 async def _close_model_cache(model_cache: ModelCacheService) -> None:
     """Bound shutdown checkpoint retries; durable transfers resume on restart."""
-    from ..logging import log_event, redact_text
 
     for attempt in range(len(REQUEST_PAUSES) + 1):
         try:
@@ -238,36 +267,6 @@ async def _close_model_cache(model_cache: ModelCacheService) -> None:
 def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
     capabilities = CapabilityRegistry()
-    from sqlalchemy import func, select
-
-    from ..agent_upgrades.service import AgentUpgradeService
-    from ..availability_production.production import build_recipe_image_availability
-    from ..db.connections import build_engine, session_factory
-    from ..execution_plan_service import ControllerExecutionPlanService
-    from ..fleet_events import FleetEventRepository
-    from ..fleet_projection.service import FleetProjection
-    from ..fleet_stream import FleetStream
-    from ..gateway.route_runtime import (
-        AtomicRouteBundlePublisher,
-        FileSupervisorAcknowledger,
-    )
-    from ..install_admission.service import InstallAdmissionService
-    from ..jobs.queue import JobService
-    from ..metrics.registry import OperationalMetricsCollector
-    from ..models.jobs import Job
-    from ..operation_api.durable import durable_operation_services
-    from ..presence import ManagementAddressPolicy
-    from ..recipe_routes.publisher import AtomicRecipeRoutePublisher
-    from ..recipe_routes.service import RecipeRouteService
-    from ..run_admission import RunAdmissionService
-    from ..runtime_image_preparation.preparation import (
-        make_runtime_image_receipt_preparer,
-        stored_runtime_image_resolver,
-    )
-    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-    from ..runtime_image_preparation.transport import OciLayoutImageTransport
-    from ..telemetry.samples import TelemetryRepository
-    from ..worker.memory import read_worker_memory_report, worker_memory_report_path
 
     if settings is None:
         settings = Settings.from_env_and_secrets()
@@ -359,10 +358,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     recipe_route_runtime = capabilities.guard(
         ControllerCapability.ROUTE_PUBLISHER,
-        AtomicRouteBundlePublisher,
-        lambda: AtomicRouteBundlePublisher(
+        route_runtime.AtomicRouteBundlePublisher,
+        lambda: route_runtime.AtomicRouteBundlePublisher(
             Path("/routes"),
-            await_supervisor_ack=FileSupervisorAcknowledger(
+            await_supervisor_ack=route_runtime.FileSupervisorAcknowledger(
                 Path("/supervisor/ack.json"), clock=clock
             ),
         ),
@@ -473,7 +472,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         build_artifact_jobs,
         initialize=lambda service: service.reconcile_storage(),
     )
-    from ..fleet_profiles.factory import build_production_fleet_profile_service
 
     fleet_profiles = build_production_fleet_profile_service(
         sessions,
@@ -568,7 +566,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         catalog=catalog_service,
         clock=clock,
     )
-    recipe_image_production = build_recipe_image_availability(
+    recipe_image_production = production.build_recipe_image_availability(
         sessions,
         settings=settings,
         recipe_builds=recipe_builds,
@@ -727,7 +725,6 @@ def admin_web_root() -> Path:
 
 
 def mount_admin_web(app: FastAPI) -> None:
-    from ..logging import log_event
 
     web_root = admin_web_root()
     if not web_root.is_dir():

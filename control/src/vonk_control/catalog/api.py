@@ -13,6 +13,7 @@ from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from ..auth import Actor
 from ..library.contract import UuidId
 from ..machine_states import CatalogSyncStateField
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
 from .service import CatalogService
@@ -137,7 +138,6 @@ def install_catalog_routes(
     service: CatalogService | None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(CATALOG_OPERATION_IDS)
     authenticated = actor_dependency

@@ -16,6 +16,7 @@ from .. import agent_operation_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..jobs.documents import RecipeInstallParent
 from ..journal_models import RunSwitchJournalRepair
+from ..lifecycle.types import Outcome
 from ..machine_states import reservation_live
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
@@ -38,7 +39,6 @@ def _end_unproven_journal(
     from ..lifecycle.agent_operation import AgentOperationAdapter
     from ..lifecycle.recipe_operation import RecipeOperationAdapter
     from ..lifecycle.run_switch import RunSwitchAdapter
-    from ..lifecycle.types import Outcome
     from ..models.execution import RecipeInstallation, ResourceReservation
     from ..run_switch_operations.planning_helpers import _run_switch_payload
 

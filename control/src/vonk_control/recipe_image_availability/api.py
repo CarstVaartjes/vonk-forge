@@ -30,6 +30,7 @@ from ..bounded_json import require_integer, require_sequence
 from ..cache_removal_review import CacheRemovalReview
 from ..logging import redact_text
 from ..model_cache.contract import UUID_PATTERN, Digest
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import (
@@ -426,8 +427,6 @@ def install_recipe_operator_routes(
     service: RecipeImageAvailabilityService | None,
 ) -> None:
     """Install current singular Recipe download/remove/update mutations."""
-
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
 

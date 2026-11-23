@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -22,6 +23,7 @@ from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import MUTATION_ROLES, Actor, CursorCodec
 from ..bounded_json import require_integer, require_sequence
 from ..cache_removal_review import CacheRemovalReview
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import (
     OperationApiServices,
     OperationListPage,
@@ -29,6 +31,7 @@ from ..operation_api.contracts import (
     OperationQuery,
     bounded_error_responses,
 )
+from ..operation_api.providers import observation_cursors
 from ..operations.contract import AvailabilityOperationFailure
 from ..operations.item_contract import (
     OperationItem,
@@ -168,8 +171,6 @@ def install_model_operator_routes(
     The service resolves selectors against an explicit immutable model digest.
     Replays bind the actor, request identity, action, selector, and digest.
     """
-
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
 
@@ -416,7 +417,6 @@ class ModelCacheOperationProvider:
         self, service: ModelCacheService, cursors: CursorCodec | None = None
     ) -> None:
         self._service = service
-        from ..operation_api.providers import observation_cursors
 
         self._cursors = cursors or observation_cursors()
 
@@ -569,7 +569,6 @@ def register_model_cache_operation_provider(
     existing = services.operation_providers
     if any(item.family == "model-cache" for item in existing):
         return services
-    from dataclasses import replace
 
     return replace(services, operation_providers=(*existing, provider))
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, get_args
 
@@ -19,6 +20,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.vocabulary import OperationReason
 
 from .agent_operation_facts import aware
+from .jobs import states as job_states
 from .models.waits import ScheduledWaitOwner
 from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
 from .strict_json import warn_unreadable_once
@@ -434,9 +436,7 @@ def schedule_wait(
 
 def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     """Give a new queued owner its initial wait, before it is flushed."""
-    from uuid import uuid4
 
-    from .jobs import states as job_states
     from .models.cache import ModelCacheOperation
     from .models.fleet import FleetProfileApplication
     from .models.jobs import Job
@@ -444,7 +444,7 @@ def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
 
     identity = getattr(owner, "id", None)
     if identity is None:
-        identity = str(uuid4())
+        identity = str(uuid.uuid4())
         if isinstance(
             owner, Job | AgentOperation | ModelCacheOperation | FleetProfileApplication
         ):

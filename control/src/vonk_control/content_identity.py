@@ -27,9 +27,16 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
+from sqlalchemy import or_, select, tuple_
 from vonk_forge_contracts import RecipeDefinition
+
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.state_machines import InstallationState
+
+from .lifecycle.evidence import Residue, read_or_rebuild
 
 if TYPE_CHECKING:
     from .model_cache.contract import CacheResolution
@@ -211,12 +218,8 @@ def runs_identically(first: RecipeExecution, second: RecipeExecution) -> bool:
 def _chosen_runtime(execution: RecipeExecution) -> object | None:
     """The parts of a recipe outside its execution key that change what runs;
     ``None`` when its stored document is damaged (retired as unknown)."""
-    from functools import partial
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
     from .catalog.revision_contract import shared_catalog_document
-    from .lifecycle.evidence import Residue, read_or_rebuild
     from .models.catalog import CatalogDocumentRevision
 
     recipe = read_or_rebuild(
@@ -307,7 +310,6 @@ def recipe_content_membership(column, digests: Collection[str]):
     The revision key locates the immutable document; the requested digest,
     rather than editorial provenance, decides which rows belong to the read.
     """
-    from sqlalchemy import select
 
     from .models.catalog import CatalogDocumentRevision
 
@@ -322,7 +324,6 @@ def catalog_selector_membership(
     publisher, slug, selectors: Collection[tuple[str, str]]
 ):
     """Look up exact logical catalog choices, without asserting artifact reuse."""
-    from sqlalchemy import tuple_
 
     return tuple_(publisher, slug).in_(selectors)
 
@@ -355,7 +356,6 @@ def recipe_model_digests(
     The binding rows were written with the revision and name the exact model
     content. A revision without rows is absent.
     """
-    from sqlalchemy import select
 
     from .models.catalog import CatalogRecipeModelReference
 
@@ -380,10 +380,6 @@ def installations_using_models(session, contents: Collection[str]) -> frozenset[
     filter is in SQL on indexed columns. An installation running on a reused
     set may name it only in its plan, so callers also read plans.
     """
-    from sqlalchemy import or_, select
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-    from vonk_agent_protocol.state_machines import InstallationState
 
     from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
     from .models.execution import RecipeInstallation
@@ -413,9 +409,6 @@ def recipes_bound_to(session, contents: Collection[str]) -> frozenset[tuple[str,
 
     By the relational binding rows, keyed by the model contents (indexed).
     """
-    from sqlalchemy import select
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
     from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
 
@@ -446,9 +439,6 @@ def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
     Heads without an active revision, or whose revision is gone, are absent:
     the caller recovers those from the selector's own records.
     """
-    from sqlalchemy import select
-
-    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
     from .models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 

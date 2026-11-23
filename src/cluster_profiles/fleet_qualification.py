@@ -30,6 +30,7 @@ from cluster_profiles.cli_states_generated import (
 from .cli_artifact_jobs import _create_with_reconcile, _declared_files, _job
 from .cli_states import ENDED_STATES, preparation
 from .control_client.errors import ControlClientError
+from .control_transport import open_https
 from .fleet_qualification_observation import (
     QualificationError,
     QualificationObservationUnknown,
@@ -520,7 +521,6 @@ class ServiceSmokeAdapter:
             )
         self.fixtures = fixtures
         self.timeout_seconds = timeout_seconds
-        from .control_transport import open_https
 
         self.opener = opener or open_https
 

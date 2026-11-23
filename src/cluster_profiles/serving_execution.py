@@ -16,6 +16,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+from vonk_forge_contracts.recipe import RecipeMultipartServingRequest
+
 from cluster_profiles.cli_states_generated import SUCCEEDED
 
 from .cli_states import ENDED_STATES
@@ -275,9 +278,6 @@ def _multipart_request(
     fixtures: Mapping[str, bytes],
 ) -> tuple[bytes, str]:
     """The declared form fields plus the staged fixture, encoded once."""
-
-    from pydantic import ValidationError
-    from vonk_forge_contracts.recipe import RecipeMultipartServingRequest
 
     try:
         declared = RecipeMultipartServingRequest.model_validate(request)

@@ -6,7 +6,7 @@ import math
 import re
 from collections.abc import Mapping
 from email.message import Message
-from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
+from typing import Any, Protocol, Self, TypedDict
 
 from jsonschema import Draft202012Validator, validators
 
@@ -18,13 +18,9 @@ from ..error_reporting import (
     safe_endpoint,
     safe_request_id,
 )
-
-if TYPE_CHECKING:
-    # Importing any generated model runs the generated package initializer,
-    # which imports all of its models; that alone was most of every vonkctl
-    # invocation's start-up time. Load them where a request needs them.
-    from ..generated_control.models.job_detail_response import JobDetailResponse
-
+from ..generated_control.models.bounded_error_response import BoundedErrorResponse
+from ..generated_control.models.error_context_response import ErrorContextResponse
+from ..generated_control.models.job_detail_response import JobDetailResponse
 
 _MAX_ARTIFACT_OUTPUT = 1024**3
 
@@ -492,8 +488,6 @@ def _structured_http_error_fields(
     )
     # Only a validated Controller problem can make a deterministic 500 terminal.
     # Bare 5xx and other availability envelopes keep their HTTP retry contract.
-    from ..generated_control.models.bounded_error_response import BoundedErrorResponse
-    from ..generated_control.models.error_context_response import ErrorContextResponse
 
     retryable = None
     try:
@@ -534,7 +528,6 @@ def _safe_job_observation(
 ) -> JobDetailResponse | None:
     if job is None:
         return None
-    from ..generated_control.models.job_detail_response import JobDetailResponse
 
     safe_job = JobDetailResponse.from_dict(job.to_dict())
     if safe_job.status_reason is not None:

@@ -24,6 +24,7 @@ from .models.execution import ArtifactJob
 from .models.fleet import AgentNode
 from .models.jobs import Job
 from .models.operations import AgentOperation
+from .recipe_operations.errors import RecipeRequestInvalid
 from .recipe_operations.stop_payloads import stop_payload_from_job_run
 from .stored.json_values import read_row_column
 
@@ -171,7 +172,6 @@ def reconcile_cancelled_runtime(
                         tuple[tuple[AgentOperation, RecipeStopPayload], ...], str
                     ] = source,
                 ) -> None:
-                    from .recipe_operations.errors import RecipeRequestInvalid
 
                     current = cancelled_runtime_source(locked, job_id)
                     if current is None or (

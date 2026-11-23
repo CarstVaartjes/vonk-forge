@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 
+from .settings import STORAGE_DEMAND_TTL_SECONDS
 from .worker.memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,7 +70,6 @@ class StorageDemands:
     def __init__(
         self, clock: Callable[[], datetime], *, ttl: timedelta | None = None
     ) -> None:
-        from .settings import STORAGE_DEMAND_TTL_SECONDS
 
         self._clock = clock
         self._ttl = ttl or timedelta(seconds=STORAGE_DEMAND_TTL_SECONDS)

@@ -33,7 +33,9 @@ from vonk_agent_protocol.state_machines import RunState
 
 from ..categorized_errors import BookkeepingUnknown
 from ..fleet_profile_contract.switch_state import FleetProfileSwitchChildKind
+from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
 from ..jobs import states as job_states
+from ..lifecycle.evidence import Residue
 from ..lifecycle.job_ranks import fan_in_cancellation_key
 from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
 from ..models.fleet import (
@@ -269,9 +271,7 @@ def validate_profile_stop_owner(
 
     # Imports are local because FleetProfileService composes this module's
     # lifecycle owner through RunSwitch.
-    from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
     from ..jobs.documents import RecipeStopParent, RunSwitchJobPayload
-    from ..lifecycle.evidence import Residue
     from ..run_switch_contract.operations import RunSwitchOperationResult
     from ..run_switch_contract.plans import RunSwitchPlan
     from ..run_switch_operations.image_receipts import _plan_target_node_ids

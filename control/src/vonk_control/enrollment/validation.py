@@ -19,9 +19,10 @@ from vonk_agent_protocol.enrollment import (
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 
+from .types import _NODE_ID, _TOKEN, EnrollmentDenied
+
 
 def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
-    from .types import _NODE_ID, EnrollmentDenied
 
     try:
         request = x509.load_pem_x509_csr(csr)
@@ -105,7 +106,6 @@ def _validate_evidence(
 
 
 def _decode_token(token: str) -> bytes:
-    from .types import _TOKEN, EnrollmentDenied
 
     if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
         raise EnrollmentDenied("invalid enrollment grant")
@@ -125,7 +125,6 @@ def _digest(value: bytes) -> str:
 
 
 def _validate_node_id(node_id: str) -> None:
-    from .types import _NODE_ID
 
     if _NODE_ID.fullmatch(node_id) is None:
         raise ValueError(

@@ -26,7 +26,10 @@ from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
+from ..auth import agent_identity_from_scope
+from ..auth_api import LoginRequestInvalid
 from ..catalog.api import CatalogProblem
+from ..logging import log_event, redact_text
 
 """Versioned authenticated control API."""
 
@@ -85,8 +88,6 @@ def _bounded_error_content(
     submitted input alongside the type error.
     """
 
-    from ..logging import redact_text
-
     if not isinstance(detail, str):
         detail = "request failed"
     detail = redact_text(detail)[:256]
@@ -126,7 +127,6 @@ def _validation_detail(issues: list[RequestValidationIssue]) -> str:
 
 
 def _invalid_login_content() -> bytes:
-    from ..auth_api import LoginRequestInvalid
 
     return canonical_message(
         LoginRequestInvalid(detail="login request is invalid").model_dump(mode="json")
@@ -196,7 +196,6 @@ def _log_request_failure(
     request: Request, status: int, cause: BaseException | None
 ) -> None:
     """Log a 5xx with the request id the caller sees and a redacted traceback."""
-    from ..logging import log_event
 
     log_event(
         _LOGGER,
@@ -213,8 +212,6 @@ def _log_request_failure(
 
 def _log_agent_rejection(request: Request, status: int, reason: str) -> None:
     """One line for a 4xx on an agent endpoint: request id and reason, no body."""
-    from ..auth import agent_identity_from_scope
-    from ..logging import log_event
 
     identity = agent_identity_from_scope(dict(request.scope))
 

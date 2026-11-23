@@ -13,8 +13,12 @@ from fastapi import FastAPI
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from pydantic import BaseModel
+from sqlalchemy.orm import sessionmaker
 from starlette.routing import Mount, Route
 
+from .auth import TokenCodec
+from .browser_auth import BrowserAuthService
+from .jobs.queue import JobService
 from .strict_json import route_endpoint
 
 
@@ -43,12 +47,8 @@ def raw_json_body(model: type[BaseModel]):
 
 
 def schema_application(*, browser_auth: bool = True) -> FastAPI:
-    from sqlalchemy.orm import sessionmaker
 
     from .api.application import create_app
-    from .auth import TokenCodec
-    from .browser_auth import BrowserAuthService
-    from .jobs.queue import JobService
 
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(

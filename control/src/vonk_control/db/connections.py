@@ -18,8 +18,14 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
+from .. import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from ..fleet_events import FleetEventRecorder
 from ..logging import redact_text
+from ..model_primitives import Base
 from ..settings import DATABASE_WAIT_BUDGETS
+from ..stored.json_values import install_write_guard
 from .constants import (
     _ALEMBIC_CONFIG,
     _DATABASE_RETRYABLE_ERRORS,
@@ -124,7 +130,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     budgets = DATABASE_WAIT_BUDGETS
     # Every JSON column write is checked against its contract (stored_columns);
     # a document no contract describes is reported once, never refused.
-    from ..stored.json_values import install_write_guard
 
     install_write_guard()
     if "postgres" in database_url:
@@ -153,7 +158,6 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
-    from ..fleet_events import FleetEventRecorder
 
     sessions = sessionmaker(engine, expire_on_commit=False)
     FleetEventRecorder.install(sessions)
@@ -251,10 +255,6 @@ def wait_for_database(
     worker, not before it: while the owner is still at work startup waits
     within the same bounded deadline. Any other refusal stays fatal.
     """
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     def connect_once() -> None:
         engine = build_engine(database_url)

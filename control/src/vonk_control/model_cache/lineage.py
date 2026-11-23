@@ -29,6 +29,7 @@ from vonk_forge_contracts.model import ModelReference
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
+from ..lifecycle.evidence import Residue, read_or_rebuild
 from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
 from ..models.catalog import CatalogDocumentRevision
 from ..stored.json_values import read_row_column
@@ -213,7 +214,6 @@ def catalog_model_files(
     cannot be read (nothing may then be ruled out by files)."""
 
     from ..catalog.revision_contract import read_catalog_document
-    from ..lifecycle.evidence import Residue, read_or_rebuild
 
     files: set[str] = set()
     for revision in session.scalars(

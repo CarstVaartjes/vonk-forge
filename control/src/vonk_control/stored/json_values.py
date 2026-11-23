@@ -44,12 +44,13 @@ from typing import (
 )
 
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter
-from sqlalchemy import JSON
+from sqlalchemy import JSON, event, inspect
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.types import TypeDecorator
 
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
+from ..model_primitives import Base
 from ..strict_json import read_stored_document, stored_document_detail
 
 _LOG = logging.getLogger(__name__)
@@ -394,12 +395,10 @@ def install_write_guard(*, strict: bool | None = None) -> None:
     """
 
     global _GUARD_INSTALLED
-    from sqlalchemy import event
 
     from .. import (
         models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
     )
-    from ..model_primitives import Base
 
     if strict is not None:
         set_write_guard_mode(strict=strict)
@@ -433,7 +432,6 @@ def _guard_row(_mapper: Any, _connection: Any, row: object) -> None:
 
 def validate_row_write(row: object) -> None:
     """Apply the canonical write contract to ORM and insert/replay producers."""
-    from sqlalchemy import inspect
 
     state = inspect(row)
     assert state is not None

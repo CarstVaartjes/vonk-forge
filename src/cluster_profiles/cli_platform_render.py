@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .cli_render.common import _field, _reported, _table, _utc
 from .generated_control.models.platform_observation import PlatformObservation
 
 
 def render_platform(observation: PlatformObservation) -> None:
     # Import lazily: the shared terminal helpers live with the task renderer.
-    from .cli_render.common import _field, _reported, _table, _utc
 
     _field("Observed", _utc(observation.observed_at))
     build = observation.api.source_sha

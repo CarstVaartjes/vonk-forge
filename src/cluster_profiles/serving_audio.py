@@ -12,6 +12,10 @@ import secrets
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from vonk_forge_contracts import recipe
+from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
+from vonk_forge_contracts.recipe import wav_facts
+
 if TYPE_CHECKING:
     from vonk_forge_contracts.recipe import WavFacts
 
@@ -28,7 +32,6 @@ def assert_speech(headers: Mapping[str, str], body: bytes) -> WavFacts:
 
     # Imported here: the platform's CLI imports this package without the recipe
     # contracts, which only a recipe's own checks need.
-    from vonk_forge_contracts.recipe import MIN_SPEECH_SECONDS, wav_facts
 
     content_type = next(
         (value for key, value in headers.items() if key.lower() == "content-type"), ""
@@ -38,10 +41,10 @@ def assert_speech(headers: Mapping[str, str], body: bytes) -> WavFacts:
     audio = wav_facts(body)
     if audio is None:
         raise AudioCheckError("the response is not a decodable WAV")
-    if audio.seconds < MIN_SPEECH_SECONDS:
+    if audio.seconds < recipe.MIN_SPEECH_SECONDS:
         raise AudioCheckError(
             f"the response holds {audio.seconds:.2f} s of audio, under "
-            f"{MIN_SPEECH_SECONDS} s"
+            f"{recipe.MIN_SPEECH_SECONDS} s"
         )
     return audio
 
@@ -62,7 +65,6 @@ def multipart_body(
 
     # Imported here: the platform's CLI imports this package without the recipe
     # contracts, which only a recipe's own checks need.
-    from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
     content = fixtures.get(fixture)
     if content is None:

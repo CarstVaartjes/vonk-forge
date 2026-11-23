@@ -22,6 +22,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from .content_identity import catalog_selector_membership
+from .fleet_profile_contract.vocabulary import RecipeSelector
 from .models.fleet import FleetProfile, FleetProfileRecipe
 
 
@@ -31,7 +32,6 @@ def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
     Assignments are validated where a profile is saved; a value that is not a
     list of assignments with a valid recipe selector is refused here too.
     """
-    from .fleet_profile_contract.vocabulary import RecipeSelector
 
     if not isinstance(assignments, list):
         raise TypeError("saved profile assignments must be a list")

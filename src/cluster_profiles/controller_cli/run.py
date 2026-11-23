@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import re
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -22,6 +23,7 @@ from ..generated_control.models.fleet_profile_run_effect_action import (
     FleetProfileRunEffectAction,
     check_fleet_profile_run_effect_action,
 )
+from ..generated_control.models.model_display import ModelDisplay
 from ..generated_control.types import Unset
 from .common import ControllerClient, _profile_number, _request_key
 from .confirmation import _require_confirmation
@@ -248,7 +250,6 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
 
     A model without a published display has no title to match and is omitted.
     """
-    from ..generated_control.models.model_display import ModelDisplay
 
     titles: dict[str, str] = {}
     for models in _library_pages(
@@ -278,7 +279,6 @@ def _resolve_run_recipe(
     needle = requested.strip().casefold()
     if not needle:
         raise SelectorError("model or recipe name cannot be empty")
-    import re
 
     if re.fullmatch(r"[0-9a-f]{64}|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", requested):
         return _resolve_recipe_selector(client, requested, deadline=deadline)

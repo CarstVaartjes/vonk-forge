@@ -54,6 +54,7 @@ from .image_receipts import _require_profile_runtime_image
 from .ownership import _lock_phase_owner
 from .planning_helpers import _now, _run_switch_payload, _stored_job_plan
 from .result_helpers import _bound_workload_intent, _progress_damaged, _read_progress
+from .retry_holds import RetryHoldsMixin
 
 
 def _persist_run_switch_runtime_image_reference(
@@ -76,7 +77,6 @@ def _persist_run_switch_runtime_image_reference(
     workload claim, then commits the reference intent while that lock is
     still held. It never waits for image work or storage from inside SQL.
     """
-    from .retry_holds import RetryHoldsMixin
 
     try:
         parsed_receipt = read_stored_model(

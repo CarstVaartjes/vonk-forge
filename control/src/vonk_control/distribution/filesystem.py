@@ -12,7 +12,7 @@ from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 
-from ..oci_image_store import IMAGE_CACHE_DIRECTORY
+from ..oci_image_store import IMAGE_CACHE_DIRECTORY, StoreUnknown
 from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from .types import (
     DistributionError,
@@ -145,7 +145,6 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
         return False
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
-        from ..oci_image_store import StoreUnknown
 
         stored = self._runtime_storage.layout.read(f"sha256:{archive_sha256}")
         return (

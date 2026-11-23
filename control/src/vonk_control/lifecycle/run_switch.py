@@ -66,6 +66,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
 
+from .. import agent_operation_states
 from ..agent_operation_facts import aware
 from ..jobs import states as job_states
 from ..lifecycle_preflight import end_unclaimed_probes
@@ -175,7 +176,6 @@ def end_unclaimed_children(
     the caller offers it again on its next check.
     """
     # agent_jobs builds on the lifecycle core; import its writers at use.
-    from .. import agent_operation_states
     from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
     from ..agent_jobs.retry import abandon_idempotent_job_in_session
     from ..run_switch_operations.awaited_children import child_job_ids

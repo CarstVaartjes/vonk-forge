@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -234,8 +234,6 @@ def _replay_matches(
         fingerprint,
     )
     binding = _issuance_binding(enrollment.provider_request)
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
 
     content_matches = (
         hashlib.sha256(

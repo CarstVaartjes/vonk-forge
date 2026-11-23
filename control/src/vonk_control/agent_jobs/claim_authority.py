@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -15,15 +15,18 @@ from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentOperation,
     AgentResult,
+    AgentUpgradePayload,
     canonical_message,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
+    RunAdmissionCode,
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states
@@ -41,6 +44,7 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
+from ..package_activation import matches_receipt
 from ..recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,
     _build_disk_envelope,
@@ -50,6 +54,7 @@ from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
+from ..recovery_policy import WAIT_STEP
 from ..spark_disk import spark_free_bytes
 from .contracts import (
     _TERMINAL_PARENT_STATES,
@@ -135,9 +140,6 @@ def _reconcile_agent_upgrade(
         .execution_options(populate_existing=True)
         .limit(1)
     )
-    from vonk_agent_protocol.contracts import AgentUpgradePayload
-
-    from ..package_activation import matches_receipt
 
     receipt = runtime_identity.package_activation
     if operation is None or operation.current_attempt == 0 or receipt is None:
@@ -444,10 +446,6 @@ def dispatch_wait(
     behind it (the reinstall, queued before the job), and the wait is bounded
     like any agent order.
     """
-    from datetime import timedelta
-
-    from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
-    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     from ..agent_operation_facts import (
         aware,
@@ -455,7 +453,6 @@ def dispatch_wait(
     from ..operations.blockers import make_blocker
     from ..persisted_waits import schedule_wait
     from ..recipe_operations.observation_helpers import reinstall_in_flight
-    from ..recovery_policy import WAIT_STEP
     from .predicates import _claim_refusal_reason
 
     if operation.kind not in {

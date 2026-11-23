@@ -25,6 +25,7 @@ from vonk_agent_protocol.wire_model import OperationProgress
 
 from .. import agent_operation_states
 from ..compose_bundle import ComposeBundle
+from ..fleet_projection.common import FleetSnapshot
 from ..jobs import states as job_states
 from ..jobs.queue import without_agent_operation
 from ..models.fleet import AgentCertificate, AgentNode, AgentNodeContact
@@ -42,7 +43,6 @@ from .readings import (
 )
 
 if TYPE_CHECKING:
-    from ..fleet_projection.common import FleetSnapshot
     from ..telemetry.samples import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
@@ -316,8 +316,6 @@ class MetricsRegistry:
     @staticmethod
     def _fleet_values(snapshot: FleetSnapshot):
         """Project the typed FleetSnapshot without inventing node health."""
-
-        from ..fleet_projection.common import FleetSnapshot
 
         if not isinstance(snapshot, FleetSnapshot):
             raise TypeError("fleet metrics require a typed FleetSnapshot")

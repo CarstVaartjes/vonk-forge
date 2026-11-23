@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.contracts import AgentResult, AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
-from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
+from vonk_agent_protocol.package_upgrade import (
+    PackageActivationReceipt,
+    PackageRollbackAuthority,
+)
 
 from .. import agent_operation_states
 from ..agent_jobs.contracts import _BOUNDARY_REFUSAL_PREFIXES
@@ -25,6 +28,7 @@ from ..lifecycle.types import CancelRequested
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
+from ..package_activation import matches_receipt
 from ..strict_json import read_stored_model
 from .contract import AgentUpgradePackage, AgentUpgradeRolloutResult
 
@@ -243,10 +247,6 @@ class DispatchMixin:
             else operation.created_at.replace(tzinfo=UTC)
         )
         evidence = message.result
-        from vonk_agent_protocol.contracts import AgentUpgradePayload
-        from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
-
-        from ..package_activation import matches_receipt
 
         raw_receipt = evidence.get("activation_receipt")
         if raw_receipt is None:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from .contracts import canonical_message
 from .lifecycle_vocabulary import LifecycleState
 from .outcome import UnknownError
 from .wire_model import StrictJSONModel, WireModel
@@ -20,7 +22,6 @@ MAX_ENROLLMENT_RESPONSE_BYTES = 64 * 1024
 
 
 def _check_response_budget(value: WireModel) -> None:
-    from .contracts import canonical_message
 
     observed = len(canonical_message(value))
     if observed > MAX_ENROLLMENT_RESPONSE_BYTES:
@@ -96,7 +97,6 @@ class ExpiredRenewRequest(RenewRequest):
     signature: str = Field(pattern=r"^[0-9a-f]{128}$")
 
     def proof_bytes(self) -> bytes:
-        import hashlib
 
         digest = hashlib.sha256(self.csr.encode("ascii")).hexdigest()
         return (

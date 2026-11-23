@@ -22,9 +22,11 @@ names why the image was or was not used.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import re
+import tarfile
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -65,6 +67,13 @@ from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
+)
+from .runtime.adapters import (
+    RUNTIME_ADAPTER_DIGEST_LABEL,
+    RUNTIME_ADAPTER_LABEL,
+    RUNTIME_INTERFACE_LABEL,
+    RUNTIME_INTERFACE_LABEL_VALUE,
+    resolve_runtime_adapter,
 )
 from .source_bundles import GeneratedSourceBundle
 from .stored.states import RecipeBuildState
@@ -152,7 +161,6 @@ def package_build_intent(
 
     from .catalog.entities import build_policy_projection
     from .recipe_builds.common import canonical_build, derive_build_input_identity
-    from .runtime.adapters import resolve_runtime_adapter
     from .source_policy import dockerfile_base_images
 
     recipe = (
@@ -268,17 +276,7 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
     prebuilt image.
     """
 
-    import io
-    import tarfile
-
     from .catalog.entities import build_policy_projection
-    from .runtime.adapters import (
-        RUNTIME_ADAPTER_DIGEST_LABEL,
-        RUNTIME_ADAPTER_LABEL,
-        RUNTIME_INTERFACE_LABEL,
-        RUNTIME_INTERFACE_LABEL_VALUE,
-        resolve_runtime_adapter,
-    )
 
     index = json.loads((library_root / "catalog-index.json").read_text("utf-8"))
     images: dict[str, dict[str, object]] = {}

@@ -14,6 +14,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..content_identity import same_image
 from ..jobs.documents import RecipeInstallParent
+from ..lifecycle.evidence import Residue
 from ..models.fleet import AgentCertificate, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
@@ -44,7 +45,6 @@ def _prove(
     # Import the sole owner predicates, not a second plan/authority interpreter.
     from ..fleet_profiles.persistence import _stored_progress
     from ..fleet_profiles.service import FleetProfileService
-    from ..lifecycle.evidence import Residue
     from ..run_switch_operations.artifact_validation import _validate_artifact_execution
     from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
     from ..run_switch_operations.image_receipts import (

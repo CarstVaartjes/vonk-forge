@@ -26,8 +26,10 @@ from ..auth import (
     TokenCodec,
 )
 from ..browser_auth import BrowserAuthService
+from ..capabilities import RecoveringService
 from ..catalog.api import install_catalog_routes
 from ..catalog.service import CatalogService
+from ..cli_update_contract import install_cli_update_contract_routes
 from ..failure_evidence import FailureEvidenceService
 from ..failure_evidence_api import install_failure_evidence_routes
 from ..fleet_profiles.api import install_fleet_profile_routes
@@ -48,6 +50,7 @@ from ..operator_acceptance import (
     OperatorReceiptResolver,
 )
 from ..operator_projection_api.services import FleetOperatorServices
+from ..recipe_image_availability.api import install_recipe_operator_routes
 from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_operations.service import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute
@@ -115,7 +118,6 @@ def create_app(
         lifespan=monitoring_lifespan,
     )
     app.router.route_class = ControllerAPIRoute
-    from ..capabilities import RecoveringService
 
     cursor_codec = cast(
         CursorCodec,
@@ -191,7 +193,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         service=model_cache,
     )
-    from ..recipe_image_availability.api import install_recipe_operator_routes
 
     install_recipe_operator_routes(
         app,
@@ -203,8 +204,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         operations=run_switch_operations,
     )
-
-    from ..cli_update_contract import install_cli_update_contract_routes
 
     install_cli_update_contract_routes(
         app,

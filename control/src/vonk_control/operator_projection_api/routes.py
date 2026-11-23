@@ -16,6 +16,7 @@ from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.state_machines import ModelCacheOperatorStatus
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
+from ..admission_locking import report_admission_locks
 from ..agent_upgrades.contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
@@ -26,6 +27,7 @@ from ..enrollment.contract import (
     EnrollmentRevocationStatus,
 )
 from ..fleet_projection.common import FleetNode, FleetNodeIdentity, FleetSnapshot
+from ..library.api import install_library_routes
 from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
 from ..models.execution import RecipeRun, RunNode
 from ..observation.platform_errors import (
@@ -38,6 +40,7 @@ from ..observation.transfer import (
     observation_openapi,
     observation_response,
 )
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import operator_acceptance
 from ..run_states import ENDED_RUN_STATES
@@ -72,9 +75,6 @@ def install_operator_projection_routes(
     it to enrollment, signed upgrades and retained authenticated evidence; this
     module never falls back to SSH or synthetic values.
     """
-
-    from ..library.api import install_library_routes
-    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_OPERATION_IDS)
     install_library_routes(
@@ -165,7 +165,6 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=403, detail="insufficient role")
         if fleet_services is None or fleet_services.sessions is None:
             raise HTTPException(status_code=503, detail="fleet locks unavailable")
-        from ..admission_locking import report_admission_locks
 
         try:
             with fleet_services.sessions() as session:

@@ -9,10 +9,18 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.capability_reply import ControllerCapability
+from vonk_control import local_ca
 
 from .agent_api.common import AgentApiServices
+from .agent_jobs.service import AgentJobService
 from .capabilities import CapabilityRegistry
+from .enrollment.bootstrap import EnrollmentBootstrapConfig
 from .enrollment.service import EnrollmentService
+from .host_helper_authority import (
+    HostHelperGrantIssuer,
+    HostRuntimeAuthorityService,
+)
+from .presence import AgentPresenceService, ManagementAddressPolicy
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,
     Settings,
@@ -26,9 +34,8 @@ def build_enrollment_service(
     clock: Callable[[], datetime],
 ) -> EnrollmentService:
     """Factory evaluated only by the shared certificate capability owner."""
-    from .local_ca import LocalCertificateAuthority
 
-    authority = LocalCertificateAuthority(
+    authority = local_ca.LocalCertificateAuthority(
         sessions=sessions,
         root_certificate_path=settings.agent_ca_root_path,
         intermediate_certificate_path=settings.agent_intermediate_certificate_path,
@@ -52,14 +59,6 @@ def build_agent_services(
     capabilities: CapabilityRegistry | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
-    from .agent_jobs.service import AgentJobService
-    from .enrollment.bootstrap import EnrollmentBootstrapConfig
-    from .enrollment.service import EnrollmentService
-    from .host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
-    from .presence import AgentPresenceService, ManagementAddressPolicy
 
     registry = capabilities or CapabilityRegistry()
     if distribution is None and model_cache is not None:

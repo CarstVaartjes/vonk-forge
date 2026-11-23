@@ -4,11 +4,32 @@ import uuid
 from enum import StrEnum
 from typing import Any
 
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.operations.ops import CreateForeignKeyOp
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    DefaultClause,
+    ForeignKeyConstraint,
+    LargeBinary,
+    MetaData,
+    PrimaryKeyConstraint,
+    Table,
+    UniqueConstraint,
+    inspect,
+)
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import (
     SQLAlchemyError,
 )
+from sqlalchemy.schema import CreateTable, DropTable
 
+from .. import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
+from ..model_primitives import Base
 from .connections import _database_sqlstate, _reraise_contention
 from .constants import _LOGGER
 
@@ -79,13 +100,6 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
     folds equivalent literal-array casts (which vary across server versions).
     No application rows are read. No durable schema is changed.
     """
-    from sqlalchemy import CheckConstraint, Column, MetaData, Table, inspect
-    from sqlalchemy.schema import CreateTable, DropTable
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     inspector = inspect(connection)
     live_tables = set(inspector.get_table_names())
@@ -166,7 +180,6 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
 
 def _column_default_sql(column: object, connection: Connection) -> str | None:
     """Return a safe SQL expression for a declared scalar model default."""
-    from sqlalchemy import DefaultClause
 
     server_default = getattr(column, "server_default", None)
     if isinstance(server_default, DefaultClause):
@@ -188,7 +201,6 @@ def _column_default_sql(column: object, connection: Connection) -> str | None:
 
 def _cosmetic_type_difference(existing_type: object, model_type: object) -> bool:
     """Recognize dialect spellings for the same binary/date-time storage type."""
-    from sqlalchemy import DateTime, LargeBinary
 
     existing_name = type(existing_type).__name__.upper()
     if isinstance(model_type, DateTime) and existing_name in {
@@ -208,12 +220,6 @@ def _is_generated_sequence_default(default: object, reflected_column: object) ->
 
 
 def _constraint_kind(constraint: object) -> str | None:
-    from sqlalchemy import (
-        CheckConstraint,
-        ForeignKeyConstraint,
-        PrimaryKeyConstraint,
-        UniqueConstraint,
-    )
 
     if isinstance(constraint, CheckConstraint):
         return "check"
@@ -233,14 +239,6 @@ def _quoted(connection: Connection, *names: str) -> str:
 
 def _repair_check_constraints(connection: Connection) -> None:
     """Converge named CHECKs; invalid historical rows do not block startup."""
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import CheckConstraint, inspect
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     ops = Operations(MigrationContext.configure(connection))
     inspector = inspect(connection)
@@ -332,12 +330,6 @@ def _drop_undeclared_tables(connection: Connection, ops: Any) -> None:
 
     if connection.dialect.name != "postgresql":
         return
-    from sqlalchemy import inspect
-
-    from .. import (
-        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
-    )
-    from ..model_primitives import Base
 
     inspector = inspect(connection)
     undeclared = sorted(
@@ -495,8 +487,6 @@ def _create_foreign_key(
     not_valid: bool,
 ) -> None:
     """Replace ``old_names`` with ``constraint`` in one savepoint."""
-
-    from alembic.operations.ops import CreateForeignKeyOp
 
     operation = CreateForeignKeyOp.from_constraint(constraint)
     if not_valid:
