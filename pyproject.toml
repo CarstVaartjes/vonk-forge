@@ -194,6 +194,10 @@ ignore = [
 # Call-time imports in scripts that serve stdlib-only lanes (`uv run
 # --no-project`, system python3): their project imports cannot be module level.
 "scripts/{install-release-publication,spark_lifecycle_contract.py,candidate_payload.py}" = ["PLC0415"]
+# A twin of the recipe library's adapters/three-d copy (kept AST-identical by
+# tests/cluster_profiles/test_glb_validation.py); where the adapter runs Pillow is
+# optional, and a missing Pillow reads as an invalid image.
+"src/cluster_profiles/glb_validation/images.py" = ["PLC0415"]
 # abspath is lexical; resolve() would follow symlinks in a no-follow verifier.
 "scripts/spark_lifecycle_contract.py" = ["PTH100"]
 
