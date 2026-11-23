@@ -60,10 +60,11 @@ def _statements(tree: ast.AST):
     while pending:
         node = pending.pop()
         yield node
-        for field in ("body", "orelse", "finalbody", "handlers"):
-            pending.extend(getattr(node, field, ()))
-        for case in getattr(node, "cases", ()):
-            pending.extend(case.body)
+        pending.extend(
+            child
+            for child in ast.iter_child_nodes(node)
+            if isinstance(child, (ast.stmt, ast.excepthandler, ast.match_case))
+        )
 
 
 def _imports(source: str, package: list[str]) -> set[str]:
