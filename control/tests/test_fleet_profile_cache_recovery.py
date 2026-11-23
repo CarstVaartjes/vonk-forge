@@ -22,6 +22,7 @@ from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
 )
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
@@ -220,7 +221,7 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(
         assert selection.application_id != first.id
         selected = session.get(FleetProfileApplication, selection.application_id)
         assert selected is not None
-        intended = service._intended_profile(selected, session=session)
+        intended = _intended_profile(selected, session=session)
         assert not isinstance(intended, Residue)
         assert _node_id(99) in intended.scope.node_ids
 

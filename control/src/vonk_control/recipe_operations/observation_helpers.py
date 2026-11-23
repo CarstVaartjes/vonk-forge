@@ -28,9 +28,7 @@ from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.owner_liveness import run_has_live_operation
 
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs import states as job_states
 from ..jobs.documents import (
     RecipeBuildCleanupParent,

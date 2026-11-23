@@ -39,9 +39,7 @@ from ..distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,

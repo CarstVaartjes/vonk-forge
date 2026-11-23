@@ -17,6 +17,7 @@ from vonk_agent_protocol.wire_model import canonical_message
 from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileIntendedConfiguration,
 )
 from ..fleet_profile_contract.assessment import FleetProfileScopePreview
 from ..fleet_profile_contract.definitions import FleetProfileAssignment
@@ -42,10 +43,13 @@ from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
 from .contracts import (
     FleetProfileConflict,
+    FleetProfileReviewStale,
     _FleetProfileSupersededIntentConflict,
 )
 from .projection_support import (
     _aware,
+    _digest,
+    _validate_remaining_effects,
 )
 
 
@@ -595,3 +599,113 @@ def _remaining_reviewed_effects(
                 ):
                     pending.append(effect)
     return reviewed.model_copy(update={"superseded": pending})
+
+
+def _intended_profile(
+    application: FleetProfileApplication,
+    *,
+    session: Session,
+) -> FleetProfileIntendedConfiguration | Residue:
+    """The accepted intent of an application, or why none can be established.
+
+    An application whose accepted intent cannot be read (never recorded, or
+    its reviewed plan is damaged) is a :class:`Residue`: the caller retires or
+    skips it. Inconsistent local projections are unknown too: execution never
+    invents accepted effects, and a fresh reviewed load remains admissible.
+    """
+
+    progress = _stored_progress(application)
+    if isinstance(progress, Residue):
+        return progress
+    if progress.intended_profile is None:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.ROW_INCOMPLETE,
+            "the application carries no accepted intent",
+        )
+    if progress.intended_profile.profile_digest != application.profile_digest:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "the accepted intent identity differs from its row",
+        )
+    intended = progress.intended_profile
+    root = (
+        application
+        if intended.reviewed_application_id == application.id
+        else session.get(FleetProfileApplication, intended.reviewed_application_id)
+    )
+    if (
+        root is None
+        or root.profile_id != application.profile_id
+        or root.profile_digest != application.profile_digest
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+            "the reviewed application is unavailable",
+        )
+    # A first load reviewed itself: its progress and plan are read once.
+    root_progress = progress if root is application else _stored_progress(root)
+    if isinstance(root_progress, Residue):
+        return root_progress
+    root_plan = _persisted_profile_plan(root)
+    if isinstance(root_plan, Residue):
+        return root_plan
+    if (
+        root_progress.retry_of_application_id is not None
+        or root_progress.intended_profile != intended
+        or intended.reviewed_application_id != root.id
+        or intended.reviewed_plan_digest != _digest(root_plan.reviewed_decision())
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "the reviewed application identity is inconsistent",
+        )
+    plan = root_plan if root is application else _persisted_profile_plan(application)
+    if isinstance(plan, Residue):
+        return plan
+    if (
+        plan.scope.node_ids != intended.scope.node_ids
+        or plan.resolved_assignments
+        != sorted(intended.assignments, key=lambda item: item.id)
+    ):
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "persisted application plan exceeds its reviewed intent",
+        )
+    try:
+        _validate_remaining_effects(root_plan.effects, plan.effects)
+    except FleetProfileReviewStale:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_MISMATCH,
+            "persisted application effects exceed its reviewed intent",
+        )
+    return intended
+
+
+def _reviewed_profile_plan(
+    application: FleetProfileApplication, *, session: Session
+) -> FleetProfilePreview | Residue:
+
+    intended = _intended_profile(application, session=session)
+    if isinstance(intended, Residue):
+        return intended
+    reviewed = session.get(FleetProfileApplication, intended.reviewed_application_id)
+    if reviewed is None:
+        return retire_as_unknown(
+            "profile-intent",
+            str(application.id),
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+            "the reviewed application is not stored",
+        )
+    return _persisted_profile_plan(reviewed)

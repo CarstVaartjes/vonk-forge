@@ -31,8 +31,9 @@ from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profiles import control_effects
+from vonk_control.fleet_profiles.continuing_effects import _continuing_effects
 from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
-from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import ACTIVE_RUN_STATES, RecipeRun
 from vonk_control.models.fleet import FleetProfileApplication
@@ -497,18 +498,15 @@ def _reviewed_before_the_fix(monkeypatch: pytest.MonkeyPatch, kept: set[str]) ->
     did not look at this decision's other placements there (an upgrade keeps
     such a stored plan in flight)."""
 
-    review = FleetProfileService._continuing_effects
+    review = _continuing_effects
 
     def unseen(item: FleetProfileAssignment) -> FleetProfileAssignment:
         return item if item.id in kept else item.model_copy(update={"nodes": []})
 
-    def before_the_fix(cls, session, assignments, *args, **kwargs):
-        del cls
+    def before_the_fix(session, assignments, *args, **kwargs):
         return review(session, tuple(map(unseen, assignments)), *args, **kwargs)
 
-    monkeypatch.setattr(
-        FleetProfileService, "_continuing_effects", classmethod(before_the_fix)
-    )
+    monkeypatch.setattr(control_effects, "_continuing_effects", before_the_fix)
 
 
 # Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.

@@ -37,6 +37,7 @@ from .assessment_support import (
 from .contracts import FleetProfileConflict
 from .dependencies import _LOGGER
 from .persistence import (
+    _intended_profile,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -211,7 +212,7 @@ class FleetProfileService:
                 row = session.get(FleetProfileApplication, application_id)
                 if row is None:
                     return None
-                intended = self._intended_profile(row, session=session)
+                intended = _intended_profile(row, session=session)
             if isinstance(intended, Residue):
                 self._step_unissued(application_id, intended)
                 return None
@@ -324,7 +325,7 @@ class FleetProfileService:
                     or row.current_step != 0
                 ):
                     return False
-                intended = self._intended_profile(row, session=session)
+                intended = _intended_profile(row, session=session)
                 if isinstance(intended, Residue):
                     return False
                 profile = session.get(FleetProfile, row.profile_id)

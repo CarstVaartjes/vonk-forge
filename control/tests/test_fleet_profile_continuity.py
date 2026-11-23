@@ -11,6 +11,11 @@ from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+    _superseding_intent,
+)
 from vonk_control.fleet_profiles.contracts import FleetProfileReviewStale
 from vonk_control.fleet_profiles.persistence import _stored_recipe
 from vonk_control.fleet_profiles.service import FleetProfileService
@@ -109,9 +114,9 @@ def test_new_lane_adopts_original_identity_without_fencing_its_spark():
         assert selection.application_id == second.id
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
-        assert service._application_is_current_selection(session, old)
-        assert service._adopted_application_scope(session, old) == (_node_id(1),)
-        assert not service._superseding_intent(session, old, retained.progress)
+        assert _application_is_current_selection(session, old)
+        assert _adopted_application_scope(session, old) == (_node_id(1),)
+        assert not _superseding_intent(session, old, retained.progress)
     # A third whole-fleet load replaces B while A still copies. The adoption
     # link is flattened to original A; superseding aggregate B must not cancel A.
     third_profile = service.create(
@@ -180,8 +185,8 @@ def test_selected_cancel_fences_both_original_and_new_node_ordinals():
         assert len({node.workload_intent_ordinal for node in nodes}) == 1
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
-        assert service._adopted_application_scope(session, old) is None
-        assert not service._application_is_current_selection(session, old)
+        assert _adopted_application_scope(session, old) is None
+        assert not _application_is_current_selection(session, old)
 
 
 def test_replaced_alias_is_not_adopted_as_equivalent_work():

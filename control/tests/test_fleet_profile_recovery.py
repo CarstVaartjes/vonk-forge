@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 
 from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import RecipeRun
@@ -46,7 +47,7 @@ def test_profile_edit_does_not_replace_accepted_retry_snapshot(
     with sessions() as session:
         row = session.get(FleetProfileApplication, retry.id)
         assert row is not None
-        intended = service._intended_profile(row, session=session)
+        intended = _intended_profile(row, session=session)
         assert not isinstance(intended, Residue)
         assert intended.assignments[0].alias == "recover-chat"
         assert (

@@ -62,9 +62,11 @@ from .contracts import (
     FleetProfileInvalid,
     planner_contract_defect,
 )
+from .control_effects import _control_effects
 from .dependencies import _DISK_REFUSALS, _PREPARATION_RESOLVABLE_CODES
 from .persistence import (
     _persisted_profile_plan,
+    _reviewed_profile_plan,
     _stored_recipe,
 )
 from .projection_support import (
@@ -127,7 +129,7 @@ class FleetProfileService:
                         "Recovery review owner is unavailable",
                         reason=InvalidRequestReason.NOT_FOUND,
                     )
-                reviewed = self._reviewed_profile_plan(recovery, session=session)
+                reviewed = _reviewed_profile_plan(recovery, session=session)
                 # An accepted plan that cannot be read names no exact images to
                 # hold the review to: it is planned against what is observed now.
                 recovery_images = (
@@ -253,7 +255,7 @@ class FleetProfileService:
             # member has no assignment and must still participate in the plan.
             target_nodes = {node.node_id for node in roster}
 
-            control = self._control_effects(
+            control = _control_effects(
                 session,
                 resolved_assignments,
                 target_nodes,

@@ -219,7 +219,7 @@ module defines its own.
 | `control/src/vonk_control/operator_projection_api/contracts.py` | declared | 10 | Operator projection api: contracts. |
 | `control/src/vonk_control/observation/platform.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
-| `control/src/vonk_control/fleet_profiles/stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
+| `control/src/vonk_control/fleet_profiles/stop_contract.py` | controller-contract | 8 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_operations/availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
 | `control/src/vonk_control/recipe_builds/cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
 | `control/src/vonk_control/recipe_operations/execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |

@@ -51,6 +51,7 @@ from .persistence import (
     _application_order_key,
     _newer_profile_intent_overlaps,
     _persisted_profile_progress,
+    _reviewed_profile_plan,
 )
 from .projection_support import (
     _aware,
@@ -349,7 +350,7 @@ class FleetProfileService:
             persisted_plan = (
                 None
                 if decline is not None
-                else self._reviewed_profile_plan(parent, session=session)
+                else _reviewed_profile_plan(parent, session=session)
             )
             if isinstance(persisted_plan, Residue):
                 decline = (

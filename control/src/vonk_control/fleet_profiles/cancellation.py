@@ -54,6 +54,8 @@ from .assessment_support import (
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
+from .assignment_assessment import _assignment_state
+from .continuing_effects import _adopted_application_scope
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
@@ -63,6 +65,7 @@ from .contracts import (
 )
 from .persistence import (
     _application_effect_scope,
+    _intended_profile,
     _newer_pending_profile_load,
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -170,7 +173,7 @@ class FleetProfileService:
                 # accepting a second request identity for the same stop.
                 cancellation = previous
             else:
-                if self._adopted_application_scope(session, row) is not None:
+                if _adopted_application_scope(session, row) is not None:
                     # Continuing effects belong to the newer selected request.
                     # An older cancellation cannot mutate that newer authority.
                     raise FleetProfileInvalid(
@@ -432,7 +435,7 @@ class FleetProfileService:
                         (assignment.id, state.current_state)
                         for assignment in selected.intended.assignments
                         if assignment.desired_state == DesiredAssignmentState.RUNNING
-                        for state in (self._assignment_state(session, assignment),)
+                        for state in (_assignment_state(session, assignment),)
                         if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
@@ -474,7 +477,7 @@ class FleetProfileService:
                         # must neither conflict with it nor reset its backoff.
                         return False
                     previous_request_id = previous.id
-                    intended = self._intended_profile(previous, session=session)
+                    intended = _intended_profile(previous, session=session)
                     if not isinstance(intended, Residue):
                         previous_reviewed_digest = intended.reviewed_plan_digest
 

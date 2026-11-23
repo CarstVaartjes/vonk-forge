@@ -44,6 +44,7 @@ from .assessment_support import (
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
+from .continuing_effects import _application_is_current_selection
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
@@ -122,9 +123,7 @@ class FleetProfileService:
                     )
                 if row.selection_generation is not None:
                     progress = _persisted_profile_progress(row)
-                    if not self._application_is_current_selection(
-                        session, row, progress
-                    ):
+                    if not _application_is_current_selection(session, row, progress):
                         raise _FleetProfileSupersededIntentConflict(
                             "Selected Fleet profile was replaced before admission resumed"
                         )

@@ -48,6 +48,7 @@ from .dependencies import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
 from .persistence import (
+    _intended_profile,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -207,7 +208,7 @@ class FleetProfileService:
                 row = session.get(FleetProfileApplication, application_id)
                 if row is None:
                     return False
-                intended = self._intended_profile(row, session=session)
+                intended = _intended_profile(row, session=session)
                 roster_reconciliation = row.selection_generation is not None
             if isinstance(intended, Residue):
                 self._finish_pending_admission(

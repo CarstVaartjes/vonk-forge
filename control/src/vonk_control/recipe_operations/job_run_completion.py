@@ -18,10 +18,10 @@ from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states as aos
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_authority import issued_order_link
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopTarget,
-    issued_order_link,
     jobrun_stop_key,
 )
 from ..jobs import states as job_states

@@ -41,9 +41,11 @@ from ..run_switch_contract.operations import RunSwitchOperation
 from .assessment_support import (
     _operation_state,
 )
+from .continuing_effects import _adopted_application_scope
 from .contracts import (
     FleetProfileInvalid,
 )
+from .control_effects import _control_effects
 from .dependencies import _PROFILE_PHASE_ADAPTER, _PROFILE_PHASE_BY_RUN_PHASE
 from .persistence import (
     _canonical_progress,
@@ -78,7 +80,6 @@ class RunSwitchFleetProfileAdapter:
         An assignment on a Spark the reviewed plan leaves to an adopted load
         has no child here; it is recorded as a failure, never dropped.
         """
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
         adopted_assignment_ids = {
@@ -101,7 +102,7 @@ class RunSwitchFleetProfileAdapter:
         continuing_scope = (
             None
             if application is None
-            else FleetProfileService._adopted_application_scope(session, application)
+            else _adopted_application_scope(session, application)
         )
         if continuing_scope is not None:
             scope_node_ids = tuple(
@@ -112,7 +113,7 @@ class RunSwitchFleetProfileAdapter:
                 for item in assignments
                 if {node.node_id for node in item.nodes} <= set(continuing_scope)
             )
-        control = FleetProfileService._control_effects(
+        control = _control_effects(
             session,
             assignments,
             set(scope_node_ids),

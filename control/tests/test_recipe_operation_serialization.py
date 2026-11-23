@@ -20,7 +20,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.fleet_profiles.stop_authority import (
+from vonk_control.fleet_profiles.stop_contract import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileJobRunStopAuthorization,

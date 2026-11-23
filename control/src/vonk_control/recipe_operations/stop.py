@@ -36,9 +36,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_mapping
 from ..failure_classification import disposition
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..logging import redact_text
 from ..models.execution import RecipeRun

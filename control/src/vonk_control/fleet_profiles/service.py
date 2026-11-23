@@ -15,11 +15,9 @@ from ..model_cache.contract import CacheResolution
 from .application_projection import FleetProfileService as _ApplicationProjection
 from .apply import FleetProfileService as _Apply
 from .assessment import FleetProfileService as _Assessment
-from .assignment_assessment import FleetProfileService as _AssignmentAssessment
 from .assignment_persistence import FleetProfileService as _AssignmentPersistence
 from .cancellation import FleetProfileService as _Cancellation
 from .cancellation_observation import FleetProfileService as _CancellationObservation
-from .continuing_effects import FleetProfileService as _ContinuingEffects
 from .contracts import (
     PreparationCanceller,
     PreparationProgress,
@@ -27,7 +25,6 @@ from .contracts import (
     StorageReliefProvider,
     _AssessmentProvider,
 )
-from .control_effects import FleetProfileService as _ControlEffects
 from .deletion import FleetProfileService as _Deletion
 from .endpoint_projection import FleetProfileService as _EndpointProjection
 from .operation_projection import FleetProfileService as _OperationProjection
@@ -52,8 +49,6 @@ class FleetProfileService(
     _Deletion,
     _EndpointProjection,
     _Assessment,
-    _ControlEffects,
-    _ContinuingEffects,
     _PendingApplication,
     _Apply,
     _QueueApplication,
@@ -68,7 +63,6 @@ class FleetProfileService(
     _Recovery,
     _AssignmentPersistence,
     _ProfileProjection,
-    _AssignmentAssessment,
     _ApplicationProjection,
 ):
     def __init__(
