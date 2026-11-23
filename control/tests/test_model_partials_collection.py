@@ -561,7 +561,6 @@ def test_a_writer_without_the_owner_lock_fails_loudly(collector, tmp_path: Path)
     kwargs = {
         "operation_id": started.id,
         "completed_artifacts": 0,
-        "force": False,
         "interrupt_after_bytes": None,
     }
     with pytest.raises(RuntimeError, match="without its lock"):

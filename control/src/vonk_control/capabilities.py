@@ -124,8 +124,9 @@ class RecoveringService[T]:
             initialized = self._initialized
         try:
             Thread(
-                target=self._construct,
-                args=(generation, value, initialized, done),
+                target=lambda: self._construct(
+                    generation, value, initialized=initialized, done=done
+                ),
                 daemon=True,
             ).start()
         except Exception:  # noqa: BLE001 -- dispatch failure releases this attempt
