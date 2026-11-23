@@ -17,6 +17,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import admission_attempts
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
@@ -57,7 +59,7 @@ from .ownership import _complete_cancellation
 from .plan_persistence import _reserve_run_switch_assets
 from .planning_helpers import _digest, _now, _run_switch_payload, _stored_job_plan
 from .provider import _ADAPTER
-from .result_helpers import _parse_persisted_result, _persisted_result, _read_progress
+from .result_helpers import _parse_persisted_result, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

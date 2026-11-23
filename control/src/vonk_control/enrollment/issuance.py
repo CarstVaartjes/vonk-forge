@@ -88,6 +88,9 @@ from .validation import (
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
+from vonk_control.enrollment.contract import EnrollmentGrant
+from vonk_control.enrollment.contract import EnrollmentIssuanceClaim as _IssuanceClaim
+
 from .ending import retain_ended_effect
 from .persistence import (
     _issuance_binding,
@@ -101,9 +104,7 @@ from .persistence import (
 from .types import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
-    EnrollmentGrant,
     EnrollmentIssuanceUncertain,
-    _IssuanceClaim,
 )
 
 

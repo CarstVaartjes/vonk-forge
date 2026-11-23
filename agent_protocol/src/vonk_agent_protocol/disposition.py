@@ -106,6 +106,5 @@ __all__ = [
     "FAILURE_KIND_DISPOSITION",
     "HTTP_STATUS_DISPOSITIONS",
     "WAIT_REASON_DISPOSITION",
-    "Disposition",
     "http_status_disposition",
 ]

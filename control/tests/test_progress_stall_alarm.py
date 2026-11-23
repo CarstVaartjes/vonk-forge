@@ -23,6 +23,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
+    ProgressAlarmCode,
     WaitOwnerKind,
     WaitReason,
     WaitResumeCondition,
@@ -40,11 +41,7 @@ from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.observation.platform import PlatformObserver
-from vonk_control.operations.blockers import (
-    BlockingOperation,
-    ProgressAlarmCode,
-    make_blocker,
-)
+from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
 

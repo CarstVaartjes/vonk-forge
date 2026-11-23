@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING, Any, Never, Self
 
 import httpx2
 
-from ..cli_states import FAILED_JOB_STATES, NEEDS_OPERATOR, SUCCEEDED
+from cluster_profiles.cli_states_generated import NEEDS_OPERATOR, SUCCEEDED
+
+from ..cli_states import FAILED_JOB_STATES
 from ..control_transport import open_https
 from ..error_reporting import (
     ClientCode,

@@ -15,6 +15,8 @@ from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..bounded_json import require_integer
 from ..jobs import states as job_states
 from ..lifecycle.run_switch import (
@@ -41,7 +43,7 @@ from .errors import RunSwitchIssuedWorkloadPending
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _run_switch_payload, _start_parent
 from .provider import _ADAPTER
-from .result_helpers import _observe_progress, _persisted_result, _read_progress
+from .result_helpers import _observe_progress, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

@@ -57,13 +57,7 @@ from .progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
 from .progress import (
-    _role_phases as _role_phases,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
     _start_deadline_failure as _start_deadline_failure,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _topology_order as _topology_order,  # noqa: PLC0414 -- shared helper export
 )
 from .rank_authority import _profile_jobrun_parent
 from .results import _recorded_result, _recorded_result_document, _validated_result

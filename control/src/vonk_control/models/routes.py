@@ -16,8 +16,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol.state_machines import RoutePublicationState, machine_check
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..model_primitives import Base
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class RecipeRouteAuthority(Base):

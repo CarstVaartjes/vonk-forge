@@ -19,6 +19,9 @@ from vonk_agent_protocol.state_machines import (
     GatewayRouteState,
 )
 
+from vonk_control.operator_receipt_contract import JobOperatorReceipt
+from vonk_control.wait_contract import QueueWait
+
 from ..agent_jobs.retirement import (
     authorize_operator_resume_in_session,
     operator_resume_eligible_operations_in_session,
@@ -38,7 +41,6 @@ from ..gateway.route_runtime import recipe_route_run_id, verify_active_route_bun
 from ..inventory.items import runtime_value
 from ..jobs import states as job_states
 from ..jobs.operator_receipts import (
-    JobOperatorReceipt,
     record_job_operator_receipt,
     replay_job_operator_receipt,
 )
@@ -68,7 +70,7 @@ from .contracts import (
     OperatorJobMutation,
 )
 from .diagnostics import _agent_upgrade_diagnostics, _aware
-from .lane_wait import QueueWait, apply_queue_wait, spark_busy_blockers
+from .lane_wait import apply_queue_wait, spark_busy_blockers
 from .providers import _activity_keyset_filter, _StandaloneJobActivityProjection
 from .responses import _advertised_actions, _operation_item, _progress_projection
 from .route_snapshot import _ActiveRouteSnapshot, _stored_activation_marker

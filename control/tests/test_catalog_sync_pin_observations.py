@@ -12,7 +12,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.revision_contract import (
-    PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
@@ -27,6 +26,7 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeLibrarySyncRun
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
+from vonk_forge_contracts import PrebuiltImage
 
 from .test_catalog_entities import _model, _recipe
 from .test_catalog_sync_topology import _item

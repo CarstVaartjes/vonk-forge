@@ -24,6 +24,9 @@ from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
+from vonk_control.enrollment.responses import _now
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
 from ..agent_jobs.contracts import StaleAgentAttempt
 from ..auth import AgentIdentity
@@ -40,7 +43,7 @@ from ..logging import log_event
 from ..models.cache import RecipeBuild
 from ..models.execution import STOPPABLE_NOT_RUNNING_RUN_STATES, RecipeRun, RunNode
 from ..models.mapping import ClusterMapping
-from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..operator_acceptance import operator_acceptance
 from ..optimistic import Stale, transition
 from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
@@ -70,7 +73,6 @@ from .common import (
     _authenticated_identity,
     _log_evidence_dropped,
     _log_evidence_warnings,
-    _now,
     _validated_authenticated_source,
     contract_verdict_or_wait,
 )

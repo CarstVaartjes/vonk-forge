@@ -19,6 +19,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
 from vonk_agent_protocol.outcome import InvalidRequestError
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.operator_receipt_contract import JobOperatorReceipt, ReceiptPolicy
 
 from ..agent_jobs.contracts import OperatorRetirementRefused
 from ..api_availability import AVAILABILITY_ERRORS
@@ -29,7 +30,7 @@ from ..auth import (
 )
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..failure_evidence import FailureEvidenceService
-from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt
+from ..jobs.operator_receipts import read_job_operator_receipt
 from ..model_cache.contract import UUID_PATTERN
 from ..operation_api.contracts import (
     JobDetailResponse,
@@ -47,10 +48,7 @@ from ..operation_api.responses import (
     decode_offset,
     job_response,
 )
-from ..operator_acceptance import (
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import operator_acceptance
 from ..operator_receipt_contract import ReceiptCode
 from ..strict_json import warn_unreadable_once
 from .common import (

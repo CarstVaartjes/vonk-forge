@@ -33,7 +33,7 @@ from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.agent_api.common import (
     _ENROLLMENT_TOKEN,
 )
-from vonk_control.agent_api.enrollment import _scan_enrollment_grants
+from vonk_control.enrollment.body import _scan_enrollment_grants
 from vonk_control.models.execution import RecipeRun, RunNode
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.operations import AgentOperation

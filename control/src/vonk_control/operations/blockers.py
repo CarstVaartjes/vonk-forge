@@ -238,7 +238,6 @@ __all__ = [
     "BlockingOperation",
     "IdentityConflict",
     "OperationBlocker",
-    "ProgressAlarmCode",
     "ProgressStall",
     "StorageReliefEvidence",
     "SwapShortfallEvidence",

@@ -15,15 +15,13 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
-from vonk_control.artifact_jobs.lifecycle import (
-    ArtifactLifecycleError,
-    ArtifactLifecycleGate,
-)
+from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleError
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,

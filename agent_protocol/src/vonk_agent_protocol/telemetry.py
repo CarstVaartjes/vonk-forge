@@ -507,7 +507,6 @@ class TelemetryRequest(TelemetryWireModel):
 
 
 __all__ = [
-    "MAX_TELEMETRY_CAPACITY_BYTES",
     "MAX_TELEMETRY_REPORT_BYTES",
     "EngineFormat",
     "EngineReading",

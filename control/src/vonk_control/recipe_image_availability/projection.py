@@ -17,6 +17,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -26,7 +28,6 @@ from ..recipe_operations.availability_intent import (
     RecipeRetryIntent,
 )
 from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
-from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

@@ -16,6 +16,11 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from vonk_control.enrollment.contract import EnrollmentRotationClaim as _RotationClaim
+from vonk_control.enrollment.contract import (
+    EnrollmentRotationRecoveryClaim as _RotationRecoveryClaim,
+)
+
 from ..admission_locking import ConstraintReplan, admitting
 from ..models.fleet import (
     AgentCertificate,
@@ -46,14 +51,6 @@ from .types import (
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
-    _RotationClaim,
-    _RotationRecoveryClaim,
-)
-from .validation import (
-    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _digest as _digest,  # noqa: PLC0414 -- shared helper export
 )
 from .validation import (
     _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
@@ -63,12 +60,6 @@ from .validation import (
 )
 from .validation import (
     _utc as _utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from .validation import (
     _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export

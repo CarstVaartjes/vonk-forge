@@ -29,11 +29,8 @@ from vonk_control.models.execution import (
 )
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
-from vonk_control.reservation_owners import (
-    ADOPTION_WINDOW,
-    OWNER_SETTLE_GRACE,
-    reservation_owner,
-)
+from vonk_control.owner_liveness import ADOPTION_WINDOW, OWNER_SETTLE_GRACE
+from vonk_control.reservation_owners import reservation_owner
 
 from .recipe_operations_support import (
     NOW,

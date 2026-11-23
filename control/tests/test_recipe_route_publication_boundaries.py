@@ -17,10 +17,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from vonk_control.gateway.route_runtime import (
-    ActivationMarker,
-    AtomicRouteBundlePublisher,
-)
+from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.models.routes import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker

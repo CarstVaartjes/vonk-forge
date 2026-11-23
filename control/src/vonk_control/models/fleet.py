@@ -34,6 +34,9 @@ from vonk_agent_protocol.state_machines import (
     machine_check,
 )
 
+from vonk_control.lifecycle.evidence import Residue
+from vonk_control.wait_contract import WaitEvidence
+
 from ..model_primitives import (
     Base,
     CertificateGenerationStorage,
@@ -42,7 +45,7 @@ from ..model_primitives import (
 )
 from ..repeated_evidence_contract import RepeatedEvidence
 from ..stored.json_values import ContractJSON
-from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
+from .waits import wait_due_column, wait_evidence_column
 
 
 class User(Base):
