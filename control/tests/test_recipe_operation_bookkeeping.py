@@ -64,7 +64,10 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.observation_helpers import (
+    _run_is_one_shot,
+    record_build_evidence,
+)
 from vonk_control.recipe_operations.progress import (
     _primary_model_identity,
     _recipe_model_identities,
@@ -74,7 +77,6 @@ from vonk_control.recipe_operations.progress import (
 )
 from vonk_control.recipe_operations.rank_authority import (
     _run_accepted_ranks,
-    _run_is_one_shot,
     _run_observes_per_generation,
 )
 from vonk_control.recipe_operations.results import _recorded_result

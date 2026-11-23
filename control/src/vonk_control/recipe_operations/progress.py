@@ -21,7 +21,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
 from vonk_forge_contracts import RecipeDefinition, read_model, read_recipe
 
-from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.build_import import (
+    RecipeBuildCleanupRequest,
+    RecipeBuildRequest,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeReconcilePayload,
@@ -94,8 +99,6 @@ def _parent_identity(
     job: Job, key: Literal["owner_id", "owner_kind", "plan_digest"]
 ) -> str | None:
     """Identity from the canonical parent, or unknown for damaged bookkeeping."""
-    from .rank_authority import _RECIPE_WIRE_PAYLOAD_MODELS
-
     parent = _recorded_parent(job)
     if isinstance(parent, Residue):
         # Phase history is bookkeeping. Rebuild only the exact affected owner
@@ -555,3 +558,15 @@ def _project_recipe_operation_progress(
         )
     projected = aggregate_progress(summary)
     return projected.model_copy(update={"members": members})
+
+
+_RECIPE_WIRE_PAYLOAD_MODELS = {
+    WireAgentOperation.RECIPE_BUILD.value: RecipeBuildRequest,
+    WireAgentOperation.RECIPE_JOB_RUN.value: RecipeJobRunRequest,
+    WireAgentOperation.RECIPE_BUILD_CLEANUP.value: RecipeBuildCleanupRequest,
+    WireAgentOperation.RECIPE_INSTALL.value: RecipeInstallPayload,
+    WireAgentOperation.RECIPE_RECONCILE.value: RecipeReconcilePayload,
+    WireAgentOperation.RECIPE_START.value: RecipeStartPayload,
+    WireAgentOperation.RECIPE_STOP.value: RecipeStopPayload,
+    WireAgentOperation.RECIPE_UNINSTALL.value: RecipeUninstallPayload,
+}

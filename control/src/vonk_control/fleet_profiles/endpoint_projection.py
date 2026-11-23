@@ -29,7 +29,7 @@ from ..fleet_profile_contract.endpoints import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..recipe_operations.rank_authority import _run_is_one_shot
+from ..recipe_operations.observation_helpers import _run_is_one_shot
 from ..run_route_name import carries_alias
 from ..strict_json import stored_document_detail
 from .assignment_assessment import _assignment_state

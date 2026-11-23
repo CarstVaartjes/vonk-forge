@@ -32,12 +32,12 @@ from .interfaces import (
     RecipeRunRecoveryOwner,
     RecipeRunStatus,
 )
-from .observation_helpers import _aware
+from .observation_helpers import _aware, _run_is_one_shot
 from .progress import (
     _parent_identity,
     _parent_recovery,
 )
-from .rank_authority import _run_accepted_ranks, _run_is_one_shot
+from .rank_authority import _run_accepted_ranks
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService

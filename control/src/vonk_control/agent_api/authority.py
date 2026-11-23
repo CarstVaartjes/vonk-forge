@@ -48,7 +48,6 @@ from ..agent_jobs.contracts import (
     StaleAgentAttempt,
 )
 from ..auth import AgentIdentity, validated_agent_identity_from_scope
-from ..contract_graph import raw_json_body
 from ..enrollment.body import _bounded_enrollment_body
 from ..enrollment.responses import unknown_response
 from ..enrollment.types import (
@@ -71,6 +70,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operator_acceptance import operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
+from ..route_declarations import raw_json_body
 from ..strict_json import ControllerAPIRoute
 from .common import (
     AgentApiServices,

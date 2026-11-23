@@ -59,6 +59,7 @@ from .constants import (
     _OPERATION_KINDS,
     _active_recipe_revision,
 )
+from .contracts import ScopeIntentStatus
 from .errors import RunSwitchRequestInvalid
 from .identity_helpers import _string_or_none
 from .image_receipts import _plan_target_node_ids, _planned_transfer_bytes
@@ -69,6 +70,7 @@ from .planning_helpers import (
     _digest,
     _now,
     _run_switch_payload,
+    _scope_intent_status,
     _stored_job_plan,
 )
 from .provider import _ADAPTER
@@ -313,7 +315,7 @@ class ReservationMixin:
                 return False
             # Cancellation and newer intent are settled before any re-plan.
             if persisted_progress.cancellation or (
-                service._scope_intent_status(session, row) != "current"
+                _scope_intent_status(session, row) != ScopeIntentStatus.CURRENT
             ):
                 return False
             due = row.next_action_at
@@ -385,7 +387,7 @@ class ReservationMixin:
             ):
                 return False
             if progress.cancellation or (
-                service._scope_intent_status(session, current) != "current"
+                _scope_intent_status(session, current) != ScopeIntentStatus.CURRENT
             ):
                 return False
             if unreadable is not None:
