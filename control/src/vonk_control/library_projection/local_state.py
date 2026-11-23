@@ -578,7 +578,8 @@ def _database_local_state(
     nodes_by_run: dict[str, list[str]] = {}
     for run_id, node_id in run_nodes:
         nodes_by_run.setdefault(run_id, []).append(node_id)
-    for run_id, installation_id, model_digest in runs:
+    for run_id, installation_id, stored_digest in runs:
+        model_digest = stored_digest
         if model_digest is not None and not isinstance(model_digest, str):
             _note_unreadable("recipe run model digest", run_id, repr(model_digest))
             model_digest = None

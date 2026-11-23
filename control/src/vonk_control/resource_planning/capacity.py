@@ -304,7 +304,8 @@ def plan_capacity(
     by_node = {item.node_id: item for item in capacities}
     nodes: list[NodeCapacityPlan] = []
     swap_reasons: list[ResourceReason] = []
-    for node in memory.nodes:
+    for planned in memory.nodes:
+        node = planned
         found = _load_swap_reason(
             node.node_id, requirements[node.node_id], by_node.get(node.node_id)
         )

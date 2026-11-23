@@ -570,7 +570,8 @@ def _remaining_reviewed_effects(
     authorize a newly discovered effect.
     """
     runs = []
-    for run_effect in reviewed.runs:
+    for reviewed_run in reviewed.runs:
+        run_effect = reviewed_run
         if run_effect.previous_alias is not None:
             run = session.get(RecipeRun, run_effect.run_id)
             if run is not None and carries_alias(run, run_effect.alias):

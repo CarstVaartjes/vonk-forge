@@ -176,13 +176,13 @@ def _preview(payload: Mapping[str, object]) -> None:
                 _field(
                     "Disk after placement", _headroom(node.get("disk_free_after_bytes"))
                 )
-                for reason_kind, label in (
+                for reason_kind, reason_label in (
                     ("blockers", "blocker"),
                     ("warnings", "warning"),
                 ):
                     _reasons(
                         node.get(reason_kind),
-                        subject=f"{_text(node_id)} capacity {label}",
+                        subject=f"{_text(node_id)} capacity {reason_label}",
                     )
         condition = _optional(
             assessment.get("post_stop_memory_check"), "post-stop memory check"

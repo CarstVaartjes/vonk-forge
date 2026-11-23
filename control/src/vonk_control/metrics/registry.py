@@ -934,10 +934,10 @@ class OperationalMetricsCollector:
             leases[key] = max(leases.get(key, 0.0), age)
 
         lines: list[str] = []
-        for node_id, (state, version, seen, expiry) in sorted(nodes.items()):
+        for node_id, (stored_state, version, seen, expiry) in sorted(nodes.items()):
             if _NODE.fullmatch(node_id) is None:
                 continue
-            state = state if state in _AGENT_STATES else "other"
+            state = stored_state if stored_state in _AGENT_STATES else "other"
             lines.append(f'vonk_agent_state{{node_id="{node_id}",state="{state}"}} 1')
             lines.append(
                 f'vonk_agent_version_compatibility{{node_id="{node_id}",version_bucket="{version}"}} 1'
@@ -950,10 +950,12 @@ class OperationalMetricsCollector:
                 lines.append(
                     f'vonk_agent_certificate_expiry_seconds{{node_id="{node_id}"}} {expiry:g}'
                 )
-        for (node_id, operation), age in sorted(leases.items()):
+        for (node_id, stored_operation), age in sorted(leases.items()):
             if _NODE.fullmatch(node_id) is None:
                 continue
-            operation = operation if operation in _AGENT_OPERATIONS else "other"
+            operation = (
+                stored_operation if stored_operation in _AGENT_OPERATIONS else "other"
+            )
             lines.append(
                 f'vonk_agent_operation_lease_age_seconds{{node_id="{node_id}",operation="{operation}"}} {age:g}'
             )
