@@ -218,7 +218,7 @@ def test_local_acceptance_bearer_keeps_authorization_and_retries_verified_receip
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, _format: str, *_args: object) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

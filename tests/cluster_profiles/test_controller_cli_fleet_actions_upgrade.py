@@ -60,7 +60,15 @@ def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() ->
 def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
     class FailingClient(FakeClient):
         def request(
-            self, method, path, payload=None, *, extra_headers=None, query=None
+            self,
+            method,
+            path,
+            payload=None,
+            *,
+            extra_headers=None,
+            query=None,
+            timeout_seconds=None,
+            retry=True,
         ):
             raise ValueError("authorization: Bearer secret-value")
 

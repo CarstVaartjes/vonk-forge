@@ -139,7 +139,7 @@ class Upstream(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(answer)
 
-    def log_message(self, *_arguments: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 

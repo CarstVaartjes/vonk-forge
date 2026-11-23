@@ -110,7 +110,7 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
             self.end_headers()
             self.wfile.write(b"release")
 
-        def log_message(self, *_args) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), ReleaseHost) as server:
@@ -972,7 +972,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             self.end_headers()
             self.wfile.write(content or b"")
 
-        def log_message(self, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     def invoke(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -1215,7 +1215,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             self.end_headers()
             self.wfile.write(content or b"")
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     environment = {
@@ -1660,7 +1660,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
                 except OSError:
                     return
 
-        def log_message(self, *_):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with ThreadingHTTPServer(("127.0.0.1", 0), Drip) as server:

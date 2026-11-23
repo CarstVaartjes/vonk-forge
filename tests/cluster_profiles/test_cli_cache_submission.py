@@ -415,7 +415,7 @@ def test_received_403_remains_a_refusal_when_its_body_is_lost(
     calls = []
 
     class BrokenBody(BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None = -1, /) -> bytes:
             raise http.client.IncompleteRead(b"Bearer partial-secret", 100)
 
     def opener(request, timeout):
@@ -462,7 +462,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     sleeps = []
 
     class BrokenBody(BytesIO):
-        def read(self, size=-1):
+        def read(self, size: int | None = -1, /) -> bytes:
             raise http.client.IncompleteRead(b"partial", 100)
 
     def opener(request, timeout):

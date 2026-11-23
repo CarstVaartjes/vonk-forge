@@ -1436,7 +1436,7 @@ class RunClient(ArtifactJobClient):
         self.ended_keys: list[str] = []
         self.contract: dict[str, object] | None = None
 
-    def request(self, method, path, payload=None, **kwargs):
+    def request(self, method, path, payload=None, **kwargs) -> dict[str, object]:
         kwargs.pop("retry", None)
         if path.startswith("/api/artifact-jobs/requests/") and self.ended:
             key = path.rsplit("/", 1)[1]
@@ -1458,6 +1458,7 @@ class RunClient(ArtifactJobClient):
                 ]
             }
         if path.startswith("/api/artifact-jobs/contract/run/"):
+            assert self.contract is not None
             return copy.deepcopy(self.contract)
         if (
             self.finish_state

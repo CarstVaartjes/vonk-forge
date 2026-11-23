@@ -351,7 +351,7 @@ def test_interrupted_follow_keeps_the_remote_identity_and_does_not_cancel(capsys
     identity = "33333333-3333-4333-8333-333333333333"
 
     class InterruptedObserver(Observations):
-        def request(self, method, path, payload=None, **kwargs):
+        def request(self, method, path, payload=None, **kwargs) -> dict[str, object]:
             self.calls.append((method, path))
             if len(self.calls) > 1:
                 raise KeyboardInterrupt

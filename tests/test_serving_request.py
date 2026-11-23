@@ -179,7 +179,7 @@ class _ThinkingEngine(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 

@@ -147,7 +147,7 @@ def test_qualifier_runs_declared_local_http_serving_checks() -> None:
             self.end_headers()
             self.wfile.write(encoded)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -219,7 +219,7 @@ def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
             self.end_headers()
             self.wfile.write(encoded)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), FailureHandler)
@@ -411,7 +411,7 @@ def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> No
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, _format: str, *_args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     document = json.loads(

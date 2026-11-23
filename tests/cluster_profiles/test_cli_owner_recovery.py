@@ -366,22 +366,22 @@ def test_cancellation_lookup_reobserves_old_metadata_without_local_conflict():
 
 
 def test_missing_attempt_reobserves_before_writing_evidence(tmp_path):
-    path = f"/api/operations/{KEY}"
+    operation_path = f"/api/operations/{KEY}"
     bundle = {"operation_id": KEY, "attempt": 2}
 
     class EvidenceClient(FakeClient):
-        def _validate_request(self, method, target, payload, query):
-            if target.startswith(path):
+        def _validate_request(self, method, path, payload, query):
+            if path.startswith(operation_path):
                 return
-            super()._validate_request(method, target, payload, query)
+            super()._validate_request(method, path, payload, query)
 
     client = EvidenceClient(
         {
-            ("GET", path): [
+            ("GET", operation_path): [
                 ControlUnavailable(503, "attempt unavailable"),
                 {"id": KEY, "attempt": 2},
             ],
-            ("GET", path + "/evidence"): bundle,
+            ("GET", operation_path + "/evidence"): bundle,
         }
     )
     destination = tmp_path / "evidence.json"
@@ -393,7 +393,11 @@ def test_missing_attempt_reobserves_before_writing_evidence(tmp_path):
         == 0
     )
     assert json.loads(destination.read_text()) == bundle
-    assert [call[1] for call in client.calls] == [path, path, path + "/evidence"]
+    assert [call[1] for call in client.calls] == [
+        operation_path,
+        operation_path,
+        operation_path + "/evidence",
+    ]
     fresh = tmp_path / "fresh.json"
     assert (
         cli.main(

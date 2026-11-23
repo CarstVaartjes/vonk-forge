@@ -858,7 +858,7 @@ def test_generated_transport_rejects_malformed_request_before_network() -> None:
     class _CountingTransport(httpx2.BaseTransport):
         calls = 0
 
-        def handle_request(self, _request: httpx2.Request) -> httpx2.Response:
+        def handle_request(self, request: httpx2.Request) -> httpx2.Response:
             self.calls += 1
             raise AssertionError("malformed request reached the network")
 

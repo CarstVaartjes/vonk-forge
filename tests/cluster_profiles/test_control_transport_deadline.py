@@ -185,7 +185,7 @@ def https_peer(tmp_path, monkeypatch):
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 state["closed"].set()
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
