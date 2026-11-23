@@ -10,16 +10,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..cli_states_generated import (
-    WAIT_GENERIC_OBSERVATION,
+    WAIT_DEPENDENCY_PENDING,
     WAIT_SPARK_BUSY,
     ProfileChildPhase,
     ProfileReportedPhase,
     ProgressPhase,
 )
-
-#: The Controller's generic wait code: "a durable wait whose cause was not typed".
-#: It is a fallback, never a reason, so a known dependency always wins over it.
-GENERIC_WAIT_CODE = WAIT_GENERIC_OBSERVATION
 
 _COPYING = "Copying model files to the Sparks"
 _DOWNLOADING = "Downloading the model"
@@ -163,14 +159,12 @@ def _meter(source: object, phase: str, label: object) -> Meter:
 
 
 def wait_words(observed: object, blocker: object) -> str:
-    """Why work waits, in plain words; the generic wait code never is the reason."""
+    """Why work waits, in plain words: the step for a dependency, else the code."""
     code = _mapping(blocker).get("code")
-    if code == GENERIC_WAIT_CODE:
+    if code == WAIT_DEPENDENCY_PENDING:
         phase = measured(observed).phase
-        text = PHASE_WORDS.get(phase)
-        if text is not None:
-            return text[0].lower() + text[1:]
-        return "the Controller to confirm the next step"
+        text = phase_words(phase)
+        return text[0].lower() + text[1:]
     if code == WAIT_SPARK_BUSY:
         return "the Spark's current operation to finish"
     return str(code)

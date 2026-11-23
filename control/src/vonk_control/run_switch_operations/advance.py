@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
 from vonk_agent_protocol.contracts import AgentOperation
-from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 from vonk_control.run_switch_operations.results import _persisted_result
@@ -566,7 +566,10 @@ class AdvanceMixin:
                         reason=status_reason,
                         wait_blockers=[
                             make_blocker(
-                                RunSwitchCode.EFFECT_UNCERTAIN,
+                                RunSwitchCode.EFFECT_UNCERTAIN
+                                if progress.retry_reason
+                                == RunSwitchCode.EFFECT_UNCERTAIN
+                                else WaitReason.DEPENDENCY_PENDING,
                                 status_reason or "Awaiting the exact child effect",
                                 node_ids=job.targets,
                             ).model_copy(
@@ -577,9 +580,7 @@ class AdvanceMixin:
                                     )
                                 }
                             )
-                        ]
-                        if progress.retry_reason == RunSwitchCode.EFFECT_UNCERTAIN
-                        else None,
+                        ],
                     )
                     job.result = _persisted_result(progress)
                     job.updated_at = now

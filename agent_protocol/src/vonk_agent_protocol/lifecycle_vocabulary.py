@@ -420,6 +420,9 @@ class WaitReason(WireEnum):
     LEASE_LAPSED = "lease-lapsed"
     REPORT_UNCERTAIN = "report-uncertain"
     OBSERVATION_UNAVAILABLE = "observation-unavailable"
+    #: Accepted work waits for its dependency (a transfer, a preparation) to
+    #: complete; the blocker names the dependency operation and its step.
+    DEPENDENCY_PENDING = "dependency-pending"
     RECEIPT_MISSING = "receipt-missing"
     STALE_PLAN = "stale-plan"
     SCOPE_CHANGED = "scope-changed"

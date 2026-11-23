@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from ..cli_states_generated import WAIT_DEPENDENCY_PENDING
 from .common import _bytes, _optional, _text
 from .phase_words import Meter, measured, phase_words, wait_words
 
@@ -25,7 +26,12 @@ def progress_line(observed: Mapping[str, object]) -> str:
     if isinstance(first, Mapping):
         behind = first.get("operation")
         nodes = first.get("node_ids")
-        if isinstance(behind, Mapping) and isinstance(nodes, list) and nodes:
+        if (
+            first.get("code") != WAIT_DEPENDENCY_PENDING
+            and isinstance(behind, Mapping)
+            and isinstance(nodes, list)
+            and nodes
+        ):
             return (
                 f"{line} (waiting: {_text(behind.get('kind'))} "
                 f"{_text(behind.get('id'))[:8]} on {_text(nodes[0])})"

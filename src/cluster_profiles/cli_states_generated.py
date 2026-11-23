@@ -96,7 +96,7 @@ class QualificationOutcome(StrEnum):
 
 
 STOP_UNCONFIRMED = "unconfirmed"
-WAIT_GENERIC_OBSERVATION = "observation-unavailable"
+WAIT_DEPENDENCY_PENDING = "dependency-pending"
 WAIT_SPARK_BUSY = "queue.spark_busy"
 PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"

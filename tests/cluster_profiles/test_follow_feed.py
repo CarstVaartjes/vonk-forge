@@ -9,9 +9,7 @@ GIB = 1 << 30
 def _application(completed: int, phase: str = "transfer") -> dict[str, object]:
     return {
         "state": "running",
-        "blockers": [
-            {"code": "observation-unavailable", "detail": "x", "node_ids": []}
-        ],
+        "blockers": [{"code": "dependency-pending", "detail": "x", "node_ids": []}],
         "progress": {
             "current_label": "Switch profile",
             "child_progress": {
