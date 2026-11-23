@@ -9,10 +9,12 @@ may import `vonk_agent_protocol`; nothing else imports a sibling package, and
 the server never imports vonkctl (`cluster_profiles`). Facts reach the CLI only
 through the generated client (`scripts/generate-control-clients`);
 `tests/test_package_import_direction.py` enforces it, function-level imports
-included.
+included, and also fails any import cycle within or across the four packages:
+imports sit at module level, and a shared name moves to a lower module instead
+of being imported late.
 `tests/test_package_no_reexports.py` keeps every `vonk_control`, `cluster_profiles` and
 `vonk_agent_protocol` package `__init__` to a docstring, `__version__` and module-only
-`from . import x` (`vonk_agent_protocol` imports `contracts` first, to order its import cycle): import a name from the module that
+`from . import x`: import a name from the module that
 defines it, never through its package. The same test fails any `from module import name`
 inside those packages where `module` only imports `name` (a facade): import it from the
 module that defines it.

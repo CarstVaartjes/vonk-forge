@@ -62,7 +62,8 @@ Keep commands in their linked runbooks so this guide stays focused on decisions.
 Package direction is one way: the Controller (`vonk_control`) and `nas_setup` may
 import `vonk_agent_protocol`; nothing else imports a sibling package, and the
 server never imports vonkctl. Facts reach the CLI only through the generated
-client. Every model an `/agent/` route takes or returns lives in
+client. Imports sit at module level and the packages import without a cycle.
+Every model an `/agent/` route takes or returns lives in
 `vonk_agent_protocol`. NAS/project setup and administration are Python; the
 resident agent, privileged helpers and native Spark installer are Rust. Package
 lifecycle logic lives in `vonk-agent-helper::package_hooks`; the Debian
