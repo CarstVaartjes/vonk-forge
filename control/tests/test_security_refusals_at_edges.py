@@ -42,7 +42,7 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_contract import RunSwitchOperationResult
 
-from . import recipe_operations_support as _fx0
+from . import test_recipe_operations as recipe_fixtures
 from .test_profile_port_claims import _load, _ready_profile
 from .test_recipe_operation_bookkeeping import _running_recipe
 
@@ -57,9 +57,9 @@ def _advance(monkeypatch, seconds: int) -> None:
     """Move the shared fixture clock that every service in the profile reads."""
 
     monkeypatch.setattr(
-        _fx0,
+        recipe_fixtures,
         "NOW",
-        _fx0.NOW + timedelta(seconds=seconds),
+        recipe_fixtures.NOW + timedelta(seconds=seconds),
     )
 
 
@@ -101,7 +101,7 @@ def _inventory_reported_again(sessions, monkeypatch) -> None:
     _advance(monkeypatch, 60)
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
-            snapshot.observed_at = snapshot.received_at = _fx0.NOW
+            snapshot.observed_at = snapshot.received_at = recipe_fixtures.NOW
     _advance(monkeypatch, 1)
 
 
@@ -122,7 +122,7 @@ def test_profile_stop_waits_for_a_briefly_unavailable_owner_then_completes(
     )
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    _fx0.started_recipe(
+    recipe_fixtures.started_recipe(
         sessions,
         lifecycle,
         installation,
@@ -180,7 +180,7 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
     )
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    _fx0.started_recipe(
+    recipe_fixtures.started_recipe(
         sessions,
         lifecycle,
         installation,
@@ -230,7 +230,7 @@ def test_profile_stop_accepts_a_parent_stored_with_a_retired_plan_field(
     )
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    _fx0.started_recipe(
+    recipe_fixtures.started_recipe(
         sessions,
         lifecycle,
         installation,

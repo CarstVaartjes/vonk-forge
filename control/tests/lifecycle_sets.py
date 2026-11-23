@@ -67,6 +67,7 @@ def _lifecycle_owner(node: ast.expr) -> bool:
     """Whether ``node`` names the lifecycle vocabulary (not RunState and kin)."""
     name = ast.unparse(node).split(".")[-1]
     return name.endswith(("LifecycleState", "_states")) or name in {
+        "states",
         "State",
         "aos",
         "ajs",
