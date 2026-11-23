@@ -5,12 +5,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    LifecycleState,
-    ReservationState,
-    UnknownOutcomeError,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles.capacity import (
     accepted_profile_runtime_image,

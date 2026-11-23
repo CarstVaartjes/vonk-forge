@@ -32,21 +32,19 @@ from .cli_states import (
     preparation,
 )
 from .cli_states_generated import RUN_RUNNING, JobContractState
-from .control_client import (
+from .control_client.errors import (
     ControlClientError,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlNotFound,
     ControlResponseTooLarge,
     ControlTransportError,
-    validate_control_document,
-)
-from .control_client.errors import (
     JobEndedWithoutResult,
     JobNotFinished,
     LocalFilesystemError,
     TransferUnavailable,
 )
+from .control_client.schema import validate_control_document
 from .control_client.transfers import (
     TransferReceipt,
     local_filesystem_error,

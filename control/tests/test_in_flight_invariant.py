@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
-from vonk_agent_protocol import InstallationState, RunState
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.models.execution import RecipeInstallation
 
 from .lifecycle_simulation import invariants

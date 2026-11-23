@@ -25,13 +25,13 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentOperation,
+from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
-    RunSwitchCode,
     SecurityRefusalReason,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.categorized_errors import SecurityRefused
 from vonk_control.lifecycle.core import STOP_BUDGET
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
@@ -733,8 +733,8 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
     """Unknown outcomes recover after restart and admit fresh work, regardless of
     the preparation owner's retryable flag."""
 
-    from vonk_agent_protocol import RuntimeImageCode
     from vonk_agent_protocol.agent_words import ProfileChildPhase
+    from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
     from vonk_control.runtime_image_preparation.contracts import (
         RuntimeImagePreparationUnknown,
     )
@@ -815,7 +815,8 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     """A leftover probe checkpoint must not overwrite the current lifecycle wait."""
     from dataclasses import replace
 
-    from vonk_agent_protocol import RuntimePreflightCode, WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+    from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
     from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
     from vonk_control.persisted_waits import read_wait
 

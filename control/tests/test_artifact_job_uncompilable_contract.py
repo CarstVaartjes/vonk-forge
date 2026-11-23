@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_control.artifact_jobs.contracts import ArtifactJobInvalid
 
 from .artifact_jobs_support import (

@@ -11,7 +11,7 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol import (
+from vonk_agent_protocol.state_machines import (
     InstallationState,
     ObservedAssignmentState,
 )

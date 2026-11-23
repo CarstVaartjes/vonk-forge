@@ -11,14 +11,14 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
     RunAdmissionCode,
-    RunState,
-    RunSwitchCode,
-    canonical_message,
 )
-from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.state_machines import RunState
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
 from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles.service import FleetProfileService

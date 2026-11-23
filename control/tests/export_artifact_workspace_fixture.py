@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.artifact_jobs.api import ArtifactJobCreate
 from vonk_control.artifact_jobs.contracts import ArtifactJobListResponse

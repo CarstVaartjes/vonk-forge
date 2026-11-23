@@ -8,17 +8,19 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    Disposition,
-    InstallationState,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
+    WaitReason,
+)
+from vonk_agent_protocol.state_machines import (
+    InstallationState,
+    NodeIdentityState,
     ReservationState,
     RunState,
-    WaitReason,
-    canonical_message,
 )
-from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states
 from ..agent_operation_facts import (

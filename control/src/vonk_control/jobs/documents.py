@@ -24,22 +24,22 @@ from pydantic import (
     StringConstraints,
     field_validator,
 )
-from vonk_agent_protocol import (
-    OperationProgress,
-    RecipeBuildCleanupRequest,
-    RecipeInstallPayload,
-    RecipeReconcilePayload,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    RecipeUninstallPayload,
-    RouteState,
-)
+from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
 from vonk_agent_protocol.contracts import RecipeBuildRequest
 from vonk_agent_protocol.integer_domains import (
     MAX_DATABASE_BIGINT,
     MAX_DATABASE_INTEGER,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
+    RecipeReconcilePayload,
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeUninstallPayload,
+)
+from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
 from ..distribution_assignment import NodeDistributionAssignment

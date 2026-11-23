@@ -9,11 +9,12 @@ from io import StringIO
 import pytest
 from controller_cli_support import FakeClient, _InjectedClock, run
 
-from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import (
+from cluster_profiles import cli
+from cluster_profiles.control_client.errors import (
     ControlMalformedResponse,
     ControlTransportError,
 )
+from cluster_profiles.controller_cli import observation as observation_module
 
 
 def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() -> None:
@@ -318,7 +319,7 @@ def test_watch_shows_updated_resource_and_retains_final_snapshot(
             self.now += delay
 
     clock = WatchClock()
-    monkeypatch.setattr(controller_cli.observation, "time", clock)
+    monkeypatch.setattr(observation_module, "time", clock)
     common = {
         "identity": {"slug": "Qwen"},
         "selector": "qwen",
@@ -840,7 +841,7 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
 def _sticky_upgrade_follow(
     snapshot_overrides: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(controller_cli.observation, "time", _InjectedClock())
+    monkeypatch.setattr(observation_module, "time", _InjectedClock())
     job_id = "upgrade-job"
     request_key = "44444444-4444-4444-8444-444444444444"
     nodes = ["spk_" + letter * 32 for letter in "abcd"]
@@ -909,7 +910,7 @@ def test_fleet_upgrade_timeout_reports_the_job_as_still_running(
 ) -> None:
     """Catches a timed-out watch that shows a finished Spark as the outcome:
     one Spark succeeded, one is still queued, so the job is not done."""
-    monkeypatch.setattr(controller_cli.observation, "time", _InjectedClock())
+    monkeypatch.setattr(observation_module, "time", _InjectedClock())
     job_id = "upgrade-job"
     request_key = "55555555-5555-4555-8555-555555555555"
     nodes = ["spk_" + letter * 32 for letter in "ab"]

@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeUpdateCode,
-    RuntimeImageCode,
     SecurityRefusalReason,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 

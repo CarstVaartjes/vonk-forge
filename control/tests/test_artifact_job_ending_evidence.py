@@ -14,26 +14,31 @@ from datetime import UTC
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentOperation as WireAgentOperation,
-)
-from vonk_agent_protocol import (
-    AgentResult,
-    ContainerRuntimeAction,
-    InstallationNodeState,
-    InstallationState,
-    InvalidRequestError,
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    OperationFailureCode,
+    RunAdmissionCode,
+)
+from vonk_agent_protocol.outcome import InvalidRequestError
+from vonk_agent_protocol.reason_codes.evidence import OperationFailureCode
+from vonk_agent_protocol.recipe_jobs import (
     RecipeJobEnding,
     RecipeJobFile,
     RecipeJobRunRequest,
     RecipeJobRunResult,
-    RunAdmissionCode,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
+from vonk_agent_protocol.state_machines import (
+    InstallationNodeState,
+    InstallationState,
     RunState,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
 )
 from vonk_control.agent_jobs.contracts import (
     CLAIM_LEASE_SECONDS,

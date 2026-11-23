@@ -33,7 +33,7 @@ from typing import Any, ClassVar, NamedTuple
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError, model_validator
 from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 
-from .reason_codes import AgentEvidenceCode
+from .reason_codes.evidence import AgentEvidenceCode
 from .wire_model import WireModel
 
 

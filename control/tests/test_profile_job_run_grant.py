@@ -15,18 +15,23 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
-    InvalidRequestReason,
-    RecipeJobFile,
+    ExecuteContainerRuntimeRequestOperation,
     SignedHostHelperGrant,
-    canonical_message,
-    recipe_job_manifest_document,
-    recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobFile,
+    RecipeJobRunRequest,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_document as recipe_job_manifest_document,
+)
+from vonk_agent_protocol.recipe_jobs import (
+    manifest_sha256 as recipe_job_manifest_sha256,
+)
 from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline

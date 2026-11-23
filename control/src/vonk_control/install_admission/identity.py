@@ -6,13 +6,11 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from vonk_agent_protocol import (
-    InstallAdmissionCode,
-    WaitReason,
-)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.admission import InstallAdmissionCode
 
 from ..content_identity import same_image
 from ..models.cache import RecipeBuild

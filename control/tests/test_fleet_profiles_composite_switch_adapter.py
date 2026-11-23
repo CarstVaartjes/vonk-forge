@@ -7,10 +7,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, create_engine, select, update
-from vonk_agent_protocol import (
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -520,7 +518,7 @@ def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
 
     import datetime as _datetime
 
-    from vonk_agent_protocol import DistributionObject
+    from vonk_agent_protocol.distribution import DistributionObject
     from vonk_control.distribution_assignment import NodeDistributionAssignment
 
     node_id = nodes[0]

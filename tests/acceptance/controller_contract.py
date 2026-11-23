@@ -24,7 +24,7 @@ from typing import Any
 
 from pydantic import JsonValue, TypeAdapter
 
-from cluster_profiles.control_client import source_schema_validator
+from cluster_profiles.control_client.schema import source_schema_validator
 from cluster_profiles.observation_transfer_reader import (
     ObservationStream,
     check_observation_deadline,

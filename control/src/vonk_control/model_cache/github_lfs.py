@@ -37,7 +37,8 @@ from urllib.parse import urlsplit
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol import ModelCacheCode, OperatorActionName
+from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_retry import bounded_attempts
 from ..operations.contract import AvailabilityRecoveryAction

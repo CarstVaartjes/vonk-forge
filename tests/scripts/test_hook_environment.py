@@ -270,3 +270,15 @@ def test_protocol_environment_adds_only_the_protocol_member(tmp_path, monkeypatc
     (root / "uv.lock").write_text("version = 2\n")
     environment.ensure_protocol(root, venv)
     assert len(calls) == 4
+
+
+def test_staged_files_outside_the_pyright_scope_are_not_type_checked() -> None:
+    module = hook()
+    assert module.type_checked(
+        [
+            "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+            "control/tests/test_api.py",
+            "src/cluster_profiles/generated_control/client.py",
+            "src/cluster_profiles/cli.py",
+        ]
+    ) == ["control/tests/test_api.py", "src/cluster_profiles/cli.py"]

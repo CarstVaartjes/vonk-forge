@@ -18,7 +18,7 @@ from .optional_evidence import (
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
 )
-from .reason_codes import AgentEvidenceCode
+from .reason_codes.evidence import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
 from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES

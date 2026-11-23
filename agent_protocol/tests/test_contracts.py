@@ -9,23 +9,24 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
+    RESULT_MODELS,
     AgentClaim,
-    AgentEvidenceCode,
     AgentOperation,
     AgentProgress,
     AgentProtocolError,
     AgentResult,
+    _validate_safe_keys,
     canonical_message,
     schema_validator,
     validate_result_for_operation,
     validate_schema_message,
 )
-from vonk_agent_protocol.contracts import RESULT_MODELS, _validate_safe_keys
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,

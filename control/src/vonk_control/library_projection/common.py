@@ -11,7 +11,8 @@ from typing import Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
-from vonk_agent_protocol import AssetAvailability, RunState, UnknownOutcomeError
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import AssetAvailability, RunState
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,

@@ -8,14 +8,14 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select, true
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    Disposition,
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    UnknownOutcomeError,
 )
-from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 
 from ..agent_operation_facts import aware as _aware
 from ..artifact_jobs.lifecycle import ArtifactIdentity, has_pending_removal

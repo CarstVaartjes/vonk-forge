@@ -9,15 +9,15 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_files import PrivateOutput
-from cluster_profiles.control_client import (
-    MAX_CONTROL_DOCUMENT_BYTES,
-    ControlClient,
+from cluster_profiles.control_client.errors import (
     ControlForbidden,
     ControlMalformedResponse,
     ControlResponseTooLarge,
     ControlTransportError,
     ControlUnavailable,
 )
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 from control.tests.consumer_outcomes import not_adopted
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"

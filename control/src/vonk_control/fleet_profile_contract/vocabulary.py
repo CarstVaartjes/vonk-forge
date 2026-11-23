@@ -10,18 +10,18 @@ from pydantic import (
     Field,
     StringConstraints,
 )
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    EndpointState,
-    LifecycleState,
-    ObservedAssignmentState,
-    SupersedeCode,
-    machine_adopter,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileInstallationPolicy,
     ProfileOperationKind,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    EndpointState,
+    ObservedAssignmentState,
+    machine_adopter,
 )
 
 

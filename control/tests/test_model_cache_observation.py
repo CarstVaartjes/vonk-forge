@@ -16,8 +16,9 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.categorized_errors import BookkeepingUnknown
 from vonk_control.fleet_profiles import read_observation as profile_read_observation
 from vonk_control.fleet_profiles.read_observation import profile_read

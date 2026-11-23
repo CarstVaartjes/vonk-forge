@@ -10,12 +10,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, select
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    LifecycleState,
-    ProfileReasonCode,
-    SupersedeCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileInput,
@@ -699,7 +697,8 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     monkeypatch, end_path: str
 ) -> None:
     """An exhausted chain must release its application scope, not poison new loads."""
-    from vonk_agent_protocol import RecipeImageCode, ReservationState
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+    from vonk_agent_protocol.state_machines import ReservationState
     from vonk_control.models.fleet import FleetProfileApplication
     from vonk_control.operations.blockers import make_blocker
 

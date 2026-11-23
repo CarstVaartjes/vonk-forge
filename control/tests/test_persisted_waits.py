@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job
@@ -61,7 +61,10 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
     postgres_engine,
 ) -> None:
     """Catches dropped enum/nullable evidence, split transactions and read churn."""
-    from vonk_agent_protocol import WaitOwnerKind, WaitResumeCondition
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        WaitOwnerKind,
+        WaitResumeCondition,
+    )
     from vonk_control.operation_api.lane_wait import apply_queue_wait
     from vonk_control.operations.blockers import (
         BlockingOperation,
@@ -262,7 +265,11 @@ def test_every_durable_wait_owner_has_identity_and_projection() -> None:
     from datetime import UTC, datetime
 
     from sqlalchemy import Integer
-    from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        WaitOwnerKind,
+        WaitReason,
+        WaitResumeCondition,
+    )
     from vonk_control.model_primitives import Base
     from vonk_control.models.jobs import Job
     from vonk_control.operations.blockers import make_blocker
@@ -349,7 +356,7 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     tmp_path, postgres_engine
 ) -> None:
     """Catches a restarted loop losing its delay or attaching it to unrelated history."""
-    from vonk_agent_protocol import CatalogSyncCode
+    from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
     from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.models.cache import RecipeLibrarySyncRun
     from vonk_control.persisted_waits import read_wait
@@ -388,7 +395,7 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
 
 def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
     """Catches an attention warning resetting the dependency's original age."""
-    from vonk_agent_protocol import ProgressAlarmCode
+    from vonk_agent_protocol.lifecycle_vocabulary import ProgressAlarmCode
     from vonk_control.operations.blockers import make_blocker
     from vonk_control.persisted_waits import read_wait, schedule_wait
 
@@ -409,7 +416,10 @@ def test_operator_wait_retains_the_owners_real_action_after_store_load(
     postgres_engine,
 ) -> None:
     """Catches publishing an operator wait without the resume action its owner accepts."""
-    from vonk_agent_protocol import OperatorActionName, WaitResumeCondition
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        OperatorActionName,
+        WaitResumeCondition,
+    )
     from vonk_control.persisted_waits import read_wait, schedule_wait
 
     Base.metadata.create_all(postgres_engine)

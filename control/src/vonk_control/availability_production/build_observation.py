@@ -6,17 +6,13 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    AgentFailureResult,
-    Disposition,
-    LifecycleState,
-    RecipeBuildEvidence,
-    RecipeImageCode,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.build_import import RecipeBuildEvidence
+from vonk_agent_protocol.contracts import AgentFailureResult, canonical_message
+from vonk_agent_protocol.disposition import Disposition
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 

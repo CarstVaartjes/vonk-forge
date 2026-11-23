@@ -9,8 +9,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, OperationProgress, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.execution_plan_service import (
@@ -56,7 +58,7 @@ from vonk_control.run_switch_operations.results import _stored_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.stored.json_values import write_guard_mode
 
-from cluster_profiles.control_client import validate_control_document
+from cluster_profiles.control_client.schema import validate_control_document
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
@@ -796,8 +798,8 @@ def test_dual_agent_loss_mid_load_keeps_bounded_wait_visible_after_return(
     tmp_path: Path, postgres_engine
 ) -> None:
     """Reject losing the native recovery clock at the profile adapter seam."""
-    from vonk_agent_protocol import DesiredAssignmentState
     from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+    from vonk_agent_protocol.state_machines import DesiredAssignmentState
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
@@ -872,12 +874,16 @@ def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
     """Catches a loaded profile hiding the Controller's recovery explanation."""
     from datetime import UTC, datetime, timedelta
 
-    from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
     from vonk_agent_protocol.agent_words import ProfileDocumentState
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        WaitOwnerKind,
+        WaitReason,
+        WaitResumeCondition,
+    )
     from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.wait_contract import QueueWait
 
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     now = datetime(2026, 10, 22, 12, 55, tzinfo=UTC)
     wait = QueueWait(

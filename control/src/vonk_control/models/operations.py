@@ -15,10 +15,9 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, LifecycleSubject
+from vonk_agent_protocol.state_machines import (
     DistributionAssignmentState,
-    LifecycleState,
-    LifecycleSubject,
     machine_check,
 )
 

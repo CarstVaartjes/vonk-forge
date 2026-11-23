@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from pydantic import ValidationError
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 
 from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,

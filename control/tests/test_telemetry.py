@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import RecipeRun

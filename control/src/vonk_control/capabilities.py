@@ -13,12 +13,13 @@ from datetime import UTC, datetime, timedelta
 from threading import Event, Lock, Thread
 from typing import Any, cast
 
-from vonk_agent_protocol import Disposition, WaitReason
 from vonk_agent_protocol.capability_reply import (
     CapabilityReason,
     CapabilityUnavailableReply,
     ControllerCapability,
 )
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from .capability_contract import CapabilityAvailability, CapabilityStatus
 

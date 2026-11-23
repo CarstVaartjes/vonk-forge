@@ -6,13 +6,11 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProgressPhase,
-    ReservationState,
-    canonical_message,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.state_machines import ReservationState
 from vonk_control.jobs.documents import RecipeBuildParent
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import ResourceReservation
@@ -153,13 +151,12 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
 ):
     """A released envelope cannot let a due retry oversubscribe a later load."""
     from sqlalchemy import select
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.contracts import (
         AgentFailureKind,
+        AgentFailureResult,
         AgentResult,
-        AgentResultState,
-        FailureCode,
     )
-    from vonk_agent_protocol.contracts import AgentFailureResult
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.disk_reservations import outstanding_disk_reservation_bytes

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
@@ -207,7 +207,7 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
     """Catches treating a post-acceptance observation fault as permanent failure."""
     from uuid import uuid4
 
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
     Base.metadata.create_all(postgres_engine)
     world = Catalog(postgres_engine)

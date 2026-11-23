@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from vonk_agent_protocol import CatalogSyncCode
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import (

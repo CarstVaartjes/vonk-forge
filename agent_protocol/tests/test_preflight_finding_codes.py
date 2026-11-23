@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
+from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightFindingCode
+from vonk_agent_protocol.reason_codes.vocabulary import (
     RETIRED_FINDING_CODE_SPELLINGS,
-    HelperErrorCode,
-    RuntimePreflightFindingCode,
     adopt_preflight_finding_code,
 )
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightFinding

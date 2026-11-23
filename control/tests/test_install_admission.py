@@ -7,8 +7,9 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission.identity import (
     _primary_model_sha256,

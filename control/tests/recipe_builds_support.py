@@ -11,10 +11,8 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.inventory.repository import (
     InventoryRepository,

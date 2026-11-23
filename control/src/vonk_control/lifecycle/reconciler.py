@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 
 from .adapter import KindAdapter
 from .core import transition

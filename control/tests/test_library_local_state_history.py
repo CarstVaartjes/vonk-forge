@@ -18,7 +18,8 @@ from sqlalchemy import String, column, create_engine, event, func, or_, select, 
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import ModelAccessReason, OperationProgress
+from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import TokenCodec
 from vonk_control.library.contract import LibraryLocalState
 from vonk_control.library_projection import local_state

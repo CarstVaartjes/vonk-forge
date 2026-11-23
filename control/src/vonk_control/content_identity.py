@@ -381,8 +381,8 @@ def installations_using_models(session, contents: Collection[str]) -> frozenset[
     set may name it only in its plan, so callers also read plans.
     """
     from sqlalchemy import or_, select
-    from vonk_agent_protocol import InstallationState
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+    from vonk_agent_protocol.state_machines import InstallationState
 
     from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
     from .models.execution import RecipeInstallation

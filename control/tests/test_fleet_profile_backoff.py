@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job

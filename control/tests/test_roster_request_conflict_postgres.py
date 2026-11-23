@@ -10,9 +10,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileOperationKind, ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot

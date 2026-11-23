@@ -13,11 +13,8 @@ from library_route_fixtures import _recipe_projection
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import (
-    ControlNotFound,
-    _operation,
-    validate_control_document,
-)
+from cluster_profiles.control_client.errors import ControlNotFound
+from cluster_profiles.control_client.schema import _operation, validate_control_document
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
 )

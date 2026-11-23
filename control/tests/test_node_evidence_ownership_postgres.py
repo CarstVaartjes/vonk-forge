@@ -2,8 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import ControllerErrorCode
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
 from vonk_control.evidence_repeats import (
     command_events,
     command_evidence_needed,

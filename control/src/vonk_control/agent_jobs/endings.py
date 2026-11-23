@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.types import CancelRequested

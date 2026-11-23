@@ -4,12 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentResult,
-    RecipeOperationRequest,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult, canonical_message
+from vonk_agent_protocol.recipe_operations import RecipeOperationRequest
 
 ROOT = Path(__file__).parents[1] / "fixtures"
 

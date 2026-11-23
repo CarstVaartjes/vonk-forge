@@ -7,15 +7,13 @@ from enum import Enum
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleVocabulary,
-    OutcomeCatalog,
-    OutcomeEvidence,
     OutcomeKind,
-    OutcomeUnknown,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.outcome import OutcomeCatalog, OutcomeEvidence, OutcomeUnknown
 
 from cluster_profiles.generated_control.models.lifecycle_vocabulary import (
     LifecycleVocabulary as GeneratedVocabulary,

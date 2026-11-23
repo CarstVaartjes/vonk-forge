@@ -8,9 +8,7 @@ from datetime import UTC, datetime
 from threading import Lock
 
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    DistributionObject,
-)
+from vonk_agent_protocol.distribution import DistributionObject
 
 from ..distribution_assignment import NodeDistributionAssignment
 from .delivery import DeliveryMixin

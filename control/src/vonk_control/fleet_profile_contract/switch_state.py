@@ -10,12 +10,10 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
-    LifecycleState,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileSwitchChildKind,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.requests import RunSwitchProfileStopScope

@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import fnmatch
 import importlib.metadata
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
@@ -26,6 +28,24 @@ TYPE_INPUTS = {
     "scripts/check-staged-code",
     "scripts/check_environment.py",
 }
+
+
+def type_checked(files: list[str]) -> list[str]:
+    """The staged files inside pyright's configured scope.
+
+    The full check (CI) reports only ``include`` minus ``exclude`` from
+    pyproject.toml; handing pyright a file outside it reports errors CI never
+    sees. pyproject.toml is the one owner of the scope."""
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyright = config["tool"]["pyright"]
+    include = [entry.rstrip("/") for entry in pyright["include"]]
+    exclude = [pattern.replace("**", "*") for pattern in pyright.get("exclude", [])]
+    return [
+        path
+        for path in files
+        if any(path == entry or path.startswith(entry + "/") for entry in include)
+        and not any(fnmatch.fnmatch(path, pattern) for pattern in exclude)
+    ]
 
 
 def main() -> int:
@@ -82,9 +102,15 @@ def main() -> int:
                 ],
             ]
         )
-    commands.append(
-        [sys.executable, "scripts/check-python-types", *([] if full_types else files)]
-    )
+    checked = files if full_types else type_checked(files)
+    if full_types or checked:
+        commands.append(
+            [
+                sys.executable,
+                "scripts/check-python-types",
+                *([] if full_types else checked),
+            ]
+        )
     for command in commands:
         result = subprocess.run(
             command, cwd=ROOT, env=check_env, check=False, timeout=600

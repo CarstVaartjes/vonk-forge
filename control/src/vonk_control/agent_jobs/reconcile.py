@@ -7,7 +7,9 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select
-from vonk_agent_protocol import AgentOperation, Disposition, WaitReason
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states as aos

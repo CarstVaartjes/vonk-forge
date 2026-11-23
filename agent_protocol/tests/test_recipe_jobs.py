@@ -4,16 +4,15 @@ import json
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentProtocolError,
     AgentResult,
-    RecipeJobRunRequest,
-    RecipeJobRunResult,
     canonical_message,
     validate_result_for_operation,
     validate_schema_message,
 )
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

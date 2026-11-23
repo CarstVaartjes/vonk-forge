@@ -6,12 +6,11 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
-from vonk_agent_protocol import (
+from vonk_agent_protocol.reason_codes.model_cache import (
     CacheReferenceReason,
     ModelCacheCode,
-    ModelFileState,
-    RunState,
 )
+from vonk_agent_protocol.state_machines import ModelFileState, RunState
 
 from ..bounded_retry import bounded_attempts
 from ..catalog.queries import active_head_revision

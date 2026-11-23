@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentClaim, AgentProgress, AgentResult
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 Fenced = AgentClaim | AgentProgress | AgentResult | str

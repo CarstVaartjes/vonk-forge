@@ -11,31 +11,32 @@ from functools import cache
 from pathlib import Path
 from typing import get_args
 
-from vonk_agent_protocol import (
-    LEGACY_WAIT_STATE,
-    REASON_CODE_ENUMS,
+from vonk_agent_protocol.agent_words import (
     RETIRED_PROGRESS_PHASE_SPELLINGS,
+    ProgressPhase,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LEGACY_WAIT_STATE,
     AgentResultState,
     ErrorCategory,
     FailureCode,
     InvalidRequestReason,
     LifecycleEventKind,
     LifecycleState,
-    OperationMemberProgress,
     OperatorActionName,
-    ProgressPhase,
     ResourceBlockerCode,
     RunAdmissionCode,
     SecurityRefusalReason,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import REASON_CODE_ENUMS
 from vonk_agent_protocol.state_machines import (
     MACHINES,
     CertificateRecordState,
     ModelCacheOperatorStatus,
     NodeIdentityState,
 )
-from vonk_agent_protocol.wire_model import WireEnum
+from vonk_agent_protocol.wire_model import OperationMemberProgress, WireEnum
 from vonk_control.stored import states as stored_states
 
 from .parsed_sources import memoized_scan, parse_file
@@ -408,7 +409,7 @@ def _activity_result_literals(tree: ast.Module) -> set[int]:
         for node in tree.body
         if isinstance(node, ast.ImportFrom)
         and node.level == 0
-        and node.module == "vonk_agent_protocol"
+        and node.module == "vonk_agent_protocol.wire_model"
         for alias in node.names
         if alias.name == "OperationMemberProgress"
     ]

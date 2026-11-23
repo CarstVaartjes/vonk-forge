@@ -21,7 +21,7 @@ from contextvars import ContextVar
 from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
 
-from cluster_profiles.glb_validation import validate_mesh_glb_bytes
+from cluster_profiles.glb_validation.validation import validate_mesh_glb_bytes
 
 from .contracts import FixtureError, FixtureObservationUnknown
 from .values import _strict_json_loads

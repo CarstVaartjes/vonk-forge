@@ -9,13 +9,13 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentOperation,
+from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RunState,
-    SupersedeCode,
 )
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
+from vonk_agent_protocol.state_machines import RunState
 
 from .. import agent_operation_states
 from ..admission_locking import (

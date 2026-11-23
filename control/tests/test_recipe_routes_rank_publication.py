@@ -12,15 +12,15 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     EndpointState,
-    LifecycleState,
     RouteState,
     RunState,
-    UnknownError,
 )
-from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,

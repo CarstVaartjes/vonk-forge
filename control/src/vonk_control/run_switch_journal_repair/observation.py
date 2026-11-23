@@ -7,11 +7,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-    UnknownOutcomeError,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from ..admission_locking import AdmissionLockBusy
 from ..journal_models import RunSwitchJournalRepairPending

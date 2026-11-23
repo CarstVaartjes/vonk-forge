@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..agent_contacts import last_seen as contact_last_seen

@@ -8,11 +8,9 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    LifecycleState,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows

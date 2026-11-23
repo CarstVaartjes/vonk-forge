@@ -5,10 +5,8 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 
-from vonk_agent_protocol import (
-    InvalidRequestReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.package_source import AgentPackageSource
 
 from ..strict_json import read_stored_model

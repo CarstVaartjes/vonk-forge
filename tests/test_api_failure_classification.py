@@ -8,7 +8,8 @@ control/tests/test_api_failure_classification.py. This scan prevents new direct
 import ast
 from pathlib import Path
 
-from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
+from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from control.tests.parsed_sources import parse_file
 

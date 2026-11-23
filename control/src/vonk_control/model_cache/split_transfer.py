@@ -11,13 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol import (
-    LifecycleState,
-    ModelCacheCode,
-    ModelFileState,
-    OperatorActionName,
-    ProgressPhase,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OperatorActionName
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.state_machines import ModelFileState
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_faults import OperationInterrupted

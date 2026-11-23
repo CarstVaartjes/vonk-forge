@@ -8,13 +8,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.reason_codes.admission import UninstallPlanCode
+from vonk_agent_protocol.reason_codes.runs import StopPlanCode
+from vonk_agent_protocol.state_machines import (
     InstallationNodeState,
     InstallationState,
     RunState,
-    StopPlanCode,
-    UninstallPlanCode,
-    canonical_message,
 )
 
 from ..machine_states import rank_installed

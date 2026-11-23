@@ -6,10 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
-    SecurityRefusalReason,
-    WaitReason,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 
 from . import vocabulary_literals as scan
 
@@ -307,7 +304,7 @@ def test_a_contract_member_in_a_code_position_is_not_a_literal(
     tmp_path: Path,
 ) -> None:
     source = """
-from vonk_agent_protocol import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 
 class WidgetError(Exception):
@@ -329,7 +326,7 @@ def use():
 
 def test_a_subclass_constructor_without_a_code_takes_a_detail(tmp_path: Path) -> None:
     source = """
-from vonk_agent_protocol import RunSwitchCode
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 
 
 class BaseError(Exception):
@@ -357,7 +354,7 @@ def test_the_cli_spells_only_contract_codes() -> None:
     import ast
     import re
 
-    from vonk_agent_protocol import REASON_CODE_ENUMS
+    from vonk_agent_protocol.reason_codes.vocabulary import REASON_CODE_ENUMS
 
     from cluster_profiles import cli, cli_render, controller_cli
 
@@ -370,9 +367,14 @@ def test_the_cli_spells_only_contract_codes() -> None:
     domains = {word.split(".")[0] for word in members if "." in word}
     shaped = re.compile(r"^[a-z][a-z0-9_-]*\.[a-z0-9_.-]+$")
     unknown: set[str] = set()
-    for module in (cli, cli_render, controller_cli):
-        assert module.__file__ is not None
-        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    sources = [Path(cli.__file__)] + [
+        path
+        for package in (cli_render, controller_cli)
+        for directory in package.__path__
+        for path in sorted(Path(directory).rglob("*.py"))
+    ]
+    for source in sources:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Constant)

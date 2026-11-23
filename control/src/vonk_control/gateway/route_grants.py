@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RouteState, RunState
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDecisionSettings
 

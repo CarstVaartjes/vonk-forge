@@ -3,9 +3,8 @@ from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import ProjectionCode
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
-from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.cli_render.activity import (
     activity_continuation,
     unknown_membership,
@@ -16,6 +15,7 @@ from cluster_profiles.cli_render.artifact_jobs import (
     result_files,
 )
 from cluster_profiles.cli_render.common import _text
+from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.cli_render.fleet import (
     NO_SPARKS,
     RunProblem,
@@ -31,9 +31,10 @@ from cluster_profiles.cli_render.library import (
 )
 from cluster_profiles.cli_render.operations import stalls
 from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listing
+from cluster_profiles.cli_render.progress import progress_line
 from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
 from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
-from cluster_profiles.control_client import ControlMalformedResponse
+from cluster_profiles.control_client.errors import ControlMalformedResponse
 from cluster_profiles.generated_control.models.gpu_clock_observation import (
     GpuClockObservation,
 )
@@ -109,7 +110,7 @@ def test_every_controller_command_has_a_registered_presentation() -> None:
 
     import cluster_profiles
     from cluster_profiles.cli_presentations import PRESENTATIONS
-    from cluster_profiles.controller_cli import add_controller_commands
+    from cluster_profiles.controller_cli.parser import add_controller_commands
 
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command")
@@ -136,7 +137,7 @@ def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
     # Catches discarding temperature when utilisation is unsupported.
     from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
-    from cluster_profiles.cli_render import _gpu
+    from cluster_profiles.cli_render.fleet import _gpu
 
     assert (
         _gpu(

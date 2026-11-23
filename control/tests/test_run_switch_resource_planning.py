@@ -1,7 +1,7 @@
 import hashlib
 from importlib.resources import files
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.bounded_json import text
 from vonk_control.resource_planning.demand import (
     _resource_evidence,

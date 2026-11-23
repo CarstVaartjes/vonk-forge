@@ -10,12 +10,10 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
-    LifecycleState,
-    ProfileReasonCode,
-    SupersedeCode,
-)
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 
 from ..operations.blockers import OperationBlocker
 from ..strict_json import StrictModel

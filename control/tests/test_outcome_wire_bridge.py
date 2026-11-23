@@ -17,15 +17,10 @@ from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
-from vonk_agent_protocol import (
-    AgentResult,
-    ErrorCatalog,
-    LifecycleVocabulary,
-    OutcomeCatalog,
-    OutcomeEvidence,
-    ReasonCodeVocabulary,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+from vonk_agent_protocol.outcome import ErrorCatalog, OutcomeCatalog, OutcomeEvidence
+from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
 
 FENCE = str(uuid4())
 DIAGNOSTICS = {

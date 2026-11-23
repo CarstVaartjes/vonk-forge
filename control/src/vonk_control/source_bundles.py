@@ -15,16 +15,18 @@ from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
 from sqlalchemy import literal_column, select
-from vonk_agent_protocol import (
-    InvalidRequestError,
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    SourceBundleCode,
-    UnknownOutcomeError,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.source_bundles import (
     SourceBundleDigestManifest,
     SourceBundleFile,

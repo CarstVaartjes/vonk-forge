@@ -10,9 +10,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
-from vonk_agent_protocol import (
-    LifecycleState,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.revision_collection import GRACE
 from vonk_control.model_cache.service import ModelCacheService
@@ -726,7 +724,7 @@ def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
     waits for is refused: the space it was promised never comes. A deferred
     removal (outcome unknown, retried next pass) is still under way; a refused
     one is not, until a later pass removes it after all."""
-    from vonk_agent_protocol import WaitReason
+    from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
     from vonk_control.recipe_operations.errors import RecipeRetryLater
 
     old = world.revision("glm", 1)

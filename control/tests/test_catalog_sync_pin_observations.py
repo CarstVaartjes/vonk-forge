@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CatalogSyncCode
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.revision_contract import (
     PrebuiltImage,

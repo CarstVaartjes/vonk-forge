@@ -10,17 +10,16 @@ from typing import cast as typing_cast
 from sqlalchemy import or_, select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    LifecycleState,
-    ProjectionCode,
-    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.state_machines import RunState
 
 from ..admission_locking import (
     AdmissionLockBusy,

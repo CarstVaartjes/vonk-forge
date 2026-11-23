@@ -22,7 +22,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.job_limits import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,

@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from vonk_agent_protocol import (
+from vonk_agent_protocol.reason_codes.resources import (
     ResourcePlanningCode,
     ResourceTerm,
     ResourceTermProblem,
-    resource_term_code,
 )
+from vonk_agent_protocol.reason_codes.vocabulary import resource_term_code
 from vonk_forge_contracts import ModelDefinition
 
 from ..bounded_json import require_integer

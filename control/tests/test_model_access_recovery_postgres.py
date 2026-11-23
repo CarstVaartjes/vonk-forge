@@ -13,7 +13,8 @@ import httpx2
 import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, ModelAccessReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation

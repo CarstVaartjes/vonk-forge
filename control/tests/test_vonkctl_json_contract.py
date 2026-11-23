@@ -32,7 +32,7 @@ from cluster_profiles.cli_json_contract import (
     DocumentKind,
     document_kind,
 )
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 
 from .conftest import load_tools_module
 from .test_catalog_entities import _model, _recipe

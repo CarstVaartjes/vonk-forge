@@ -15,9 +15,7 @@ from typing import Literal
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.install_admission.contracts import (

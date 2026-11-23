@@ -21,21 +21,16 @@ import pytest
 import vonk_agent_protocol
 from fastapi import FastAPI
 from pydantic import BaseModel
-from vonk_agent_protocol import (
-    AgentEvidenceCode,
-    AgentProgress,
-    AgentResult,
-    AgentResultState,
-    InventoryRequest,
-    OutcomeKind,
-    RecipeStartResult,
-)
 from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.contracts import AgentProgress, AgentResult, RecipeStartResult
+from vonk_agent_protocol.inventory import InventoryRequest
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
     redact_host_paths,
 )
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
 from vonk_control.agent_api.routes import install_agent_routes
 

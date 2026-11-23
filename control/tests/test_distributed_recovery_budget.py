@@ -4,8 +4,9 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult, RunState, canonical_message
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.state_machines import RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distributed_recovery.common import (
     _recovery_marker,
@@ -624,7 +625,10 @@ def test_malformed_plan_waits_for_changed_content_without_repeating_decision(
     tmp_path, postgres_engine, monkeypatch
 ):
     """Catches unchanged damaged plans bypassing cooldown and re-parsing forever."""
-    from vonk_agent_protocol import InvalidRequestReason, WaitResumeCondition
+    from vonk_agent_protocol.lifecycle_vocabulary import (
+        InvalidRequestReason,
+        WaitResumeCondition,
+    )
     from vonk_control.distributed_recovery import common
     from vonk_control.persisted_waits import read_wait
     from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY

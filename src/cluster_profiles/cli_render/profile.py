@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from .. import cli_states
-from ..control_client import ControlMalformedResponse
+from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.endpoint_response import EndpointResponse
 from ..generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,

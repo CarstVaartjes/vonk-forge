@@ -46,16 +46,17 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import (
-    ControllerErrorCode,
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode
+from vonk_agent_protocol.state_machines import (
     DistributionAssignmentState,
+    EnrollmentRecordState,
     InstallationState,
-    LifecycleState,
+    NodeIdentityState,
     ReservationState,
     RoutePublicationState,
     RunState,
 )
-from vonk_agent_protocol.state_machines import EnrollmentRecordState, NodeIdentityState
 
 from .catalog.revision_collection import GRACE, INTERVAL, tokens
 from .lifecycle.evidence import Residue

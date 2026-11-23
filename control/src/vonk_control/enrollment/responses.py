@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from vonk_agent_protocol import LifecycleState, UnknownError, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.enrollment import (
     EnrollmentObservationReply,
     IssuedCertificateResponse,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownError
 
 from ..pki import IssuedCertificate
 from .contract import EnrollmentObservationOutcome

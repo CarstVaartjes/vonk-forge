@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    RecipeImageCode,
     WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry

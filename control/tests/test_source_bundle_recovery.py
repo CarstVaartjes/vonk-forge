@@ -8,11 +8,8 @@ from importlib.resources import files
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    SecurityRefusalError,
-    UnknownOutcomeError,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.catalog.revision_contract import RecipeRevisionProjection

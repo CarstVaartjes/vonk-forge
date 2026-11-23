@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from vonk_agent_protocol import StorageDemandCode
+from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
 
 from .worker.memory_contract import WorkerMemoryComponent
 

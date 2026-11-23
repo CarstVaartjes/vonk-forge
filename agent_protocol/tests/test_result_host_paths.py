@@ -18,9 +18,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vonk_agent_protocol import AgentFailureResult, AgentProtocolError, AgentResult
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
+    AgentProtocolError,
+    AgentResult,
+)
 from vonk_agent_protocol.optional_evidence import HOST_PATH_MARKER, redact_host_paths
-from vonk_agent_protocol.reason_codes import AgentEvidenceCode
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 

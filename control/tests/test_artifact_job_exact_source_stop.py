@@ -28,13 +28,13 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.contracts import AgentResult
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     InvalidRequestReason,
-    OperationProgress,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs

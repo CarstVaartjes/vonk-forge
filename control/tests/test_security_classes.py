@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from vonk_agent_protocol import SecurityRefusalReason
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.security_edges import SECURITY_REFUSAL_EDGES, SecurityEdge
 

@@ -6,7 +6,7 @@ import httpx2
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import _validate_generated_request
+from cluster_profiles.control_client.schema import _validate_generated_request
 from cluster_profiles.controller_cli.dispatch import run_controller
 from cluster_profiles.generated_control.models.gateway_key_created import (
     GatewayKeyCreated,

@@ -11,7 +11,8 @@ import pytest
 from sqlalchemy import Text, cast, create_engine, func, select
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, RecipeImageCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.admission_locking import ConstraintDefect, admitting
 from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.model_primitives import Base

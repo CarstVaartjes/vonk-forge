@@ -398,7 +398,7 @@ def test_agent_identity_wait_requires_current_identity_and_builder_capability(
 
 
 def test_synthetic_canary_download_uses_the_current_operator_request_shape() -> None:
-    from cluster_profiles.control_client import validate_control_document
+    from cluster_profiles.control_client.schema import validate_control_document
 
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)

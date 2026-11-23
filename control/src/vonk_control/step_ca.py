@@ -12,12 +12,10 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
-from vonk_agent_protocol import (
-    CertificateCode,
-    Disposition,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import CertificateCode
 
 from .ca_issuance_contract import (
     CertificateIssuanceBinding,

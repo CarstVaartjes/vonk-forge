@@ -61,19 +61,22 @@ from typing import Any
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
+    AgentFailureResult,
     AgentOperation,
-    Disposition,
+    AgentResultPayload,
+    canonical_message,
+)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     LifecycleSubject,
-    OperationProgress,
-    RecipeJobRunResult,
     WaitOwnerKind,
     adopt_state,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from .. import agent_operation_states
 from .. import agent_operation_states as aos

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import (
-    LifecycleState,
-    OperationProgress,
-    ProgressPhase,
-)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import OperationProgress
 
 from ..categorized_errors import MissingRecord
 from ..jobs import states as job_states

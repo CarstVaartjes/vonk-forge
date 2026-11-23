@@ -17,7 +17,7 @@ import json
 from typing import Any, get_args
 
 import pytest
-from vonk_agent_protocol import validate_compiled_execution_plan
+from vonk_agent_protocol.compiled_execution_plan import validate_compiled_execution_plan
 from vonk_control.harnesses.canonical_metadata import (
     CANONICAL_HARNESSES,
 )

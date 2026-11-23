@@ -14,8 +14,9 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

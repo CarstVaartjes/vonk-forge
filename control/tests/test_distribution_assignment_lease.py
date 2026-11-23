@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol.distribution import DistributionObject
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.distribution.types import DistributionError

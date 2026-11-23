@@ -35,15 +35,15 @@ from pathlib import Path
 
 from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
+from vonk_agent_protocol.contracts import (
     AgentFailureKind,
     AgentFailureResult,
-    LifecycleState,
-    PrebuiltImageCode,
-    UnknownOutcomeError,
     canonical_message,
 )
-from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_forge_contracts import (
     PrebuiltImage,
     RecipeDefinition,

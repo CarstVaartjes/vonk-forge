@@ -10,7 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import AgentOperation, InventoryVerdict, canonical_message
+from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_agent_protocol.inventory import InventoryVerdict
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,

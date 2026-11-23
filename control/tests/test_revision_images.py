@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
 )

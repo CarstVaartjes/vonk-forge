@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, timedelta
 
 import pytest
-from vonk_agent_protocol import FailureStage, OutcomeKind, WaitReason
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.lifecycle_vocabulary import OutcomeKind, WaitReason
 from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.core import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET
@@ -32,15 +33,14 @@ from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     agent_service,
 ) -> None:
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.contracts import (
         AgentFailureKind,
         AgentFailureResult,
         AgentResult,
-        AgentResultState,
-        FailureCode,
-        OutcomeFailed,
-        RecipeStopResult,
     )
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
+    from vonk_agent_protocol.outcome import OutcomeFailed
+    from vonk_agent_protocol.recipe_operations import RecipeStopResult
     from vonk_control.recovery_policy import RecoveryPolicy
 
     jobs, sessions, clock = agent_service
@@ -113,14 +113,9 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
 def test_a_job_that_waits_before_launch_on_every_attempt_ends_at_the_recovery_deadline(
     agent_service,
 ) -> None:
-    from vonk_agent_protocol import (
-        AgentFailureKind,
-        AgentResult,
-        AgentResultState,
-        FailureCode,
-        OutcomeEvidence,
-        OutcomeFailed,
-    )
+    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
+    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -182,15 +177,13 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     image, model, inputs, storage or launch layout) is retried: this attempt
     never ran the job. Production trigger: a transient artifact distribution
     or image pull failure ended a user's job failed."""
-    from vonk_agent_protocol import (
-        AgentFailureKind,
-        AgentResult,
+    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import (
         AgentResultState,
         FailureCode,
         ObservationCause,
-        OutcomeEvidence,
-        OutcomeFailed,
     )
+    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -255,14 +248,9 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
 def test_a_job_wait_after_dispatch_is_never_reissued(agent_service, stage: str) -> None:
     """A stage a job also reaches after its process was dispatched never proves
     the attempt did not run: the job is never issued a second time."""
-    from vonk_agent_protocol import (
-        AgentFailureKind,
-        AgentResult,
-        AgentResultState,
-        FailureCode,
-        OutcomeEvidence,
-        OutcomeFailed,
-    )
+    from vonk_agent_protocol.contracts import AgentFailureKind, AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, FailureCode
+    from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()

@@ -3,7 +3,7 @@
 import hashlib
 import uuid
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,

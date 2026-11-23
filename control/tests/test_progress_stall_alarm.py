@@ -15,23 +15,22 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import (
-    AdmissionCode,
-    AgentFailureKind,
-    AgentOperation,
-    LifecycleState,
-    ObservedAssignmentState,
-    ProfileReasonCode,
-    RecipeImageCode,
-    WaitOwnerKind,
-    WaitReason,
-    WaitResumeCondition,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,
     ProgressPhase,
 )
+from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    WaitOwnerKind,
+    WaitReason,
+    WaitResumeCondition,
+)
+from vonk_agent_protocol.reason_codes.admission import AdmissionCode
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.state_machines import ObservedAssignmentState
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,

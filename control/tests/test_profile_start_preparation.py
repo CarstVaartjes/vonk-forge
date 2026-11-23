@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.models.catalog import CatalogDocumentRevision

@@ -7,13 +7,13 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     LifecycleSubject,
-    UnknownOutcomeError,
     is_state,
 )
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionLockBusy

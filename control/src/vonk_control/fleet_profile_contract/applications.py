@@ -10,13 +10,11 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
-from vonk_agent_protocol import (
-    LifecycleState,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..operations.blockers import OperationBlocker, ProgressStall
 from ..run_switch_contract.progress import RunSwitchProgress

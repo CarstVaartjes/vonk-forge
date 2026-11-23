@@ -58,17 +58,17 @@ from typing import Any, Literal
 from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    AgentFailureResult,
-    Disposition,
+from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
-    RecipeJobRunResult,
-    RunDegradedReason,
     WaitOwnerKind,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware

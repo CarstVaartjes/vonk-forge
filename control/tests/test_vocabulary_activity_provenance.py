@@ -6,7 +6,7 @@ from .vocabulary_literals import LEGACY_STATE_WORDS, _state_literals
 
 
 def test_activity_literal_requires_unshadowed_canonical_field_owner():
-    imported = "from vonk_agent_protocol import OperationMemberProgress\n"
+    imported = "from vonk_agent_protocol.wire_model import OperationMemberProgress\n"
     expression = 'value = OperationMemberProgress(state=state, activity="waiting" if state == LifecycleState.QUEUED else None)\n'
 
     def found(source):

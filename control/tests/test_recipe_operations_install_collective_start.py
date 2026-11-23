@@ -11,17 +11,15 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentInstallResult,
     AgentResult,
-    LifecycleState,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    RouteState,
-    RunState,
     canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.execution import (
     RecipeInstallation,

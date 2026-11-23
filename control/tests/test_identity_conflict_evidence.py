@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import LifecycleState, RecipeImageCode
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.install_admission.contracts import InstallAdmissionBusy
 from vonk_control.models.cache import RecipeBuild

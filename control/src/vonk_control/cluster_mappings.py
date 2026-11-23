@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, sessionmaker
-from vonk_agent_protocol import ClusterMappingCode
+from vonk_agent_protocol.reason_codes.fleet import ClusterMappingCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar

@@ -10,11 +10,8 @@ from collections.abc import Callable, Mapping
 from ..cli_outcome import (
     operation_state,
 )
-from ..control_client import (
-    ControlClientError,
-    ControlMalformedResponse,
-    validate_control_document,
-)
+from ..control_client.errors import ControlClientError, ControlMalformedResponse
+from ..control_client.schema import validate_control_document
 from .common import (
     ControllerClient,
     NoLoadedProfile,

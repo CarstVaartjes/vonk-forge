@@ -12,7 +12,8 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_completion import completion_script
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.controller_cli import observation as observation_module
 
 
 class Observations:
@@ -243,12 +244,11 @@ def test_profile_follow_pins_latest_application_before_a_new_load(capsys):
 
 
 def test_poll_deadline_bounds_sleep_and_retains_reconnect_identity(monkeypatch, capsys):
-    from cluster_profiles import controller_cli
 
     now = [0.0]
-    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(observation_module.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(
-        controller_cli.observation.time,
+        observation_module.time,
         "sleep",
         lambda seconds: now.__setitem__(0, now[0] + seconds),
     )

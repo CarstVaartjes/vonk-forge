@@ -30,7 +30,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
 
 from ..agent_operation_facts import aware
 from ..jobs import states as job_states

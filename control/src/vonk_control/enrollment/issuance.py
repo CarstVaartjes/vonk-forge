@@ -17,18 +17,18 @@ from datetime import datetime, timedelta
 from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    EnrollmentGrantState,
+from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
+from vonk_agent_protocol.lifecycle_vocabulary import (
     ErrorCategory,
     InvalidRequestReason,
     LifecycleState,
     WaitReason,
 )
-from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRecordState,
     CertificateRotationState,
+    EnrollmentGrantState,
     EnrollmentPurpose,
     EnrollmentRecordState,
     NodeIdentityState,

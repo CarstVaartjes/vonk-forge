@@ -7,7 +7,7 @@ from threading import Event
 
 import pytest
 from sqlalchemy import select, text, update
-from vonk_agent_protocol import ProfileReasonCode
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_control import source_bundles
 from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,

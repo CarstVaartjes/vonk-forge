@@ -17,13 +17,12 @@ from enum import Enum
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    InstallationState,
+from vonk_agent_protocol.outcome import (
     InvalidRequestError,
-    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.execution import (

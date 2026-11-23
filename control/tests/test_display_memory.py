@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.display_memory import (
@@ -12,6 +11,7 @@ from vonk_agent_protocol.display_memory import (
     DisplayMemorySignal,
 )
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_control.fleet_projection.display_memory import display_memory_advice
 
 VECTORS = (

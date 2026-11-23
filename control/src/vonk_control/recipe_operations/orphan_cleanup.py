@@ -6,16 +6,14 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    AgentOperation as OperationKind,
-)
-from vonk_agent_protocol import (
-    LifecycleState,
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
     RecipeStopPayload,
     RecipeUninstallPayload,
-    ReservationState,
 )
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation

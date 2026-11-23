@@ -17,8 +17,8 @@ import pytest
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -50,7 +50,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 
 from .consumer_outcomes import not_adopted
 from .display_fixtures import reworded

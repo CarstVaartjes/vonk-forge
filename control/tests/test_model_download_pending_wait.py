@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from vonk_agent_protocol import ModelAccessReason, OperationProgress
+from vonk_agent_protocol.reason_codes.model_cache import ModelAccessReason
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )

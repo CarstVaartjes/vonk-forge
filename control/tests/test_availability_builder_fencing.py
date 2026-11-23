@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
@@ -276,7 +276,8 @@ def test_builder_contention_names_its_owner_and_replans_after_release(
 ):
     # Catches replacing the admission owner's evidence with an anonymous busy
     # message, and retaining the failed selection after the lock is released.
-    from vonk_agent_protocol import AgentOperation, RecipeImageCode
+    from vonk_agent_protocol.contracts import AgentOperation
+    from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
     from vonk_control.admission_locking import (
         acquire_admission_keys,
         node_admission_key,

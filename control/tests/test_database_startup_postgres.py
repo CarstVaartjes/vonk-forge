@@ -391,7 +391,7 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
 ) -> None:
     """Catches a moved JSON owner permanently refusing every subsequent report."""
     from sqlalchemy import update
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.inventory.items import inventory_items
     from vonk_control.models.fleet import AgentNode
     from vonk_control.models.telemetry import NodeInventoryItemsSnapshot

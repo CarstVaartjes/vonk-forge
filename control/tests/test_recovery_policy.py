@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from vonk_agent_protocol import Disposition
+from vonk_agent_protocol.disposition import Disposition
 from vonk_control.failure_classification import disposition
 from vonk_control.recovery_policy import (
     FailureKind,
@@ -24,7 +24,7 @@ def test_retry_budget_is_stable_and_honors_dependency_cooldown() -> None:
 
 
 def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:
-    from vonk_agent_protocol import FailureCode, LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
     from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
     from vonk_control.recovery_policy import kind_for_failure_fields
 
@@ -51,7 +51,7 @@ def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:
 
 
 def test_uncertain_distribution_observation_never_becomes_unverified_success() -> None:
-    from vonk_agent_protocol import FailureCode, LifecycleState
+    from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
     from vonk_control.lifecycle.core import transition
     from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
     from vonk_control.lifecycle.types import Effect, Outcome, Reported

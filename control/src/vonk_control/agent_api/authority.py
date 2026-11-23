@@ -15,17 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from vonk_agent_protocol import (
-    AgentDirective,
-    AgentProgress,
-    AgentResult,
-    ContainerRuntimeAction,
-    SecurityRefusalReason,
-    SignedHostHelperGrant,
-    UnknownError,
-    UnknownOutcomeError,
-    WaitReason,
-)
+from vonk_agent_protocol.contracts import AgentDirective, AgentProgress, AgentResult
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
@@ -41,7 +31,13 @@ from vonk_agent_protocol.grant_requests import (
     OrphanStopGrantRequest,
     PackageActivationGrantRequest,
 )
-from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
+from vonk_agent_protocol.host_helper import (
+    ContainerRuntimeAction,
+    SignedHostHelperGrant,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
+from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode as Code
 
 from ..agent_jobs.contracts import (
     CLAIM_LEASE_SECONDS,

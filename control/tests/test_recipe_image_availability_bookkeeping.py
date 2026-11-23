@@ -10,12 +10,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    Disposition,
-    LifecycleState,
-    OperationProgress,
-    RecipeImageCode,
-)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.model_cache.contract import ModelCacheCancellation
 from vonk_control.model_primitives import Base
@@ -556,7 +554,7 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     """An uncertain child observation recovers after the former count ceiling."""
     import json
 
-    from vonk_agent_protocol import ModelCacheCode
+    from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
     from vonk_control.models.cache import ArtifactLifecycleGate
     from vonk_control.recovery_policy import RecoveryPolicy
 
@@ -661,7 +659,8 @@ def test_metadata_security_refusal_is_preserved_without_an_admission_retry(
     tmp_path: Path,
 ) -> None:
     """A denied authority must never become a retryable metadata observation."""
-    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+    from vonk_agent_protocol.outcome import SecurityRefusalError
 
     engine, _sessions, service, _ = _started(tmp_path)
     denied = SecurityRefusalError(

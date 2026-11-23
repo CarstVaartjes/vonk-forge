@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import Field
-from vonk_agent_protocol import CacheReferenceReason, OperationProgress
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     RunSwitchReasonScopeName,
@@ -35,11 +34,13 @@ from vonk_agent_protocol.inventory import (
     RunScopeId,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
+from vonk_agent_protocol.reason_codes.model_cache import CacheReferenceReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import (
     CatalogVocabulary,
     ModelDefinition,

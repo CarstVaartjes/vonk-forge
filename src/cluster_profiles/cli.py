@@ -42,7 +42,9 @@ from .cli_outcome import (
     Submission,
 )
 from .cli_presentations import PRESENTATIONS
-from .cli_render import progress_line, render_payload, terminal_text
+from .cli_render.common import terminal_text
+from .cli_render.dispatch import render_payload
+from .cli_render.progress import progress_line
 from .cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
@@ -51,23 +53,21 @@ from .cli_update import (
     interactive_notice,
     run_update,
 )
-from .control_client import (
-    ControlClient,
+from .control_client.connection import resolve_credential
+from .control_client.errors import (
+    CommandInterrupted,
     ControlClientError,
     ControlNotConfigured,
     ControlTransportError,
     ControlTransportUnsupported,
     ControlUnavailable,
+    LocalInputError,
 )
-from .control_client.connection import resolve_credential
-from .control_client.errors import CommandInterrupted, LocalInputError
-from .controller_cli import (
-    ActionDeclined,
-    ControllerClient,
-    add_controller_commands,
-    run_controller,
-)
-from .controller_cli.common import NoLoadedProfile
+from .control_client.transfers import ControlClient
+from .controller_cli.common import ControllerClient, NoLoadedProfile
+from .controller_cli.confirmation import ActionDeclined
+from .controller_cli.dispatch import run_controller
+from .controller_cli.parser import add_controller_commands
 from .error_reporting import ClientCode
 from .runtime_identity import packaged_runtime_identity
 

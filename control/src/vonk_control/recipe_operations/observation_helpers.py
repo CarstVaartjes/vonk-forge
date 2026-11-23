@@ -7,23 +7,23 @@ from datetime import UTC, datetime
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import (
-    InstallationState,
+from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
+)
+from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
-    RecipeJobRunRequest,
     RecipeReconcilePayload,
     RecipeStartPayload,
-    RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
-    RunState,
-    WaitReason,
-    canonical_message,
 )
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 
 from ..fleet_profiles.stop_authority import (
     ProfileJobRunStopJob,

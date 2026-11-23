@@ -1053,7 +1053,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
     from cluster_profiles import runtime_identity
-    from cluster_profiles.control_client import ControlClient
+    from cluster_profiles.control_client.transfers import ControlClient
     from cluster_profiles.runtime_identity import verified_wheel_identity
 
     workspace, environment, executable, python, candidate_wheel = (

@@ -1,7 +1,8 @@
 import json
 from dataclasses import replace
 
-from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
+from vonk_agent_protocol.lifecycle_vocabulary import ResourceBlockerCode
+from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning.capacity import plan_capacity
 from vonk_control.resource_planning.demand import resource_demand

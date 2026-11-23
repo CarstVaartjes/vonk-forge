@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from vonk_agent_protocol import (
-    LifecycleState,
-    RecipeOperationCode,
-)
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
 
 from ..lifecycle.evidence import (
     Residue,

@@ -5,7 +5,8 @@ from __future__ import annotations
 from sqlalchemy import inspect, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 
 from . import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata

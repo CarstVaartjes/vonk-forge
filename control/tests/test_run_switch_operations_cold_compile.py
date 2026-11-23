@@ -10,9 +10,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.models.cache import RecipeBuild
@@ -437,7 +435,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
 
 def _runtime_probes(sessions) -> int:
-    from vonk_agent_protocol import AgentOperation as AgentOperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     with sessions() as session:
         return len(
@@ -509,7 +507,7 @@ def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
     round and the switch still creates exactly one installation.
     """
 
-    from vonk_agent_protocol import AgentOperation as AgentOperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     sessions, clock, service = switch.sessions, switch.clock, switch.service
@@ -785,7 +783,7 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
 
 def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> None:
     """Catches an old operation timestamp poisoning fresh inventory evidence."""
-    from vonk_agent_protocol import AgentOperation as OperationKind
+    from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
     # One second earlier only tells the old receipts from the fresh ones.

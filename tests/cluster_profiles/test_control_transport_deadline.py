@@ -40,10 +40,8 @@ from vonk_control.observation.transfer import (
 from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import (
-    ControlClient,
-    ControlTransportError,
-)
+from cluster_profiles.control_client.errors import ControlTransportError
+from cluster_profiles.control_client.transfers import ControlClient
 from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
@@ -456,7 +454,7 @@ def test_sigint_stops_promptly_closes_https_and_does_not_cancel_remote_work(
 import sys
 from pathlib import Path
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 client = ControlClient(sys.argv[1], Path(sys.argv[2]), timeout_seconds=2)
 raise SystemExit(cli.main(sys.argv[3:], control_client=client))
 """
@@ -504,7 +502,7 @@ def test_expired_dns_does_not_keep_the_cli_process_alive(https_peer):
 import socket, sys, time
 from pathlib import Path
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 def stalled(*args, **kwargs):
     time.sleep(30)
     raise socket.gaierror(-2, 'fixture DNS failure')

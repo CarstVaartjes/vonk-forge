@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.recipe_update_batch import (
     CANCEL_BUDGET,

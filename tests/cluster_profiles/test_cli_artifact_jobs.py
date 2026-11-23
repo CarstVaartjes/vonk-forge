@@ -25,13 +25,13 @@ from test_control_client_requests import (
 )
 
 from cluster_profiles import cli, cli_artifact_jobs
-from cluster_profiles.control_client import (
-    MAX_CONTROL_DOCUMENT_BYTES,
-    ControlClient,
+from cluster_profiles.control_client.errors import (
     ControlHTTPError,
     ControlNotFound,
     ControlTransportError,
 )
+from cluster_profiles.control_client.transfers import ControlClient
+from cluster_profiles.generated_control.limits import MAX_CONTROL_DOCUMENT_BYTES
 
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 JOB_ID = "00000000-0000-4000-8000-000000000001"

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import InvalidRequestReason, SupersedeCode
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..lifecycle.agent_operation import AgentOperationAdapter

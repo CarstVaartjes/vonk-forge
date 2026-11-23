@@ -23,21 +23,20 @@ from fastapi import HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    AgentEvidenceCode,
-    AgentProtocolError,
-    InvalidRequestError,
-    SecurityRefusalError,
-    SignedHostHelperGrant,
-    UnknownOutcomeError,
-    WaitReason,
-)
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
-from vonk_agent_protocol.contracts import PAYLOAD_MODELS
+from vonk_agent_protocol.contracts import PAYLOAD_MODELS, AgentProtocolError
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
+from vonk_agent_protocol.host_helper import SignedHostHelperGrant
 from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+)
+from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.state_machines import (
     CertificateRecordState,
     EnrollmentPurpose,

@@ -1,8 +1,8 @@
 """Informative headless recommendation, owned by the Fleet projection only."""
 
-from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 
 from .common import ProjectionReason
 

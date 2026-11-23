@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from vonk_agent_protocol import DesiredAssignmentState
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileNode,

@@ -12,14 +12,13 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import (
-    AgentResult,
-    RecipeOperationRequest,
-    canonical_message,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.recipe_operations import (
+    RecipeOperationRequest,
+    RecipeStopResult,
+)
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentCertificate, AgentNode
@@ -54,7 +53,7 @@ STOP_RESULT = RecipeStopResult()
 
 
 def distribution_payload(plan_digest: str = COMMIT):
-    from vonk_agent_protocol import ArtifactDistributionPayload
+    from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 
     payload = ArtifactDistributionPayload.model_validate_json(
         (
@@ -393,7 +392,7 @@ _RESTART_INTERRUPTED = {
 
 
 def _restart_interrupted_result(claim, operation_kind: str):
-    from vonk_agent_protocol import AgentResult
+    from vonk_agent_protocol.contracts import AgentResult
 
     return AgentResult.model_validate_json(
         json.dumps(

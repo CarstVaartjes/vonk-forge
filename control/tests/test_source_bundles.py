@@ -184,7 +184,7 @@ def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
     postgres_engine,
 ):
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import canonical_message
+    from vonk_agent_protocol.contracts import canonical_message
     from vonk_agent_protocol.source_bundles import SourceBundleManifest
     from vonk_control.model_primitives import Base
     from vonk_control.models.catalog import RecipeSourceBundle

@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog.service import CatalogService

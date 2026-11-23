@@ -19,7 +19,7 @@ from vonk_control.observation.transfer import (
 )
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client.transfers import ControlClient
 from cluster_profiles.error_reporting import (
     ErrorContext,
     local_io_context,

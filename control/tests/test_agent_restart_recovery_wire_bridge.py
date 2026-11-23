@@ -24,20 +24,18 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    AgentResult,
-    AgentResultState,
-    ArtifactDistributionResult,
-    OutcomeDone,
-    OutcomeUnknown,
-    WaitReason,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_state import (
     AgentExecutorProbeMode,
     AgentExecutorProbeRequest,
 )
-from vonk_agent_protocol.contracts import ArtifactDistributionPayload
+from vonk_agent_protocol.contracts import (
+    AgentResult,
+    ArtifactDistributionPayload,
+    ArtifactDistributionResult,
+    canonical_message,
+)
+from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
+from vonk_agent_protocol.outcome import OutcomeDone, OutcomeUnknown
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.service import DistributionService
 from vonk_control.distribution.sources import MemoryObjectSource

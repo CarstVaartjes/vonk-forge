@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol.reason_codes import RecipeImageCode
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService

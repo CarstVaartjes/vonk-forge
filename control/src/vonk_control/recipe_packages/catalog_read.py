@@ -21,7 +21,7 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel
-from vonk_agent_protocol import RecipePackageCode
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import CatalogModelEntry, CatalogRecipeEntry
 from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,

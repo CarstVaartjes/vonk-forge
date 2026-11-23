@@ -9,11 +9,9 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
 from sqlalchemy.exc import DBAPIError
-from vonk_agent_protocol import (
-    Disposition,
-    LifecycleState,
-    RecipeImageCode,
-)
+from vonk_agent_protocol.disposition import Disposition
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_jobs.lifecycle import (

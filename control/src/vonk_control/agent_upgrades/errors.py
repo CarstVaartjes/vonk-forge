@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import re
 
-from vonk_agent_protocol import (
-    InvalidRequestError,
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitReason,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
 )
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")

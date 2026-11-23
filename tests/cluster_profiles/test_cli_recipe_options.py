@@ -6,7 +6,7 @@ import json
 from library_route_fixtures import _recipe_projection
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlHTTPError
+from cluster_profiles.control_client.errors import ControlHTTPError
 
 NODE = "spk_" + "1" * 32
 SELECTOR = "vonk-forge/glm"

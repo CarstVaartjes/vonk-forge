@@ -6,7 +6,7 @@ import select
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlNotFound
+from cluster_profiles.control_client.errors import ControlNotFound
 from control.tests.consumer_outcomes import not_adopted
 
 KEY = "11111111-1111-4111-8111-111111111111"

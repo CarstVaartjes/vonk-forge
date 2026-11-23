@@ -7,16 +7,15 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    AgentResult,
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
-    OutcomeDone,
     OutcomeKind,
-    RecipeStopResult,
-    canonical_message,
 )
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (

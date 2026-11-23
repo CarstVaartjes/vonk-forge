@@ -8,7 +8,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import AgentClaim, DistributionAssignment, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim, canonical_message
+from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 

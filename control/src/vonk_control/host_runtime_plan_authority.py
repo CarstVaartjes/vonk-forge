@@ -9,22 +9,23 @@ from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as AgentOperationKind
-from vonk_agent_protocol import (
-    ContainerRuntimeAction,
-    InstallationState,
-    InvalidRequestError,
+from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_helper import ContainerRuntimeAction
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
-    RunState,
-    SecurityRefusalError,
     SecurityRefusalReason,
-    UnknownOutcomeError,
     WaitOwnerKind,
     WaitReason,
-    canonical_message,
+)
+from vonk_agent_protocol.outcome import (
+    InvalidRequestError,
+    SecurityRefusalError,
+    UnknownOutcomeError,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.state_machines import InstallationState, RunState
 
 from .categorized_errors import InvalidType
 from .models.catalog import CatalogDocumentRevision

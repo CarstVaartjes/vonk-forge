@@ -7,14 +7,14 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
     CertificateState,
     InstallationState,
-    InstallDegradedReason,
-    LifecycleState,
     ReservationState,
 )
-from vonk_agent_protocol.state_machines import CertificateRecordState
 
 from ..auth import CursorError
 from ..evidence_repeats import repeating_evidence

@@ -8,12 +8,13 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select, true
-from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
     ProfileReasonSeverity,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 
 from ..admission_locking import patient_admission
 from ..fleet_profile_contract.review import FleetProfilePreview

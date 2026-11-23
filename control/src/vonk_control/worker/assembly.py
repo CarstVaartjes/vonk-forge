@@ -6,15 +6,12 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vonk_agent_protocol import (
-    UnknownOutcomeError,
-    WaitOwnerKind,
-    WaitReason,
-)
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
+from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind, WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from ..capabilities import CapabilityRegistry

@@ -4,7 +4,9 @@ from uuid import UUID, uuid5
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ReservationState, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.state_machines import ReservationState
 
 from ..fleet_profile_contract.assessment import FleetProfileResourceRequirement
 from ..models.execution import ResourceReservation

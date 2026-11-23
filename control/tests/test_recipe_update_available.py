@@ -7,8 +7,8 @@ from copy import deepcopy
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DesiredAssignmentState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.state_machines import DesiredAssignmentState
 from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
@@ -363,7 +363,7 @@ def test_profile_assignment_says_when_it_runs_an_older_revision() -> None:
 
 
 def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> None:
-    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.cli_render.dispatch import render_payload
 
     sessions = _sessions()
     _seed(sessions, running=REVISION_1)

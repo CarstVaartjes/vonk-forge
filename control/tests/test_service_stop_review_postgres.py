@@ -5,7 +5,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
@@ -307,13 +308,10 @@ def test_pending_service_stop_stops_its_run_at_a_newer_generation(
 def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     postgres_engine, tmp_path, monkeypatch, replacement
 ):
-    from vonk_agent_protocol import (
-        AgentResult,
-        AgentResultState,
-        OutcomeDone,
-        OutcomeKind,
-        RecipeStopResult,
-    )
+    from vonk_agent_protocol.contracts import AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
+    from vonk_agent_protocol.outcome import OutcomeDone
+    from vonk_agent_protocol.recipe_operations import RecipeStopResult
     from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
     from vonk_control.fleet_profiles.run_switch_adapter import (
@@ -566,13 +564,10 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     published_service_run, tmp_path, monkeypatch
 ):
-    from vonk_agent_protocol import (
-        AgentResult,
-        AgentResultState,
-        OutcomeDone,
-        OutcomeKind,
-        RecipeStopResult,
-    )
+    from vonk_agent_protocol.contracts import AgentResult
+    from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
+    from vonk_agent_protocol.outcome import OutcomeDone
+    from vonk_agent_protocol.recipe_operations import RecipeStopResult
     from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.presence import ManagementAddressPolicy

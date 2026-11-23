@@ -8,16 +8,16 @@ from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    ObservedAssignmentState,
-    ProfileReasonCode,
-)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileChildPhase,
     ProfileInstallationPolicy,
     ProfileReasonSeverity,
+)
+from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
+from vonk_agent_protocol.state_machines import (
+    DesiredAssignmentState,
+    ObservedAssignmentState,
 )
 
 from ..fleet_profile_contract.assessment import FleetProfileReason

@@ -8,14 +8,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import (
-    FailureCode,
-    LifecycleState,
-    RunSwitchCode,
-    SupersedeCode,
-    canonical_message,
-)
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.reason_codes.runs import RunSwitchCode, SupersedeCode
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -1207,7 +1203,7 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
     fresh load is admitted. The same refusal raised from a cause that clears
     by itself (a timeout) keeps waiting."""
 
-    from vonk_agent_protocol import ProfileReasonCode
+    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
     from vonk_control.categorized_errors import InvalidValue
 
     _sessions, lifecycle, service, profile, _desired, first, _child, _nodes = (
@@ -1634,7 +1630,7 @@ def test_child_observation_recovers_without_exception_taxonomy(
     tmp_path, monkeypatch, fault
 ):
     """Catches a local unknown being ended according to its exception label."""
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol.outcome import UnknownOutcomeError
     from vonk_control.fleet_profiles.contracts import (
         FleetProfileAdmissionBusy,
         FleetProfileReviewStale,

@@ -7,12 +7,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import AgentUpgradePayload, canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentUpgradePayload
 
 from .. import agent_operation_states
 from ..agent_jobs.retry import schedule_agent_upgrade_retry

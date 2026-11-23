@@ -15,7 +15,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     check_removal_fence_nowait,

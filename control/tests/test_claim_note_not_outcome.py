@@ -11,14 +11,13 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.contracts import (
     AgentFailureResult,
     AgentResult,
-    FailureCode,
-    LifecycleState,
     canonical_message,
 )
-from vonk_agent_protocol import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_control.agent_jobs.contracts import _REFUSAL_PREFIXES
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.jobs import Job

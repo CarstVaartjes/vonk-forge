@@ -7,18 +7,18 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.compiled_execution_plan import (
+    MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
+    CompiledExecutionPlan,
+    CompiledJobInput,
+)
+from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentOperation,
     AgentProtocolError,
-    CompiledExecutionPlan,
-    RecipeOperationRequest,
     RecipeStartResult,
 )
-from vonk_agent_protocol.compiled_execution_plan import (
-    MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
-    CompiledJobInput,
-)
+from vonk_agent_protocol.recipe_operations import RecipeOperationRequest
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()

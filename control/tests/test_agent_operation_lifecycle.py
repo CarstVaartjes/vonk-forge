@@ -19,8 +19,12 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import LifecycleState, ObservationCause, WaitReason
+from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import (
+    LifecycleState,
+    ObservationCause,
+    WaitReason,
+)
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
@@ -176,12 +180,16 @@ def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
 def _exit_receipt(code: int) -> dict[str, object]:
     """The stored document of a job's measured exit (its ``RecipeJobRunResult``)."""
 
-    from vonk_agent_protocol import (
+    from vonk_agent_protocol.contracts import canonical_message
+    from vonk_agent_protocol.recipe_jobs import (
         RecipeJobFile,
         RecipeJobRunResult,
-        canonical_message,
-        recipe_job_manifest_document,
-        recipe_job_manifest_sha256,
+    )
+    from vonk_agent_protocol.recipe_jobs import (
+        manifest_document as recipe_job_manifest_document,
+    )
+    from vonk_agent_protocol.recipe_jobs import (
+        manifest_sha256 as recipe_job_manifest_sha256,
     )
 
     _kind, payload = _job_run_payload()

@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.lifecycle.core import STOP_BUDGET, transition
 from vonk_control.lifecycle.model_cache import (
     RECOVERY_BUDGET,

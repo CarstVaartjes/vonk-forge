@@ -12,10 +12,8 @@ from uuid import uuid4
 
 from sqlalchemy import Table, create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import (
-    LifecycleState,
-)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileChildOperation,
 )

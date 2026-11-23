@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Annotated, Any, NoReturn
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
-from vonk_agent_protocol import InvalidRequestError
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
+from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 

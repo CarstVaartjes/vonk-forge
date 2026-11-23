@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.contracts import canonical_message
 from vonk_control.fleet_event_contract import NodeProfilePayload
 from vonk_control.fleet_stream_contract import (
     FleetChangeEvent,

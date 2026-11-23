@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CertificateCode
+from vonk_agent_protocol.reason_codes.admission import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_services import build_agent_services

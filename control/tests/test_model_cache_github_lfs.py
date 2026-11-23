@@ -20,8 +20,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
 from vonk_agent_protocol.http_failure import TransientReason
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache import github_lfs
 from vonk_control.model_cache.artifacts import ArtifactSpec

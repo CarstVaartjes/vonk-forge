@@ -9,13 +9,13 @@ from datetime import UTC, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
-    OperationProgress,
-    RecipeImageCode,
     WaitReason,
 )
+from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
+from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
 from ..artifact_jobs.lifecycle import (

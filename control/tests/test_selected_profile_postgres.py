@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import SupersedeCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
 from vonk_control.fleet_profiles.port_promises import PortPromiseTaken
@@ -838,8 +838,8 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches silent unplaced standing intent after both targets return."""
-    from vonk_agent_protocol import LifecycleState, WaitReason
     from vonk_agent_protocol.agent_words import ProfileReasonSeverity
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
     from vonk_agent_protocol.state_machines import NodeIdentityState
     from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
 

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from vonk_agent_protocol import (
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
+from vonk_agent_protocol.state_machines import (
     MACHINE_ALIASES,
     MACHINES,
     DistributionAssignmentState,
     InstallationState,
-    LifecycleVocabulary,
     RouteState,
     adopt_machine_state,
     machine_adopter,

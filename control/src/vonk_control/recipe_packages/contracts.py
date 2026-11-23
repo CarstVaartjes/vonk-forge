@@ -7,15 +7,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
-from vonk_agent_protocol import (
-    CatalogSyncCode,
-    InvalidRequestError,
-    InvalidRequestReason,
-    RecipePackageCode,
-    UnknownOutcomeError,
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
+from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
+from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
 from vonk_forge_contracts import CONTRACT_MAJOR
 
 from ..catalog.sync_contract import ManagedCatalogSyncProblem

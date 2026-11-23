@@ -14,12 +14,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import (
-    AgentClaim,
-    AgentOperation,
-    LifecycleState,
-    RecipeJobRunRequest,
-)
+from vonk_agent_protocol.contracts import AgentClaim, AgentOperation
+from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
 from . import agent_operation_states
 from .models.jobs import Job
