@@ -417,8 +417,7 @@ def test_slot_sharing_never_serves_a_started_download_before_a_waiting_one(
             files = shuffle.randint(1, 8)
             started = shuffle.randint(0, files)
             in_flight: list[Future[None]] = []
-            for _ in range(shuffle.randint(0, started)):
-                in_flight.append(Future())
+            in_flight.extend(Future() for _ in range(shuffle.randint(0, started)))
             record = _BackgroundTransfer(
                 set_digest="0" * 64,
                 manifest=cast(ArtifactSetManifest, None),

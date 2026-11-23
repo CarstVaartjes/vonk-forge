@@ -86,12 +86,12 @@ def fleet_mismatch(world: World, application_id: str) -> str | None:
                 f"run {run.id} on {node_id} was started by load {starter}, outside"
                 " the load's intent"
             )
-    for node_id in sorted(covered):
-        if found[node_id] != wanted[node_id]:
-            problems.append(
-                f"{node_id} runs {sorted(found[node_id].elements())}, the profile"
-                f" {sorted(wanted[node_id].elements())}"
-            )
+    problems.extend(
+        f"{node_id} runs {sorted(found[node_id].elements())}, the profile"
+        f" {sorted(wanted[node_id].elements())}"
+        for node_id in sorted(covered)
+        if found[node_id] != wanted[node_id]
+    )
     return "; ".join(problems) or None
 
 

@@ -1388,8 +1388,7 @@ def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None
         generator = _events(stream_for(events), 0)
         frames: list[str] = []
         try:
-            async for frame in generator:
-                frames.append(frame)
+            frames.extend([frame async for frame in generator])
         finally:
             await generator.aclose()
         return frames

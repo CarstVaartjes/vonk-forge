@@ -206,8 +206,12 @@ def test_capture_is_frozen_before_first_network_suspension(tmp_path):
 
     async def collect() -> bytes:
         pieces: list[bytes] = []
-        async for part in response.body_iterator:
-            pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+        pieces.extend(
+            [
+                part.encode() if isinstance(part, str) else bytes(part)
+                async for part in response.body_iterator
+            ]
+        )
         return b"".join(pieces)
 
     peer = Response(
