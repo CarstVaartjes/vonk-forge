@@ -22,7 +22,7 @@ from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_forge_contracts import read_recipe
 
-from .test_recipe_operations import installed_recipe, setup_services
+from .recipe_operations_support import installed_recipe, setup_services
 
 
 def _damaged_stored_recipe(_document):

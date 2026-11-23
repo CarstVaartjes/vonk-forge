@@ -23,6 +23,9 @@ from ..admission_locking import (
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import disposition, is_definite
+from ..fleet_profiles.capacity import (
+    accepted_profile_runtime_image,
+)
 from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason
 from ..lifecycle.run_switch import (
@@ -40,9 +43,6 @@ from ..lifecycle.types import (
 from ..models.jobs import Job
 from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, wait_due
-from ..profile_capacity import (
-    accepted_profile_runtime_image,
-)
 from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView

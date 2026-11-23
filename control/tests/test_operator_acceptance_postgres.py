@@ -26,11 +26,11 @@ from vonk_control.recipe_image_availability.service import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_model_cache_cancel_recovery import _artifact
 from .test_profile_cancel_receipt_postgres import _application
-from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
 
 class DropFirstResponse:
@@ -419,7 +419,7 @@ def test_artifact_create_upload_and_cancel_resolve_existing_job(
     """Catches accepting a terminal no-op cancel or losing an upload's publication."""
     import hashlib
 
-    from .test_artifact_jobs import artifact_create_request, running_artifact_service
+    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, owner, run_id, _node = running_artifact_service(
         tmp_path, engine=postgres_engine

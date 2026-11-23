@@ -12,7 +12,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeGrantUnsatisfiable,
 )
 
-from .test_agent_api import NODE_A, agent_headers, make_agent_system
+from .agent_api_support import NODE_A, agent_headers, make_agent_system
 
 _BODY = {
     "fence": "00000000-0000-4000-8000-000000000004",

@@ -44,8 +44,8 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from cluster_profiles.cli import main
 from cluster_profiles.control_client import ControlClient
 
-from .test_model_cache import _artifact
-from .test_recipe_image_availability import (
+from .model_cache_support import _artifact
+from .recipe_image_availability_support import (
     Transport,
     _add_head,
     _add_revision,

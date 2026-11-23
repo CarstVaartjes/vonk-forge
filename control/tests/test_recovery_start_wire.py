@@ -19,7 +19,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation as StoredAgentOperation
 from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

@@ -22,8 +22,8 @@ from vonk_control.run_switch_operations.observation_helpers import (
 from vonk_control.stored.json_values import read_row_column
 
 from .non_blocking import assert_ended_without_blocking
-from .test_run_switch_operations import (
-    NOW,
+from .recipe_operations_support import NOW
+from .run_switch_operations_support import (
     _ObservingLifecycle,
     _parked_start_switch,
     _request,

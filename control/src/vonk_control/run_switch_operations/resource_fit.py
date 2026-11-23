@@ -27,6 +27,9 @@ from ..disk_reservations import (
     model_sets_stored_on_node,
     outstanding_disk_charges,
 )
+from ..fleet_profiles.capacity import (
+    reservation_visible,
+)
 from ..gpu.health import gpu_health_reason
 from ..install_admission.contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,
@@ -44,9 +47,6 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import ResourceReservation
 from ..models.fleet import AgentNode
 from ..observed_run_memory import observed_role_peaks, recent_best_available
-from ..profile_capacity import (
-    reservation_visible,
-)
 from ..recipe_operations.runtime_specs import (
     RecipeRuntimeSpecError,
     recipe_topology,

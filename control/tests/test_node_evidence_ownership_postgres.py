@@ -16,7 +16,7 @@ from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.models.operations import AgentOperation
 from vonk_control.repeated_evidence_contract import RepeatedEvidenceSubject
 
-from .test_agent_api import NODE_A, STOP_PAYLOAD, make_agent_system, parent
+from .agent_api_support import NODE_A, STOP_PAYLOAD, make_agent_system, parent
 
 
 def test_concurrent_contact_notes_do_not_lose_counts(tmp_path, postgres_engine):

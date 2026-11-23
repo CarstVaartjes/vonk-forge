@@ -20,12 +20,12 @@ from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.strict_json import serialize_json_value
 
+from .agent_jobs_support import COMMIT, NODE_A, STOP_PAYLOAD, Clock, parent
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     inventory_items_fixture,
 )
-from .test_agent_jobs import COMMIT, NODE_A, STOP_PAYLOAD, Clock, parent
 from .test_operation_api import Jobs
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)

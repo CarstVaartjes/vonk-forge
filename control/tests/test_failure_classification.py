@@ -63,7 +63,7 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
     from vonk_control.models.jobs import Job
     from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
-    from .test_run_switch_operations import _request
+    from .run_switch_operations_support import _request
 
     outer = ValueError("wrapped peer denial")
     outer.__cause__ = SecurityRefused(

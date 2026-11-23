@@ -20,8 +20,8 @@ from vonk_control.run_switch_operations.observation_helpers import (
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.strict_json import read_stored_model
 
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _ObservingLifecycle,

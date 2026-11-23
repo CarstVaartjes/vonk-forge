@@ -54,9 +54,9 @@ from vonk_control.lifecycle.types import (
 from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.models.jobs import Job
 
+from .fleet_profiles_support import _uuid
+from .recipe_operations_support import NOW
 from .test_fleet_profile_cancel import _application
-from .test_fleet_profiles import _uuid
-from .test_recipe_operations import NOW
 
 _PROGRESS = FleetProfileApplicationProgress().model_dump(mode="json")
 

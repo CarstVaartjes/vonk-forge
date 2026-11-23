@@ -22,9 +22,9 @@ from vonk_control.recipe_operations.observation_helpers import (
 )
 from vonk_control.recipe_routes.service import RecipeRouteService
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, build_world
-from .test_artifact_jobs import _configure_artifact_recipe
 from .test_profile_job_member import _ACTIVATION, _load
 
 

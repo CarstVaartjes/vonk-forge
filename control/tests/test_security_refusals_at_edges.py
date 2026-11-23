@@ -40,7 +40,7 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 
-from . import test_recipe_operations as recipe_fixtures
+from . import recipe_operations_support as recipe_fixtures
 from .test_profile_port_claims import _load, _ready_profile
 from .test_recipe_operation_bookkeeping import _running_recipe
 

@@ -25,7 +25,7 @@ from vonk_control.recipe_operations.observation_helpers import (
 )
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -33,7 +33,7 @@ from .test_recipe_operations import (
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

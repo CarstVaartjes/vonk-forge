@@ -27,8 +27,8 @@ from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE, reservation_owner
 
+from .recipe_builds_support import setup
 from .test_build_cancellation_recovery import _issue, _services
-from .test_recipe_builds import setup
 
 
 def _counted(sessions, node_id):

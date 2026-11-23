@@ -40,7 +40,7 @@ from vonk_control.recipe_routes.shared import (
 
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     _required,
     installed_recipe,

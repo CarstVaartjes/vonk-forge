@@ -15,12 +15,12 @@ from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .non_blocking import NON_BLOCKING_ENDS
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     _cold_compile_switch,
-    _finish,
     _request,
 )
+from .test_lifecycle_preflight import _finish
 
 
 @pytest.mark.parametrize(

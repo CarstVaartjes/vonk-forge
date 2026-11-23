@@ -27,8 +27,8 @@ from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import FleetProfileApplication
 
+from .fleet_profiles_support import _SwitchAdapter
 from .test_fleet_profile_api import _client, _headers
-from .test_fleet_profiles import _SwitchAdapter
 from .test_fleet_profiles_canonical import NODE_1, NOW, _seed
 from .test_profile_load_installed_cli import _process_environment
 

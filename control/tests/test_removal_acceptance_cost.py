@@ -15,7 +15,7 @@ from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
-from .test_model_cache import _artifact, _download
+from .model_cache_support import _artifact, _download
 from .test_model_removal_reference_lifecycle import _removal_service
 
 UNRELATED_SETS = 60

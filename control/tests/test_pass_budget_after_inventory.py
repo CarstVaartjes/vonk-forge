@@ -21,9 +21,9 @@ from vonk_control.catalog.revision_collection import (
 )
 from vonk_control.model_cache import partials_collection
 
+from .model_cache_support import cache  # noqa: F401
 from .pass_budget_clocks import PASS_BUDGET_MODULES, PassClock
 from .test_catalog_revision_collection import _refresh, catalog  # noqa: F401
-from .test_model_cache import cache  # noqa: F401
 from .test_model_partials_collection import (  # noqa: F401
     _age,
     _orphan,
