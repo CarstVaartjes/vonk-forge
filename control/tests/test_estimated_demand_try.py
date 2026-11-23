@@ -16,14 +16,14 @@ from dataclasses import replace
 import pytest
 from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
-from vonk_control.resource_planning import (
-    PLATFORM_MEMORY_FLOOR_BYTES,
+from vonk_control.resource_planning.capacity import plan_capacity
+from vonk_control.resource_planning.memory import memory_capacity_snapshot
+from vonk_control.resource_planning.types import (
     MemoryReservationTotals,
     PlannedStopRelease,
     SwapCapacity,
-    memory_capacity_snapshot,
-    plan_capacity,
 )
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .test_resource_planning import (
     _SPARK_POOL,
@@ -175,7 +175,7 @@ def test_a_cut_swap_rise_waits_until_the_setting_is_reached() -> None:
 
 
 def test_a_cut_swap_rise_waits_on_swap_other_loads_hold() -> None:
-    from vonk_control.resource_planning import SwapHolder
+    from vonk_control.resource_planning.types import SwapHolder
 
     rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
     declared = replace(_declared_demand(10 * GIB), load_overshoot_bytes=rise)

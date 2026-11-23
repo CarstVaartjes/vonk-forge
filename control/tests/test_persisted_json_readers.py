@@ -12,8 +12,8 @@ from vonk_control.agent_jobs.stored import (
     column_message,
 )
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import AgentOperation
-from vonk_control.operation_api import _stored_activation_marker
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operation_api.route_snapshot import _stored_activation_marker
 
 from .recipe_stop_fixtures import recipe_stop_payload as accepted_payload
 

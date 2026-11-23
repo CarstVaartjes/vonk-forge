@@ -19,21 +19,17 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.models import (
-    AgentOperation,
-    Job,
-    RecipeBuild,
-    ResourceReservation,
-)
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
 
 from .test_build_cancellation_recovery import (

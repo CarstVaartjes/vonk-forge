@@ -40,7 +40,7 @@ from ..library.contract import (
     RecipeLibraryResponse,
 )
 from ..machine_states import RUN_LIVE
-from ..models import CatalogDocument, CatalogDocumentRevision
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from ..strict_json import serialize_json_value

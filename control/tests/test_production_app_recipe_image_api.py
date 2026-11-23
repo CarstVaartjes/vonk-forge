@@ -8,12 +8,12 @@ from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import production_app
+from vonk_control.api.production import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import production as availability_production
 from vonk_control.gateway import route_runtime
-from vonk_control.models import (
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,

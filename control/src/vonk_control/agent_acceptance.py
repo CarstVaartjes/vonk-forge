@@ -25,16 +25,11 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 from .agent_operation_facts import aware
 from .auth import agent_identity_from_scope
 from .inventory.items import inventory_items, runtime_value
-from .models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    NodeInventorySnapshot,
-    NodeTelemetrySample,
-    RecipeBuild,
-    RunNode,
-)
+from .models.cache import RecipeBuild
+from .models.execution import RunNode
+from .models.fleet import AgentCertificate, AgentNode
+from .models.operations import AgentOperation, AgentOperationAttempt
+from .models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
 from .telemetry.samples import _same_sample
 

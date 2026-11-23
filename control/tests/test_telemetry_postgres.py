@@ -13,9 +13,9 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.inventory.items_contract import InventorySnapshotKind
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import (
     NodeInventoryResourceSnapshot,
     NodeTelemetrySample,
 )
@@ -207,7 +207,7 @@ def test_gpu_clock_nullable_column_is_added_in_place_without_rewriting_old_sampl
 ) -> None:
     """The approved upgrade preserves old samples and the existing latest pointer."""
     from sqlalchemy import text
-    from vonk_control.db import reconcile_schema
+    from vonk_control.db.schema import reconcile_schema
 
     repository, _sessions = _repository(postgres_engine)
     value = _sample(boot_id=BOOT_A, sequence=1, observed_at=NOW - timedelta(seconds=1))

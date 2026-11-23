@@ -15,9 +15,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from ..content_identity import same_image
-from ..models import (
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
 from .contracts import (
     InstallEvidenceChanged,
     InstallNodePlan,

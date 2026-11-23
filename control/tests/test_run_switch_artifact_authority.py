@@ -21,13 +21,12 @@ from vonk_control.inventory.repository import (
 )
 from vonk_control.library.assessment import LibraryAssessment
 from vonk_control.library.contract import RecipeReadinessCheck
-from vonk_control.models import Job, RecipeBuild
-from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchReason
-from vonk_control.run_switch_operations import (
-    DatabaseRunSwitchArtifactInspector,
-    RunSwitchOperationService,
-)
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.evidence import RunSwitchReason
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_operations.artifact_inspection import (
+    DatabaseRunSwitchArtifactInspector,
     failed_copies_read_once,
     missing_spark_bytes_by_node,
 )
@@ -36,6 +35,7 @@ from vonk_control.run_switch_operations.result_helpers import (
     _persisted_result,
     _read_progress,
 )
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .runtime_image_fixtures import hold_image_through_another_recipe
 from .test_recipe_operations import NOW, installed_recipe
@@ -356,7 +356,7 @@ def test_covered_claims_read_each_newest_report_in_one_statement(tmp_path) -> No
     from vonk_control.covered_installation_claims import (
         release_covered_installation_claims,
     )
-    from vonk_control.models import (
+    from vonk_control.models.execution import (
         InstallationNode,
         RecipeInstallation,
         ResourceReservation,

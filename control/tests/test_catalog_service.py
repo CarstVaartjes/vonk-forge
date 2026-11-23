@@ -11,7 +11,8 @@ from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
-from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import document_sha256
 

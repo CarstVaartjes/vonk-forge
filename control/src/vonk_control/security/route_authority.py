@@ -1,6 +1,6 @@
 """Explicit enrollment revocation denies route effects, regardless of observations."""
 
-from ..models import AgentNode
+from ..models.fleet import AgentNode
 from ..recipe_routes.shared import RecipeEndpointAuthorityRefused
 
 

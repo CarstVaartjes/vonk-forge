@@ -31,7 +31,8 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
 
 os.environ["VONK_SYNTHETIC_CANARY_INDEX"] = (

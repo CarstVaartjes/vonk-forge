@@ -28,16 +28,22 @@ from ..disk_reservations import outstanding_disk_charges
 from ..gpu.health import gpu_health_reason
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from ..jobs import states as job_states
-from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import AgentNode, AgentOperationAttempt, Job, RecipeBuild
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.types import Outcome, Reported
+from ..models.cache import RecipeBuild
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
-from ..recipe_builds import BUILD_ARTIFACT_FORMAT
-from ..recipe_builds.common import _build_disk_envelope, _build_disk_reserve
-from ..recipe_execution_contract import (
+from ..recipe_builds.common import (
+    BUILD_ARTIFACT_FORMAT,
+    _build_disk_envelope,
+    _build_disk_reserve,
+)
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )

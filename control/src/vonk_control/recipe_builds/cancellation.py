@@ -21,25 +21,26 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_forge_contracts import read_recipe
 
-from .. import fleet_profile_states
 from ..admission_locking import is_admission_contention
-from ..agent_jobs import _JsonFlagIsTrue
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..categorized_errors import InvalidValue
-from ..fleet_profile_contract import (
-    FleetProfileApplicationProgress,
-    FleetProfileAssignment,
-    FleetProfilePreview,
-    profile_switch_child_request_key,
-)
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
+from ..fleet_profiles import states as fleet_profile_states
 from ..jobs import states as job_states
-from ..models import AgentNode, FleetProfileApplication, Job, RecipeBuild
-from ..recipe_availability_intent import read_availability_intent
-from ..recipe_lifecycle_contract import (
+from ..models.cache import RecipeBuild
+from ..models.fleet import AgentNode, FleetProfileApplication
+from ..models.jobs import Job
+from ..recipe_operations.availability_intent import read_availability_intent
+from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
     parse_recipe_lifecycle_result,
 )
-from ..run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
-from ..runtime_image_preparation import RuntimeImageReceipt
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from ..strict_json import StrictJSONModel, read_stored_model
 
 

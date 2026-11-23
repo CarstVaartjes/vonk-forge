@@ -54,7 +54,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
 | Compiled artifact-job contract | `CompiledArtifactContract` in `compiled_artifact_contract.py` | Compiler, stored job, runtime handoff, artifact-job API; knob type and limits (`minimum`, `maximum`, `step`, `allowed_values`) come from the recipe's `RecipeJobKnob`, knob `label`/`description`/`unit` from its display `knobs`; `sha256()` leaves the wording out, and job create refuses a value off the declared range, step grid or allowed values (422) |
-| Lifecycle operation results | `RecipeLifecycleResult` in `recipe_lifecycle_contract.py`, composed from shared protocol evidence | Lifecycle producers, stored results and recipe API |
+| Lifecycle operation results | `RecipeLifecycleResult` in `recipe_operations/lifecycle_contract.py`, composed from shared protocol evidence | Lifecycle producers, stored results and recipe API |
 | Model-cache operation results | `ModelCacheDownloadResult` and `ModelCacheEvictionResult` | Cache workers, stored results, cache API and Run/Switch receipts |
 | Fleet and Run/Switch progress/results | `fleet_profile_contract/` and `run_switch_contract/` | Orchestration, restart/replay reads, Library projections and APIs |
 | Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract/phase_results.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
@@ -803,12 +803,12 @@ before a later operation consumes it:
 
 | Stored document | Authoritative contract |
 | --- | --- |
-| Installation and run plans, node admission details, run endpoints | `recipe_execution_contract.py` |
-| Build requests | Protocol `RecipeBuildRequest`, reused by `recipe_execution_contract.py` |
+| Installation and run plans, node admission details, run endpoints | `recipe_operations/execution_contract.py` |
+| Build requests | Protocol `RecipeBuildRequest`, reused by `recipe_operations/execution_contract.py` |
 | Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
 | Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
 | Catalog projections | `catalog/revision_contract.py`, composed from public model/topology and protocol build-option types |
-| Cache manifests, preparation/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
+| Cache manifests, preparation/repair/eviction payloads and results | `model_cache/contract.py`, selected by operation kind |
 
 A required nullable value remains present; unused optional fields are omitted.
 Malformed stored documents produce a controlled error instead of becoming empty

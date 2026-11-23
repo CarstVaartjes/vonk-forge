@@ -1,0 +1,586 @@
+"""Authenticated schema-2 HTTP routes for the Controller NAS model cache."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Annotated, Any
+
+from fastapi import FastAPI, HTTPException, Path, status
+from vonk_agent_protocol import (
+    Disposition,
+    ErrorCategory,
+    OperationProgress,
+    SecurityRefusalError,
+    UnknownError,
+    UnknownOutcomeError,
+    WaitReason,
+)
+
+from ..api_availability import AVAILABILITY_ERRORS
+from ..auth import MUTATION_ROLES, Actor, CursorCodec
+from ..bounded_json import require_integer, require_sequence
+from ..cache_removal_review import CacheRemovalReview
+from ..operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+    bounded_error_responses,
+)
+from ..operations.contract import AvailabilityOperationFailure
+from ..operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
+from ..operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
+from ..strict_json import read_stored_model
+from .contract import (
+    UUID_PATTERN,
+    CacheOperationKind,
+    ModelCacheCancellationRequest,
+    ModelCacheOperatorAction,
+    ModelCacheOperatorRequest,
+    ModelCacheOperatorResponse,
+    ModelCacheRemovalRequest,
+    ModelCacheRemovalResult,
+)
+from .errors import (
+    ModelCacheConflict,
+    ModelCacheError,
+    ModelCacheNotFound,
+    ModelCacheResolutionError,
+    ModelCacheSelectorAmbiguous,
+)
+from .progress import project_cache_progress
+from .service import ModelCacheService
+
+MODEL_CACHE_OPERATION_IDS = {
+    ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
+    ("get", "/api/model/requests/{request_key}"): "getModelRequest",
+    (
+        "get",
+        "/api/model/operations/{operation_id}/cancellations/{request_key}",
+    ): "getModelCancellation",
+    ("get", "/api/model/{selector}/remove-review"): "reviewModelRemoval",
+    ("post", "/api/model/{selector}/download"): "downloadModel",
+    ("post", "/api/model/{selector}/remove"): "removeModel",
+    ("post", "/api/model/operations/{operation_id}/resume-access"): "resumeModelAccess",
+    ("post", "/api/model/operations/{operation_id}/cancel"): "cancelModelOperation",
+}
+
+
+def _model_operator_response(
+    operation: Any, *, action: ModelCacheOperatorAction, selector: str
+) -> ModelCacheOperatorResponse:
+    raw = project_cache_progress(operation.progress)
+    progress = read_stored_model(OperationProgress, raw)
+    result = operation.result
+    cancelled = (
+        result.cancelled_operations
+        if isinstance(result, ModelCacheRemovalResult)
+        else []
+    )
+    return ModelCacheOperatorResponse(
+        fleet=operation.fleet,
+        review_digest=operation.review_digest,
+        action=action,
+        selector=selector,
+        request_key=operation.request_key,
+        model_content_sha256=operation.model_content_sha256,
+        operation_id=operation.id,
+        state=operation.state,
+        phase=str(raw.get("phase", progress.phase)),
+        progress=progress,
+        transferred_bytes=progress.completed_bytes,
+        total_bytes=progress.total_bytes,
+        eta_seconds=progress.eta_seconds,
+        preserved=(
+            ["verified-controller-copy"]
+            if action == "download" and operation.state == "succeeded"
+            else []
+        ),
+        next_actions=(
+            ["retry"] if operation.state == "failed" and operation.retryable else []
+        ),
+        cancelled_operations=list(cancelled),
+        cancellation=getattr(operation, "cancellation", None),
+        result=result,
+        failure=(
+            read_stored_model(AvailabilityOperationFailure, operation.failure)
+            if isinstance(operation.failure, Mapping)
+            else None
+        ),
+        blockers=list(operation.blockers),
+        wait=operation.wait,
+        next_attempt_at=operation.next_attempt_at,
+    )
+
+
+def model_cache_http_error(error: BaseException) -> HTTPException:
+    if isinstance(error, UnknownOutcomeError):
+        # A busy owner or unconfirmed bookkeeping: the route's retry-later
+        # answer (503, Retry-After, error code) says to ask again.
+        raise error
+    if isinstance(error, ModelCacheSelectorAmbiguous):
+        from ..library.api import SelectorAmbiguityHTTPError
+        from ..library_projection.common import LibrarySelectorAmbiguous
+
+        return SelectorAmbiguityHTTPError(
+            LibrarySelectorAmbiguous("model", error.candidates),
+            status_code=409,
+            code=error.code,
+        )
+    if isinstance(error, ModelCacheNotFound):
+        return HTTPException(status_code=404, detail=error.detail)
+    if isinstance(error, ModelCacheConflict):
+        return HTTPException(status_code=409, detail=error.detail)
+    if isinstance(error, ModelCacheResolutionError):
+        return HTTPException(status_code=422, detail=error.detail)
+    if isinstance(error, ModelCacheError) and isinstance(error, SecurityRefusalError):
+        return HTTPException(
+            status_code=403,
+            detail=error.detail,
+            headers={"x-vonk-error-code": error.code},
+        )
+    if isinstance(error, ModelCacheError):
+        if error.disposition != Disposition.OBSERVE:
+            return HTTPException(
+                status_code=409,
+                detail=error.detail,
+                headers={"x-vonk-error-code": error.code},
+            )
+    elif not isinstance(error, AVAILABILITY_ERRORS):
+        raise error
+    return HTTPException(status_code=503, detail="model cache unavailable")
+
+
+def install_model_operator_routes(
+    app: FastAPI,
+    *,
+    actor_dependency: Any,
+    service: ModelCacheService | None,
+) -> None:
+    """Install the current singular Model mutation routes.
+
+    The service resolves selectors against an explicit immutable model digest.
+    Replays bind the actor, request identity, action, selector, and digest.
+    """
+
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
+
+    _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
+
+    def cache() -> ModelCacheService:
+        if service is None:
+            raise HTTPException(status_code=503, detail="model cache unavailable")
+        return service
+
+    def require_operator(actor: Actor, route: str) -> None:
+        if actor.role not in MUTATION_ROLES[("POST", route)]:
+            raise HTTPException(status_code=403, detail="insufficient role")
+
+    @app.get(
+        "/api/model/requests/{request_key}",
+        response_model=ModelCacheOperatorResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelRequest",
+    )
+    def get_request(
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        try:
+            operation, action, selector = cache().get_operator_request(
+                request_key, actor=actor.subject
+            )
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.get(
+        "/api/model/operations/{operation_id}",
+        response_model=ModelCacheOperatorResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelOperation",
+    )
+    def get_operation(
+        operation_id: Annotated[str, Path(min_length=1, max_length=128)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        """Observe a submitted model mutation; any authenticated actor may read it."""
+
+        del actor
+        try:
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.get(
+        "/api/model/operations/{operation_id}/cancellations/{request_key}",
+        response_model=ModelCacheOperatorResponse | UnknownError,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModelCancellation",
+    )
+    def cancellation_receipt(
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        request_key: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse | UnknownError:
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        try:
+            operation, action, selector = service.get_operator_cancellation(
+                operation_id, request_key, actor=actor.subject
+            )
+            return _model_operator_response(operation, action=action, selector=selector)
+        except ModelCacheNotFound:
+            raise HTTPException(
+                status_code=404, detail="Cancellation receipt not found"
+            ) from None
+        except (ModelCacheError, *AVAILABILITY_ERRORS):
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
+    @app.post(
+        "/api/model/operations/{operation_id}/resume-access",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="resumeModelAccess",
+    )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
+    def resume_access(
+        body: ModelCacheOperatorRequest,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/operations/{operation_id}/resume-access")
+        try:
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            if operation.artifact_set_sha256 is None or operation.plan_digest is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="operation has no retained transfer identity",
+                )
+            resumed = cache().check_access_and_resume(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                artifact_set_sha256=operation.artifact_set_sha256,
+                plan_digest=operation.plan_digest,
+            )
+            return _model_operator_response(resumed, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.get(
+        "/api/model/{selector:path}/remove-review",
+        response_model=CacheRemovalReview,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="reviewModelRemoval",
+    )
+    def review_removal(
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        fleet: bool = False,
+        actor: Actor = actor_dependency,
+    ) -> CacheRemovalReview:
+        require_operator(actor, "/api/model/{selector:path}/remove")
+        try:
+            return (
+                cache().review_fleet_model_removal(selector)
+                if fleet
+                else cache().review_model_removal(selector)
+            )
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.post(
+        "/api/model/{selector:path}/download",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="downloadModel",
+    )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
+    def download(
+        body: ModelCacheOperatorRequest,
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/{selector:path}/download")
+        try:
+            operation = cache().download_model_selector(
+                selector,
+                actor=actor.subject,
+                request_key=body.request_key,
+                force=True,
+            )
+            return _model_operator_response(
+                operation, action=CacheOperationKind.DOWNLOAD, selector=selector
+            )
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.post(
+        "/api/model/{selector:path}/remove",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="removeModel",
+    )
+    @operator_acceptance(ReceiptPolicy.MODEL_REQUEST)
+    def remove(
+        body: ModelCacheRemovalRequest,
+        selector: Annotated[str, Path(min_length=1, max_length=256)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        require_operator(actor, "/api/model/{selector:path}/remove")
+        try:
+            if body.fleet:
+                assert body.review_digest is not None
+                operation = cache().remove_fleet_model_selector(
+                    selector,
+                    actor=actor.subject,
+                    request_key=body.request_key,
+                    review_digest=body.review_digest,
+                )
+            else:
+                operation = cache().remove_model_selector(
+                    selector, actor=actor.subject, request_key=body.request_key
+                )
+            return _model_operator_response(
+                operation, action=CacheOperationKind.REMOVE, selector=selector
+            )
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    @app.post(
+        "/api/model/operations/{operation_id}/cancel",
+        response_model=ModelCacheOperatorResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="cancelModelOperation",
+    )
+    @operator_acceptance(ReceiptPolicy.MODEL_CANCEL)
+    def cancel_operation(
+        body: ModelCacheCancellationRequest,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Actor = actor_dependency,
+    ) -> ModelCacheOperatorResponse:
+        route = "/api/model/operations/{operation_id}/cancel"
+        require_operator(actor, route)
+        try:
+            cache().cancel_operation(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                reason=body.reason,
+            )
+            operation, action, selector = cache().get_operator_operation(operation_id)
+            return _model_operator_response(operation, action=action, selector=selector)
+        except HTTPException:
+            raise
+        except (ModelCacheError, *AVAILABILITY_ERRORS) as error:
+            raise model_cache_http_error(error) from None
+
+    OperatorReceiptResolver(models=service).bind(app)
+
+
+class ModelCacheOperationProvider:
+    """Current Activity provider for the Controller-owned cache family."""
+
+    family = "model-cache"
+
+    def __init__(
+        self, service: ModelCacheService, cursors: CursorCodec | None = None
+    ) -> None:
+        self._service = service
+        from ..operation_api.providers import observation_cursors
+
+        self._cursors = cursors or observation_cursors()
+
+    def list_operations(self, query: OperationQuery | None = None) -> OperationListPage:
+        page = OperationListPage([], None, None, continuation_unavailable=True)
+        for _attempt in range(3):
+            try:
+                page = self._list_operations_once(query)
+                if not page.continuation_unavailable:
+                    return page
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+                continue
+        return page
+
+    def _list_operations_once(self, query: OperationQuery | None) -> OperationListPage:
+        limit = int(getattr(query, "limit", 100) or 100)
+        after = getattr(query, "after", None)
+        state = getattr(query, "state", None)
+        node_id = getattr(query, "node_id", None)
+        request_id = getattr(query, "request_id", None)
+        page = self._service.activity_operations(
+            after=after,
+            limit=min(limit, 101),
+            state=state,
+            node_id=node_id,
+            request_id=request_id,
+        )
+        items = []
+        unreadable = False
+        for item in require_sequence(page["operations"], "page operations"):
+            try:
+                items.append(self._summary(item))
+            except (TypeError, ValueError, KeyError):
+                unreadable = True
+        next_cursor = self._next_cursor(
+            page.get("_next_boundary"),
+            state=state,
+            node_id=node_id,
+            request_id=request_id,
+        )
+        try:
+            total = require_integer(page["total"], "page total")
+        except (TypeError, ValueError, KeyError):
+            total = None
+            unreadable = True
+        unavailable = unreadable or (
+            page.get("_next_boundary") is not None and next_cursor is None
+        )
+        return OperationListPage(
+            items=items,
+            next_cursor=next_cursor,
+            total=total,
+            projection_issue="Operation pagination observation is unavailable."
+            if unavailable
+            else None,
+            continuation_unavailable=unavailable,
+        )
+
+    def _next_cursor(
+        self,
+        boundary: object,
+        *,
+        state: object,
+        node_id: object,
+        request_id: object,
+    ) -> str | None:
+        """Sign readable boundaries; unavailable bookkeeping has no cursor."""
+
+        if boundary is None:
+            return None
+        if not isinstance(boundary, tuple) or len(boundary) != 2:
+            return None
+        created_at, operation_id = boundary
+        if not isinstance(created_at, str) or not isinstance(operation_id, str):
+            return None
+        if not operation_id:
+            return None
+        try:
+            datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
+        context = {"state": state, "node_id": node_id, "request_id": request_id}
+        return self._cursors.encode(
+            resource="model-cache-operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at, operation_id],
+        )
+
+    def get_operation(self, operation_id: str) -> OperationItem:
+        try:
+            operation = self._service.get_operation(operation_id)
+        except ModelCacheNotFound:
+            # A global Activity lookup asks every family. An absent cache
+            # operation must let another family supply the requested operation.
+            raise KeyError(operation_id) from None
+        return self._summary(operation)
+
+    def _summary(self, operation: Any) -> OperationItem:
+        progress = dict(operation.progress)
+        retryable = operation.state == "failed" and operation.retryable
+        return OperationItem(
+            id=operation.id,
+            kind=f"model-cache.{operation.kind}",
+            state=operation.state,
+            attempt=operation.attempt,
+            progress=OperationProgress.model_validate(self._progress(progress)),
+            created_at=operation.created_at,
+            updated_at=operation.updated_at,
+            supported_actions=["retry"] if retryable else [],
+            result=OperationResultFacts.of(operation.result),
+            failure=operation.failure,
+            model_cache_cancellation=operation.cancellation,
+            blockers=list(operation.blockers),
+            wait=operation.wait,
+            next_attempt_at=operation.next_attempt_at,
+            owner=OperationOwnerReference(
+                kind="model-cache-operation",
+                id=operation.id,
+                request_id=operation.request_key,
+            ),
+        )
+
+    @staticmethod
+    def _progress(value: Mapping[str, object]) -> dict[str, object]:
+        return project_cache_progress(value)
+
+
+def model_cache_operation_provider(
+    service: ModelCacheService,
+    cursors: Any | None = None,
+) -> OperationProvider:
+    provider = ModelCacheOperationProvider(service, cursors)
+    return OperationProvider(
+        family=provider.family,
+        list_operations=provider.list_operations,
+        get_operation=provider.get_operation,
+    )
+
+
+def register_model_cache_operation_provider(
+    services: OperationApiServices | None, service: ModelCacheService | None
+) -> OperationApiServices | None:
+    """Attach the cache family to the current shared Activity services."""
+    if services is None or service is None:
+        return services
+    provider = model_cache_operation_provider(service, services.cursor_codec)
+    existing = services.operation_providers
+    if any(item.family == "model-cache" for item in existing):
+        return services
+    from dataclasses import replace
+
+    return replace(services, operation_providers=existing + (provider,))
+
+
+__all__ = [
+    "MODEL_CACHE_OPERATION_IDS",
+    "ModelCacheOperationProvider",
+    "install_model_operator_routes",
+    "model_cache_operation_provider",
+    "register_model_cache_operation_provider",
+]

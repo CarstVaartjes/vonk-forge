@@ -11,8 +11,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import LifecycleState
 
 from ..logging import redact_text
-from ..models import AgentNode, Job
-from ..run_switch_contract import RunSwitchRuntimeImageResult
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..run_switch_contract.phase_results import RunSwitchRuntimeImageResult
 from ..run_switch_operations.observation_window import checkpoint_verdict
 from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..run_switch_operations.result_helpers import _parse_persisted_result

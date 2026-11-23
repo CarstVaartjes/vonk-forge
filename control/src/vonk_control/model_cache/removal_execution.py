@@ -13,9 +13,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import Disposition, InvalidRequestError, UnknownOutcomeError
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     check_removal_fence_nowait,
@@ -23,31 +22,24 @@ from ..artifact_lifecycle import (
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import (
-    ArtifactReferenceFinding,
-    _reason_projection,
-    model_set_reference_findings,
-)
+from ..artifact_reference_scan.model_references import model_set_reference_findings
+from ..artifact_reference_scan.types import ArtifactReferenceFinding, _reason_projection
 from ..failure_classification import disposition
-from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import (
+from ..lifecycle.types import Effect, Outcome, Reported
+from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..models.execution import RecipeInstallation
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import Job
+from ..models.operations import ArtifactDistributionAssignment
+from ..validation_detail import validation_error_detail
+from . import states as model_cache_states
+from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
+from .contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     ModelCacheSetState,
 )
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import (
-    ArtifactDistributionAssignment,
-    FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeInstallation,
-)
-from ..validation_detail import validation_error_detail
-from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
 from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .persistence import (
     _operation_progress,
@@ -55,6 +47,7 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
+from .progress import cache_phase, progress_document
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

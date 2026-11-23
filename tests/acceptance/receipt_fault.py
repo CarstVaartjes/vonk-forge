@@ -137,7 +137,7 @@ class LostStartReceipt:
 
 if __name__ == "__main__":
     import uvicorn
-    from vonk_control.api import production_app
+    from vonk_control.api.production import production_app
 
     uvicorn.run(
         LostStartReceipt(production_app(), Path("/acceptance-state")),

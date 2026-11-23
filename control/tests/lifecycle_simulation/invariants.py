@@ -24,16 +24,16 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
-from vonk_control.fleet_profiles import FleetProfileConflict
-from vonk_control.models import (
-    AgentOperation,
-    FleetProfileApplication,
-    Job,
-    RecipeBuild,
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import (
     ADOPTION_WINDOW,
     installations_named_by_live_jobs,

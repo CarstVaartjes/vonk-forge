@@ -15,12 +15,8 @@ from vonk_forge_contracts.recipe import RecipeDefinition
 from ..cluster_mappings import (
     ClusterMappingPlacement,
 )
-from ..recipe_operations import (
-    RecipeOperationView,
-)
-from ..run_switch_contract import (
-    SparkGroupNode,
-)
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..run_switch_contract.requests import SparkGroupNode
 from .errors import RunSwitchRetryLater
 
 

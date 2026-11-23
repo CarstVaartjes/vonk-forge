@@ -25,16 +25,19 @@ import pytest
 from sqlalchemy import Engine, select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import CatalogDocumentRevision, ModelCacheSet, RecipeBuild
-from vonk_control.run_switch_contract import (
-    ArtifactStorageImpact,
-    RunSwitchModelDownloadResult,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
+from vonk_control.distribution_executor.preparation import (
+    CompositeDistributionPhaseExecutor,
 )
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.run_switch_contract.evidence import (
+    ArtifactStorageImpact,
+    RunSwitchPhase,
+)
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.phase_results import RunSwitchModelDownloadResult
+from vonk_control.run_switch_contract.plans import RunSwitchPlan
 from vonk_control.run_switch_operations.artifact_validation import (
     _validate_artifact_execution,
 )

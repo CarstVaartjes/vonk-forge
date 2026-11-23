@@ -12,13 +12,11 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..agent_upgrade_contract import (
-    AgentUpgradePackage,
-)
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import (
     InvalidType,
 )
+from .contract import AgentUpgradePackage
 
 if TYPE_CHECKING:
     from .service import AgentUpgradeService

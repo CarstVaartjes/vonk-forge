@@ -6,18 +6,21 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import AgentProgress, LifecycleState, OperationProgress
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
-from vonk_control.fleet_profile_contract import FleetProfileSwitchAdapterResult
-from vonk_control.run_switch_contract import (
-    RunSwitchChildProgress,
-    RunSwitchOperationResult,
+from vonk_control.fleet_profile_contract.switch_state import (
+    FleetProfileSwitchAdapterResult,
 )
-from vonk_control.run_switch_observation_contract import RunSwitchObservedEvidence
-from vonk_control.run_switch_operations import _persisted_result, _read_progress
-from vonk_control.run_switch_progress import (
+from vonk_control.run_switch_contract.observation import RunSwitchObservedEvidence
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress import RunSwitchChildProgress
+from vonk_control.run_switch_contract.progress_view import (
     _complete_operation_progress,
     _complete_phase_progress,
     _merge_progress_evidence,
     _progress_view,
+)
+from vonk_control.run_switch_operations.result_helpers import (
+    _persisted_result,
+    _read_progress,
 )
 
 from .test_recipe_operations import NOW, setup_services

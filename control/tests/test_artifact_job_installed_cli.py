@@ -19,11 +19,13 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_job_api import install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs.api import install_artifact_job_routes
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.auth import Actor
-from vonk_control.models import AgentOperation, ArtifactJob, Job
+from vonk_control.models.execution import ArtifactJob
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.cli_json_contract import DocumentKind
@@ -645,7 +647,7 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
         if expected_state != "succeeded":
             from datetime import timedelta
 
-            from vonk_control.agent_jobs import AgentJobService
+            from vonk_control.agent_jobs.service import AgentJobService
 
             ended_at = service._clock() + timedelta(seconds=3601)
             service._clock = lambda: ended_at

@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import Job
+from vonk_control.models.jobs import Job
 
 from .test_build_cancellation_recovery import _issue, _services
 

@@ -24,39 +24,37 @@ from vonk_agent_protocol import (
     RunState,
     WaitReason,
 )
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_job_evidence import read_result_evidence
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs.evidence import read_result_evidence
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileChildOperation,
-    FleetProfileInput,
-)
-from vonk_control.fleet_profiles import (
-    RunSwitchFleetProfileAdapter,
-    build_production_fleet_profile_service,
-)
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.fleet_profile_contract.applications import FleetProfileChildOperation
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.items import inventory_items, runtime_value
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     ArtifactJob,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    Job,
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfileApplication,
+    FleetProfileSelection,
     User,
 )
-from vonk_control.operation_api import durable_operation_services
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
 from .profile_due_fixtures import next_profile_due
@@ -1610,7 +1608,7 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
 
     import uuid
 
-    from vonk_control.models import AgentOperationAttempt
+    from vonk_control.models.operations import AgentOperationAttempt
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2

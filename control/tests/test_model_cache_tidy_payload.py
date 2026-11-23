@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.lifecycle.types import State
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRetry,
 )

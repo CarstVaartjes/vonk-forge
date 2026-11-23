@@ -12,8 +12,13 @@ from vonk_agent_protocol.telemetry import (
     HostResourceSample,
     TelemetrySample,
 )
-from vonk_control.db import initialize_database, node_facts
-from vonk_control.models import Base, NodeInventoryResourceSnapshot, NodeTelemetrySample
+from vonk_control.db import node_facts
+from vonk_control.db.startup import initialize_database
+from vonk_control.model_primitives import Base
+from vonk_control.models.telemetry import (
+    NodeInventoryResourceSnapshot,
+    NodeTelemetrySample,
+)
 from vonk_control.telemetry.samples import TelemetryRepository
 
 NODE = "spk_" + "c" * 32
@@ -126,7 +131,8 @@ def test_resource_reporting_rolls_back_partial_sample_and_retries(
     """Catches a telemetry commit whose resource owner was not committed with it."""
     from datetime import timedelta
 
-    from vonk_control.models import AgentNode, NodeTelemetryLatest
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.telemetry import NodeTelemetryLatest
     from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     Base.metadata.create_all(postgres_engine)
@@ -176,7 +182,7 @@ def test_archived_measurement_lock_does_not_block_install_admission(
     postgres_engine: Engine, tmp_path
 ) -> None:
     """Catches locking telemetry history as if it were current admission evidence."""
-    from vonk_control.models import RecipeInstallation
+    from vonk_control.models.execution import RecipeInstallation
 
     from .test_recipe_operations import NOW as now
     from .test_recipe_operations import setup_services
@@ -224,7 +230,7 @@ def test_recent_memory_reads_the_validated_byte_contract(
     from datetime import timedelta
 
     from sqlalchemy import update
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
     from vonk_control.observed_run_memory import recent_best_available
     from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 

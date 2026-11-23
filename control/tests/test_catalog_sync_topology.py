@@ -17,7 +17,7 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import document_sha256
 
@@ -178,7 +178,7 @@ def test_snapshot_availability_costs_constant_queries_per_check(
 
     from sqlalchemy import event, select
     from vonk_control.catalog import sync as catalog_sync
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     from .test_catalog_revision_collection import Catalog
 

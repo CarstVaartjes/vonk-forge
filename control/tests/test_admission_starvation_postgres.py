@@ -18,7 +18,9 @@ from vonk_control.admission_locking import (
     node_admission_key,
     patient_admission,
 )
-from vonk_control.models import AgentNode, AgentNodeContact, Base, NodeTelemetrySample
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.telemetry import NodeTelemetrySample
 from vonk_control.observation.delivery import ObservationDeliveryMiddleware
 from vonk_control.telemetry import maintenance as telemetry_maintenance
 

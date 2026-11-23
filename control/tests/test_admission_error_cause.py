@@ -18,7 +18,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control import run_admission
 from vonk_control.failure_classification import disposition
-from vonk_control.models import Job, RecipeInstallation, RecipeRun
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.jobs import Job
 from vonk_forge_contracts import read_recipe
 
 from .test_recipe_operations import installed_recipe, setup_services

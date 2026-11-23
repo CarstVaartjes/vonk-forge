@@ -22,7 +22,7 @@ from .observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
-from .operation_api import bounded_error_responses
+from .operation_api.contracts import bounded_error_responses
 from .strict_json import StrictModel
 
 

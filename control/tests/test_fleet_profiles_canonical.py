@@ -18,29 +18,32 @@ from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileDefinition,
     FleetProfileInput,
-    FleetProfilePreview,
     FleetProfileView,
     UnavailableFleetProfileView,
 )
-from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
-from vonk_control.model_cache_contract import (
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_cache.contract import (
     CachedModelResolution,
     CachedRecipeResolution,
     CachedResourceEstimate,
     CacheResolution,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    AgentNodeProfile,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeContact,
+    AgentNodeProfile,
     FleetProfile,
     FleetProfileApplication,
     User,
@@ -298,7 +301,7 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
-    from vonk_control.models import FleetProfile
+    from vonk_control.models.fleet import FleetProfile
 
     sessions = _sessions()
     service = FleetProfileService(sessions, clock=lambda: NOW)
@@ -322,8 +325,8 @@ def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
     "field,value", [("labels", []), ("assignments", [{"invalid": "choice"}])]
 )
 def test_saved_profile_identity_never_embeds_a_damaged_column(field, value):
-    from vonk_control.fleet_profiles import _profile_document
-    from vonk_control.models import FleetProfile
+    from vonk_control.fleet_profiles.projection_support import _profile_document
+    from vonk_control.models.fleet import FleetProfile
 
     sessions = _sessions()
     service = FleetProfileService(sessions, clock=lambda: NOW)
@@ -1139,7 +1142,7 @@ def test_an_unknown_option_or_value_is_replaced_by_the_default_and_named() -> No
 def test_a_profile_holding_a_retired_choice_can_still_be_edited() -> None:
     """Every edit re-submits all assignments, so one stale choice blocked them all."""
 
-    from vonk_control.models import FleetProfile
+    from vonk_control.models.fleet import FleetProfile
 
     sessions = _sessions()
     _seed(sessions, options=True)
@@ -1172,7 +1175,7 @@ def test_a_profile_holding_a_retired_choice_can_still_be_edited() -> None:
 
 
 def test_a_profile_saved_without_choices_runs_the_recipe_defaults() -> None:
-    from vonk_control.models import FleetProfile
+    from vonk_control.models.fleet import FleetProfile
 
     sessions = _sessions()
     _seed(sessions, options=True)
@@ -1194,7 +1197,7 @@ def test_a_profile_saved_without_choices_runs_the_recipe_defaults() -> None:
 
 
 def test_a_stored_choice_the_newer_recipe_no_longer_offers_falls_back_visibly() -> None:
-    from vonk_control.models import FleetProfile
+    from vonk_control.models.fleet import FleetProfile
 
     sessions = _sessions()
     _seed(sessions, options=True)
@@ -1213,7 +1216,8 @@ def test_a_stored_choice_the_newer_recipe_no_longer_offers_falls_back_visibly() 
 
 
 def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> None:
-    from vonk_control.models import ClusterMapping, ClusterMappingNode, FleetProfile
+    from vonk_control.models.fleet import FleetProfile
+    from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 
     sessions = _sessions()
     _seed(sessions, options=True)
@@ -1388,7 +1392,7 @@ def test_save_observer_timeout_is_atomic_and_reconnects_to_committed_content(
     """Catches an early commit, a partial draft, or a replay editing twice."""
     from threading import Event
 
-    from vonk_control.models import FleetProfile
+    from vonk_control.models.fleet import FleetProfile
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1484,9 +1488,11 @@ def test_profile_read_observes_distinct_content_once(
         revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/latency-{index}")
-    from vonk_control.model_cache import ModelCacheService
-    from vonk_control.profile_read_observation import observe_storage
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.fleet_profiles.read_observation import observe_storage
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     cache = ModelCacheService(sessions, tmp_path / "models", clock=lambda: NOW)
     images = FilesystemRuntimeImageStorage(tmp_path / "images")
@@ -1537,7 +1543,7 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
-    from vonk_control import profile_read_observation as observation
+    from vonk_control.fleet_profiles import read_observation as observation
 
     submissions = []
     submit = observation._POOL.submit
@@ -1755,9 +1761,14 @@ def test_profile_storage_wait_is_bounded_and_recovers(
 
     from vonk_agent_protocol import ProfileReasonCode
     from vonk_control.categorized_errors import BookkeepingUnknown
-    from vonk_control.model_cache import ModelCacheService
-    from vonk_control.profile_read_observation import observe_storage, profile_read
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.fleet_profiles.read_observation import (
+        observe_storage,
+        profile_read,
+    )
+    from vonk_control.model_cache.service import ModelCacheService
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from tests.test_fleet_profiles import _assessment, _exact_preparation
 
@@ -1824,7 +1835,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             return service.preview(saved.id)
         return service.read_number(1)
 
-    from vonk_control import profile_read_observation
+    from vonk_control.fleet_profiles import read_observation as profile_read_observation
 
     from .pass_budget_clocks import completing_wait, expiring_wait
 
@@ -1885,7 +1896,7 @@ def test_profile_observation_reuses_only_fresh_results(monkeypatch):
     from threading import Event
     from types import SimpleNamespace
 
-    from vonk_control import profile_read_observation as observation
+    from vonk_control.fleet_profiles import read_observation as observation
 
     now = [0.0]
     monkeypatch.setattr(observation, "time", SimpleNamespace(monotonic=lambda: now[0]))
@@ -1957,7 +1968,7 @@ def test_profile_preview_preserves_cache_inspection_progress():
         ProfileReasonSeverity,
         RunSwitchReasonScopeName,
     )
-    from vonk_control.run_switch_contract import RunSwitchReason
+    from vonk_control.run_switch_contract.evidence import RunSwitchReason
 
     from tests.test_fleet_profiles import _assessment, _exact_preparation
 

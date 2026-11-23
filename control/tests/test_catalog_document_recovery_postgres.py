@@ -15,9 +15,10 @@ from vonk_control.catalog.revision_contract import read_catalog_document
 from vonk_control.catalog.service import CatalogService
 from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
-from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.fleet_removal import _model_objects
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import ModelDefinition, document_sha256
 

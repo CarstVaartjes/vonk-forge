@@ -13,13 +13,14 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileOperationKind, ProfileReasonSeverity
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileReason
+from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.contracts import _SelectedProfileSnapshot
 from vonk_control.fleet_profiles.projection_support import _digest, _roster_digest
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    Base,
     FleetProfileApplication,
     FleetProfileSelection,
 )

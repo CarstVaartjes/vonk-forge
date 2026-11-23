@@ -26,13 +26,13 @@ from ..dialect_insert import dialect_insert
 from ..fleet_event_contract import NodeTelemetryPayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..lifecycle.evidence import Residue
-from ..models import (
-    AgentNode,
+from ..models.execution import RecipeRun
+from ..models.fleet import AgentNode
+from ..models.telemetry import (
     NodeEngineSample,
     NodeInventoryResourceSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
-    RecipeRun,
 )
 from ..observed_run_memory import record_observed_run_memory
 from ..strict_json import warn_unreadable_once

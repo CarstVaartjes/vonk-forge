@@ -16,9 +16,10 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_control.failure_classification import disposition
-from vonk_control.models import RecipeRun, RoutePublicationOwner, RunNode
+from vonk_control.models.execution import RecipeRun, RunNode
+from vonk_control.models.routes import RoutePublicationOwner
 from vonk_control.optimistic import Applied, transition
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .node_contacts import contact_row
@@ -286,7 +287,7 @@ def test_deadline_contention_is_visible_wait_and_heals_next_tick(
     import logging
     from datetime import timedelta
 
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     now = [NOW]
@@ -336,7 +337,7 @@ def test_publication_deferral_contention_continues_without_traceback(
     import logging
 
     from vonk_agent_protocol import SecurityRefusalError
-    from vonk_control.recipe_routes import RecipeRouteNotReady
+    from vonk_control.recipe_routes.shared import RecipeRouteNotReady
 
     from .test_recipe_routes import add_running_run
 
@@ -412,9 +413,10 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     )
     from vonk_agent_protocol.recipe_operations import RecipeStopResult
     from vonk_control import agent_operation_states as aos
-    from vonk_control.agent_jobs import AgentJobService
     from vonk_control.agent_jobs import results as ingress
-    from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.models.fleet import AgentNode
+    from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
     from .agent_fences import fenced_attempt
     from .recipe_stop_fixtures import recipe_stop_payload
@@ -604,7 +606,7 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
 
     from vonk_agent_protocol import WaitOwnerKind
     from vonk_control.due_waits import DueWaitBackstop, WaitSource
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
 
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     now = [NOW]

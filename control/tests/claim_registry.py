@@ -67,7 +67,7 @@ CLAIMS: dict[str, Claim] = {
         ended=(OwnerKind.CACHE_OPERATION, OwnerKind.IMAGE_JOB),
         reclaimed_by="ModelCacheService.reconcile_removal_gates and the image "
         "availability reconcile_removal_gates (worker ticks), through "
-        "artifact_lifecycle.dead_removal_identities",
+        "artifact_jobs.lifecycle.dead_removal_identities",
     ),
     "recipe_library_sync_runs": Claim(
         model="RecipeLibrarySyncRun",

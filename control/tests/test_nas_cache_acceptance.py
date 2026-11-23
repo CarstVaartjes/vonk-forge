@@ -12,25 +12,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DistributionObject
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.distribution import (
-    CompositeObjectSource,
-    DistributionService,
+from vonk_control.distribution.filesystem import (
     FilesystemObjectSource,
-    ModelCacheObjectSource,
     RecipeBuildObjectSource,
 )
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import CompositeObjectSource
 from vonk_control.distribution_assignment import NodeDistributionAssignment
-from vonk_control.model_cache import (
-    ModelCacheService,
-)
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    FleetProfile,
-    RecipeBuild,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import AgentNode, FleetProfile
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -211,7 +205,9 @@ def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: byt
     archive_root.mkdir(parents=True)
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + archive_sha256
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .runtime_image_fixtures import place_test_image
 

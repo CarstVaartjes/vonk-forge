@@ -10,27 +10,23 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
 )
 from ..content_identity import ImageContent, differing_image_fields
-from ..fleet_profile_contract import (
-    FleetProfilePreview,
-)
-from ..models import (
-    Job,
-    RecipeInstallation,
-)
-from ..recipe_execution_contract import (
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..models.execution import RecipeInstallation
+from ..models.jobs import Job
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredInstallationPlan,
     parse_stored_installation_plan,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.operations import (
     RunSwitchOperationResult,
-    RunSwitchPlan,
     RunSwitchRuntimeImageReferenceIntent,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..strict_json import read_stored_model
 
 
@@ -172,6 +168,6 @@ def _run_switch_runtime_image_intent(
 
 
 def _run_switch_kinds() -> frozenset[str]:
-    from ..run_switch_operations import _OPERATION_KINDS
+    from ..run_switch_operations.constants import _OPERATION_KINDS
 
     return frozenset(_OPERATION_KINDS)

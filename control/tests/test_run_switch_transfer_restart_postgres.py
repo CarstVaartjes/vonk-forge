@@ -24,24 +24,19 @@ from vonk_agent_protocol import (
     AgentOperation as OperationKind,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.distribution import DistributionService, MemoryObjectSource
-from vonk_control.distribution_executor import (
-    DurableDistributionPhaseExecutor,
-    RuntimeImagePull,
-)
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-    RecipeRun,
-)
-from vonk_control.recipe_routes import RecipeRouteService
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-)
-from vonk_control.run_switch_operations import PhaseExecution, RunSwitchOperationService
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.receipts import RuntimeImagePull
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
@@ -455,7 +450,7 @@ def test_an_invalid_retained_receipt_cannot_starve_another_exact_transfer(
     """Catches a bounded sweep stuck examining the same unusable history row."""
     from vonk_control.agent_jobs import results as ingress
     from vonk_control.jobs.documents import DistributionJobPayload
-    from vonk_control.run_switch_operations import _stored_job_plan
+    from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
     from vonk_control.strict_json import read_stored_model
 
     sessions, _lifecycle, jobs, executor, _service, parent_id, claim, now = transfer

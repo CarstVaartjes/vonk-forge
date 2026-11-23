@@ -35,18 +35,13 @@ from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..categorized_errors import InvalidType, InvalidValue
 from ..jobs.agent_contract import ClaimFacts
-from ..lifecycle import (
-    Reconciler,
-    Reported,
-)
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperationAttempt,
-    Job,
-)
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.reconciler import Reconciler
+from ..lifecycle.types import Reported
+from ..models.fleet import AgentCertificate, AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..operations.contract import validate_progress_update
 from ..operations.progress import progress_document, sample_progress, stored_progress
 from ..optimistic import Stale, transition

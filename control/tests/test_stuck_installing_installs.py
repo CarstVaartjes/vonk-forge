@@ -18,12 +18,10 @@ from vonk_agent_protocol import InstallationState
 from vonk_control import attempt_residues
 from vonk_control.attempt_residues import LEFTOVER_GRACE, AttemptResidueReconciler
 from vonk_control.installation_transitions import IN_FLIGHT
-from vonk_control.models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    Job,
-    RecipeInstallation,
-)
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 from vonk_control.owner_liveness import OWNER_SETTLE_GRACE
 from vonk_control.reservation_owners import ADOPTION_WINDOW
 

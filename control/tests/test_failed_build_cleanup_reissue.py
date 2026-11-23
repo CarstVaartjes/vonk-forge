@@ -15,14 +15,15 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RecipeBuildCode
-from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.models import AgentNode, Job
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.install_admission.service import InstallAdmissionService
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_operations.errors import RecipeRetryLater
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_build_cancellation_recovery import _active_claims, _issue
 from .test_recipe_builds import RecordingQueue, setup

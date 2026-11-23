@@ -8,23 +8,24 @@ from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
-from .. import model_cache_states
 from ..categorized_errors import InvalidValue
-from ..lifecycle import State
+from ..lifecycle.types import State
 from ..logging import redact_text
-from ..model_cache_contract import (
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
+from ..operations.contract import AvailabilityOperationFailure
+from ..persisted_waits import read_wait
+from ..strict_json import read_stored_model, serialize_json_value
+from . import states as model_cache_states
+from .catalog_helpers import _datetime, _iso, _parse_iso
+from .constants import SCHEMA_VERSION
+from .contract import (
     CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheOperationResponse,
     ModelCacheOperatorAction,
     ModelCacheRemovalPayload,
 )
-from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
-from ..operations.contract import AvailabilityOperationFailure
-from ..persisted_waits import read_wait
-from ..strict_json import read_stored_model, serialize_json_value
-from .catalog_helpers import _datetime, _iso, _parse_iso
-from .constants import SCHEMA_VERSION
 from .errors import ModelCacheConflictInvalid, ModelCacheNotFoundInvalid
 from .persistence import _cache_failure, _derived_result, _operation_progress
 from .source_helpers import _request_key

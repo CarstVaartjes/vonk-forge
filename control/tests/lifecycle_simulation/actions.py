@@ -19,13 +19,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from sqlalchemy import select
-from vonk_control.models import (
+from vonk_control.models.execution import (
     STOPPABLE_RUN_STATES,
-    FleetProfileApplication,
     RecipeInstallation,
     RecipeRun,
 )
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .world import PAIR, SOLO, SOLO_B
 

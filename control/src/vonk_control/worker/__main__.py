@@ -16,7 +16,7 @@ from ..logging import log_event, redact_text
 
 if TYPE_CHECKING:
     from ..catalog.sync import ManagedRecipeCatalogSyncService
-    from ..enrollment import EnrollmentService
+    from ..enrollment.service import EnrollmentService
 from .assembly import assemble_production_worker
 from .liveness import (
     _LOGGER,
@@ -32,19 +32,15 @@ if __name__ == "__main__":
     from datetime import UTC, datetime
     from pathlib import Path
 
-    from ..agent_jobs import AgentJobService
-    from ..db import (
-        build_engine,
-        session_factory,
-        wait_for_database,
-    )
+    from ..agent_jobs.service import AgentJobService
+    from ..db.connections import build_engine, session_factory, wait_for_database
     from ..execution_plan_service import ControllerExecutionPlanService
     from ..gateway.route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
     )
     from ..logging import configure_controller_logging
-    from ..model_cache import ModelCacheService
+    from ..model_cache.service import ModelCacheService
     from ..presence import ManagementAddressPolicy
     from ..runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
@@ -152,7 +148,7 @@ if __name__ == "__main__":
         runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
     from ..agent_services import build_enrollment_service
-    from ..enrollment import EnrollmentService
+    from ..enrollment.service import EnrollmentService
 
     enrollment = capabilities.guard(
         ControllerCapability.CERTIFICATE_AUTHORITY,

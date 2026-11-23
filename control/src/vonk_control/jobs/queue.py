@@ -26,7 +26,8 @@ from ..admission_locking import ConstraintReplay, admitting
 from ..categorized_errors import InvalidType, InvalidValue, MissingRecord
 from ..compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from ..lifecycle.job import JobAdapter
-from ..models import AgentOperation, Job, JobAttempt
+from ..models.jobs import Job, JobAttempt
+from ..models.operations import AgentOperation
 from ..optimistic import Stale, transition
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")

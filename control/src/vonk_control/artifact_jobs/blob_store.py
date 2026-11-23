@@ -1,0 +1,894 @@
+"""Atomic filesystem CAS for large artifact-job inputs and outputs."""
+
+from __future__ import annotations
+
+import asyncio
+import fcntl
+import hashlib
+import os
+import tempfile
+import time
+import uuid
+from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO
+
+from pydantic import BaseModel, ConfigDict, Field
+from vonk_agent_protocol import (
+    Disposition,
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
+
+from ..bounded_retry import bounded_async_attempts
+from ..categorized_errors import InvalidValue
+from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+
+# The reference fence is a short critical section around one blob verification
+# and its durable attachment, so a bounded nonblocking claim is enough: the
+# caller retries its own operation rather than parking on another process'
+# reconciliation.
+_REFERENCE_LOCK_BUDGET_SECONDS = 30.0
+_REFERENCE_LOCK_RETRY_SECONDS = 0.05
+
+
+class BlobStoreUsage(BaseModel):
+    """How much of the artifact store's quota is stored, reserved and left."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_stored_bytes: int = Field(ge=0)
+    used_bytes: int = Field(ge=0)
+    reserved_bytes: int = Field(ge=0)
+    in_flight_uploads: int = Field(ge=0)
+    remaining_bytes: int = Field(ge=0)
+
+
+class BlobReconciliation(BlobStoreUsage):
+    """What one bounded reconciliation pass removed, found missing and left."""
+
+    removed_temporary_files: int = Field(ge=0)
+    removed_reservation_files: int = Field(ge=0)
+    removed_orphan_blobs: int = Field(ge=0)
+    missing_referenced_blobs: list[str]
+    remaining_work: bool
+
+
+class ArtifactBlobStoreError(ValueError):
+    pass
+
+
+class ArtifactBlobInvalid(InvalidRequestError, ArtifactBlobStoreError):
+    """An upload or digest outside its declared contract (size, chunk, format)."""
+
+
+class ArtifactBlobQuotaExhausted(UnknownOutcomeError, ArtifactBlobStoreError):
+    """Storage is temporarily unavailable; this attempt releases its claims."""
+
+
+class ArtifactBlobDigestMismatch(SecurityRefusalError, ArtifactBlobStoreError):
+    """Uploaded bytes do not hash to the digest the request declared."""
+
+
+class ArtifactBlobUnsafePath(SecurityRefusalError, ArtifactBlobStoreError):
+    """A storage key, path or root that is not the exact content-addressed place."""
+
+
+class ArtifactBlobBusy(UnknownOutcomeError, ArtifactBlobStoreError):
+    """The reference fence is held by a reconciliation: the caller retries."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
+
+@dataclass(frozen=True, slots=True)
+class StoredArtifactBlob:
+    sha256: str
+    size_bytes: int
+    storage_key: str
+    path: Path
+
+
+@dataclass(slots=True)
+class _BlobReservation:
+    token: str
+    path: Path
+    descriptor: int
+    size_bytes: int
+
+
+class ArtifactBlobStore:
+    def __init__(self, root: Path, *, max_stored_bytes: int = 16 * 1024**3) -> None:
+        if not root.is_absolute() or max_stored_bytes < 1:
+            raise InvalidValue(
+                "artifact blob store configuration is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
+        self._root = root
+        self._max_stored_bytes = max_stored_bytes
+
+    @property
+    def max_stored_bytes(self) -> int:
+        return self._max_stored_bytes
+
+    def usage(self) -> BlobStoreUsage:
+        self._prepare_root()
+        with self._quota_lock():
+            reservations = self._reservation_entries()
+            reserved = sum(reservations.values())
+            used = self._stored_bytes() + self._unreserved_temporary_bytes(
+                set(reservations)
+            )
+            return BlobStoreUsage(
+                max_stored_bytes=self._max_stored_bytes,
+                used_bytes=used,
+                reserved_bytes=reserved,
+                in_flight_uploads=len(reservations),
+                remaining_bytes=max(0, self._max_stored_bytes - used - reserved),
+            )
+
+    @contextmanager
+    def reference_attachment(self) -> Iterator[None]:
+        """Fence one blob verification plus its durable database attachment."""
+        with self._reference_lock(exclusive=False):
+            yield
+
+    @asynccontextmanager
+    async def reference_attachment_async(self) -> AsyncIterator[None]:
+        """``reference_attachment`` for async callers.
+
+        The flock belongs to the open file description, not to a thread, so the
+        acquire (which may wait on a reconciler) and the release each run in a
+        worker thread and the event loop never waits on the lock. A cancel
+        during the acquire lets it finish, releases the lock, then re-raises, so
+        no cancelled caller leaves the fence held. Errors from the acquire
+        (including the unsafe-path security refusal) reach the caller as is.
+        """
+
+        def enter() -> AbstractContextManager[None]:
+            guard = self.reference_attachment()
+            guard.__enter__()
+            return guard
+
+        acquire = asyncio.ensure_future(asyncio.to_thread(enter))
+        try:
+            guard = await asyncio.shield(acquire)
+        except asyncio.CancelledError:
+            # Let the acquire finish, then give back what it took.
+            (taken,) = await asyncio.gather(acquire, return_exceptions=True)
+            if isinstance(taken, AbstractContextManager):
+                await asyncio.to_thread(taken.__exit__, None, None, None)
+            raise
+        try:
+            yield
+        finally:
+            # Shielded: a cancelled caller still releases the fence.
+            await asyncio.shield(asyncio.to_thread(guard.__exit__, None, None, None))
+
+    @contextmanager
+    def reference_reconciliation(self) -> Iterator[None]:
+        """Exclude new database attachments while references are reconciled."""
+        with self._reference_lock(exclusive=True):
+            yield
+
+    async def put_stream(
+        self,
+        expected_sha256: str,
+        chunks: AsyncIterable[bytes],
+        *,
+        expected_bytes: int,
+        maximum_bytes: int,
+    ) -> StoredArtifactBlob:
+        self._digest(expected_sha256)
+        if not 0 <= expected_bytes <= maximum_bytes:
+            raise ArtifactBlobInvalid(
+                "artifact upload size is outside its bound",
+                reason=InvalidRequestReason.MALFORMED,
+            )
+        unavailable: UnknownOutcomeError | None = None
+        async for _attempt in bounded_async_attempts():
+            try:
+                reservation, existing = await asyncio.to_thread(
+                    self._reserve, expected_sha256, expected_bytes
+                )
+                break
+            except UnknownOutcomeError as error:
+                unavailable = error
+        else:
+            assert unavailable is not None
+            raise unavailable
+        if existing is not None:
+            digest = hashlib.sha256()
+            observed = 0
+            async for chunk in chunks:
+                if not isinstance(chunk, bytes):
+                    raise ArtifactBlobInvalid(
+                        "artifact upload chunk is invalid",
+                        reason=InvalidRequestReason.MALFORMED,
+                    )
+                observed += len(chunk)
+                if observed > expected_bytes:
+                    raise ArtifactBlobInvalid(
+                        "artifact upload exceeds its declared size",
+                        reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                    )
+                digest.update(chunk)
+            if observed != expected_bytes:
+                raise ArtifactBlobInvalid(
+                    "artifact upload size does not match",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            if digest.hexdigest() != expected_sha256:
+                raise ArtifactBlobDigestMismatch(
+                    "artifact upload SHA-256 does not match",
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
+                )
+            return existing
+        assert reservation is not None
+        temporary = Path()
+        digest = hashlib.sha256()
+        observed = 0
+        try:
+            descriptor, temporary_name = await asyncio.to_thread(
+                tempfile.mkstemp,
+                prefix=f".{expected_sha256}.{reservation.token}.",
+                suffix=".part",
+                dir=self._root / ".tmp",
+            )
+            temporary = Path(temporary_name)
+            stream = os.fdopen(descriptor, "wb")
+            try:
+                async for chunk in chunks:
+                    if not isinstance(chunk, bytes):
+                        raise ArtifactBlobInvalid(
+                            "artifact upload chunk is invalid",
+                            reason=InvalidRequestReason.MALFORMED,
+                        )
+                    observed += len(chunk)
+                    if observed > maximum_bytes or observed > expected_bytes:
+                        raise ArtifactBlobInvalid(
+                            "artifact upload exceeds its declared size",
+                            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                        )
+                    digest.update(chunk)
+                    await asyncio.to_thread(stream.write, chunk)
+                await asyncio.to_thread(self._flush_and_sync, stream)
+            finally:
+                await asyncio.to_thread(stream.close)
+            if observed != expected_bytes:
+                raise ArtifactBlobInvalid(
+                    "artifact upload size does not match",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
+            if digest.hexdigest() != expected_sha256:
+                raise ArtifactBlobDigestMismatch(
+                    "artifact upload SHA-256 does not match",
+                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
+                )
+            async for _attempt in bounded_async_attempts():
+                try:
+                    stored = await asyncio.to_thread(
+                        self._commit, temporary, expected_sha256, observed
+                    )
+                    temporary = Path()
+                    return stored
+                except UnknownOutcomeError as error:
+                    unavailable = error
+            assert unavailable is not None
+            raise unavailable
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact transfer storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+        finally:
+            # Shielded: a cancelled upload still removes its temp file and
+            # reservation (a cancel before they were named leaves only files
+            # the reconciler sweeps).
+            await asyncio.shield(
+                asyncio.to_thread(self._cleanup_upload, temporary, reservation)
+            )
+
+    @staticmethod
+    def _flush_and_sync(stream: BinaryIO) -> None:
+        stream.flush()
+        os.fsync(stream.fileno())
+
+    def put_bytes(
+        self,
+        expected_sha256: str,
+        content: bytes,
+        *,
+        maximum_bytes: int,
+    ) -> StoredArtifactBlob:
+        self._digest(expected_sha256)
+        if len(content) > maximum_bytes:
+            raise ArtifactBlobInvalid(
+                "artifact bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            )
+        if hashlib.sha256(content).hexdigest() != expected_sha256:
+            raise ArtifactBlobDigestMismatch(
+                "artifact upload SHA-256 does not match",
+                reason=SecurityRefusalReason.DIGEST_MISMATCH,
+            )
+        reservation, existing = self._reserve(expected_sha256, len(content))
+        if existing is not None:
+            return existing
+        assert reservation is not None
+        temporary = Path()
+        try:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f".{expected_sha256}.{reservation.token}.",
+                suffix=".part",
+                dir=self._root / ".tmp",
+            )
+            temporary = Path(temporary_name)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            stored = self._commit(temporary, expected_sha256, len(content))
+            temporary = Path()
+            return stored
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact transfer storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+        finally:
+            self._cleanup_upload(temporary, reservation)
+
+    def resolve(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
+        """The stored object, or ``None`` when its bytes are absent or damaged.
+
+        Absent or damaged bytes are unknown, not a refusal: the caller reads
+        ``None`` as "not found" and the next identical upload replaces them.
+        """
+
+        try:
+            self._digest(sha256)
+            expected_key = f"{sha256[:2]}/{sha256}"
+            if storage_key != expected_key:
+                retire_as_unknown(
+                    "artifact-blob.storage-key",
+                    sha256,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "stored key differs from content identity",
+                )
+            # Content identity owns the path. A damaged stored key cannot select
+            # another path or prevent observation of the exact accepted bytes.
+            path = self._root / expected_key
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or path.stat().st_size != size_bytes
+            ):
+                return None
+            return path
+        except (ArtifactBlobInvalid, OSError):
+            return None
+
+    @staticmethod
+    def iter_file(path: Path, *, chunk_bytes: int = 1024**2) -> Iterator[bytes]:
+        with path.open("rb") as stream:
+            while chunk := stream.read(chunk_bytes):
+                yield chunk
+
+    def delete(self, storage_key: str, sha256: str) -> None:
+        expected_key = f"{sha256[:2]}/{sha256}"
+        self._digest(sha256)
+        if storage_key != expected_key:
+            raise ArtifactBlobUnsafePath(
+                "artifact storage key is invalid",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
+        path = self._root / storage_key
+        if path.is_symlink():
+            raise ArtifactBlobUnsafePath(
+                "artifact storage path is unsafe",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
+        if path.exists():
+            path.unlink()
+
+    def reconcile(
+        self,
+        referenced_sha256: set[str],
+        *,
+        batch_limit: int = 1000,
+        orphan_grace_seconds: int = 300,
+        reclaimable_sha256: set[str],
+        _reference_fenced: bool = False,
+    ) -> BlobReconciliation:
+        """Remove abandoned temporary/orphan bytes and report referenced gaps.
+
+        ``reclaimable_sha256`` is required: only those content-addressed
+        objects may be unlinked, and the caller must have positive evidence
+        for each (a reference scan that may be incomplete never proves an
+        object unused). There is deliberately no sweep-everything default.
+        """
+        if not _reference_fenced:
+            with self.reference_reconciliation():
+                return self.reconcile(
+                    referenced_sha256,
+                    batch_limit=batch_limit,
+                    orphan_grace_seconds=orphan_grace_seconds,
+                    reclaimable_sha256=reclaimable_sha256,
+                    _reference_fenced=True,
+                )
+        if not 1 <= batch_limit <= 10_000:
+            raise InvalidValue(
+                "artifact reconciliation batch limit is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
+        if not 0 <= orphan_grace_seconds <= 3600:
+            raise InvalidValue(
+                "artifact reconciliation orphan grace is invalid",
+                reason=InvalidRequestReason.OUT_OF_RANGE,
+            )
+        for digest in referenced_sha256:
+            self._digest(digest)
+        self._prepare_root()
+        removed_temporary = 0
+        removed_reservations = 0
+        removed_orphans = 0
+        remaining_work = False
+        remaining_budget = batch_limit
+        missing = set(referenced_sha256)
+        with self._quota_lock():
+            active_reservations: set[str] = set()
+            reservations_root = self._root / ".reservations"
+            for path in reservations_root.iterdir():
+                if (
+                    path.is_symlink()
+                    or not path.is_file()
+                    or not path.name.endswith(".reserve")
+                ):
+                    continue
+                descriptor = os.open(
+                    path,
+                    os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                )
+                try:
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        active_reservations.add(path.name.removesuffix(".reserve"))
+                        continue
+                    if remaining_budget == 0:
+                        remaining_work = True
+                        continue
+                    path.unlink()
+                    removed_reservations += 1
+                    remaining_budget -= 1
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                finally:
+                    os.close(descriptor)
+            temporary_root = self._root / ".tmp"
+            for path in temporary_root.iterdir():
+                if path.is_file() and not path.is_symlink():
+                    token = self._temporary_token(path)
+                    if token in active_reservations:
+                        continue
+                    if remaining_budget == 0:
+                        remaining_work = True
+                        continue
+                    path.unlink()
+                    removed_temporary += 1
+                    remaining_budget -= 1
+            for directory in self._root.iterdir():
+                if (
+                    len(directory.name) != 2
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in directory.name
+                    )
+                    or directory.is_symlink()
+                    or not directory.is_dir()
+                ):
+                    continue
+                for path in directory.iterdir():
+                    if path.is_symlink() or not path.is_file():
+                        continue
+                    digest = path.name
+                    if digest in referenced_sha256:
+                        missing.discard(digest)
+                    else:
+                        if digest not in reclaimable_sha256:
+                            # No positive evidence that this object is unused.
+                            continue
+                        if time.time() - path.stat().st_mtime < orphan_grace_seconds:
+                            remaining_work = True
+                            continue
+                        if remaining_budget == 0:
+                            remaining_work = True
+                            continue
+                        path.unlink()
+                        removed_orphans += 1
+                        remaining_budget -= 1
+        return BlobReconciliation(
+            removed_temporary_files=removed_temporary,
+            removed_reservation_files=removed_reservations,
+            removed_orphan_blobs=removed_orphans,
+            missing_referenced_blobs=sorted(missing),
+            remaining_work=remaining_work,
+            **self.usage().model_dump(),
+        )
+
+    @contextmanager
+    def _reference_lock(self, *, exclusive: bool) -> Iterator[None]:
+        """Hold the shared reference fence for one bounded claim.
+
+        The fence is a kernel file lock shared with any other Controller
+        process, so it is claimed nonblockingly and retried until a bounded
+        budget expires. A caller that cannot make progress reports the
+        contention and retries its own operation instead of pinning a worker
+        thread on another process' reconciliation.
+        """
+
+        self._prepare_root()
+        flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(self._root / ".references.lock", flags, 0o600)
+        try:
+            self._claim_reference_lock(descriptor, exclusive=exclusive)
+            yield
+        finally:
+            # Closing is mandatory even when the explicit unlock fails. The
+            # descriptor owns the kernel fence; leaking it wedges fresh work.
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+    @staticmethod
+    def _claim_reference_lock(descriptor: int, *, exclusive: bool) -> None:
+        """Acquire the reference fence nonblockingly inside a bounded budget."""
+
+        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        deadline = time.monotonic() + _REFERENCE_LOCK_BUDGET_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, mode | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise ArtifactBlobBusy(
+                        "artifact storage references are being reconciled",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from None
+                time.sleep(_REFERENCE_LOCK_RETRY_SECONDS)
+
+    def _commit(
+        self, temporary: Path, sha256: str, size_bytes: int
+    ) -> StoredArtifactBlob:
+        try:
+            return self._commit_once(temporary, sha256, size_bytes)
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact commit storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+
+    def _commit_once(
+        self, temporary: Path, sha256: str, size_bytes: int
+    ) -> StoredArtifactBlob:
+        directory = self._root / sha256[:2]
+        directory.mkdir(mode=0o700, exist_ok=True)
+        destination = directory / sha256
+        storage_key = f"{sha256[:2]}/{sha256}"
+        with self._quota_lock():
+            if destination.exists():
+                intact = self._intact(storage_key, sha256, size_bytes)
+                if intact is not None:
+                    # A prior rename may have succeeded before directory fsync
+                    # failed. Reconcile that exact publication before reuse.
+                    if not temporary.exists():
+                        self._fsync_directory(directory)
+                    return StoredArtifactBlob(sha256, size_bytes, storage_key, intact)
+                # Damaged bytes are replaced by the verified upload below.
+            reservations = self._reservation_entries()
+            accounted = (
+                self._stored_bytes()
+                + sum(reservations.values())
+                + self._unreserved_temporary_bytes(set(reservations))
+            )
+            if accounted > self._max_stored_bytes:
+                raise ArtifactBlobQuotaExhausted(
+                    "artifact storage quota is exhausted",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            os.replace(temporary, destination)
+            self._fsync_directory(directory)
+        return StoredArtifactBlob(sha256, size_bytes, storage_key, destination)
+
+    @staticmethod
+    def _fsync_directory(directory: Path) -> None:
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _intact(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
+        """The stored object when it is present and of the recorded size."""
+
+        path = self.resolve(storage_key, sha256, size_bytes)
+        if path is None:
+            retire_as_unknown(
+                "artifact-blob.object",
+                sha256,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                "stored object is absent or of another size",
+            )
+        return path
+
+    def _prepare_root(self) -> None:
+        self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self._root.is_symlink() or not self._root.is_dir():
+            raise ArtifactBlobUnsafePath(
+                "artifact storage root is unsafe",
+                reason=SecurityRefusalReason.UNSAFE_PATH,
+            )
+        for name in (".tmp", ".reservations"):
+            path = self._root / name
+            path.mkdir(mode=0o700, exist_ok=True)
+            if path.is_symlink() or not path.is_dir():
+                raise ArtifactBlobUnsafePath(
+                    "artifact storage metadata path is unsafe",
+                    reason=SecurityRefusalReason.UNSAFE_PATH,
+                )
+
+    def _stored_bytes(self) -> int:
+        total = 0
+        for directory in self._root.iterdir():
+            if (
+                directory.name in {".tmp", ".reservations"}
+                or directory.is_symlink()
+                or not directory.is_dir()
+            ):
+                continue
+            for path in directory.iterdir():
+                if path.is_file() and not path.is_symlink():
+                    total += path.stat().st_size
+        return total
+
+    def _reserve(
+        self, sha256: str, size_bytes: int
+    ) -> tuple[_BlobReservation | None, StoredArtifactBlob | None]:
+        try:
+            self._prepare_root()
+            return self._reserve_once(sha256, size_bytes)
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact reservation storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+
+    def _reserve_once(
+        self, sha256: str, size_bytes: int
+    ) -> tuple[_BlobReservation | None, StoredArtifactBlob | None]:
+        storage_key = f"{sha256[:2]}/{sha256}"
+        destination = self._root / storage_key
+        with self._quota_lock():
+            if destination.exists():
+                intact = self._intact(storage_key, sha256, size_bytes)
+                if intact is not None:
+                    return None, StoredArtifactBlob(
+                        sha256, size_bytes, storage_key, intact
+                    )
+                # Rebuild from evidence: the incoming bytes are verified against
+                # the digest and replace the damaged stored object.
+            self._reap_abandoned_uploads()
+            reservations = self._reservation_entries()
+            accounted = (
+                self._stored_bytes()
+                + sum(reservations.values())
+                + self._unreserved_temporary_bytes(set(reservations))
+            )
+            if accounted + size_bytes > self._max_stored_bytes:
+                raise ArtifactBlobQuotaExhausted(
+                    "artifact storage quota is exhausted",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            token = uuid.uuid4().hex
+            path = self._root / ".reservations" / f"{token}.reserve"
+            descriptor = os.open(
+                path,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.write(descriptor, str(size_bytes).encode("ascii"))
+                os.fsync(descriptor)
+            except BaseException as error:
+                os.close(descriptor)
+                path.unlink(missing_ok=True)
+                if isinstance(error, OSError):
+                    raise ArtifactBlobBusy(
+                        "artifact reservation storage is unavailable",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
+                raise
+            return _BlobReservation(token, path, descriptor, size_bytes), None
+
+    def _cleanup_upload(self, temporary: Path, reservation: _BlobReservation) -> None:
+        try:
+            if temporary != Path():
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            retire_as_unknown(
+                "artifact-blob.temporary",
+                reservation.token,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                str(error),
+            )
+        finally:
+            self._release_reservation(reservation)
+
+    def _reap_abandoned_uploads(self) -> None:
+        # Quota ownership serializes new reservation creation. A nonblocking
+        # claim of the reservation proves its uploader no longer owns it.
+        # Keep that exact record until its partial bytes have been removed.
+        for path in (self._root / ".reservations").glob("*.reserve"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            descriptor = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                token = path.name.removesuffix(".reserve")
+                for temporary in (self._root / ".tmp").iterdir():
+                    if (
+                        self._temporary_token(temporary) == token
+                        and not temporary.is_symlink()
+                    ):
+                        temporary.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
+            finally:
+                os.close(descriptor)
+
+    def _release_reservation(self, reservation: _BlobReservation) -> None:
+        try:
+            if not any(
+                self._temporary_token(path) == reservation.token
+                for path in (self._root / ".tmp").iterdir()
+            ):
+                reservation.path.unlink(missing_ok=True)
+        except OSError as error:
+            retire_as_unknown(
+                "artifact-blob.reservation",
+                reservation.token,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                str(error),
+            )
+        finally:
+            try:
+                fcntl.flock(reservation.descriptor, fcntl.LOCK_UN)
+            except OSError as error:
+                retire_as_unknown(
+                    "artifact-blob.reservation",
+                    reservation.token,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    str(error),
+                )
+            finally:
+                os.close(reservation.descriptor)
+
+    def _reservation_entries(self) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for path in (self._root / ".reservations").iterdir():
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or not path.name.endswith(".reserve")
+            ):
+                continue
+            try:
+                value = int(path.read_text(encoding="ascii"))
+            except (OSError, UnicodeError, ValueError) as error:
+                value = None
+                note = f"{type(error).__name__}: {error}"
+            else:
+                note = "reservation size is outside the quota"
+            if value is None or not 0 <= value <= self._max_stored_bytes:
+                # A reservation file that cannot be read (half-written by a live
+                # holder, or damaged) is unknown, not a refusal: its bytes are
+                # counted from the temporary file it guards, and the reconcile
+                # sweep removes it once no holder has it locked.
+                retire_as_unknown(
+                    "artifact-blob.reservation",
+                    path.name,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    note,
+                )
+                continue
+            values[path.name.removesuffix(".reserve")] = value
+        return values
+
+    def _unreserved_temporary_bytes(self, reservations: set[str]) -> int:
+        return sum(
+            path.stat().st_size
+            for path in (self._root / ".tmp").iterdir()
+            if path.is_file()
+            and not path.is_symlink()
+            and self._temporary_token(path) not in reservations
+        )
+
+    @staticmethod
+    def _temporary_token(path: Path) -> str | None:
+        parts = path.name.split(".")
+        if len(parts) >= 5 and len(parts[2]) == 32:
+            return parts[2]
+        return None
+
+    def _quota_lock(self):
+        lock_path = self._root / ".quota.lock"
+        try:
+            stream = lock_path.open("a+b")
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact quota storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+
+        class _Lock:
+            def __enter__(self_nonlocal):
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as error:
+                    stream.close()
+                    raise ArtifactBlobBusy(
+                        "artifact quota observation is unavailable",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
+                return stream
+
+            def __exit__(self_nonlocal, _kind, _value, _traceback):
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                except OSError as error:
+                    retire_as_unknown(
+                        "artifact-blob.quota",
+                        str(lock_path),
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        str(error),
+                    )
+                finally:
+                    stream.close()
+
+        return _Lock()
+
+    @staticmethod
+    def _digest(value: str) -> None:
+        if (
+            len(value) != 64
+            or value != value.lower()
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ArtifactBlobInvalid(
+                "artifact digest is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
+
+
+__all__ = [
+    "ArtifactBlobBusy",
+    "ArtifactBlobDigestMismatch",
+    "ArtifactBlobInvalid",
+    "ArtifactBlobQuotaExhausted",
+    "ArtifactBlobStore",
+    "ArtifactBlobStoreError",
+    "ArtifactBlobUnsafePath",
+    "StoredArtifactBlob",
+]

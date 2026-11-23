@@ -15,21 +15,22 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
 )
 
-from .. import fleet_profile_states
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.effects import (
     FleetProfileAdoptedApplicationEffect,
     FleetProfileAdoptedStopEffect,
-    FleetProfileAssignment,
     FleetProfilePendingEffect,
-    FleetProfileSwitchChildState,
-    profile_switch_child_request_key,
 )
+from ..fleet_profile_contract.switch_state import FleetProfileSwitchChildState
+from ..fleet_profile_contract.vocabulary import profile_switch_child_request_key
 from ..jobs import states as job_states
 from ..jobs.documents import RunSwitchJobPayload
 from ..lifecycle.evidence import Residue
-from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection, Job
-from ..run_switch_contract import RunSwitchOperationResult
+from ..models.fleet import AgentNode, FleetProfileApplication, FleetProfileSelection
+from ..models.jobs import Job
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..stored.json_values import read_row_column
+from . import states as fleet_profile_states
 from .contracts import (
     FleetProfileConflict,
 )

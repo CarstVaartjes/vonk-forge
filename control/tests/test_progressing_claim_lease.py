@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, PROGRESSING_LEASE
-from vonk_control.models import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, NODE_A, distribution_payload, parent

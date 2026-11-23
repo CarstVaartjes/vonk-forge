@@ -7,12 +7,9 @@ from collections.abc import Mapping
 from pydantic import BaseModel
 from vonk_agent_protocol.package_source import AgentPackageSource
 
-from ..agent_upgrade_contract import (
-    AgentUpgradePackage,
-    AgentUpgradeRolloutResult,
-)
-from ..models import Job
+from ..models.jobs import Job
 from ..strict_json import read_stored_model
+from .contract import AgentUpgradePackage, AgentUpgradeRolloutResult
 
 
 def _stored_field[T: BaseModel](

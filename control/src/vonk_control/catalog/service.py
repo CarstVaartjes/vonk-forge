@@ -39,9 +39,9 @@ from vonk_forge_contracts.qualification_status import (
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import CursorCodec
 from ..identity_insert import insert_identity
-from ..models import CatalogDocument, CatalogDocumentHead, RecipeSourceBundle
+from ..models.catalog import CatalogDocument, CatalogDocumentHead, RecipeSourceBundle
 from ..observed_run_memory import carry_measured_peaks
-from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..source_bundles import (
     SourceBundleError,
     SourceBundleIntegrityRefused,

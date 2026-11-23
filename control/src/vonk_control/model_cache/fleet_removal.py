@@ -29,7 +29,10 @@ from ..admission_locking import (
     lock_admission_rows,
 )
 from ..agent_operation_facts import aware
-from ..artifact_lifecycle import ArtifactLifecycleError, ArtifactReferenceUnverified
+from ..artifact_jobs.lifecycle import (
+    ArtifactLifecycleError,
+    ArtifactReferenceUnverified,
+)
 from ..cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalBlocker,
@@ -64,29 +67,26 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..machine_states import RUN_LIVE
-from ..model_cache_contract import CacheManifest, CacheOperationKind
-from ..models import (
-    AgentNode,
+from ..models.cache import (
     ArtifactLifecycleGate,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
-    InstallationNode,
-    Job,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
-    NodeInventorySnapshot,
-    RecipeInstallation,
-    RecipeRun,
 )
-from ..recipe_execution_contract import parse_stored_installation_plan
+from ..models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.telemetry import NodeInventorySnapshot
 from ..recipe_operations.errors import RecipeRequestInvalid
+from ..recipe_operations.execution_contract import parse_stored_installation_plan
 from ..strict_json import read_stored_model
 from ..unused_storage_collection.evidence import _Evidence
 from ..unused_storage_collection.references import (
     _installation_kept,
     _installation_pointing,
 )
+from .contract import CacheManifest, CacheOperationKind
 from .errors import ModelCacheConflictInvalid
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal, _store_operation_payload

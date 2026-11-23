@@ -16,7 +16,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.definitions import (
     FleetAssignmentModelView,
     FleetAssignmentRecipeView,
     FleetCacheSummary,
@@ -28,15 +28,10 @@ from ..fleet_profile_contract import (
     FleetProfileView,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache_contract import CachedResourceEstimate
-from ..models import (
-    AgentNode,
-    AgentNodeProfile,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    FleetProfile,
-)
-from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
+from ..model_cache.contract import CachedResourceEstimate
+from ..models.catalog import CatalogDocument, CatalogDocumentRevision
+from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
+from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice
 from ..stored.states import CatalogRevisionState
 from .assignment_assessment import _AssignmentRows
 from .contracts import _SelectedProfileSnapshot

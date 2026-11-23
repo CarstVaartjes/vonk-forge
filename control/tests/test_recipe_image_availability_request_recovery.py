@@ -20,12 +20,14 @@ from vonk_control.lifecycle.image_availability import (
     CANCEL_BUDGET,
     PREPARATION_STALL_WINDOW,
 )
-from vonk_control.models import Base, Job, User
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
     OPERATION_KIND,
     BuildUnsettled,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
 from .test_recipe_image_availability import (
@@ -382,10 +384,10 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
     """Catch missing-child observations being overridden into permanent failures."""
     from types import SimpleNamespace
 
-    from vonk_control.model_cache import ModelCacheNotFound
-    from vonk_control.model_cache_contract import ModelCacheCounters
-    from vonk_control.model_cache_progress import cache_progress, progress_document
-    from vonk_control.models import ModelCacheOperation
+    from vonk_control.model_cache.contract import ModelCacheCounters
+    from vonk_control.model_cache.errors import ModelCacheNotFound
+    from vonk_control.model_cache.progress import cache_progress, progress_document
+    from vonk_control.models.cache import ModelCacheOperation
 
     from .test_recipe_image_availability import (
         _download_preview,

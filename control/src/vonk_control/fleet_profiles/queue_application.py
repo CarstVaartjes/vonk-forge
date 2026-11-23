@@ -24,29 +24,29 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..failure_classification import disposition
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
-    FleetProfileApplicationView,
     FleetProfileIntendedConfiguration,
-    FleetProfileOperationKind,
-    FleetProfilePreview,
-    FleetProfileScope,
 )
+from ..fleet_profile_contract.definitions import FleetProfileScope
+from ..fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
+from ..fleet_profile_contract.vocabulary import FleetProfileOperationKind
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect
-from ..models import (
+from ..models.execution import RecipeRun, RunNode
+from ..models.fleet import (
     AgentNode,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
-    RecipeRun,
-    RunNode,
 )
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import (
@@ -61,6 +61,7 @@ from ..recipe_builds.cancellation import (
 )
 from ..run_route_name import rename_run
 from ..workload_intent import allocate_workload_intent, raise_workload_intent
+from . import states as fleet_profile_states
 from .assessment_support import (
     _require_recovery_preparations,
 )

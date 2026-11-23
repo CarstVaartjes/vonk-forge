@@ -20,9 +20,11 @@ from vonk_forge_contracts import PrebuiltImage
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
+from ..fleet_profiles.read_observation import observe_selection
 from ..gpu.health import gpu_health_reason
 from ..inventory.items import runtime_value
-from ..models import AgentNode, CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import AgentNode
 from ..prebuilt_images import (
     PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
@@ -30,8 +32,7 @@ from ..prebuilt_images import (
     PrebuiltDecision,
     executable_build_key,
 )
-from ..profile_read_observation import observe_selection
-from ..recipe_execution_contract import (
+from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
     build_policy_document,

@@ -12,8 +12,8 @@ from vonk_control.gateway.route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
 )
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes import publisher as publisher_module
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 
 from .observed_actions import observe_action
 from .test_route_runtime import _verified_bundle

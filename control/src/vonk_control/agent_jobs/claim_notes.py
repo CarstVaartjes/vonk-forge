@@ -17,8 +17,10 @@ from ..categorized_errors import InvalidValue
 from ..gpu.health import GPU_HEALTH_CODES
 from ..jobs.agent_contract import ClaimFacts
 from ..logging import redact_text
-from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentCertificate, AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import read_wait
 from .contracts import (
     _BOUNDARY_REFUSAL_PREFIXES,

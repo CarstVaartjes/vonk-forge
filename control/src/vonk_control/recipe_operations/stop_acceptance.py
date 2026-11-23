@@ -29,22 +29,19 @@ from ..jobs.documents import (
     controller_recipe_document,
 )
 from ..logging import redact_text
-from ..models import (
-    FleetProfileApplication,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
+from ..models.execution import RecipeInstallation, RecipeRun
+from ..models.fleet import FleetProfileApplication
+from ..models.jobs import Job
 from ..profile_stop_authority import (
     ProfileStopAuthorityError,
     ProfileStopOwnerBinding,
     validate_profile_stop_owner,
 )
-from ..recipe_action_plans import (
-    StopPlan,
-)
 from ..stored.json_values import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .impact_plans import (
+    StopPlan,
+)
 from .interfaces import new_recipe_job
 
 if TYPE_CHECKING:
@@ -63,9 +60,12 @@ class StopAcceptanceMixin:
         ordinal: int | None,
     ) -> ProfileStopOwnerBinding:
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles import _persisted_profile_progress
-        from ..run_switch_contract import RunSwitchOperationResult
-        from ..run_switch_operations import _phase_request_key, _stop_child_request_key
+        from ..fleet_profiles.persistence import _persisted_profile_progress
+        from ..run_switch_contract.operations import RunSwitchOperationResult
+        from ..run_switch_operations.observation_helpers import (
+            _phase_request_key,
+            _stop_child_request_key,
+        )
 
         application = session.get(FleetProfileApplication, profile_application_id)
         if application is None or application.current_step is None or ordinal is None:

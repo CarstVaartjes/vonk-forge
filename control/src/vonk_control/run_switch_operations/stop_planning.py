@@ -24,27 +24,21 @@ from ..lifecycle.evidence import (
     Residue,
     read_or_rebuild,
 )
-from ..models import (
-    STOPPABLE_RUN_STATES,
-    ClusterMapping,
-    ClusterMappingNode,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-)
-from ..recipe_execution_contract import (
+from ..models.cache import RecipeBuild
+from ..models.execution import STOPPABLE_RUN_STATES, RecipeInstallation, RecipeRun
+from ..models.mapping import ClusterMapping, ClusterMappingNode
+from ..recipe_operations.execution_contract import (
     parse_stored_run_plan,
 )
-from ..run_switch_contract import (
+from ..run_switch_contract.evidence import RunSwitchReason, StopImpact
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.requests import (
     InvocationMetadata,
     RunSwitchCleanupPreviewRequest,
-    RunSwitchPlan,
     RunSwitchProfileStopScope,
-    RunSwitchReason,
     RunSwitchStopPreviewRequest,
     SparkGroup,
     SparkGroupNode,
-    StopImpact,
 )
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision

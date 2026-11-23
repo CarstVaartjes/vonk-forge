@@ -16,7 +16,9 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProgressPhase
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
-from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
+from vonk_control.fleet_profile_contract.applications import (
+    FleetProfileApplicationProgress,
+)
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from vonk_control.operations.blockers import ProgressAlarmCode, make_blocker
 from vonk_control.progress_stall import (
@@ -644,7 +646,7 @@ def test_every_process_with_the_fleet_profile_service_counts_observations() -> N
     # The flush hook registers with its module; the service package must load it
     # (the worker imports the service, not this module).
     probe = (
-        "import sys, vonk_control.fleet_profiles\n"
+        "import sys, vonk_control.fleet_profiles.service\n"
         "assert 'vonk_control.progress_stall' in sys.modules\n"
     )
     subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)

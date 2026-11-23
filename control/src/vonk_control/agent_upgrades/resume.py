@@ -15,12 +15,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 
 from .. import agent_operation_states
-from ..agent_jobs import (
-    schedule_agent_upgrade_retry,
-)
-from ..agent_upgrade_contract import (
-    AgentUpgradeRolloutPayload,
-)
+from ..agent_jobs.retry import schedule_agent_upgrade_retry
 from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
@@ -33,8 +28,10 @@ from ..jobs.operator_receipts import (
 )
 from ..lifecycle.agent_upgrade import UNSUPPORTED_DISPATCH
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import AgentOperation, AgentOperationAttempt, Job, JobAttempt
+from ..models.jobs import Job, JobAttempt
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..strict_json import read_stored_model
+from .contract import AgentUpgradeRolloutPayload
 
 if TYPE_CHECKING:
     from .service import AgentUpgradeService

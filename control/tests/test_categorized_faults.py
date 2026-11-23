@@ -9,7 +9,7 @@ from uuid import uuid4
 from vonk_agent_protocol import (
     LifecycleState,
 )
-from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
+from vonk_control.artifact_jobs.lifecycle import ArtifactIdentity, reserve_removal
 
 from .removal_settle import advance_until_ended
 from .test_model_cache import cache  # noqa: F401 - pytest fixture

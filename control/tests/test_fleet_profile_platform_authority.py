@@ -80,7 +80,8 @@ def test_maintenance_cannot_add_an_original_author_permission_gate(
 @pytest.mark.parametrize("maintenance", ["batch-child", "profile-preparation-cancel"])
 def test_accepted_preparation_survives_author_removal(update_env, maintenance):
     from sqlalchemy import select
-    from vonk_control.models import Job, User
+    from vonk_control.models.fleet import User
+    from vonk_control.models.jobs import Job
 
     from .test_recipe_update_batches import _start
 

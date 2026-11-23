@@ -10,26 +10,23 @@ from httpx2 import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileApplicationView,
-    FleetProfileAssignment,
     FleetProfileChildOperation,
+)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignment
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchChildState,
 )
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-)
-from vonk_control.run_switch_contract import (
-    RunSwitchMemberReceipt,
-    RunSwitchOperationResult,
-)
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress import RunSwitchMemberReceipt
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .insert_collision_support import Rendezvous

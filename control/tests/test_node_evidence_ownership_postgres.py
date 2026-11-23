@@ -12,10 +12,8 @@ from vonk_control.evidence_repeats import (
     owner_evidence,
     repeating_evidence,
 )
-from vonk_control.models import (
-    AgentNodeContact,
-    AgentOperation,
-)
+from vonk_control.models.fleet import AgentNodeContact
+from vonk_control.models.operations import AgentOperation
 from vonk_control.repeated_evidence_contract import RepeatedEvidenceSubject
 
 from .test_agent_api import NODE_A, STOP_PAYLOAD, make_agent_system, parent

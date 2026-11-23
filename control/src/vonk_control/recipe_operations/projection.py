@@ -35,10 +35,7 @@ from ..agent_operation_facts import aware
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
 )
-from ..distributed_recovery import (
-    enforce_recovery_deadline,
-)
-from ..lifecycle import Outcome
+from ..distributed_recovery.common import enforce_recovery_deadline
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -47,60 +44,56 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter, cancel_flagged
-from ..models import (
-    AgentOperation,
-    InstallationNode,
-    Job,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..lifecycle.types import Outcome
+from ..models.cache import RecipeBuild
+from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..persisted_waits import schedule_wait
 from ..recipe_builds.cancellation import build_cancellation
-from ..recipe_execution_contract import (
+from ..stored.json_values import read_row_column
+from ..stored.states import RecipeBuildState
+from ..strict_json import read_stored_model, serialize_json_value
+from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS
+from .errors import RecipeRequestInvalid
+from .execution_contract import (
     RecipeExecutionContractError,
     run_endpoint_document,
 )
-from ..recipe_lifecycle_contract import (
+from .intent import _intent_is_current, _job_workload_intent
+from .interfaces import _TERMINAL_JOB_STATES
+from .lifecycle_contract import (
     LifecycleCodeFailureResult,
     LifecycleNodeResult,
     RecipeOperationCancellationResult,
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from ..recipe_progress import (
+from .observation_helpers import _PhaseGroups, _start_endpoint, record_build_evidence
+from .progress import (
     _current_phase_index as _current_phase_index,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _parent_force_rebuild as _parent_force_rebuild,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _parent_reconciliation as _parent_reconciliation,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _start_deadline_failure as _start_deadline_failure,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_progress import (
+from .progress import (
     _stored_phases as _stored_phases,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored.json_values import read_row_column
-from ..stored.states import RecipeBuildState
-from ..strict_json import read_stored_model, serialize_json_value
-from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS
-from .errors import RecipeRequestInvalid
-from .intent import _intent_is_current, _job_workload_intent
-from .interfaces import _TERMINAL_JOB_STATES
-from .observation_helpers import _PhaseGroups, _start_endpoint, record_build_evidence
 from .rank_authority import _run_observes_per_generation
 from .results import _RANK_FAILED, _node_result, _recorded_result, _validated_result
 
 if TYPE_CHECKING:
-    from ..agent_jobs import AgentJobService
+    from ..agent_jobs.service import AgentJobService
     from .service import RecipeOperationService
 
 

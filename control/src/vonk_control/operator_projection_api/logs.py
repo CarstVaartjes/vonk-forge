@@ -25,14 +25,9 @@ from ..failure_evidence import (
     sanitize_diagnostics,
 )
 from ..logging import redact_text
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import RecipeInstallation, RecipeRun, RunNode
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 

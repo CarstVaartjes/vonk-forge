@@ -25,10 +25,12 @@ from ..agent_operation_facts import (
 from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
-from ..lifecycle import CancelRequested, LeaseLapsed, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.types import CancelRequested, LeaseLapsed, Reported
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,

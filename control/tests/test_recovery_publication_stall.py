@@ -8,12 +8,9 @@ from pathlib import Path
 
 from sqlalchemy import select
 from vonk_control.agent_operation_facts import START_STALL_WINDOW
-from vonk_control.models import (
-    AgentCertificate,
-    AgentOperation,
-    AgentOperationAttempt,
-    RecipeRun,
-)
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentCertificate
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.recipe_routes.service import RecipeRecoveryDeadlineError
 
 from .test_recipe_operations import (

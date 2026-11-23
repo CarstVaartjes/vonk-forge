@@ -11,11 +11,8 @@ from vonk_agent_protocol import (
     EnrollmentGrantState,
 )
 
-from ..agent_api import AgentApiServices, EnrollmentGrantResponse
-from ..agent_upgrade_contract import AgentUpgradePackage, AgentUpgradeRequestIntent
-from ..enrollment import (
-    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
-)
+from ..agent_api.common import AgentApiServices, EnrollmentGrantResponse
+from ..agent_upgrades.contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 from ..enrollment.bootstrap import accepted_installer_url
 from ..enrollment.contract import (
     EnrollmentGrant,
@@ -23,6 +20,7 @@ from ..enrollment.contract import (
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
+from ..enrollment.types import MAX_ENROLLMENT_GRANT_TTL_SECONDS
 from .contracts import FleetActionResponse, FleetLogResponse
 
 

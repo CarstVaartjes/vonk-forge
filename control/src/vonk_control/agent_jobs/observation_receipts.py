@@ -33,8 +33,10 @@ from ..agent_operation_facts import aware, job_output_retention_expiry
 from ..agent_outcome import agent_outcome
 from ..inventory.items import runtime_value
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from .contracts import _ENDED_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
 from .stored import column_field, column_value
 

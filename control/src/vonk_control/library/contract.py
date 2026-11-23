@@ -41,13 +41,14 @@ from ..catalog.revision_contract import (
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..machine_states import InstallationStateField, RouteStateField, RunStateField
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
     ModelStorageObservation,
 )
 from ..operations.blockers import MAX_BLOCKERS, OperationBlocker
-from ..run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
+from ..run_switch_contract.evidence import RunSwitchReason, SparkFit
+from ..run_switch_contract.requests import SparkGroup
 from ..strict_json import StrictModel
 
 _UUID_PATTERN = (

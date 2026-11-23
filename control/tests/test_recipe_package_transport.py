@@ -39,9 +39,12 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import Base, CatalogDocumentRevision, RecipeBuild
-from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_builds.common import RecipeBuildUnknown
+from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import archive
 from vonk_control.recipe_packages import client as recipe_packages

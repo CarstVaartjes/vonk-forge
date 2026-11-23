@@ -14,23 +14,25 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
-    FleetProfileAssignment,
-    FleetProfileAssignmentFailure,
-    FleetProfileChildOperation,
+from ..fleet_profile_contract.applications import FleetProfileChildOperation
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.effects import (
     FleetProfileChildProgress,
     FleetProfileEffects,
+)
+from ..fleet_profile_contract.switch_state import (
+    FleetProfileAssignmentFailure,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchQueueItem,
 )
 from ..jobs import states as job_states
 from ..lifecycle.fleet_profile import doc_state
-from ..models import FleetProfileApplication
+from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import PHASE_RETRY_CODE, STALL_RETRY_ATTEMPT
 from ..persisted_waits import read_wait
 from ..preparation_contract import RuntimeImageIdentity
-from ..run_switch_contract import RunSwitchOperation
+from ..run_switch_contract.operations import RunSwitchOperation
 from .assessment_support import (
     _operation_state,
 )

@@ -15,11 +15,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Route
 from vonk_agent_protocol.error_response import BoundedErrorResponse
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog.api import CatalogProblem
-from vonk_control.models import Base, Job, User
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -410,7 +412,7 @@ def test_bounded_error_detail_never_echoes_the_rejected_value() -> None:
     ``ValidationError`` stringifies the submitted input, so an unredacted
     detail would hand the failing value straight back to the caller.
     """
-    from vonk_control.api import _bounded_error_content
+    from vonk_control.api.common import _bounded_error_content
 
     with pytest.raises(ValidationError) as rejected:
         _RejectedPlan.model_validate({"retries": "token=super-secret-value"})

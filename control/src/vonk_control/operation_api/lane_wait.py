@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import WaitReason
 
-from ..models import AgentOperation
+from ..models.operations import AgentOperation
 from ..operations.item_contract import OperationItem
 from ..persisted_waits import read_wait
 from ..wait_contract import QueueWait

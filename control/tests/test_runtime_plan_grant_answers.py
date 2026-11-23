@@ -44,14 +44,11 @@ from vonk_control.host_runtime_plan_authority import (
     RuntimePlanEvidenceUnavailable,
     RuntimePlanUnsatisfiable,
 )
-from vonk_control.models import (
-    AgentOperation,
-    ClusterMapping,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
-from vonk_control.recipe_execution_contract import (
+from vonk_control.models.execution import RecipeInstallation, RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.execution_contract import (
     parse_stored_run_plan,
     run_plan_document,
 )

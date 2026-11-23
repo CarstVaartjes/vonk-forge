@@ -27,12 +27,9 @@ from vonk_control.admission_locking import (
 )
 from vonk_control.agent_contacts import record_contact, record_observation_delivery
 from vonk_control.inventory.repository import InventoryRepository, NodeInventoryReport
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    Base,
-    NodeTelemetryLatest,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.telemetry import NodeTelemetryLatest
 from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
 NODE = "spk_" + "a" * 32

@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol import AgentResultState
-from vonk_control import artifact_job_states
-from vonk_control.models import ArtifactJob, ArtifactJobFile, RecipeRun
+from vonk_control.artifact_jobs import states as artifact_job_states
+from vonk_control.models.execution import ArtifactJob, ArtifactJobFile, RecipeRun
 
 from .test_artifact_jobs import (
     artifact_create_request,
@@ -107,7 +107,7 @@ def test_damaged_contract_rebuilds_or_ends_without_holding_fresh_request(
         RecipeJobOutputManifest,
         RecipeJobRunResult,
     )
-    from vonk_control.models import AgentOperation
+    from vonk_control.models.operations import AgentOperation
 
     sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path

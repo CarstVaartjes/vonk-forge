@@ -23,7 +23,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .lifecycle.agent_operation import OWNER_KIND as ARTIFACT_JOB_OWNER
-from .models import Job
+from .models.jobs import Job
 from .owner_liveness import OwnerKind
 
 #: Agent orders that remove their owner's own effect. A newer workload intent

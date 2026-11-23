@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from vonk_control.artifact_blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 
 
 def _digest(content: bytes) -> str:
@@ -192,7 +192,7 @@ def test_stream_retries_same_content_without_replaying_iterator(
     import asyncio
 
     from vonk_agent_protocol import WaitReason
-    from vonk_control.artifact_blob_store import ArtifactBlobBusy
+    from vonk_control.artifact_jobs.blob_store import ArtifactBlobBusy
 
     store = _store(tmp_path)
     content = b"exact streamed bytes"

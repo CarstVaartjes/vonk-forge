@@ -27,9 +27,12 @@ from vonk_agent_protocol import (
     AgentOperation as Kind,
 )
 from vonk_agent_protocol.contracts import AgentPayload, AgentResultPayload
-from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
+from vonk_control.agent_jobs.contracts import StaleAgentFence
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
-from vonk_control.models import AgentNode, AgentOperation, AgentOperationAttempt, Job
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from . import test_agent_jobs_postgres as fixtures
 from .node_contacts import contact_row
@@ -315,7 +318,7 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
     # Wrong implementation: terminal cancellation is excluded from idle worker
     # discovery, so its runtime is stopped only after another operator request.
     from vonk_agent_protocol import RecipeStopPayload, RunState
-    from vonk_control.models import ArtifactJob, RecipeRun
+    from vonk_control.models.execution import ArtifactJob, RecipeRun
 
     sessions, operations, artifacts, queue, _clock, job, run_id, node_id = (
         _cancelled_job(tmp_path, postgres_engine)

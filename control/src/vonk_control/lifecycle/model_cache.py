@@ -66,14 +66,14 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     ModelCacheCancellationObservation,
     ModelCacheOperationPayload,
     StoredCacheClocks,
 )
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
 from ..strict_json import serialize_json_value

@@ -26,16 +26,19 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobView
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.contracts import ArtifactJobView
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, RecipeRun
-from vonk_control.recipe_operations import (
+from vonk_control.models.execution import ArtifactJob, RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
-    RecipeOperationService,
     RecipeRetryLater,
 )
+from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (

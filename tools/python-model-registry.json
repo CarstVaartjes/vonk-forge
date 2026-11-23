@@ -172,21 +172,21 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/agent_upgrade_contract.py",
+      "module": "control/src/vonk_control/agent_upgrades/contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/artifact_blob_store.py",
+      "module": "control/src/vonk_control/artifact_jobs/blob_store.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/artifact_job_api.py",
+      "module": "control/src/vonk_control/artifact_jobs/api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/artifact_job_evidence.py",
+      "module": "control/src/vonk_control/artifact_jobs/evidence.py",
       "kind": "controller-contract"
     },
     {
@@ -200,7 +200,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/artifact_maintenance.py",
+      "module": "control/src/vonk_control/artifact_jobs/maintenance.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -365,7 +365,7 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/model_cache_contract.py",
+      "module": "control/src/vonk_control/model_cache/contract.py",
       "kind": "controller-contract"
     },
     {
@@ -416,7 +416,7 @@
       "reason": "Typed internal Prometheus query and response protocol owned by the read-only adapter."
     },
     {
-      "module": "control/src/vonk_control/recipe_availability_intent.py",
+      "module": "control/src/vonk_control/recipe_operations/availability_intent.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -426,40 +426,40 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/recipe_execution_contract.py",
+      "module": "control/src/vonk_control/recipe_operations/execution_contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/recipe_image_availability_api.py",
+      "module": "control/src/vonk_control/recipe_image_availability/api.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/recipe_image_availability_clocks_contract.py",
+      "module": "control/src/vonk_control/recipe_image_availability/clocks_contract.py",
       "kind": "controller-contract",
       "reason": "Tolerant typed lifecycle clock projection independent of job-document imports."
     },
     {
-      "module": "control/src/vonk_control/recipe_image_availability_contract.py",
+      "module": "control/src/vonk_control/recipe_image_availability/availability_contract.py",
       "kind": "controller-contract",
       "reason": "Shared recipe-image state, artifact and builder receipt identity."
     },
     {
-      "module": "control/src/vonk_control/recipe_image_availability_reader_contract.py",
+      "module": "control/src/vonk_control/recipe_image_availability/reader_contract.py",
       "kind": "controller-contract",
       "reason": "Typed adoption and exact-catalog recovery of damaged availability bookkeeping."
     },
     {
-      "module": "control/src/vonk_control/recipe_image_availability_view_contract.py",
+      "module": "control/src/vonk_control/recipe_image_availability/view_contract.py",
       "kind": "controller-contract",
       "reason": "Typed availability and removal read projections with canonical JSON egress."
     },
     {
-      "module": "control/src/vonk_control/recipe_image_removal_contract.py",
+      "module": "control/src/vonk_control/recipe_image_availability/removal_contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/recipe_lifecycle_contract.py",
+      "module": "control/src/vonk_control/recipe_operations/lifecycle_contract.py",
       "kind": "controller-contract"
     },
     {
@@ -472,11 +472,11 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/recipe_update_contract.py",
+      "module": "control/src/vonk_control/recipe_update_batches/contract.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/recipe_update_notice.py",
+      "module": "control/src/vonk_control/recipe_update_batches/notice.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -514,15 +514,15 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_identity_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/identity.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_journal_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/journal.py",
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_observation_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/observation.py",
       "kind": "controller-contract",
       "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
     },

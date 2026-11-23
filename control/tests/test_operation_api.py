@@ -16,41 +16,39 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
-from vonk_control import operation_api
-from vonk_control.agent_jobs import AgentJobService, OperatorRetirementRefused
-from vonk_control.agent_upgrade_status import (
+from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades.status import (
     agent_upgrade_next_action,
 )
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import BoundedJSONError
 from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
-from vonk_control.fleet_profile_contract import (
-    FleetProfileDefinition,
-    FleetProfileEffects,
+from vonk_control.fleet_profile_contract.assessment import (
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
-    FleetProfilePreview,
     FleetProfileScopePreview,
 )
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_profile_contract.definitions import FleetProfileDefinition
+from vonk_control.fleet_profile_contract.effects import FleetProfileEffects
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.jobs.operator_receipts import record_job_operator_receipt
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun, ResourceReservation
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentNode,
     AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
     FleetProfile,
     FleetProfileApplication,
-    Job,
-    RecipeRun,
-    ResourceReservation,
 )
-from vonk_control.operation_api import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.contracts import (
     AgentUpgradeDiagnosticsResponse,
     AgentUpgradeTargetDiagnosticsResponse,
     JobDetailResponse,
@@ -60,7 +58,21 @@ from vonk_control.operation_api import (
     OperationPage,
     OperationProvider,
     OperationQuery,
-    durable_operation_services,
+)
+from vonk_control.operation_api.contracts import (
+    OperationListPage as operation_api_OperationListPage,
+)
+from vonk_control.operation_api.diagnostics import _agent_upgrade_diagnostics
+from vonk_control.operation_api.durable import durable_operation_services
+from vonk_control.operation_api.durable import (
+    durable_operation_services as operation_api_durable_operation_services,
+)
+from vonk_control.operation_api.providers import _operation_boundary
+from vonk_control.operation_api.responses import (
+    _operation_item,
+    _progress_projection,
+    job_response,
+    operation_detail_response,
 )
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
@@ -270,7 +282,7 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
         ),
         resume_job=lambda _job_id, *, receipt=None: None,
         list_operations=lambda _cursor, _limit, _state, _node_id, _request_id: (
-            operation_api.OperationListPage((item,), None, 1)
+            operation_api_OperationListPage((item,), None, 1)
         ),
         get_operation=lambda _operation_id: item,
     )
@@ -318,16 +330,14 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
         "status_reason": reason,
     }
 
-    response = operation_api.operation_detail_response(item)
+    response = operation_detail_response(item)
 
     assert response.status_reason == reason
     assert response.model_dump()["status_reason"] == reason
     # A claim that was never refused keeps the response shape it always had.
     assert (
         "status_reason"
-        not in operation_api.operation_detail_response(
-            {**item, "status_reason": None}
-        ).model_dump()
+        not in operation_detail_response({**item, "status_reason": None}).model_dump()
     )
 
     operation = SimpleNamespace(
@@ -344,15 +354,12 @@ def test_operation_read_surfaces_a_recorded_claim_refusal_reason() -> None:
         updated_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
     )
     assert (
-        operation_api._operation_item(
-            cast(AgentOperation, operation), None
-        ).status_reason
-        == reason
+        _operation_item(cast(AgentOperation, operation), None).status_reason == reason
     )
 
 
 def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:
-    projected = operation_api._progress_projection(
+    projected = _progress_projection(
         {
             "phase": "download",
             "kind": "oci-layer",
@@ -366,14 +373,14 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
     assert projected.completed_bytes == 128
     assert projected.total_bytes == 256 and projected.total_bytes_known
     assert projected.object_sha256 == "a" * 64
-    unknown = operation_api._progress_projection({"phase": "verify"})
+    unknown = _progress_projection({"phase": "verify"})
     assert unknown is not None
     assert not unknown.total_bytes_known
     # Fields a newer Controller retired are ignored, never a read failure.
     for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
-        assert operation_api._progress_projection(
+        assert _progress_projection(
             {"phase": "download", retired: 1}
-        ) == operation_api._progress_projection({"phase": "download"})
+        ) == _progress_projection({"phase": "download"})
 
 
 def test_operations_route_accepts_a_cursor_up_to_the_cursor_contract_length() -> None:
@@ -381,7 +388,7 @@ def test_operations_route_accepts_a_cursor_up_to_the_cursor_contract_length() ->
 
     def listing(cursor, _limit, _state, _node_id, _request_id):
         seen.append(cursor)
-        return operation_api.OperationListPage((), None, 0)
+        return operation_api_OperationListPage((), None, 0)
 
     services = OperationApiServices(
         agents=lambda: (),
@@ -452,7 +459,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     def provider_for(ids: tuple[str, ...]) -> OperationProvider:
         def list_rows(query: OperationQuery) -> OperationListPage:
             def boundary(row):
-                observed = operation_api._operation_boundary(operation_item(row))
+                observed = _operation_boundary(operation_item(row))
                 assert observed is not None
                 return observed
 
@@ -1068,7 +1075,7 @@ def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
     with sessions.begin() as session:
         session.add(job)
     resumed: list[str] = []
-    services = operation_api.durable_operation_services(
+    services = operation_api_durable_operation_services(
         sessions,
         tmp_path / "routes",
         clock=lambda: now,
@@ -1124,7 +1131,7 @@ def test_durable_operation_keyset_pages_are_complete_and_aggregated(tmp_path) ->
                     updated_at=now,
                 )
             )
-    services = operation_api.durable_operation_services(
+    services = operation_api_durable_operation_services(
         sessions,
         tmp_path / "routes",
         clock=lambda: now,
@@ -1395,7 +1402,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
                 result={"reason": "agent upgrade request is invalid"},
             )
         )
-    services = operation_api.durable_operation_services(
+    services = operation_api_durable_operation_services(
         sessions,
         tmp_path / "routes",
         clock=lambda: now,
@@ -1414,7 +1421,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     assert target.observed_identity is not None
     assert target.observed_identity.binary_digest == old_binary
     assert target.observed_identity.build_digest == old_build
-    projected = operation_api.job_response(
+    projected = job_response(
         job,
         page,
         target_cursor=0,
@@ -1537,7 +1544,7 @@ def test_durable_operation_cursor_rejects_cross_job_replay_and_tampering(
                         updated_at=now,
                     )
                 )
-    services = operation_api.durable_operation_services(
+    services = operation_api_durable_operation_services(
         sessions,
         tmp_path / "routes",
         clock=lambda: now,
@@ -1688,7 +1695,7 @@ def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) 
                     },
                 )
             )
-    services = operation_api.durable_operation_services(
+    services = operation_api_durable_operation_services(
         sessions,
         tmp_path / "routes",
         clock=lambda: now,
@@ -1852,7 +1859,7 @@ def test_agent_upgrade_diagnostics_omit_unreadable_optional_package() -> None:
 
     def diagnostics(job_id: str) -> object:
         with sessions() as session:
-            return operation_api._agent_upgrade_diagnostics(session, job_id)
+            return _agent_upgrade_diagnostics(session, job_id)
 
     # An upgrade that carries no package document has no diagnostics to project.
     assert diagnostics(stored({})) is None

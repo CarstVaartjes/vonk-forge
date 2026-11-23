@@ -19,14 +19,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrades import (
-    AgentUpgradeInvalid,
-    AgentUpgradeService,
-    _request_intent,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades.errors import AgentUpgradeInvalid
+from vonk_control.agent_upgrades.intent import _request_intent
+from vonk_control.agent_upgrades.service import AgentUpgradeService
 from vonk_control.bounded_json import require_mapping
-from vonk_control.models import AgentNode, Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 
 from .node_contacts import contact_row
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

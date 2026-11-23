@@ -55,7 +55,8 @@ from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 from .catalog.revision_contract import BuildSecurityProjection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
-from .models import Job, RecipeBuild
+from .models.cache import RecipeBuild
+from .models.jobs import Job
 from .oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     STORE_BUSY,
@@ -63,12 +64,12 @@ from .oci_image_store import (
     OciImageStoreError,
     StoreUnknown,
 )
-from .recipe_execution_contract import (
+from .recipe_library_types import RecipeLibraryItem
+from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     StoredBuildPolicyReport,
     parse_stored_build_policy,
 )
-from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
 from .stored.states import RecipeBuildState
 
@@ -113,7 +114,7 @@ def executable_build_key(identity: Mapping[str, object]) -> str:
     """Name the build inputs that produce the image bytes.
 
     ``identity`` is a build input identity from
-    :func:`vonk_control.recipe_builds.derive_build_input_identity`.  The key
+    :func:`vonk_control.recipe_builds.common.derive_build_input_identity`.  The key
     keeps the inputs a build consumes (source bundle, Dockerfile, pinned base
     images, build options and capabilities, runtime adapter) and drops the
     ones that only scope reuse (builder binary, egress hosts, rebuild
@@ -154,10 +155,7 @@ def package_build_intent(
     """
 
     from .catalog.entities import build_policy_projection
-    from .recipe_builds import (
-        canonical_build,
-        derive_build_input_identity,
-    )
+    from .recipe_builds.common import canonical_build, derive_build_input_identity
     from .runtime.adapters import resolve_runtime_adapter
     from .source_policy import dockerfile_base_images
 
@@ -815,7 +813,7 @@ class PrebuiltImageImporter:
         evidence: RecipeBuildEvidence | None = None,
         failure: tuple[str, str] | None = None,
     ) -> None:
-        from .recipe_operations import record_build_evidence
+        from .recipe_operations.observation_helpers import record_build_evidence
 
         now = self._clock()
         with self._sessions.begin() as session:

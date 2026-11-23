@@ -30,51 +30,51 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import (
+from vonk_control.agent_jobs.contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
-    AgentJobService,
     controller_result_consumer,
     fencing_intent,
 )
-from vonk_control.artifact_blob_store import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.blob_store import (
     ArtifactBlobStore,
     ArtifactBlobStoreError,
     StoredArtifactBlob,
 )
-from vonk_control.artifact_jobs import (
+from vonk_control.artifact_jobs.contracts import (
     ArtifactJobError,
-    ArtifactJobService,
     ArtifactJobView,
-    CompiledArtifactContract,
     _effective_parameters,
 )
+from vonk_control.artifact_jobs.service import ArtifactJobService
 from vonk_control.bounded_json import require_mapping
 from vonk_control.compiled_artifact_contract import (
+    CompiledArtifactContract,
     ParameterScalar,
     validate_parameter_definition,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
-    CatalogDocumentRevision,
-    Job,
     RecipeInstallation,
     RecipeRun,
 )
-from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.recipe_operations import (
-    _WORKLOAD_INTENT_KINDS,
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.constants import _WORKLOAD_INTENT_KINDS
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
-    RecipeOperationView,
     RecipeRequestInvalid,
 )
-from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_control.recipe_operations.execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.workload_intent import allocate_workload_intent
 from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
@@ -1074,11 +1074,11 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
     completed = service.get(job.id)
     assert completed.state == "succeeded"
     assert completed.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
-    from vonk_control.artifact_job_api import _view
+    from vonk_control.artifact_jobs.api import _view
 
     response = _view(completed)
     assert response.result_evidence is not None
-    from vonk_control.artifact_jobs import ArtifactJobResponse
+    from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
 
     degraded = ArtifactJobResponse.model_validate(
         response.model_dump() | {"output_manifest_sha256": None}
@@ -2646,7 +2646,7 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     if reconcile:
         jobs.reconcile_orders()
     if lease_lapses:
-        from vonk_control.agent_jobs import StaleAgentFence
+        from vonk_control.agent_jobs.contracts import StaleAgentFence
 
         with pytest.raises(StaleAgentFence):
             jobs.record_result(undelivered(first))

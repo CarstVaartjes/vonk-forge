@@ -169,14 +169,14 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
 | `control/src/vonk_control/agent_api/common.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
-| `control/src/vonk_control/agent_upgrade_contract.py` | controller-contract | 5 | Package, request intent, plan and result documents of an agent upgrade rollout. |
+| `control/src/vonk_control/agent_upgrades/contract.py` | controller-contract | 5 | Package, request intent, plan and result documents of an agent upgrade rollout. |
 | `control/src/vonk_control/jobs/agent_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
-| `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
-| `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
-| `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
+| `control/src/vonk_control/artifact_jobs/blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
+| `control/src/vonk_control/artifact_jobs/api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
+| `control/src/vonk_control/artifact_jobs/evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
 | `control/src/vonk_control/artifact_jobs/contracts.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
 | `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
-| `control/src/vonk_control/artifact_maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
+| `control/src/vonk_control/artifact_jobs/maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
 | `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
 | `control/src/vonk_control/cache_removal_review.py` | declared | 6 | Canonical review contract shared by cache-removal owners and clients. |
@@ -210,7 +210,7 @@ module defines its own.
 | `control/src/vonk_control/gateway/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache/input_contracts.py` | controller-contract | 3 | Typed catalog artifact locators and explicit fixture ingress. |
 | `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
-| `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
+| `control/src/vonk_control/model_cache/contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
 | `control/src/vonk_control/observation/transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
 | `control/src/vonk_control/operation_api/contracts.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
 | `control/src/vonk_control/operations/blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
@@ -220,20 +220,20 @@ module defines its own.
 | `control/src/vonk_control/observation/platform.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
-| `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
+| `control/src/vonk_control/recipe_operations/availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
 | `control/src/vonk_control/recipe_builds/cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
-| `control/src/vonk_control/recipe_execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
-| `control/src/vonk_control/recipe_image_availability_api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
-| `control/src/vonk_control/recipe_image_availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
-| `control/src/vonk_control/recipe_image_availability_clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
-| `control/src/vonk_control/recipe_image_availability_reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
-| `control/src/vonk_control/recipe_image_availability_view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
-| `control/src/vonk_control/recipe_image_removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
-| `control/src/vonk_control/recipe_lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
+| `control/src/vonk_control/recipe_operations/execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
+| `control/src/vonk_control/recipe_image_availability/api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
+| `control/src/vonk_control/recipe_image_availability/availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
+| `control/src/vonk_control/recipe_image_availability/clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
+| `control/src/vonk_control/recipe_image_availability/reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
+| `control/src/vonk_control/recipe_image_availability/view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
+| `control/src/vonk_control/recipe_image_availability/removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
+| `control/src/vonk_control/recipe_operations/lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
 | `control/src/vonk_control/recipe_operations/contracts.py` | controller-contract | 2 | Typed recipe operation context and installation disposal receipt. |
 | `control/src/vonk_control/recipe_packages/contracts.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
-| `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
-| `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
+| `control/src/vonk_control/recipe_update_batches/contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
+| `control/src/vonk_control/recipe_update_batches/notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
@@ -242,9 +242,9 @@ module defines its own.
 | `control/src/vonk_control/run_switch_contract/progress.py` | controller-contract | 6 | Run switch contract: progress. |
 | `control/src/vonk_control/run_switch_contract/phase_results.py` | controller-contract | 22 | Run switch contract: phase results. |
 | `control/src/vonk_control/run_switch_contract/operations.py` | controller-contract | 5 | Run switch contract: operations. |
-| `control/src/vonk_control/run_switch_identity_contract.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
-| `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
-| `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
+| `control/src/vonk_control/run_switch_contract/identity.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
+| `control/src/vonk_control/run_switch_contract/journal.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
+| `control/src/vonk_control/run_switch_contract/observation.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime/spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
@@ -266,7 +266,7 @@ module defines its own.
 
 ### Narrow Run/Switch journal repair evidence
 
-`run_switch_journal_contract.py` owns the typed append-only evidence in
+`run_switch_contract/journal.py` owns the typed append-only evidence in
 `run_switch_journal_repairs.evidence`. `Job.result` remains the sole live
 Run/Switch checkpoint. The evidence stores the original SQL document's explicit
 canonical text (including nulls), original/corrected digests and exact native
@@ -323,7 +323,7 @@ read-only. These records do not grant authority: every API mutation retains
 its role check and every remote request authenticates with the master key.
 Malformed records are misses; current requests replace them before effects.
 
-`recipe_execution_contract.RouteWithdrawalFollowUp` constrains the generated
+`recipe_operations.execution_contract.RouteWithdrawalFollowUp` constrains the generated
 `OperatorActionName.STOP` and `OperatorActionName.RETRY` choices for stop and
 recovery follow-ups after recipe route withdrawal.
 

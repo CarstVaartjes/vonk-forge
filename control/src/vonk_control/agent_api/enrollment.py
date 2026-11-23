@@ -17,14 +17,14 @@ from vonk_agent_protocol.enrollment import (
 )
 
 from ..contract_graph import raw_json_body
-from ..enrollment import (
+from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
+from ..enrollment.responses import unknown_response
+from ..enrollment.types import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
-from ..enrollment.body import _bounded_enrollment_body, _scan_enrollment_grants
-from ..enrollment.responses import unknown_response
-from ..operation_api import bounded_error_responses
+from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from .common import (
     AgentApiServices,

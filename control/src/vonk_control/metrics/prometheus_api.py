@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_agent_protocol import UnknownOutcomeError
 
 from ..auth import Actor
-from ..operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
+from ..operation_api.constants import _ADMIN_OPERATION_IDS
+from ..operation_api.contracts import bounded_error_responses
 from .contract import (
     METRIC_SPECS,
     SERIES_LABEL,

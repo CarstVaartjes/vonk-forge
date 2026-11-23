@@ -25,25 +25,23 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeUnknown
-from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobInvalid, ArtifactJobUnavailableError
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs import states as ajs
+from vonk_control.artifact_jobs.contracts import (
+    ArtifactJobInvalid,
+    ArtifactJobUnavailableError,
+)
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    ArtifactJob,
-    ArtifactJobFile,
-    Job,
-    RecipeRun,
-)
-from vonk_control.recipe_operations import RecipeRetryLater
+from vonk_control.models.execution import ArtifactJob, ArtifactJobFile, RecipeRun
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .agent_fences import fenced_operation

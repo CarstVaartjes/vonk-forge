@@ -11,8 +11,8 @@ import io
 from pathlib import Path
 
 from sqlalchemy import event
-from vonk_control.models import CatalogDocumentRevision
-from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_builds.service import RecipeBuildService
 
 from .test_recipe_builds import setup
 
@@ -117,7 +117,8 @@ def test_database_store_cost_is_independent_of_distinct_digests(
     from datetime import UTC, datetime
 
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.models import Base, CatalogDocument
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.catalog import CatalogDocument
     from vonk_control.source_bundles import (
         DatabaseSourceBundleStore,
         generate_source_bundle,

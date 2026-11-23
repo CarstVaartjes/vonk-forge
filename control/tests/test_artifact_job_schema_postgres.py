@@ -10,8 +10,9 @@ words (the preparation stages live in their own column).
 from __future__ import annotations
 
 from sqlalchemy import inspect, text
-from vonk_control.db import reconcile_schema
-from vonk_control.models import ArtifactJob, Base
+from vonk_control.db.schema import reconcile_schema
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import ArtifactJob
 
 TABLE = ArtifactJob.__tablename__
 OLD_CHECK = (

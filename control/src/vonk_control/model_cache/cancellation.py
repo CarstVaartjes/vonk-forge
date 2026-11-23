@@ -10,20 +10,19 @@ from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
-from ..lifecycle import CancelRequested, State, Tick
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import (
+from ..lifecycle.types import CancelRequested, State, Tick
+from ..models.cache import ModelCacheOperation
+from . import states as model_cache_states
+from .artifacts import ArtifactSetManifest, _unique_artifacts
+from .catalog_helpers import _iso
+from .contract import (
     CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheOperationPayload,
 )
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
-from .artifacts import ArtifactSetManifest, _unique_artifacts
-from .catalog_helpers import _iso
 from .errors import ModelCacheConflictInvalid
 from .persistence import (
     _operation_cancellation,
@@ -31,6 +30,7 @@ from .persistence import (
     _operation_progress,
     _store_operation_payload,
 )
+from .progress import cache_phase, progress_document
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -161,8 +161,8 @@ class CancellationMixin:
                 settled += int(cache._try_settle_cancellation(operation_id))
         if requested_id is None:
             return settled + cache._reconciler.reconcile().changed
-        from ..lifecycle import Reconciler
         from ..lifecycle.model_cache import ModelCacheStore
+        from ..lifecycle.reconciler import Reconciler
 
         reconciler = Reconciler(
             ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),

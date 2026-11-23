@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     lock_reference_gates,
@@ -27,13 +27,10 @@ from ..content_identity import (
     active_recipe_revisions,
     catalog_selector_membership,
 )
-from ..model_cache_contract import CacheManifest
-from ..models import (
-    CatalogDocumentRevision,
-    FleetProfile,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-)
+from ..model_cache.contract import CacheManifest
+from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
+from ..models.catalog import CatalogDocumentRevision
+from ..models.fleet import FleetProfile
 from .types import ArtifactReferenceFinding, _finding
 
 

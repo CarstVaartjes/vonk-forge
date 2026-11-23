@@ -35,14 +35,15 @@ from vonk_agent_protocol import (
     ImageStoreCode,
 )
 
-from .artifact_lifecycle import (
+from .artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     lock_reference_gates,
 )
-from .artifact_reference_scan import runtime_image_reference_findings
+from .artifact_reference_scan.image_references import runtime_image_reference_findings
 from .logging import log_event
-from .models import ArtifactDistributionAssignment, RecipeBuild
+from .models.cache import RecipeBuild
+from .models.operations import ArtifactDistributionAssignment
 from .oci_image_store import (
     IMAGE_CACHE_DIRECTORY,
     REFERENCE_SCAN_FAILED,
@@ -52,10 +53,8 @@ from .oci_image_store import (
     StoreUnknown,
 )
 from .owner_liveness import builds_in_flight
-from .runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    RuntimeImagePreparationError,
-)
+from .runtime_image_preparation.contracts import RuntimeImagePreparationError
+from .runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from .stored.states import RecipeBuildState
 
 _LOGGER = logging.getLogger(__name__)

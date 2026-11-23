@@ -23,15 +23,13 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperationAttempt,
-    Base,
-    Job,
-)
-from vonk_control.models import AgentOperation as StoredOperation
+from vonk_control.agent_jobs.contracts import StaleAgentAttempt
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
+from vonk_control.models.operations import AgentOperationAttempt
 
 from ..recipe_stop_fixtures import recipe_stop_payload
 from ..runtime_identity_support import claim_agent
@@ -313,7 +311,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 import importlib.metadata, json
                 from importlib.resources import files
                 from vonk_agent_protocol import AgentProtocolError, DistributionObject
-                from vonk_control.recipe_runtime_specs import compile_runtime_spec
+                from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
                 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256, read_model, read_recipe
 
                 def rejects(value):

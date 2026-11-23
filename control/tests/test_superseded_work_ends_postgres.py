@@ -18,35 +18,28 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, canonical_message
-from vonk_control.agent_jobs import (
-    CLAIM_LEASE_SECONDS,
-    AgentJobService,
-    StaleAgentFence,
-)
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS, StaleAgentFence
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
 from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    NodeInventorySnapshot,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
-from vonk_control.run_switch_contract import (
+from vonk_control.run_switch_contract.requests import (
     RunSwitchApplyRequest,
     SparkGroup,
     SparkGroupNode,
 )
-from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent

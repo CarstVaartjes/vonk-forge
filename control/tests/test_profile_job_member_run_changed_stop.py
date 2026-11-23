@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_control.models import RecipeRun
+from vonk_control.models.execution import RecipeRun
 from vonk_control.recipe_operations import job_run_stop
 
 from .lifecycle_simulation.simulation import Simulation

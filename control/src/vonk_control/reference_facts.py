@@ -22,10 +22,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from .content_identity import catalog_selector_membership
-from .models import (
-    FleetProfile,
-    FleetProfileRecipe,
-)
+from .models.fleet import FleetProfile, FleetProfileRecipe
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:

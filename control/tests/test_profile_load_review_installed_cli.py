@@ -8,16 +8,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    AgentNodeProfile,
-    CatalogDocumentRevision,
-    RecipeRun,
-)
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.fleet import AgentNode, AgentNodeContact, AgentNodeProfile
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,

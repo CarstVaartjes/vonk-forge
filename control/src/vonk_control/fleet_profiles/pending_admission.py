@@ -16,14 +16,14 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..admission_locking import patient_admission
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.vocabulary import (
     FleetProfileOperationState,
-    FleetProfilePreview,
     FleetProfileSupersedeCode,
 )
 from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
-from ..models import FleetProfile, FleetProfileApplication
+from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..operations.blockers import OperationBlocker, make_blocker
 from .assessment_support import (
     _deferral_code,

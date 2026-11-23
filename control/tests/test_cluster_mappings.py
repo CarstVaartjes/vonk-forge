@@ -17,16 +17,15 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    ClusterMapping,
-    ClusterMappingNode,
 )
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture

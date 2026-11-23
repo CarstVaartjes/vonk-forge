@@ -35,11 +35,13 @@ from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
 from ..inventory.items import inventory_items, runtime_value
 from ..jobs import states as job_states
-from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import Residue
-from ..models import AgentNode, AgentOperationAttempt, Job
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.types import CancelRequested, Outcome, Reported
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..operations.progress import stored_progress
 from ..own_cleanup import CLEANUP_KINDS
 from ..persisted_waits import schedule_wait

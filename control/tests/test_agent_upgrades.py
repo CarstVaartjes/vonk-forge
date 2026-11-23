@@ -14,32 +14,24 @@ from vonk_agent_protocol.contracts import AgentUpgradeResult
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.agent_upgrade_contract import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.agent_upgrades import package as agent_upgrades_module
+from vonk_control.agent_upgrades.constants import _AGENT_UPGRADE_RECOVERY_FENCE
+from vonk_control.agent_upgrades.contract import (
     AgentUpgradePackage,
     AgentUpgradeRequestIntent,
 )
-from vonk_control.agent_upgrade_status import (
+from vonk_control.agent_upgrades.errors import AgentUpgradeConflict
+from vonk_control.agent_upgrades.service import AgentUpgradeService
+from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
 )
-from vonk_control.agent_upgrades import (
-    _AGENT_UPGRADE_RECOVERY_FENCE,
-    AgentUpgradeConflict,
-    AgentUpgradeService,
-)
-from vonk_control.agent_upgrades import package as agent_upgrades_module
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import AttemptFence, JobService, StaleAttempt
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    Base,
-    Job,
-    JobAttempt,
-)
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job, JobAttempt
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .node_contacts import contact_row
@@ -2011,7 +2003,7 @@ def test_a_conflict_names_a_spark_only_by_its_canonical_identifier() -> None:
 
 
 def test_invalid_upgrade_intent_has_no_targets_and_valid_intent_is_accepted() -> None:
-    from vonk_control.agent_upgrades import _request_intent
+    from vonk_control.agent_upgrades.intent import _request_intent
 
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         _request_intent({"all": "yes", "selectors": None}, None)
@@ -2033,7 +2025,7 @@ def test_upgrade_identity_warning_names_its_order_and_clears_on_confirmation(
         WaitReason,
     )
     from vonk_control.evidence_repeats import note_repeat, owner_evidence
-    from vonk_control.models import AgentOperation
+    from vonk_control.models.operations import AgentOperation
 
     from .agent_fences import fenced_operation
     from .test_evidence_repeats import LIMIT, _repeating

@@ -95,8 +95,9 @@ from ..agent_operation_facts import (
 )
 from ..categorized_errors import InvalidValue
 from ..jobs import states as job_states
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..operations.progress import progress_document
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait

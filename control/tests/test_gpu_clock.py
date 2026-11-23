@@ -17,7 +17,7 @@ from vonk_agent_protocol.gpu_clock import (
     default_gpu_clock,
 )
 from vonk_agent_protocol.host_helper import ApplyGpuClockOperation, parse_host_operation
-from vonk_control.fleet_profile_contract import FleetProfileDefinition
+from vonk_control.fleet_profile_contract.definitions import FleetProfileDefinition
 
 NODE = "spk_" + "a" * 32
 
@@ -96,7 +96,8 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
         InventoryRepository,
         NodeInventoryReport,
     )
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -176,8 +177,9 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import ProjectionCode
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
-    from vonk_control.fleet_projection import FleetProjection
-    from vonk_control.models import AgentNode, Base
+    from vonk_control.fleet_projection.service import FleetProjection
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.fleet import AgentNode
     from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
     engine = create_engine("sqlite://")
@@ -243,7 +245,7 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from vonk_control.gpu.clock import gpu_clock_start_intent
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -269,7 +271,7 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
     """Catches any producer/store/projection/client dropping real clock evidence."""
     from vonk_agent_protocol import TelemetryRequest
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     from cluster_profiles.cli_render import render_payload
 

@@ -15,7 +15,8 @@ from .test_fleet_profiles import _uuid
 def test_profile_edit_does_not_replace_accepted_retry_snapshot(
     tmp_path,
 ):
-    from vonk_control.models import FleetProfileApplication, Job
+    from vonk_control.models.fleet import FleetProfileApplication
+    from vonk_control.models.jobs import Job
 
     sessions, _lifecycle, service, profile, desired, original, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -54,7 +55,8 @@ def test_profile_edit_does_not_replace_accepted_retry_snapshot(
 
 
 def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
-    from vonk_control.models import ClusterMapping, RecipeBuild
+    from vonk_control.models.cache import RecipeBuild
+    from vonk_control.models.mapping import ClusterMapping
 
     from .test_recipe_operations import installed_recipe, started_recipe
 
@@ -78,7 +80,7 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     )
     declined = service.retry(original.id, request_key=_uuid(801), actor="admin")
     assert declined.id == original.id
-    from vonk_control.models import RecipeRun
+    from vonk_control.models.execution import RecipeRun
 
     with sessions() as session:
         running = session.get(RecipeRun, direct.owner_id)
@@ -90,7 +92,7 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):
 
     from pydantic import ValidationError
-    from vonk_control.fleet_profile_contract import FleetProfileApplicationView
+    from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
 
     _sessions, _lifecycle, service, _profile, _desired, original, _child, _nodes = (
         _failed_profile(tmp_path)

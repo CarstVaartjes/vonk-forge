@@ -14,21 +14,15 @@ from vonk_agent_protocol import (
     input_state,
 )
 
-from .. import model_cache_states
 from ..admission_locking import admitting
 from ..agent_operation_facts import aware as _aware
 from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Reported
-from ..model_cache_contract import (
-    ModelCacheRepairCheckpoint,
-    ModelCacheRepairPayload,
-    ModelCacheRetry,
-)
-from ..model_cache_progress import progress_document
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..lifecycle.types import Reported
+from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityOperationFailure
 from ..strict_json import serialize_json_value
+from . import states as model_cache_states
 from .artifacts import (
     ArtifactSetManifest,
     _optional_digest,
@@ -36,11 +30,17 @@ from .artifacts import (
 )
 from .catalog_helpers import _datetime, _iso
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION, SOURCE_POLICY
+from .contract import (
+    ModelCacheRepairCheckpoint,
+    ModelCacheRepairPayload,
+    ModelCacheRetry,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheNotFoundInvalid,
 )
 from .persistence import _cache_failure, _write_operation_payload
+from .progress import progress_document
 from .source_helpers import _request_key
 from .storage import RunningTransfers, TransferNeed
 from .transfer_admission import admit_transfer
@@ -366,7 +366,7 @@ class RepairMixin:
         ``after`` is the already authenticated global activity boundary.
         """
         cache = cast("ModelCacheService", self)
-        from ..operation_api import _activity_keyset_filter
+        from ..operation_api.providers import _activity_keyset_filter
 
         if not 1 <= limit <= 101:
             raise InvalidValue("operation provider page limit is invalid")

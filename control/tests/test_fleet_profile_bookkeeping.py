@@ -16,24 +16,26 @@ import pytest
 from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import UnavailableFleetProfileView
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
-    UnavailableFleetProfileView,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    _persisted_profile_plan,
-    _persisted_profile_progress,
-    _persisted_profile_result,
+from vonk_control.fleet_profiles.assessment_support import (
     _require_recovery_preparation,
     _string_items,
 )
+from vonk_control.fleet_profiles.persistence import (
+    _persisted_profile_plan,
+    _persisted_profile_progress,
+    _persisted_profile_result,
+)
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
 )
@@ -374,7 +376,7 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
 
 def test_denied_user_authority_has_no_effect_and_restored_authority_loads() -> None:
     """The real security boundary denies effects, rather than a synthetic reason."""
-    from vonk_control.models import User
+    from vonk_control.models.fleet import User
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)

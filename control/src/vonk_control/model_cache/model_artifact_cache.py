@@ -16,7 +16,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from threading import Lock
 
-from ..models import CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
 from .artifacts import ArtifactSpec
 
 _MAX_RETAINED_SPECS = 100_000

@@ -28,16 +28,17 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_control.admission_locking import AdmissionLockBusy
-from vonk_control.agent_jobs import AgentJobService, result_disposition
+from vonk_control.agent_jobs.retry import result_disposition
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
-from vonk_control.agent_upgrade_status import (
+from vonk_control.agent_upgrades.status import (
     AGENT_UPGRADE_AWAITING_IDENTITY_PREDECESSOR_REASON,
     AGENT_UPGRADE_AWAITING_IDENTITY_REASON,
 )
-from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import cancel_requested_at
-from vonk_control.models import AgentOperationAttempt
+from vonk_control.lifecycle.types import Outcome, Reported
+from vonk_control.models.operations import AgentOperationAttempt
 
 FENCE = str(uuid4())
 NOW = datetime(2026, 10, 5, 12, tzinfo=UTC)

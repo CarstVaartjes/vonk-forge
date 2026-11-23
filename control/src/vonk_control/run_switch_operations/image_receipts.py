@@ -12,21 +12,17 @@ from vonk_agent_protocol import (
 )
 
 from ..content_identity import differing_image_fields
-from ..models import (
-    RecipeBuild,
-)
+from ..models.cache import RecipeBuild
 from ..preparation_contract import (
     RuntimeImageIdentity,
 )
-from ..run_switch_contract import (
-    RunSwitchContainerBuildResult,
-    RunSwitchOperationResult,
-    RunSwitchPlan,
-)
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.observation import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchContainerBuildResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..stored.states import RecipeBuildState
 from .errors import RunSwitchRetryLater
 from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes

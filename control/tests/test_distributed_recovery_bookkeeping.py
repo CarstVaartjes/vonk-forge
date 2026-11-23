@@ -9,15 +9,13 @@ from typing import Any, cast
 
 import vonk_control.distributed_recovery as recovery_module
 from sqlalchemy import func, select
-from vonk_control.distributed_recovery import (
-    _accepted_start_authority,
-    _decode_phases,
-    _enqueue_recovery_stop,
-    _RecoveryAuthority,
-)
+from vonk_control.distributed_recovery.authority import _enqueue_recovery_stop
+from vonk_control.distributed_recovery.common import _decode_phases, _RecoveryAuthority
+from vonk_control.distributed_recovery.singleton import _accepted_start_authority
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import Job, RecipeRun
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
 from vonk_control.strict_json import read_stored_model
 
 from .test_recovery_start_wire import _queued_recovery_restart

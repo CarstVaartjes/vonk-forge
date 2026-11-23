@@ -21,13 +21,14 @@ from vonk_agent_protocol.failure_evidence import (
     FailureProperty,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
-from vonk_control.distributed_recovery import (
+from vonk_control.distributed_recovery.common import (
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,
 )
-from vonk_control.models import AgentOperation, RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations import run_transitions
-from vonk_control.recipe_stop_payloads import RecipeStopAuthorityError
+from vonk_control.recipe_operations.stop_payloads import RecipeStopAuthorityError
 
 from .test_absent_run_release import _report_absent
 from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401

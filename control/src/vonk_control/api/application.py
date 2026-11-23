@@ -14,15 +14,12 @@ from fastapi import (
 )
 from vonk_agent_protocol.capability_reply import ControllerCapability
 
-from ..agent_api import (
-    AgentApiServices,
-    EnrollmentRateLimiter,
-    install_agent_routes,
-)
-from ..artifact_job_api import (
+from ..agent_api.common import AgentApiServices, EnrollmentRateLimiter
+from ..agent_api.routes import install_agent_routes
+from ..artifact_jobs.api import (
     install_artifact_job_routes,
 )
-from ..artifact_jobs import ArtifactJobService
+from ..artifact_jobs.service import ArtifactJobService
 from ..auth import (
     CursorCodec,
     TokenCodec,
@@ -32,29 +29,26 @@ from ..catalog.api import install_catalog_routes
 from ..catalog.service import CatalogService
 from ..failure_evidence import FailureEvidenceService
 from ..failure_evidence_api import install_failure_evidence_routes
-from ..fleet_profile_api import install_fleet_profile_routes
+from ..fleet_profiles.api import install_fleet_profile_routes
+from ..fleet_profiles.application_cancel_api import (
+    install_profile_application_cancel_route,
+)
 from ..gateway.keys import GatewayKeyService, install_gateway_key_routes
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..metrics.prometheus_api import PrometheusReader
 from ..metrics.registry import MetricsRegistry
-from ..model_cache_api import install_model_operator_routes
+from ..model_cache.api import install_model_operator_routes
 from ..observation.platform import (
     PlatformObserver,
     api_only_capture,
 )
-from ..operation_api import (
-    OperationApiServices,
-    bounded_error_responses,
-)
+from ..operation_api.contracts import OperationApiServices, bounded_error_responses
 from ..operator_acceptance import (
     OperatorReceiptResolver,
 )
-from ..operator_projection_api import (
-    FleetOperatorServices,
-)
-from ..profile_application_cancel_api import install_profile_application_cancel_route
-from ..recipe_operations import RecipeOperationService
-from ..run_switch_operations import RunSwitchOperationService
+from ..operator_projection_api.services import FleetOperatorServices
+from ..recipe_operations.service import RecipeOperationService
+from ..run_switch_operations.service import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute
 from .common import (
     JobQueue,
@@ -196,7 +190,7 @@ def create_app(
         actor_dependency=authenticated_actor,
         service=model_cache,
     )
-    from ..recipe_image_availability_api import install_recipe_operator_routes
+    from ..recipe_image_availability.api import install_recipe_operator_routes
 
     install_recipe_operator_routes(
         app,

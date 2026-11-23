@@ -27,18 +27,15 @@ from .fleet_event_contract import (
     RunNodePayload,
     validate_fleet_event_payload,
 )
-from .models import (
-    AgentNodeProfile,
-    AgentOperation,
+from .models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
+from .models.fleet import AgentNodeProfile
+from .models.jobs import Job
+from .models.operations import AgentOperation
+from .models.telemetry import (
     FleetEventCursor,
     FleetStreamEvent,
-    InstallationNode,
-    Job,
     NodeInventoryItemsSnapshot,
     NodeTelemetryLatest,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
 )
 from .strict_json import serialize_json_value
 

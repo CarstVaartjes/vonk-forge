@@ -33,8 +33,9 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.categorized_errors import SecurityRefused
-from vonk_control.lifecycle import (
-    STOP_BUDGET,
+from vonk_control.lifecycle.core import STOP_BUDGET
+from vonk_control.lifecycle.run_switch import RunSwitchAdapter
+from vonk_control.lifecycle.types import (
     CancelRequested,
     Effect,
     LeaseLapsed,
@@ -44,16 +45,11 @@ from vonk_control.lifecycle import (
     State,
     Tick,
 )
-from vonk_control.lifecycle.run_switch import RunSwitchAdapter
-from vonk_control.models import Job
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchOperationResult,
-)
-from vonk_control.run_switch_operations import (
-    RunSwitchOperationConflict,
-    _read_progress,
-)
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.errors import RunSwitchOperationConflict
+from vonk_control.run_switch_operations.result_helpers import _read_progress
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -642,7 +638,7 @@ def test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed(
 
 
 def module_conflict(message: str) -> RunSwitchOperationConflict:
-    from vonk_control.run_switch_operations import _RunSwitchDefiniteConflict
+    from vonk_control.run_switch_operations.errors import _RunSwitchDefiniteConflict
 
     return _RunSwitchDefiniteConflict(message)
 
@@ -682,7 +678,9 @@ def test_post_stop_inventory_pending_waits_past_the_retry_budget_and_then_heals(
     """
 
     from vonk_control.lifecycle.core import RECOVERY
-    from vonk_control.run_switch_operations import RunSwitchPostStopEvidencePending
+    from vonk_control.run_switch_operations.errors import (
+        RunSwitchPostStopEvidencePending,
+    )
 
     executor = _ScriptedExecutor()
     pending = RunSwitchPostStopEvidencePending("Spark has no post-stop inventory")
@@ -737,7 +735,9 @@ def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
 
     from vonk_agent_protocol import RuntimeImageCode
     from vonk_agent_protocol.agent_words import ProfileChildPhase
-    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+    from vonk_control.runtime_image_preparation.contracts import (
+        RuntimeImagePreparationUnknown,
+    )
 
     executor = _ScriptedExecutor()
     unknown = RuntimeImagePreparationUnknown(

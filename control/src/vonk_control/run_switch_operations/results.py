@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from ..lifecycle.evidence import Residue, read_or_rebuild
-from ..run_switch_contract import RunSwitchOperationResult
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..strict_json import read_stored_document
 
 

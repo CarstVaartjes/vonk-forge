@@ -8,10 +8,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
-from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_profiles.contracts import FleetProfileInvalid
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.gpu.clock import selected_gpu_clocks
-from vonk_control.models import (
+from vonk_control.models.fleet import (
     FleetProfile,
     FleetProfileApplication,
     FleetProfileRecipe,

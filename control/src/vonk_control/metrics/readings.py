@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from ..fleet_projection import FleetSnapshot, TelemetryPoint
+    from ..fleet_projection.common import FleetSnapshot, TelemetryPoint
     from ..telemetry.samples import LiveEngineReading
 
 

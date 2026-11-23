@@ -24,38 +24,38 @@ from vonk_agent_protocol.runtime_preflight import (
 )
 from vonk_control import terminal_history_collection
 from vonk_control.agent_contacts import record_contact
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    _persisted_profile_progress,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    AgentOperationAttempt,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    Job,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+)
+from vonk_control.models.fleet import (
+    AgentCertificate,
+    AgentNode,
+    AgentNodeContact,
+    FleetProfileApplication,
+    FleetProfileSelection,
     User,
 )
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime.preflight import mandatory_capabilities
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 

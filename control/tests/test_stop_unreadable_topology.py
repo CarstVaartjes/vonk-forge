@@ -4,10 +4,12 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
-from vonk_control import recipe_progress
 from vonk_control.jobs.documents import RecipeStopParent
-from vonk_control.models import AgentOperation, Job, RecipeRun
-from vonk_control.recipe_runtime_specs import RecipeRuntimeSpecError
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations import progress as recipe_progress
+from vonk_control.recipe_operations.runtime_specs import RecipeRuntimeSpecError
 
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 

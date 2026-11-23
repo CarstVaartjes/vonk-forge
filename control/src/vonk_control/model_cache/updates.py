@@ -16,7 +16,8 @@ from ..catalog.revision_contract import (
     read_catalog_document,
 )
 from ..categorized_errors import InvalidValue
-from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..models.cache import ModelCacheSet
+from ..models.catalog import CatalogDocumentRevision
 from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, _optional_digest

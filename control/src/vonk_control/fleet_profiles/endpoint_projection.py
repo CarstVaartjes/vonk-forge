@@ -19,14 +19,14 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
     FleetProfileEndpointProjectionIssue,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..recipe_operations import _run_is_one_shot
+from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
+from ..recipe_operations.rank_authority import _run_is_one_shot
 from ..run_route_name import carries_alias
 from ..strict_json import stored_document_detail
 from .contracts import (

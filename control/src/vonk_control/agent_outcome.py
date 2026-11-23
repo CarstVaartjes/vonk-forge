@@ -46,7 +46,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.lifecycle_vocabulary import RETIRED_RESULT_STATE_SPELLINGS
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
-from .agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+from .agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
 
 _FAILURE_CODE_BY_OPERATION = {
     AgentOperation.AGENT_UPGRADE.value: FailureCode.AGENT_UPGRADE_FAILED,

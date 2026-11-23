@@ -10,16 +10,13 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select, update
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import Job, RecipeRun
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
-    RunSwitchOperationResult,
-)
-from vonk_control.run_switch_operations import (
-    _load_plan,
-    _progress_view,
-    _stored_result,
-)
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.progress_view import _progress_view
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations.plan_persistence import _load_plan
+from vonk_control.run_switch_operations.results import _stored_result
 
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -206,7 +203,7 @@ def test_a_retry_over_a_revoked_spark_is_refused_not_waited_on(tmp_path: Path) -
     from datetime import timedelta
 
     from vonk_agent_protocol import InvalidRequestReason, LifecycleState
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
     from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
     from vonk_control.strict_json import serialize_json_value
 

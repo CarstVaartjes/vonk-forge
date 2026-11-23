@@ -26,7 +26,7 @@ def move_contact_facts(connection: Connection) -> None:
     rollback and an upgrade again, each fact takes the newer value by its
     contact clock, so the rolled-back Controller's contacts are not lost.
     """
-    from ..models import AgentNodeContact
+    from ..models.fleet import AgentNodeContact
 
     # Contact facts lived on agent_nodes until owner-approved lock-reduction
     # step 1 moved them; their names are the contact row's columns.
@@ -86,7 +86,7 @@ def move_runtime_facts(connection: Connection) -> None:
         InventorySnapshotKind,
         PreflightInventoryItem,
     )
-    from ..models import NodeInventoryItemsSnapshot
+    from ..models.telemetry import NodeInventoryItemsSnapshot
     from .constants import _LOGGER
 
     inspector = inspect(connection)
@@ -243,7 +243,7 @@ def move_resource_facts(connection: Connection) -> None:
     from vonk_agent_protocol.telemetry import HostResourceSample
 
     from ..inventory.items_contract import InventorySnapshotKind
-    from ..models import NodeInventoryResourceSnapshot
+    from ..models.telemetry import NodeInventoryResourceSnapshot
 
     inspector = inspect(connection)
     # Replacement report-only uniqueness was installed by reconciliation.

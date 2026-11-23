@@ -16,33 +16,35 @@ from vonk_agent_protocol import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import (
-    FleetProfileInput,
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchQueueItem,
 )
-from vonk_control.fleet_profiles import (
+from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    _aware,
+    _FleetProfileSupersededIntentConflict,
+)
+from vonk_control.fleet_profiles.persistence import (
+    _kept_fence_ordinal,
     _persisted_profile_progress,
 )
-from vonk_control.fleet_profiles.contracts import _FleetProfileSupersededIntentConflict
-from vonk_control.fleet_profiles.persistence import _kept_fence_ordinal
-from vonk_control.models import (
+from vonk_control.fleet_profiles.projection_support import _aware
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentNode,
     AgentNodeContact,
-    Base,
     FleetProfileApplication,
-    Job,
-    ResourceReservation,
 )
+from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,

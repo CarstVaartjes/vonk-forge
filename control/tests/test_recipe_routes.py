@@ -27,9 +27,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.route_activation import SupervisorPhase
-from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
@@ -38,33 +37,33 @@ from vonk_control.gateway.route_runtime import (
     AtomicRouteBundlePublisher,
 )
 from vonk_control.jobs.documents import RecipeStartParent
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    RecipeBuild,
     RecipeInstallation,
-    RecipeRouteAuthority,
     RecipeRun,
-    RoutePublication,
-    RoutePublicationOwner,
     RunNode,
 )
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.models.routes import (
+    RecipeRouteAuthority,
+    RoutePublication,
+    RoutePublicationOwner,
+)
+from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_routes import (
-    AtomicRecipeRoutePublisher,
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.service import RecipeRouteService
+from vonk_control.recipe_routes.shared import (
     RecipeRouteNotReady,
     RecipeRouteOwnerBusy,
-    RecipeRouteService,
     RecipeRouteSuperseded,
+    route_publication_owner_lock_statement,
 )
 from vonk_forge_contracts import (
     EndpointAlias,
@@ -874,7 +873,7 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
 
 
 def test_route_publication_owner_lock_compiles_for_postgresql() -> None:
-    statement_factory = recipe_routes.route_publication_owner_lock_statement
+    statement_factory = route_publication_owner_lock_statement
     assert callable(statement_factory)
 
     sql = str(

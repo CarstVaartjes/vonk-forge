@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING, Protocol, cast
 from vonk_agent_protocol import ModelCacheCode, OperatorActionName
 from vonk_agent_protocol.http_failure import TransientReason
 
-from ..model_cache_contract import (
+from ..models.cache import ModelCacheOperation
+from .catalog_helpers import _datetime
+from .contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationPayload,
 )
-from ..models import ModelCacheOperation
-from .catalog_helpers import _datetime
 from .errors import ProviderNotAsked
 
 if TYPE_CHECKING:

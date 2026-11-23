@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from ..model_cache_contract import ModelCacheIngressMismatch
+from .contract import ModelCacheIngressMismatch
 
 #: Consecutive ingress digest mismatches after which the download ends.
 INGRESS_MISMATCH_LIMIT = 2

@@ -8,9 +8,10 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.browser_auth import bootstrap_administrator
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import Base, User
-from vonk_control.recipe_update_batches import RecipeUpdateBatches
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
+from vonk_control.recipe_update_batches.service import RecipeUpdateBatches
 
 from .lock_wait_support import backend_pid, lock_waits_behind
 

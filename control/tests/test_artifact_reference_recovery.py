@@ -9,17 +9,17 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol.agent_words import ProfileDocumentState
-from vonk_control.artifact_reference_scan import (
+from vonk_control.artifact_reference_scan.model_references import (
     model_set_reference_findings,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    FleetProfile,
 )
+from vonk_control.models.fleet import FleetProfile
 from vonk_forge_contracts import document_sha256, read_recipe
 
 from .test_catalog_revision_collection import Catalog

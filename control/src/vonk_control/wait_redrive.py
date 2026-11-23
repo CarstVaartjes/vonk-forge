@@ -6,24 +6,27 @@ from collections.abc import Mapping
 
 from vonk_agent_protocol import WaitOwnerKind
 
+from . import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
 from .due_waits import AdvanceWait, WaitSource
-from .models import (
+from .model_primitives import Base
+from .models.cache import (
+    ArtifactLifecycleGate,
+    ModelCacheOperation,
+    RecipeLibrarySyncRun,
+)
+from .models.coordinator import CoordinatorFailure
+from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun
+from .models.fleet import (
     AgentCertificate,
     AgentIssuedCertificateRevocation,
-    AgentOperation,
-    ArtifactJob,
-    ArtifactLifecycleGate,
-    Base,
-    CoordinatorFailure,
     FleetProfileApplication,
     FleetProfileSelection,
-    Job,
-    ModelCacheOperation,
-    RecipeInstallation,
-    RecipeLibrarySyncRun,
-    RecipeRun,
-    RoutePublicationOwner,
 )
+from .models.jobs import Job
+from .models.operations import AgentOperation
+from .models.routes import RoutePublicationOwner
 
 # This is dispatch coverage, not a duplicate state/reason vocabulary. The
 # whole-tree guard compares both the ORM owners and concrete KindAdapters.

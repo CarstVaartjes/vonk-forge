@@ -71,22 +71,18 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states as aos
-from .. import artifact_job_states as ajs
 from ..agent_operation_facts import aware
-from ..artifact_job_evidence import (
+from ..artifact_jobs import states as ajs
+from ..artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
     read_result_evidence,
 )
 from ..categorized_errors import InvalidValue
-from ..models import (
-    STOPPABLE_RUN_STATES,
-    AgentOperationAttempt,
-    ArtifactJob,
-    Job,
-    RecipeRun,
-)
-from ..models import AgentOperation as StoredOperation
+from ..models.execution import STOPPABLE_RUN_STATES, ArtifactJob, RecipeRun
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import lifecycle_wait
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import stall_deadline

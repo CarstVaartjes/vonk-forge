@@ -16,32 +16,28 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
 from ..content_identity import ImageContent, differing_image_fields
 from ..jobs import states as job_states
-from ..models import (
-    AgentNode,
-)
+from ..models.fleet import AgentNode
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
-    RunSwitchRuntimeImageReferenceIntent,
-)
-from ..run_switch_observation_contract import (
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import (
     RunSwitchObservedImageIdentity,
 )
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationUnknown,
+from ..run_switch_contract.operations import (
+    RunSwitchOperationResult,
+    RunSwitchRuntimeImageReferenceIntent,
 )
-from ..runtime_image_preparation import (
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationUnknown
+from ..runtime_image_preparation.contracts import (
     RuntimeImageReceipt as RuntimeImageReceiptDocument,
 )
 from ..stored.json_values import read_row_column

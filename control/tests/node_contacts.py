@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from vonk_control.models import AgentNode, AgentNodeContact
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
 
 
 def contact_row(node: AgentNode) -> AgentNodeContact:

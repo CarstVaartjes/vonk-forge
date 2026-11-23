@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import TokenCodec
-from vonk_control.db import build_engine, session_factory
+from vonk_control.db.connections import build_engine, session_factory
 
 # The carry runs this program in the previous release's Controller first. Wave 4
 # moved these entry points into packages; the previous release still has the

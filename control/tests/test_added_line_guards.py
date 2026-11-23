@@ -1862,6 +1862,13 @@ def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
         {2},
         modes=("model-sets",),
     )
+    # The modules that moved in from flat model_cache_*.py stay scanned.
+    assert check_source(
+        "control/src/vonk_control/model_cache/api.py",
+        source,
+        {2},
+        modes=("model-sets",),
+    )
     gate = "def plan(cache, manifest):\n    cache._require_managed_cache_coverage(manifest)\n"
     assert check_source(
         "control/src/vonk_control/run_switch_operations/run_planning.py",
@@ -2546,7 +2553,7 @@ _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references
             "kept = revision.content_digest in head_digests\n",
         ),
         (
-            "control/src/vonk_control/recipe_update_notice.py",
+            "control/src/vonk_control/recipe_update_batches/notice.py",
             "same = newest.content_digest == running.content_digest\n",
         ),
         (
@@ -3800,8 +3807,8 @@ def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:
 @pytest.mark.parametrize(
     "owner",
     [
-        "control/src/vonk_control/fleet_profile_states.py",
-        "control/src/vonk_control/model_cache_contract.py",
+        "control/src/vonk_control/fleet_profiles/states.py",
+        "control/src/vonk_control/model_cache/contract.py",
         "control/src/vonk_control/run_switch_contract/vocabulary.py",
     ],
 )

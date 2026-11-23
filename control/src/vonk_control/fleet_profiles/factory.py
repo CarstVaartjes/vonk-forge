@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..model_cache_contract import CacheResolution
-from ..run_switch_operations import RunSwitchOperationService
+from ..model_cache.contract import CacheResolution
+from ..run_switch_operations.service import RunSwitchOperationService
 
 if TYPE_CHECKING:
     from .service import FleetProfileService

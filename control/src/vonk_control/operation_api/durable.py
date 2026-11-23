@@ -20,20 +20,20 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
-from ..agent_jobs import (
-    AgentJobService,
+from ..agent_jobs.retirement import (
     authorize_operator_resume_in_session,
     operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
+from ..agent_jobs.service import AgentJobService
 from ..auth import CursorCodec, CursorError, cursor_key
 from ..endpoint_contract import EndpointResponse
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.endpoints import (
     FleetProfileEndpointAssignmentView,
     FleetProfileEndpointIntent,
-    FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from ..fleet_profile_contract.vocabulary import FleetProfileEndpointState
 from ..gateway.route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from ..gateway.route_runtime import recipe_route_run_id, verify_active_route_bundle
 from ..inventory.items import runtime_value
@@ -44,12 +44,10 @@ from ..jobs.operator_receipts import (
     replay_job_operator_receipt,
 )
 from ..lifecycle.job import JobAdapter
-from ..models import (
-    AgentCertificate,
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
+from ..models.fleet import AgentCertificate, AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
+from ..models.routes import (
     RecipeRouteAuthority,
     RoutePublication,
     RoutePublicationOwner,

@@ -10,16 +10,16 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, WaitReason
-from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
-from vonk_control.fleet_profiles import (
-    _persisted_profile_progress,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
 from vonk_control.fleet_profiles.projection_support import _digest
-from vonk_control.models import CatalogDocumentRevision, FleetProfileApplication
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import FleetProfileApplication
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.recovery_policy import RECOVERY
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (

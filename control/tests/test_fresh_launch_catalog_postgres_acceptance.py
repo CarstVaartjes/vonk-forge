@@ -46,8 +46,8 @@ from vonk_control.library.contract import (
     RecipeDetailResponse,
     RecipeLibraryResponse,
 )
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import CatalogDocumentRevision
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import read_model, read_recipe

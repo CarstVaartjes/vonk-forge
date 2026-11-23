@@ -19,14 +19,14 @@ from vonk_agent_protocol.state_machines import (
     CertificateRotationState,
     NodeIdentityState,
 )
-from vonk_control.enrollment import EnrollmentService
 from vonk_control.enrollment.ending import retain_ended_effect
-from vonk_control.models import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentIssuedCertificateRevocation,
     AgentNode,
+    LocalCertificateRevocation,
 )
-from vonk_control.models.fleet import LocalCertificateRevocation
 from vonk_control.persisted_waits import read_wait, schedule_wait
 from vonk_control.step_ca import StepCAError, StepCAUnavailable
 

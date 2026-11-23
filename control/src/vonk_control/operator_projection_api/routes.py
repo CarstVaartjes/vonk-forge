@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..agent_upgrade_contract import AgentUpgradeRequestIntent
+from ..agent_upgrades.contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
 from ..enrollment.contract import (
@@ -26,13 +26,9 @@ from ..enrollment.contract import (
     EnrollmentObservationOutcome,
     EnrollmentRevocationStatus,
 )
-from ..fleet_projection import (
-    FleetNode,
-    FleetNodeIdentity,
-    FleetSnapshot,
-)
+from ..fleet_projection.common import FleetNode, FleetNodeIdentity, FleetSnapshot
 from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
-from ..models import RecipeRun, RunNode
+from ..models.execution import RecipeRun, RunNode
 from ..observation.platform_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
@@ -43,7 +39,7 @@ from ..observation.transfer import (
     observation_openapi,
     observation_response,
 )
-from ..operation_api import bounded_error_responses
+from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..run_states import ENDED_RUN_STATES
 from .contracts import (
@@ -79,7 +75,7 @@ def install_operator_projection_routes(
     """
 
     from ..library.api import install_library_routes
-    from ..operation_api import _ADMIN_OPERATION_IDS
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_OPERATION_IDS)
     install_library_routes(

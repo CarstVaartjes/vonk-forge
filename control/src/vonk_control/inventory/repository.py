@@ -23,7 +23,8 @@ from ..categorized_errors import InvalidValue
 from ..dialect_insert import dialect_insert
 from ..installed_bytes import reconcile_missing_installations, refresh_installed_bytes
 from ..logging import log_event
-from ..models import AgentNode, NodeInventorySnapshot, NodeSnapshot
+from ..models.fleet import AgentNode
+from ..models.telemetry import NodeInventorySnapshot, NodeSnapshot
 from .items_contract import InventorySnapshotKind
 
 _LOG = logging.getLogger(__name__)

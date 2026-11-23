@@ -17,20 +17,16 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionLockBusy
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-    RunSwitchJournalRepair,
-    RunSwitchJournalRepairPending,
-)
+from ..journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..persisted_waits import clear_wait, read_wait
-from ..run_switch_contract import RunSwitchOperationResult
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
     RunSwitchJournalRepairEvidence,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_operations.results import _persisted_result
 from .discovery import (
     REPAIR_WAIT,

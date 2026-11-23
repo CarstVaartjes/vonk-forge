@@ -17,19 +17,24 @@ from vonk_agent_protocol import (
     RecipeImageCode,
 )
 from vonk_control.jobs.documents import AvailabilityJobPayload
-from vonk_control.model_cache_contract import ModelCacheCancellation
-from vonk_control.models import Base, Job, ModelCacheOperation, User
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityService,
+from vonk_control.model_cache.contract import ModelCacheCancellation
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability import requests
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
-    requests,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.stored.json_values import Residue, read_row_column
 from vonk_forge_contracts import RecipeDefinition
 
@@ -84,7 +89,9 @@ def test_public_availability_service_reuses_published_content_after_restart(
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(
     caplog,
 ) -> None:
-    from vonk_control.recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
+    from vonk_control.recipe_image_availability.removal_contract import (
+        RECIPE_CACHE_REMOVE_KIND,
+    )
 
     # A pre-contract row can retain a malformed progress clock. It is due for
     # owner reconciliation, while a valid scheduling column remains a bound.
@@ -353,7 +360,9 @@ def test_model_child_cancel_intent_survives_unrelated_payload_damage(
     tmp_path: Path,
 ) -> None:
     """A damaged download envelope must not forget its accepted cancellation."""
-    from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+    from vonk_control.recipe_image_availability.service import (
+        RecipeImageAvailabilityService,
+    )
 
     cancel = ModelCacheCancellation(
         request_key="00000000-0000-4000-8000-000000000a02",
@@ -485,7 +494,7 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
 ) -> None:
     """A vanished exact child must not keep its parent's execution claim retrying."""
     from vonk_control.jobs.documents import AvailabilityModelChild
-    from vonk_control.model_cache import ModelCacheNotFound
+    from vonk_control.model_cache.errors import ModelCacheNotFound
     from vonk_control.strict_json import serialize_json_value
 
     engine, sessions, service, operation = _started(tmp_path)
@@ -548,7 +557,7 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     import json
 
     from vonk_agent_protocol import ModelCacheCode
-    from vonk_control.models import ArtifactLifecycleGate
+    from vonk_control.models.cache import ArtifactLifecycleGate
     from vonk_control.recovery_policy import RecoveryPolicy
 
     from .non_blocking import assert_ended_without_blocking
@@ -685,7 +694,7 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
     """A read fault must not turn verified image availability into a refusal."""
     from sqlalchemy.exc import SQLAlchemyError
     from vonk_control.jobs.documents import AvailabilityModelChild
-    from vonk_control.model_cache import ModelCacheError
+    from vonk_control.model_cache.errors import ModelCacheError
     from vonk_control.strict_json import serialize_json_value
 
     engine, sessions, service, operation = _started(tmp_path)

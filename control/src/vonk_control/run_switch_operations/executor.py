@@ -18,13 +18,9 @@ from ..cluster_mappings import (
 )
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..lifecycle_preflight import LifecyclePreflight
-from ..recipe_operations import (
-    RecipeOperationService,
-    RecipeOperationView,
-)
-from ..run_switch_contract import (
-    RunSwitchOperation,
-)
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..recipe_operations.service import RecipeOperationService
+from ..run_switch_contract.operations import RunSwitchOperation
 from .executor_phases import ExecutorPhasesMixin
 from .executor_preflight import ExecutorPreflightMixin
 from .executor_verification import ExecutorVerificationMixin

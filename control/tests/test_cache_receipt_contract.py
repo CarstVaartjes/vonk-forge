@@ -7,9 +7,9 @@ from vonk_agent_protocol import UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
 )
-from vonk_control.distribution import ModelCacheObjectSource
+from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.execution_plan_service import _runtime_image_receipt
-from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 from .test_nas_cache_acceptance import controller  # noqa: F401 - shared cache fixture
 
@@ -74,7 +74,7 @@ def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
         ModelCacheObjectSource.from_service(cache).objects_for_set(digest)
     from sqlalchemy import select
     from vonk_agent_protocol import LifecycleState
-    from vonk_control.models import ModelCacheOperation
+    from vonk_control.models.cache import ModelCacheOperation
 
     with sessions() as session:
         repairs = list(
@@ -102,8 +102,8 @@ def test_a_set_the_nas_evicted_still_compiles_without_a_download(
     Spark already holds: after eviction that waited or downloaded it again.
     A set over bytes the NAS still holds is recorded for a later copy."""
     from sqlalchemy import delete, select
-    from vonk_control.distribution import verified_model_receipts
-    from vonk_control.models import (
+    from vonk_control.distribution.sources import verified_model_receipts
+    from vonk_control.models.cache import (
         ModelCacheOperation,
         ModelCacheSet,
         ModelCacheSetArtifact,

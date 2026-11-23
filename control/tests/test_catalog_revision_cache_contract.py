@@ -12,12 +12,13 @@ from vonk_control.catalog.revision_contract import (
     read_catalog_document,
     read_catalog_projection,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheDownloadPayload,
     parse_model_cache_payload,
 )
-from vonk_control.models import CatalogDocumentRevision, ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .display_fixtures import create_draft, reword

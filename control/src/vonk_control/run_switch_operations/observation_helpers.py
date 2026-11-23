@@ -19,18 +19,12 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import RunSwitchIntent
-from ..models import (
-    ACTIVE_RUN_STATES,
-    Job,
-)
-from ..recipe_operations import (
-    RecipeOperationService,
-    RecipeOperationView,
-)
-from ..run_switch_contract import (
-    RunSwitchPhase,
-    RunSwitchPlan,
-)
+from ..models.execution import ACTIVE_RUN_STATES
+from ..models.jobs import Job
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..recipe_operations.service import RecipeOperationService
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.plans import RunSwitchPlan
 from .errors import RunSwitchRequestInvalid
 from .planning_helpers import _run_switch_payload
 

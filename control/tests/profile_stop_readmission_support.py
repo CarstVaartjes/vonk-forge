@@ -7,14 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import AgentNode, RecipeRun, ResourceReservation, RunNode
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent

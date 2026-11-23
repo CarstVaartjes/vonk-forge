@@ -11,7 +11,6 @@ from vonk_agent_protocol import AssetAvailability
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.qualification_status import QualificationStatus
 
-from .. import model_cache_states
 from ..auth import CursorCodec
 from ..catalog.revision_contract import (
     ModelRevisionProjection,
@@ -29,11 +28,12 @@ from ..library.contract import (
 )
 from ..library.image_presence import ImagePresenceIndex
 from ..library.storage_observation import LibraryStorageObserver
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     ModelCacheOperationState,
     ModelCacheUsage,
 )
-from ..models import CatalogDocumentRevision
+from ..models.catalog import CatalogDocumentRevision
 from ..wait_contract import QueueWait
 from .catalog import (
     _catalog_documents,

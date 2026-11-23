@@ -20,13 +20,12 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
 )
 
-from .. import model_cache_states
 from ..bounded_retry import bounded_attempts
 from ..cached_file_verification import verified_files
-from ..lifecycle import Effect, Outcome, Reported, Tick
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
+from ..lifecycle.types import Effect, Outcome, Reported, Tick
+from ..models.cache import ModelCacheOperation
 from ..runtime_init import RuntimeSecretError, read_runtime_secret
+from . import states as model_cache_states
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _unique_artifacts
 from .constants import (
     _CREDENTIAL_FAILURE_PUBLIC_CODES,
@@ -40,6 +39,7 @@ from .errors import (
     _retry_after_seconds,
 )
 from .persistence import _operation_progress, _store_operation_payload, _updated
+from .progress import cache_phase, progress_document
 from .source_helpers import (
     _fsync_directory,
     _is_allowed_huggingface_redirect,

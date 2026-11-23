@@ -15,17 +15,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LibraryAssessmentCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from ..model_cache import ModelCacheService
 from ..model_cache.resolution import artifact_sets_resolved_once
-from ..models import AgentNode
-from ..run_switch_contract import RunSwitchPlan, RunSwitchReason
-from ..run_switch_operations import RunSwitchOperationService
+from ..model_cache.service import ModelCacheService
+from ..models.fleet import AgentNode
+from ..run_switch_contract.evidence import RunSwitchReason
+from ..run_switch_contract.plans import RunSwitchPlan
 from ..run_switch_operations.artifact_inspection import (
     failed_copies_read_once,
     missing_spark_bytes,
     spark_stores,
 )
 from ..run_switch_operations.phase_planning import targets_hold_model
+from ..run_switch_operations.service import RunSwitchOperationService
 from .contract import LibraryRecipeProjection, RecipeReadiness, RecipeReadinessCheck
 
 

@@ -35,24 +35,27 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.catalog import revision_collection as catalog_revision_collection
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
-from vonk_control.model_cache_contract import CacheManifest
-from vonk_control.models import (
-    Base,
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
-    ModelCacheOperation,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    RecipeInstallation,
 )
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256

@@ -17,29 +17,29 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import (
-    FleetProfileInput,
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
+)
+from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    _persisted_profile_progress,
-)
-from vonk_control.models import (
+from vonk_control.fleet_profiles.persistence import _persisted_profile_progress
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    AgentOperation,
-    Base,
-    CatalogDocumentRevision,
     FleetProfileApplication,
-    Job,
-    ResourceReservation,
 )
-from vonk_control.run_switch_contract import RunSwitchMemberProgress
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.run_switch_contract.progress import RunSwitchMemberProgress
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row

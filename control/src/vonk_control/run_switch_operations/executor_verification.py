@@ -23,22 +23,20 @@ from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..machine_states import rank_installed
-from ..models import (
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import (
     STOPPABLE_RUN_STATES,
-    AgentNode,
-    CatalogDocumentRevision,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
 )
-from ..recipe_operations import RecipeRunStatus
+from ..models.fleet import AgentNode
+from ..recipe_operations.interfaces import RecipeRunStatus
 from ..run_admission import run_port_demand
 from ..run_readiness import run_not_ready_for_profile
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-    RunSwitchPlan,
-    RunSwitchRuntimePlanResult,
-)
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
+from ..run_switch_contract.plans import RunSwitchPlan
 from .errors import RunSwitchRetryLater
 from .interfaces import PhaseExecution
 from .planning_helpers import _latest_inventory, _now

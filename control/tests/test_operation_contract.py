@@ -15,7 +15,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.bounded_json import require_mapping, require_sequence, text
-from vonk_control.models import AgentOperation, Base, RecipeRun
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import RecipeRun
+from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.contract import (
     OperationMemberProgress,
     OperationPhase,

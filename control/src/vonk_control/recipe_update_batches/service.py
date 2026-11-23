@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..lifecycle.recipe_update_batch import RecipeUpdateBatchAdapter
 
 if TYPE_CHECKING:
-    from ..recipe_image_availability import RecipeImageAvailabilityService
+    from ..recipe_image_availability.service import RecipeImageAvailabilityService
 
 from .activity import ActivityMixin
 from .cancellation import CancellationMixin

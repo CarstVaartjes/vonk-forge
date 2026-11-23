@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason, TopologyCode
 
-from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
+from .recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 
 
 class TopologyError(InvalidRequestError, ValueError):

@@ -7,8 +7,9 @@ join the same convergence path as one that already records this baseline.
 
 from __future__ import annotations
 
+import vonk_control.models  # noqa: F401 -- loads every mapped table onto Base.metadata
 from alembic import op
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 
 revision = "0000_fresh_schema"
 down_revision = None

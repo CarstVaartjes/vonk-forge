@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import RecipeRunObservationWire, RouteState, RunState
 
 from ..logging import log_event
-from ..models import RecipeRun, RunNode
+from ..models.execution import RecipeRun, RunNode
 from ..owner_liveness import run_has_live_operation
 from ..persisted_waits import schedule_wait
-from ..recipe_stop_payloads import durable_run_stop_payloads
+from ..recipe_operations.stop_payloads import durable_run_stop_payloads
 from ..run_states import ENDED_RUN_STATES
 from .common import _LOGGER, _now
 

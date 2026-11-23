@@ -23,8 +23,9 @@ from cryptography.x509.oid import NameOID
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import Base, FleetProfileApplication
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import FleetProfileApplication
 
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import _SwitchAdapter

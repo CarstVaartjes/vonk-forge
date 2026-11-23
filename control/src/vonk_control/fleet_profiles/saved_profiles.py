@@ -21,9 +21,8 @@ from ..admission_locking import (
     label_transaction,
 )
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.definitions import (
     FleetNodeView,
-    FleetProfileApplicationView,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
     FleetProfileInput,
@@ -33,8 +32,13 @@ from ..fleet_profile_contract import (
     SavedProfileProjectionIssue,
     UnavailableFleetProfileView,
 )
-from ..models import AgentNode, AgentNodeProfile, FleetProfile, FleetProfileApplication
-from ..profile_read_observation import profile_read
+from ..fleet_profile_contract.review import FleetProfileApplicationView
+from ..models.fleet import (
+    AgentNode,
+    AgentNodeProfile,
+    FleetProfile,
+    FleetProfileApplication,
+)
 from .contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
@@ -46,6 +50,7 @@ from .projection_support import (
     _profile_definition,
     _with_save_notes,
 )
+from .read_observation import profile_read
 
 if TYPE_CHECKING:
     from .profile_projection import _ProfilePageReads

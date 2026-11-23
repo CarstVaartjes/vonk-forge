@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import ADMIN_ROLE, Actor
 from .db.connections import require_durable_commit
-from .models import LoginSession, User
+from .models.fleet import LoginSession, User
 from .passwords import hash_password, verify_password
 
 _ADMIN_SUBJECT = "admin"

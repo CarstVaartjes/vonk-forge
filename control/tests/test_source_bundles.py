@@ -186,7 +186,8 @@ def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import canonical_message
     from vonk_agent_protocol.source_bundles import SourceBundleManifest
-    from vonk_control.models import Base, RecipeSourceBundle
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.catalog import RecipeSourceBundle
     from vonk_control.source_bundles import (
         DatabaseSourceBundleStore,
         generate_source_bundle,
@@ -261,7 +262,8 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog.service import CatalogService
-    from vonk_control.models import Base, RecipeSourceBundle
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.catalog import RecipeSourceBundle
 
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     store = SourceBundleStore(tmp_path / "bundles")

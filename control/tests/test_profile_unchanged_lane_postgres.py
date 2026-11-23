@@ -7,11 +7,11 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ReservationState, RunState
-from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
-from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
-from vonk_control.fleet_profile_contract import (
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
+from vonk_control.artifact_jobs.service import ArtifactJobService
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
@@ -19,7 +19,9 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.models import AgentNode, Job, RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, SOLO_B, build_world

@@ -22,52 +22,56 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileChildOperation,
+)
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
-    FleetProfileChildOperation,
-    FleetProfileChildProgress,
     FleetProfileInput,
     FleetProfileNode,
-    FleetProfileRunEffect,
     FleetProfileScope,
+    FleetProfileView,
+)
+from vonk_control.fleet_profile_contract.effects import (
+    FleetProfileChildProgress,
+    FleetProfileRunEffect,
+)
+from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchChildState,
     FleetProfileSwitchQueueItem,
     FleetProfileVerificationResult,
-    FleetProfileView,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileAdmissionBusy,
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    _operation_state,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profiles.assessment_support import _operation_state
+from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionBusy
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    FleetProfile,
-    FleetProfileApplication,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RunNode,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    AgentNodeContact,
+    FleetProfile,
+    FleetProfileApplication,
     User,
 )
-from vonk_control.operation_api import OperationQuery
+from vonk_control.models.jobs import Job
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.operation_api.contracts import OperationQuery
 from vonk_control.operations.item_contract import operation_item
 from vonk_control.persisted_waits import wait_due
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
@@ -79,14 +83,14 @@ from vonk_control.preparation_contract import (
     RuntimeImagePreparation,
     TargetAssetState,
 )
-from vonk_control.recipe_execution_contract import installation_plan_document
-from vonk_control.run_switch_contract import (
-    RunSwitchAssessment,
-    RunSwitchOperationResult,
+from vonk_control.recipe_operations.execution_contract import installation_plan_document
+from vonk_control.run_switch_contract.evidence import (
     RunSwitchReason,
     SparkFit,
     SparkFitNode,
 )
+from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+from vonk_control.run_switch_contract.plans import RunSwitchAssessment
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
@@ -1068,7 +1072,7 @@ def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
     tmp_path: Path,
 ) -> None:
     from vonk_control.auth import TokenCodec
-    from vonk_control.operation_api import durable_operation_services
+    from vonk_control.operation_api.durable import durable_operation_services
 
     sessions = _database()
     _, revision_id = _seed(sessions)
@@ -2228,7 +2232,7 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
 ) -> None:
     from vonk_agent_protocol.agent_words import ProfileChildJobKind
     from vonk_control.jobs.documents import RunSwitchJobPayload
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import CompleteArtifactInspector, _request
@@ -2300,7 +2304,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
 ) -> None:
     """The profile child delegates exact preparation and run admission to RunSwitch."""
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -2474,10 +2478,8 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     it and any later restart.
     """
 
-    from vonk_control.run_switch_operations import (
-        RunSwitchOperationService,
-        _persisted_result,
-    )
+    from vonk_control.run_switch_operations.result_helpers import _persisted_result
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -2601,10 +2603,8 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     fail the whole load with "Run/Switch child returned waiting".
     """
 
-    from vonk_control.run_switch_operations import (
-        RunSwitchOperationService,
-        _persisted_result,
-    )
+    from vonk_control.run_switch_operations.result_helpers import _persisted_result
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -2714,7 +2714,7 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     opens its own writer then fails here with "database is locked".
     """
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -2822,7 +2822,7 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
     advancing forever.
     """
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -2912,7 +2912,7 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
 ) -> None:
     """An empty desired set still stops a complete in-scope run through RunSwitch."""
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import (
         installed_recipe,
@@ -3000,7 +3000,7 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
     stayed on the Spark forever.
     """
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import (
         installed_recipe,
@@ -3708,7 +3708,9 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
             .where(FleetProfile.id == created.id)
             .values(assignments=assignments)
         )
-    from vonk_control.fleet_profile_contract import UnavailableFleetProfileView
+    from vonk_control.fleet_profile_contract.definitions import (
+        UnavailableFleetProfileView,
+    )
 
     # Keep the exact saved identity observable. Dropping a malformed choice
     # would let an ordinary edit silently delete accepted authoring intent.
@@ -3821,7 +3823,9 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
     from datetime import timedelta
 
     from vonk_agent_protocol import RecipeImageCode
-    from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
+    from vonk_control.fleet_profile_contract.vocabulary import (
+        FLEET_PROFILE_ENDED_STATES,
+    )
     from vonk_control.operations.blockers import make_blocker
 
     sessions = _database()
@@ -3888,7 +3892,7 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     defect the Spark acceptance canary surfaced.
     """
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -3965,7 +3969,7 @@ def test_child_operation_state_unknown_is_observed_never_refused() -> None:
 def _exact_cleanup_profile(tmp_path: Path, *, engine=None):
     """A production-wired profile that removes an unlisted installation."""
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import installed_recipe, setup_services
     from .test_run_switch_operations import (
@@ -4067,7 +4071,7 @@ def test_profile_preview_delegates_removal_to_the_orchestrator(
 def _exact_planned_cleanup_profile(tmp_path: Path):
     """A production-wired exact profile whose only leftover is a persisted plan."""
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
@@ -4148,7 +4152,7 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
     assert completed.state == "succeeded", completed.status_reason
     # The profile application keeps the Run/Switch receipt, so the operator
     # sees the abandonment and its reason rather than a silent disappearance.
-    from vonk_control.run_switch_contract import RunSwitchUninstallResult
+    from vonk_control.run_switch_contract.phase_results import RunSwitchUninstallResult
 
     receipts = [
         item.result.run_switch
@@ -4182,7 +4186,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
 ) -> None:
     """The packaged acceptance consumer follows delegated cleanup evidence."""
 
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import (
         installed_recipe,
@@ -4393,7 +4397,7 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
 
 def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
     """A replacement must prepare before stopping the exact old workload."""
-    from vonk_control.fleet_profiles import _switch_queue
+    from vonk_control.fleet_profiles.projection_support import _switch_queue
 
     identities = {
         name: _uuid(19890 + index)
@@ -4455,7 +4459,7 @@ def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
 def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
     tmp_path: Path,
 ) -> None:
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
     from .test_recipe_operations import (
         installed_recipe,
@@ -4514,7 +4518,7 @@ def test_every_application_state_is_active_or_named_ended() -> None:
 
     from typing import get_args
 
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.vocabulary import (
         FLEET_PROFILE_ENDED_STATES,
         FleetProfileOperationState,
     )
@@ -4562,7 +4566,7 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
 ) -> None:
     """An exhausted chain must release its application scope, not poison new loads."""
     from vonk_agent_protocol import RecipeImageCode, ReservationState
-    from vonk_control.models import FleetProfileApplication
+    from vonk_control.models.fleet import FleetProfileApplication
     from vonk_control.operations.blockers import make_blocker
 
     from .non_blocking import assert_ended_without_blocking
@@ -4609,7 +4613,10 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     profile = service.create(_input(revision_id), actor="admin")
     ended = service.apply(profile.id, request_key=_uuid(920), actor="admin")
     if end_path != "admission":
-        from vonk_control import fleet_profiles as fp
+        from vonk_control.fleet_profiles.contracts import (
+            FleetProfileAdmissionEffectBusy,
+            _FleetProfileRecoveryBindingConflict,
+        )
 
         # Automatic recovery scans backing-off loads, rather than pending admission.
         with sessions.begin() as session:
@@ -4630,9 +4637,9 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
         )
         monkeypatch.setattr(service, "_retry_eligible", lambda session, row: True)
         error = (
-            fp._FleetProfileRecoveryBindingConflict
+            _FleetProfileRecoveryBindingConflict
             if end_path == "cache-recovery"
-            else fp.FleetProfileAdmissionEffectBusy
+            else FleetProfileAdmissionEffectBusy
         )
 
         def interrupted(*args, **kwargs):
@@ -4651,7 +4658,7 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
             assert row.progress.get("retry_due_at") is None
             assert row.current_operation_id is None
             from sqlalchemy import select
-            from vonk_control.models import ResourceReservation
+            from vonk_control.models.execution import ResourceReservation
 
             assert (
                 list(

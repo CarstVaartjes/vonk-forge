@@ -13,7 +13,7 @@ from ..fleet_profile_contract.definitions import StoredFleetProfileAssignment
 from ..fleet_profile_contract.effects import FleetProfileGpuClockEffect
 from ..fleet_profiles.service import FleetProfileService
 from ..lifecycle.evidence import Residue
-from ..models import FleetProfileApplication, FleetProfileSelection
+from ..models.fleet import FleetProfileApplication, FleetProfileSelection
 
 
 def selected_gpu_clock(session: Session, node_id: str) -> GpuClockIntent:

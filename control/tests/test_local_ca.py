@@ -19,11 +19,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
-from vonk_control.agent_api import AgentApiServices
-from vonk_control.api import build_agent_services
+from vonk_control.agent_api.common import AgentApiServices
+from vonk_control.agent_services import build_agent_services
 from vonk_control.local_ca import LocalCertificateAuthority
-from vonk_control.models import AgentCertificate, Base
-from vonk_control.models.fleet import LocalCertificateRevocation
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, LocalCertificateRevocation
 from vonk_control.step_ca import StepCAError
 
 from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
@@ -32,7 +32,7 @@ from .ca_material import NODE_ID, NOW, _csr, _leaf, _write_material
 @pytest.fixture
 def local_ca(tmp_path: Path, postgres_engine: Engine):
     # Source admission also checks pre-existing Controller-issued certificates.
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
 
     Base.metadata.create_all(postgres_engine)
     material = _write_material(tmp_path)
@@ -80,7 +80,7 @@ def test_production_factory_reads_normalized_compose_signing_secrets(
 
     from vonk_control import runtime_init
     from vonk_control.agent_services import build_enrollment_service
-    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.enrollment.service import EnrollmentService
     from vonk_control.settings import Settings
 
     material = _write_material(tmp_path / "material")
@@ -326,7 +326,7 @@ def test_revocation_fences_a_pending_signature(local_ca):
 def test_preexisting_certificate_can_rotate(local_ca):
     """Catches requiring every rotation source to have been issued locally."""
     ca, material, options = local_ca
-    from vonk_control.models import AgentNode
+    from vonk_control.models.fleet import AgentNode
 
     csr = _csr()
     leaf = _leaf(csr, material, serial=1234)
@@ -494,7 +494,7 @@ def test_a_serial_known_only_from_revocation_evidence_leaves_the_crl(local_ca):
     Its binding was made before the evidence, so the certificate it could have
     produced expires within one lifetime of the evidence.
     """
-    from vonk_control.models import AgentIssuedCertificateRevocation
+    from vonk_control.models.fleet import AgentIssuedCertificateRevocation
     from vonk_control.step_ca import CERTIFICATE_LIFETIME
     from vonk_control.telemetry.maintenance import TelemetryMaintenance
 

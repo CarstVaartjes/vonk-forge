@@ -1272,6 +1272,12 @@ _MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
 
 # The one reader outside the model cache that may require NAS coverage.
 NAS_COVERAGE_READER = "control/src/vonk_control/distribution/model_cache.py"
+# Flat model_cache_* modules that moved into the package: they were scanned
+# before the move, so the package exemption for the storage modules excludes them.
+MOVED_FLAT_MODEL_CACHE_MODULES = frozenset(
+    f"control/src/vonk_control/model_cache/{name}.py"
+    for name in ("api", "contract", "progress", "ranges", "states", "streams")
+)
 
 
 def _targets_membership_rows(node: ast.AST) -> bool:

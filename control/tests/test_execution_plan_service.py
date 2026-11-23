@@ -21,7 +21,8 @@ from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.execution_plan_service import (
     compile_job_invocation,
 )
-from vonk_control.models import Base, RecipeBuild
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
 from vonk_forge_contracts import document_sha256
 
 from .catalog_launch_fixtures import load_inputs
@@ -210,7 +211,7 @@ def test_unconfirmed_model_cache_evidence_keeps_its_type(installation):
     admitting owner observes again, not a compilation verdict."""
 
     from vonk_control.execution_plan_service import ControllerExecutionPlanService
-    from vonk_control.model_cache import ModelCacheStorageUnknown
+    from vonk_control.model_cache.errors import ModelCacheStorageUnknown
 
     sessions, revision, _installed, _plan = installation
 

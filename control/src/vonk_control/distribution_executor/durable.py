@@ -21,30 +21,29 @@ from vonk_agent_protocol.agent_words import (
     ProfileEffectState,
 )
 
-from ..agent_jobs import abandon_idempotent_job_in_session
+from ..agent_jobs.retry import abandon_idempotent_job_in_session
 from ..agent_operation_facts import aware
 from ..failure_classification import is_security_failure
 from ..jobs.documents import DistributionJobPayload
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-)
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.progress import aggregate_progress, project_progress
-from ..run_switch_contract import (
-    ArtifactVerificationEvidence,
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchCachedTransferResult,
-    RunSwitchChildProgress,
     RunSwitchDistributionChildResult,
     RunSwitchDistributionEndedResult,
-    RunSwitchMemberReceipt,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
     RunSwitchTargetTransferResult,
 )
-from ..run_switch_operations import PhaseExecution
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import (
+    ArtifactVerificationEvidence,
+    RunSwitchChildProgress,
+    RunSwitchMemberReceipt,
+)
 from ..run_switch_operations.constants import _is_artifact_phase
+from ..run_switch_operations.interfaces import PhaseExecution
 from ..strict_json import read_stored_model
 from .children import DistributionChildren
 from .receipts import (

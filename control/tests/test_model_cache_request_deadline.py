@@ -8,8 +8,8 @@ import httpx2
 import pytest
 from vonk_agent_protocol import LifecycleState
 from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation
 
 from .test_model_cache import _http_artifact, _http_cache_service
 from .test_model_cache import cache as cache  # noqa: PLC0414 -- pytest fixture
@@ -144,9 +144,7 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
     usage = namedtuple("usage", "total used free")
     real_disk_usage = __import__("shutil").disk_usage
     if dependency == "capacity":
-        monkeypatch.setattr(
-            "vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0)
-        )
+        monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
     with lock_path.open("a+b") as holder:
         if dependency == "writer":
             fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -169,9 +167,7 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
         if dependency == "writer":
             fcntl.flock(holder, fcntl.LOCK_UN)
         else:
-            monkeypatch.setattr(
-                "vonk_control.model_cache.shutil.disk_usage", real_disk_usage
-            )
+            monkeypatch.setattr("shutil.disk_usage", real_disk_usage)
     service.run_pending()
     assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     assert service._object_path(digest).read_bytes() == data

@@ -17,39 +17,35 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states
-from ..agent_jobs import (
-    _JsonFlagIsTrue,
-)
+from ..agent_jobs.predicates import _JsonFlagIsTrue
 from ..categorized_errors import (
     InvalidValue,
     MissingRecord,
 )
 from ..jobs import states as job_states
-from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-)
+from ..lifecycle.types import Outcome
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation
 from ..recipe_builds.cancellation import BuildConsumerError, build_cancellation
-from ..recipe_lifecycle_contract import (
-    RecipeOperationCancellationResult,
-)
-from ..recipe_progress import (
-    _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
-)
-from ..recipe_progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
-)
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeOperationConflict, RecipeRequestInvalid
 from .intent import _cancel_reason
 from .interfaces import RecipeOperationView
+from .lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 from .observation_helpers import _aware
+from .progress import (
+    _cancel_requested as _cancel_requested,  # noqa: PLC0414 -- shared helper export
+)
+from .progress import (
+    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
+)
 from .results import _recorded_result, _recorded_result_document, _validated_result
 
 if TYPE_CHECKING:

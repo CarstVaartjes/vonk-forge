@@ -26,18 +26,11 @@ from ..jobs import states as job_states
 from ..lifecycle.run_switch import (
     RunSwitchAdapter,
 )
-from ..models import (
-    Job,
-)
-from ..operation_api import (
-    OperationListPage,
-    OperationQuery,
-    _activity_keyset_filter,
-)
+from ..models.jobs import Job
+from ..operation_api.contracts import OperationListPage, OperationQuery
+from ..operation_api.providers import _activity_keyset_filter
 from ..operations.item_contract import OperationItem
-from ..run_switch_contract import (
-    RunSwitchOperation,
-)
+from ..run_switch_contract.operations import RunSwitchOperation
 from ..strict_json import (
     warn_unreadable_once,
 )

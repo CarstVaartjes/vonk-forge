@@ -20,14 +20,10 @@ from vonk_agent_protocol import (
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.core import STOP_BUDGET
-from ..model_cache import ModelCacheError
-from ..models import (
-    Job,
-)
+from ..model_cache.errors import ModelCacheError
+from ..models.jobs import Job
 from ..operations.contract import AvailabilityOperationFailure
-from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -39,7 +35,7 @@ from .contracts import (
 )
 
 if TYPE_CHECKING:
-    from ..recipe_update_batches import RecipeUpdateClaim
+    from ..recipe_update_batches.helpers import RecipeUpdateClaim
     from .service import RecipeImageAvailabilityService
 
 

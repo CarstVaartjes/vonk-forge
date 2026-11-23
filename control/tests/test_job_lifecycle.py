@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
-from vonk_control.lifecycle import Lifecycle, State, transition
+from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.lifecycle.types import (
     CancelRequested,
@@ -19,13 +19,16 @@ from vonk_control.lifecycle.types import (
     Execute,
     Heartbeat,
     LeaseLapsed,
+    Lifecycle,
     Observed,
     OperatorAction,
     Outcome,
     Reported,
+    State,
     Tick,
 )
-from vonk_control.models import Base, Job, JobAttempt
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job, JobAttempt
 
 NOW = datetime(2026, 8, 3, tzinfo=UTC)
 

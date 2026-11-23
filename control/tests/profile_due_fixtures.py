@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 
 def next_profile_due(

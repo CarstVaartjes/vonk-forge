@@ -8,16 +8,12 @@ from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
-from vonk_control.recipe_operation_worker import RecipeOperationWorker
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
+from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .test_recipe_operations import (
     NOW,
@@ -318,12 +314,12 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         OutcomeKind,
         RecipeStopResult,
     )
-    from vonk_control.agent_jobs import AgentJobService
-    from vonk_control.fleet_profiles import (
+    from vonk_control.agent_jobs.service import AgentJobService
+    from vonk_control.fleet_profiles.persistence import _persisted_profile_plan
+    from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter,
-        _persisted_profile_plan,
     )
-    from vonk_control.models import FleetProfileApplication
+    from vonk_control.models.fleet import FleetProfileApplication
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang
@@ -349,7 +345,7 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
 
         def dispatch(*args, **kwargs):
             if blocked[0]:
-                from vonk_control.recipe_operations import RecipeRetryLater
+                from vonk_control.recipe_operations.errors import RecipeRetryLater
 
                 raise RecipeRetryLater(
                     "injected unavailable dispatch after exact withdrawal"
@@ -577,13 +573,11 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         OutcomeKind,
         RecipeStopResult,
     )
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.recipe_routes import (
-        AtomicRecipeRoutePublisher,
-        RecipeRouteService,
-    )
+    from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
+    from vonk_control.recipe_routes.service import RecipeRouteService
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang

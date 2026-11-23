@@ -17,7 +17,7 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from ..admission_locking import ConstraintReplan, admitting
-from ..models import (
+from ..models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentIssuedCertificateRevocation,

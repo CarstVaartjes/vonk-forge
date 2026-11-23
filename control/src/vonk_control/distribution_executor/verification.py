@@ -6,15 +6,15 @@ from collections.abc import Mapping, Sequence
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
-from ..run_switch_contract import (
-    ArtifactVerificationEvidence,
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchCachedTransferResult,
-    RunSwitchOperationResult,
-    RunSwitchPlan,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
 )
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import ArtifactVerificationEvidence
 from .identity import DistributionIdentity
 
 

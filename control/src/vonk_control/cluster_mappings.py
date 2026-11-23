@@ -21,14 +21,11 @@ from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 from .inventory.items import runtime_value
 from .inventory.repository import newest_snapshot_ids
 from .mapping_parameters import MappingParameters
-from .models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    NodeInventorySnapshot,
-)
-from .recipe_runtime_specs import (
+from .models.catalog import CatalogDocumentRevision
+from .models.fleet import AgentNode
+from .models.mapping import ClusterMapping, ClusterMappingNode
+from .models.telemetry import NodeInventorySnapshot
+from .recipe_operations.runtime_specs import (
     OPTION_CHOICES_KEY,
     RecipeRuntimeSpecError,
     recipe_topology,

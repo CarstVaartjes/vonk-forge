@@ -37,7 +37,7 @@ from vonk_agent_protocol.optional_evidence import (
     redact_host_paths,
 )
 from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
-from vonk_control.agent_api import install_agent_routes
+from vonk_control.agent_api.routes import install_agent_routes
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY
 

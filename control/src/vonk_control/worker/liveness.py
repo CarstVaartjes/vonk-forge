@@ -215,7 +215,7 @@ class WorkerHeartbeatRecorder:
     def _register_process_start(self) -> None:
         from ..build_identity import packaged_runtime_identity
         from ..identity_insert import insert_identity
-        from ..models import ControlProcessHeartbeat
+        from ..models.jobs import ControlProcessHeartbeat
 
         identity = packaged_runtime_identity()
 
@@ -246,7 +246,7 @@ class WorkerHeartbeatRecorder:
         """Publish the step that is still running, so a slow one is named."""
         from sqlalchemy import text, update
 
-        from ..models import ControlProcessHeartbeat
+        from ..models.jobs import ControlProcessHeartbeat
 
         with self._sessions.begin() as session:
             if session.get_bind().dialect.name == "postgresql":
@@ -269,7 +269,7 @@ class WorkerHeartbeatRecorder:
     def completed_loop(self) -> None:
         from sqlalchemy import select
 
-        from ..models import ControlProcessHeartbeat
+        from ..models.jobs import ControlProcessHeartbeat
 
         completed_at = self._clock()
         if (

@@ -7,11 +7,11 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.catalog import revision_collection as catalog_revision_collection
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
-from vonk_control.unused_storage_collection import spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import spark_eviction_capacity
 
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_fleet_model_removal_postgres import inventory

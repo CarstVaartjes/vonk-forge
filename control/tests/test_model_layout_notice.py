@@ -19,8 +19,8 @@ from vonk_agent_protocol.failure_evidence import (
     ModelStoreLayoutFault,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_projection.service import FleetProjection
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import claim_agent

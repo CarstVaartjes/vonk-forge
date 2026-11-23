@@ -82,7 +82,10 @@ def _check_constraint_differences(connection: Connection) -> list[str]:
     from sqlalchemy import CheckConstraint, Column, MetaData, Table, inspect
     from sqlalchemy.schema import CreateTable, DropTable
 
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     inspector = inspect(connection)
     live_tables = set(inspector.get_table_names())
@@ -234,7 +237,10 @@ def _repair_check_constraints(connection: Connection) -> None:
     from alembic.operations import Operations
     from sqlalchemy import CheckConstraint, inspect
 
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     ops = Operations(MigrationContext.configure(connection))
     inspector = inspect(connection)
@@ -328,7 +334,10 @@ def _drop_undeclared_tables(connection: Connection, ops: Any) -> None:
         return
     from sqlalchemy import inspect
 
-    from ..models import Base
+    from .. import (
+        models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+    )
+    from ..model_primitives import Base
 
     inspector = inspect(connection)
     undeclared = sorted(

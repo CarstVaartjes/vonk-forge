@@ -17,34 +17,31 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
-from .. import model_cache_states
 from ..content_identity import same_image
+from ..fleet_profiles.read_observation import profile_read
 from ..logging import redact_text
-from ..model_cache import CacheOperationView, ModelCacheNotFound
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadResult,
 )
-from ..models import (
-    CatalogDocumentRevision,
-    RecipeBuild,
-)
-from ..profile_read_observation import profile_read
-from ..run_switch_contract import (
-    RunSwitchChildProgress,
+from ..model_cache.errors import ModelCacheNotFound
+from ..model_cache.views import CacheOperationView
+from ..models.cache import RecipeBuild
+from ..models.catalog import CatalogDocumentRevision
+from ..run_switch_contract.evidence import RunSwitchPhase
+from ..run_switch_contract.observation import RuntimeImageBuildInput
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,
     RunSwitchModelDownloadResult,
-    RunSwitchOperationResult,
-    RunSwitchPhase,
-    RunSwitchPlan,
     RunSwitchRuntimeImageResult,
 )
-from ..run_switch_observation_contract import RuntimeImageBuildInput
-from ..run_switch_operations import PhaseExecution
+from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_contract.progress import RunSwitchChildProgress
+from ..run_switch_operations.interfaces import PhaseExecution
 from ..run_switch_operations.publish import _persist_run_switch_runtime_image_reference
-from ..runtime_image_preparation import (
-    RuntimeImageReceipt,
-)
+from ..runtime_image_preparation.contracts import RuntimeImageReceipt
 from ..stored.states import CatalogRevisionState, RecipeBuildState
 from ..strict_json import read_stored_model
 from ..worker.memory_contract import WorkerMemoryComponent
@@ -314,7 +311,7 @@ class CompositeDistributionPhaseExecutor(
         if plan.recipe_revision_id is None or not plan.spark_group.nodes:
             raise RuntimeError("runtime image preparation identity is unavailable")
         from ..execution_plan_service import _bind_runtime_artifacts
-        from ..recipe_runtime_specs import (
+        from ..recipe_operations.runtime_specs import (
             RecipeRuntimeSpecError,
             compile_runtime_spec,
             resolve_recipe_entities,
@@ -472,8 +469,8 @@ class CompositeDistributionPhaseExecutor(
     def _cache_result(
         view: CacheOperationView,
     ) -> RunSwitchModelDownloadResult | RunSwitchModelDownloadPendingResult:
-        from ..model_cache_contract import ModelCacheOperationProgress
-        from ..model_cache_progress import project_cache_progress
+        from ..model_cache.contract import ModelCacheOperationProgress
+        from ..model_cache.progress import project_cache_progress
 
         if view.artifact_set_sha256 is None:
             raise RuntimeError(

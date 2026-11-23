@@ -14,8 +14,9 @@ from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.models import Job, User
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .test_build_cancellation_recovery import _evidence, _services
 from .test_recipe_builds import _write_controller_build_receipt

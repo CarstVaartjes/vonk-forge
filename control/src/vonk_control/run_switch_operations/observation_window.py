@@ -17,17 +17,17 @@ from sqlalchemy.orm import object_session
 from vonk_agent_protocol import RunSwitchCode
 
 from ..admission_locking import AdmissionLockBusy
-from ..install_admission import InstallAdmissionBusy
-from ..models import Job
-from ..recipe_builds import RecipeBuildAdmissionBusy
-from ..recipe_lifecycle_contract import START_CHILD_KINDS
+from ..install_admission.contracts import InstallAdmissionBusy
+from ..models.jobs import Job
+from ..recipe_builds.common import RecipeBuildAdmissionBusy
+from ..recipe_operations.lifecycle_contract import START_CHILD_KINDS
 from ..reservation_owners import Owner, OwnerKind, OwnerRef, owner
 from ..run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RUN_ADMISSION_WAIT_CODES,
     RunAdmissionBusy,
 )
-from ..run_switch_contract import RunSwitchOperationResult
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
 from .awaited_children import awaited_jobs
 from .constants import _FINAL_VERIFICATION_MAX_SECONDS

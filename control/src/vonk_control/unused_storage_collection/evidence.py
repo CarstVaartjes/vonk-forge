@@ -12,18 +12,18 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-from ..artifact_reference_scan import _selectors_revisions
+from ..artifact_reference_scan.model_sets import _selectors_revisions
 from ..catalog.queries import active_head_revision
 from ..catalog.revision_collection import GRACE, operation_tokens, plan_tokens, tokens
 from ..content_identity import catalog_selector_membership
-from ..models import (
-    ArtifactDistributionAssignment,
+from ..models.cache import RecipeBuild
+from ..models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    FleetProfileSelection,
-    RecipeBuild,
 )
+from ..models.fleet import FleetProfileSelection
+from ..models.operations import ArtifactDistributionAssignment
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
 from ..stored.states import CatalogRevisionState

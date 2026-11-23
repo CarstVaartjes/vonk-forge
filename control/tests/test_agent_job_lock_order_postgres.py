@@ -13,15 +13,11 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    Base,
-    Job,
-)
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload

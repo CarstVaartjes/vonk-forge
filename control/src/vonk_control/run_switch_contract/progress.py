@@ -14,8 +14,8 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 
-from ..run_switch_identity_contract import NodeId
 from ..strict_json import StrictModel
+from .identity import NodeId
 from .vocabulary import (
     RunSwitchMemberState,
     RunSwitchPhaseKind,

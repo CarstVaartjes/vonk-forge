@@ -18,15 +18,16 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
-from vonk_control.fleet_profile_contract import FleetProfileApplicationView
-from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.contracts import FleetProfileConflict
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    Base,
     FleetProfileApplication,
     User,
 )
@@ -192,7 +193,7 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
 def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope(
     alias: str,
 ) -> None:
-    from vonk_control.fleet_profile_contract import FleetProfileEndpointsView
+    from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
 
     calls: list[tuple[int, str | None, str]] = []
 
@@ -451,9 +452,9 @@ def test_production_app_composes_fleet_profiles_with_preparation_authority() -> 
     binding and admit a profile whose required assets cannot be attested.
     """
 
-    from vonk_control import api
+    from vonk_control.api.production import production_app
 
-    source = inspect.getsource(api.production_app)
+    source = inspect.getsource(production_app)
     assert "build_production_fleet_profile_service(" in source
     assert "FleetProfileService(" not in source
 
@@ -887,7 +888,10 @@ def test_profile_listing_continues_portably(count):
 
 
 def _assert_profile_listing_pages(sessions, count):
-    from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileList
+    from vonk_control.fleet_profile_contract.definitions import (
+        FleetProfileInput,
+        FleetProfileList,
+    )
 
     profiles = FleetProfileService(
         sessions, clock=lambda: datetime(2026, 10, 20, tzinfo=UTC)

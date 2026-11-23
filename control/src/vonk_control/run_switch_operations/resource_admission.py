@@ -17,19 +17,12 @@ from vonk_forge_contracts import ModelDefinition
 
 from ..model_cache.errors import ModelCacheError
 from ..model_cache.resolution import resolve_recipe_set
-from ..models import (
-    CatalogDocumentRevision,
-)
+from ..models.catalog import CatalogDocumentRevision
 from ..profile_capacity import kept_runs
-from ..resource_planning import (
-    resolve_effective_settings,
-)
-from ..run_switch_contract import (
-    RunSwitchAssessment,
-    RunSwitchPreviewRequest,
-    RunSwitchReason,
-    StopImpact,
-)
+from ..resource_planning.settings import resolve_effective_settings
+from ..run_switch_contract.evidence import RunSwitchReason, StopImpact
+from ..run_switch_contract.plans import RunSwitchAssessment
+from ..run_switch_contract.requests import RunSwitchPreviewRequest
 from ..strict_json import (
     read_stored_model,
 )

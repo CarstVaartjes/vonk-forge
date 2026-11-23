@@ -33,9 +33,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import Disposition, WaitOwnerKind
 
+from . import (
+    models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
+)
 from .failure_classification import disposition, error_detail, wait_reason
 from .logging import log_event, redact_text
-from .models import Base
+from .model_primitives import Base
 from .models.waits import ScheduledWaitOwner
 from .persisted_waits import owner_identity
 from .recovery_policy import WAIT_STEP

@@ -17,9 +17,11 @@ from vonk_agent_protocol import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.agent_state import AgentExecutorProbeMode
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentNode, Job, RecipeInstallation
-from vonk_control.models import AgentOperation as StoredOperation
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.execution import RecipeInstallation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation as StoredOperation
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row

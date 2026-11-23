@@ -11,14 +11,16 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog.queries import active_head_revision
 from vonk_control.catalog.service import CatalogService
-from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileAssignmentInput
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.contract import RecipeDetailResponse
-from vonk_control.library_projection import LibraryProjection, _canonical_recipe
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
-from vonk_control.recipe_update_notice import newest_active_revisions
+from vonk_control.library_projection.common import _canonical_recipe
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.recipe_update_batches.notice import newest_active_revisions
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reword

@@ -20,38 +20,34 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileInput,
-)
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
-    build_production_fleet_profile_service,
-)
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.install_admission.identity import _primary_model_sha256
-from vonk_control.models import (
-    CatalogDocumentRevision,
-    FleetProfileApplication,
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.run_switch_contract import (
-    RunSwitchApplyRequest,
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.run_switch_contract.phase_results import (
     RunSwitchInstallationVerifyResult,
 )
-from vonk_control.run_switch_operations import (
-    RunSwitchOperationService,
-    resource_admission,
-)
+from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
+from vonk_control.run_switch_operations import resource_admission
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.settings import (
     PROFILE_STALL_WINDOW_SECONDS,
     STORAGE_ADMISSION_RETRY_SECONDS,
@@ -64,10 +60,8 @@ from vonk_control.storage_demands import (
     StorageRelief,
     spark_scope,
 )
-from vonk_control.unused_storage_collection import (
-    _STORAGE_WAIT_CODES,
-    UnusedStorageCollector,
-)
+from vonk_control.unused_storage_collection.common import _STORAGE_WAIT_CODES
+from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from cluster_profiles.control_client import validate_control_document
 
@@ -1295,7 +1289,8 @@ def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
     still admits the plan, and the warning names the profile. Models stay on the
     NAS, so a later load reinstalls."""
 
-    from vonk_control.models import CatalogDocumentRevision, FleetProfile
+    from vonk_control.models.catalog import CatalogDocumentRevision
+    from vonk_control.models.fleet import FleetProfile
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
@@ -1512,10 +1507,10 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
     uninstalls through the lifecycle, observes disk and issues its install.
     """
     from vonk_agent_protocol import AgentOperation as OperationKind
-    from vonk_control.fleet_profile_contract import (
+    from vonk_control.fleet_profile_contract.applications import (
         FleetProfileApplicationProgress,
-        FleetProfilePreview,
     )
+    from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 
     from .test_unused_storage_collection import _agents_succeed
 
@@ -1608,8 +1603,8 @@ def test_prepared_installation_is_referenced_before_its_child_is_issued(
     from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
     from vonk_control.catalog.revision_collection import operation_tokens
     from vonk_control.jobs.documents import RunSwitchJobPayload
-    from vonk_control.run_switch_contract import (
-        RunSwitchOperationResult,
+    from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
+    from vonk_control.run_switch_contract.phase_results import (
         RunSwitchRuntimeInstallResult,
     )
 

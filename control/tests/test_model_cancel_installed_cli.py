@@ -11,8 +11,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
 
 from .test_model_cache_cancel_recovery import _api, _artifact, _hold_at_verification
 from .test_profile_load_installed_cli import (

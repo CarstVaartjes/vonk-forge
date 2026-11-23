@@ -13,7 +13,8 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode
 
-from .models import AgentOperation, AgentOperationAttempt, RecipeInstallation
+from .models.execution import RecipeInstallation
+from .models.operations import AgentOperation, AgentOperationAttempt
 from .stored.json_values import read_row_column
 
 if TYPE_CHECKING:

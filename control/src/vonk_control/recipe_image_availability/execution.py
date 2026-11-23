@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import model_cache_states
 from ..failure_classification import is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import (
@@ -27,27 +26,19 @@ from ..jobs.documents import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
-from ..model_cache import (
-    ModelCacheNotFound,
-)
-from ..models import (
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheOperation,
-)
+from ..model_cache import states as model_cache_states
+from ..model_cache.errors import ModelCacheNotFound
+from ..models.cache import ModelCacheOperation
+from ..models.catalog import CatalogDocumentRevision
+from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
 from ..persisted_waits import schedule_wait, wait_due
-from ..recipe_availability_intent import (
+from ..recipe_operations.availability_intent import (
     RecipeRetryIntent,
-)
-from ..recipe_image_availability_reader_contract import (
-    AvailabilityDownloadPreview,
-    StoredAvailabilityIdentity,
-    StoredModelChildCancellation,
 )
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
@@ -61,6 +52,11 @@ from .contracts import (
     _AvailabilityClaimLost,
     _known_total,
     _read,
+)
+from .reader_contract import (
+    AvailabilityDownloadPreview,
+    StoredAvailabilityIdentity,
+    StoredModelChildCancellation,
 )
 
 if TYPE_CHECKING:

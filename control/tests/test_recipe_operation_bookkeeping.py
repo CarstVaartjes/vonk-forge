@@ -30,46 +30,56 @@ from vonk_agent_protocol import (
 )
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
-from vonk_control.install_admission import (
-    InstallAdmissionService,
-    InstallEvidenceChanged,
-)
+from vonk_control.install_admission.contracts import InstallEvidenceChanged
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.jobs.documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentOperation,
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.execution import (
     InstallationNode,
-    Job,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
-from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.recipe_lifecycle_contract import (
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_operations import action_plans as recipe_action_plans
+from vonk_control.recipe_operations.errors import (
+    RecipeOperationConflict,
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+)
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_installation_plan,
+)
+from vonk_control.recipe_operations.intent import (
+    _bound_workload_intent,
+    _job_workload_intent,
+)
+from vonk_control.recipe_operations.interfaces import new_recipe_job
+from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
 )
-from vonk_control.recipe_operations import (
-    RecipeOperationConflict,
-    RecipeOperationService,
-    RecipeRequestInvalid,
-    RecipeRetryLater,
-    _job_workload_intent,
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.progress import (
     _primary_model_identity,
     _recipe_model_identities,
-    _recorded_result,
     _role_phases,
+    _stored_phases,
+    _topology_order,
+)
+from vonk_control.recipe_operations.rank_authority import (
     _run_accepted_ranks,
     _run_is_one_shot,
     _run_observes_per_generation,
-    _stored_phases,
-    _topology_order,
-    new_recipe_job,
-    record_build_evidence,
 )
-from vonk_control.recipe_operations import action_plans as recipe_action_plans
+from vonk_control.recipe_operations.results import _recorded_result
+from vonk_control.recipe_operations.service import RecipeOperationService
+from vonk_control.recipe_operations.service import (
+    RecipeOperationService as recipe_operations_RecipeOperationService,
+)
 from vonk_control.run_admission import RunAdmissionService
 
 from .recipe_stop_fixtures import recipe_stop_payload
@@ -223,7 +233,7 @@ def test_a_damaged_installation_plan_is_skipped_and_prepared_afresh(tmp_path) ->
     assert second != first
     with sessions() as session:
         assert (
-            recipe_operations.RecipeOperationService._prepared_installation_id(
+            recipe_operations_RecipeOperationService._prepared_installation_id(
                 session, plan, adopt_at=NOW
             )
             == second
@@ -348,7 +358,7 @@ def test_a_job_that_lost_its_intent_recovers_it_from_its_orders(tmp_path) -> Non
     sessions, _service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
         parent = _required(session.get(Job, run.id))
-        expected = recipe_operations._bound_workload_intent(parent)
+        expected = _bound_workload_intent(parent)
         payload = {
             key: value
             for key, value in parent.payload.items()
@@ -360,7 +370,7 @@ def test_a_job_that_lost_its_intent_recovers_it_from_its_orders(tmp_path) -> Non
         assert _job_workload_intent(session, parent) in {expected, None}
         # The fence itself still refuses to guess a missing intent.
         with pytest.raises(Exception) as _ending:
-            recipe_operations._bound_workload_intent(parent)
+            _bound_workload_intent(parent)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1228,7 +1238,7 @@ def test_installation_cleanup_names_the_recorded_digest_after_its_revision_is_go
     installation's bytes remain, and their cleanup names the digest the
     installation's accepted plan recorded instead of blocking for ever."""
     from sqlalchemy import delete
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)
     installed = installed_recipe(
@@ -1258,7 +1268,7 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     sessions, service, _queue, installation, started, nodes = _running_recipe(tmp_path)
     with sessions() as session:
         original = _required(session.get(Job, started.id))
-        ordinal = recipe_operations._bound_workload_intent(original)
+        ordinal = _bound_workload_intent(original)
     request_id = str(uuid.uuid4())
     reason, completed, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
@@ -1284,7 +1294,7 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
         assert len(stops) == 2
         retry = next(job for job in stops if job.id != first_id)
         assert retry.request_id != request_id
-        assert recipe_operations._bound_workload_intent(retry) == ordinal
+        assert _bound_workload_intent(retry) == ordinal
     _, _, advanced = service._retirement_cleanup(
         original, request_id, "recipe.stop", "run", started.owner_id, ordinal
     )
@@ -1309,7 +1319,7 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
 def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_path):
     from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
     from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
-    from vonk_control.models import ResourceReservation
+    from vonk_control.models.execution import ResourceReservation
 
     sessions, service, _queue, installed, started, nodes = _running_recipe(
         tmp_path, nodes=2

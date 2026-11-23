@@ -7,19 +7,19 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
-    FleetProfileApplicationView,
 )
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import (
-    AgentOperation,
-    FleetProfileApplication,
-    Job,
+from vonk_control.fleet_profile_contract.review import FleetProfileApplicationView
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.models.execution import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 
 from .insert_collision_support import Rendezvous
 from .test_profile_load_submission import _profile_api

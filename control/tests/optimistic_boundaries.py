@@ -42,7 +42,8 @@ def scan_source(
     imported_models = {
         alias.asname or alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("models")
+        if isinstance(node, ast.ImportFrom)
+        and ((node.module or "").endswith("models") or ".models." in f".{node.module}.")
         for alias in node.names
     }
 

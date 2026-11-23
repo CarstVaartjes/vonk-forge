@@ -9,29 +9,25 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DesiredAssignmentState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.fleet_profile_contract import (
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileNode,
 )
-from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_profiles.service import FleetProfileService
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.lifecycle.evidence import Residue
-from vonk_control.models import (
-    AgentNode,
-    AgentNodeContact,
-    Base,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
-    ClusterMapping,
-    ClusterMappingNode,
-    RecipeBuild,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
 )
-from vonk_control.recipe_update_notice import (
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import AgentNode, AgentNodeContact
+from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
+from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )

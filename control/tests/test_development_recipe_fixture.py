@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
 from vonk_control.source_policy import dockerfile_base_images
 from vonk_forge_contracts import document_sha256, read_model, read_recipe
 

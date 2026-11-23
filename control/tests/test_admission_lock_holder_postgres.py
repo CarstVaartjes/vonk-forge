@@ -13,7 +13,8 @@ from vonk_control.admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from vonk_control.models import AgentNode, Base
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNode
 
 NODE = "spk_" + "a" * 32
 

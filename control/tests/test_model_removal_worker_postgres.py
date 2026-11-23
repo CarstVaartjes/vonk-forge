@@ -16,13 +16,14 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.model_cache import CacheOperationView, ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     parse_model_cache_payload,
 )
-from vonk_control.models import ModelCacheOperation
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_cache.views import CacheOperationView
+from vonk_control.models.cache import ModelCacheOperation
 from vonk_forge_contracts import document_sha256
 
 from .test_model_cache import _artifact, _download, _remove_model
@@ -325,7 +326,7 @@ import json, os, sys
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.service import ModelCacheService
 config = json.loads(Path(sys.argv[1]).read_text())
 engine = create_engine(config["database"])
 service = ModelCacheService(

@@ -23,30 +23,23 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import LifecycleState, ObservationCause, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import (
-    AgentJobService,
-    operator_resume_candidates_in_session,
-)
-from vonk_control.lifecycle import (
-    LOST_OBSERVATION_BOUND,
-    OBSERVE_BUDGET,
-    STOP_BUDGET,
-    Effect,
-    State,
-    Tick,
-    transition,
-)
+from vonk_control.agent_jobs.retirement import operator_resume_candidates_in_session
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     aggregate_parent_state,
     parked_orders,
 )
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
+from vonk_control.lifecycle.core import (
+    LOST_OBSERVATION_BOUND,
+    OBSERVE_BUDGET,
+    STOP_BUDGET,
+    transition,
 )
+from vonk_control.lifecycle.types import Effect, State, Tick
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import (

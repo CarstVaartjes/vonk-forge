@@ -40,17 +40,13 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.lifecycle import Reported
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+from vonk_control.lifecycle.types import Reported
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    Job,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
-)
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )

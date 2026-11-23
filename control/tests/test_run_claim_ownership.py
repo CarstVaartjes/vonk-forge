@@ -14,18 +14,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.models import (
-    Job,
-    NodeInventorySnapshot,
-    RecipeRun,
-    ResourceReservation,
-    RunNode,
+from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoordinator
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.execution import RecipeRun, ResourceReservation, RunNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.recipe_operations.observation_helpers import (
+    prepare_exact_recipe_run_observation_nodes,
 )
-from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_recipe_operations import (
     NOW,
@@ -176,7 +174,7 @@ def _load_over(tmp_path: Path, *, state: str, plan_readable: bool, engine=None):
 
 
 def _selector(sessions) -> str:
-    from vonk_control.models import CatalogDocumentRevision
+    from vonk_control.models.catalog import CatalogDocumentRevision
 
     with sessions() as session:
         revision = session.scalar(

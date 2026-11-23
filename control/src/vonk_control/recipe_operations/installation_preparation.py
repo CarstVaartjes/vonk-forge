@@ -27,13 +27,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
 
 from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..failure_classification import error_detail
-from ..install_admission import (
-    InstallPlan,
-)
-from ..install_admission import (
+from ..install_admission.contracts import InstallPlan
+from ..install_admission.validation import (
     require_admissible as require_install_admissible,
 )
-from ..install_admission import (
+from ..install_admission.validation import (
     require_same_execution as require_same_install_execution,
 )
 from ..lifecycle.evidence import (
@@ -43,25 +41,22 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import (
-    InstallationNode,
-    Job,
-    RecipeInstallation,
-)
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
-from ..recipe_progress import (
-    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
-)
+from ..models.execution import InstallationNode, RecipeInstallation
+from ..models.jobs import Job
 from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
+from .execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from .interfaces import RecipeOperationView
 from .observation_helpers import (
     _active_recipe_revision,
     wait_for_installation_upkeep,
+)
+from .progress import (
+    _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
 
 if TYPE_CHECKING:

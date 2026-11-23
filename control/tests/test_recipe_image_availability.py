@@ -23,11 +23,11 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, OperationProgress, SecurityRefusalReason
-from vonk_control.artifact_lifecycle import (
+from vonk_control.artifact_jobs.lifecycle import (
     ArtifactIdentity,
     check_removal_fence_nowait,
 )
-from vonk_control.artifact_reference_scan import (
+from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
 )
@@ -41,8 +41,7 @@ from vonk_control.jobs.documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from vonk_control.model_cache import ModelCacheError, ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CacheManifest,
     ModelCacheCounters,
     ModelCacheDownloadPayload,
@@ -51,54 +50,62 @@ from vonk_control.model_cache_contract import (
     ModelCacheRepairPreviewResponse,
     ModelCacheSetState,
 )
-from vonk_control.model_cache_progress import cache_progress, progress_document
-from vonk_control.models import (
-    AgentNode,
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.progress import cache_progress, progress_document
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import (
     ArtifactLifecycleGate,
-    Base,
-    CatalogDocument,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    FleetProfile,
-    FleetProfileApplication,
-    Job,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
+)
+from vonk_control.models.catalog import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+)
+from vonk_control.models.fleet import (
+    AgentNode,
+    FleetProfile,
+    FleetProfileApplication,
     User,
 )
+from vonk_control.models.jobs import Job
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
 from vonk_control.persisted_waits import schedule_wait
-from vonk_control.recipe_availability_intent import RecipeRevisionIntent
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityService,
-    RecipeImageAvailabilityUnknown,
-)
-from vonk_control.recipe_image_availability_api import (
+from vonk_control.recipe_image_availability.api import (
     _recipe_error,
     _view_document,
     install_recipe_operator_routes,
 )
-from vonk_control.recipe_image_availability_view_contract import (
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityUnknown,
+)
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+)
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeCacheRemovalStatus,
     RecipeImageAvailabilityView,
 )
-from vonk_control.recipe_image_removal_contract import (
-    RecipeCacheRemovalOwner,
-)
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
+from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
     RuntimeImageReferenceIntent,
     read_runtime_image_reference_intent,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -1474,7 +1481,7 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
         good = session.scalar(select(Job).where(Job.request_id == good_key))
         assert bad is not None and bad.state == LifecycleState.SUCCEEDED
         assert good is not None and good.state == LifecycleState.SUCCEEDED
-        from vonk_control.models import ArtifactLifecycleGate
+        from vonk_control.models.cache import ArtifactLifecycleGate
 
         assert (
             session.scalar(
@@ -3213,7 +3220,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
         require_mapping(completed.result["model_child"], "model child")["id"]
         == child.id
     )
-    from vonk_control.recipe_image_availability_api import _view_document
+    from vonk_control.recipe_image_availability.api import _view_document
 
     response = _view_document(completed)
     assert response.result is not None
@@ -4630,7 +4637,9 @@ def test_preparation_expiry_preserves_download_but_explicit_cancel_still_owns_it
     tmp_path: Path, postgres_engine, checkpointed: bool
 ) -> None:
     from vonk_agent_protocol import RecipeImageCode, WaitReason
-    from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+    from vonk_control.recipe_operations.lifecycle_contract import (
+        RecipeOperationCancellationResult,
+    )
 
     from .test_model_removal_worker_postgres import _prepare_removal_target
 

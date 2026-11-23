@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 import vonk_control.availability_production.production as availability_production_module
-import vonk_control.recipe_builds as recipe_builds_module
 import vonk_control.runtime.adapters as runtime_adapters_module
 from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,48 +27,51 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.agent_jobs import AgentJobService, superseded_cancellation_deadline
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog.entities import CatalogEntityService
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission.service import InstallAdmissionService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentCertificate,
-    AgentNode,
-    AgentNodeContact,
-    AgentOperation,
-    Base,
-    CatalogDocumentRevision,
-    Job,
-    RecipeBuild,
-    RecipeSourceBundle,
-    ResourceReservation,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentRevision, RecipeSourceBundle
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_builds.common import (
+    RecipeBuildError,
+    _build_disk_reserve,
+    _build_effective_settings,
 )
-from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
-from vonk_control.recipe_execution_contract import parse_stored_build_plan
-from vonk_control.recipe_image_availability import (
-    BuildUnsettled,
+from vonk_control.recipe_builds.service import RecipeBuildService
+from vonk_control.recipe_image_availability.availability_contract import (
+    AvailabilityBuildReceipt,
+)
+from vonk_control.recipe_image_availability.contracts import BuildUnsettled
+from vonk_control.recipe_image_availability.removal_contract import (
+    RecipeCacheRemovalOwner,
+)
+from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
-from vonk_control.recipe_image_removal_contract import RecipeCacheRemovalOwner
-from vonk_control.recipe_operations import (
-    RecipeOperationService,
-    record_build_evidence,
-)
+from vonk_control.recipe_operations.execution_contract import parse_stored_build_plan
+from vonk_control.recipe_operations.observation_helpers import record_build_evidence
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime.adapters import resolve_runtime_adapter
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
+from vonk_control.runtime_image_preparation.contracts import (
     PulledImageEvidence,
     RuntimeImageReceipt,
 )
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
@@ -169,8 +171,8 @@ def _restore_builder_inventory(sessions, node_id, now):
 
 
 def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
-    assert recipe_builds_module._build_disk_reserve(100 * 1024**3) == 4 * 1024**3
-    assert recipe_builds_module._build_disk_reserve(4 * 1024**4) == 64 * 1024**3
+    assert _build_disk_reserve(100 * 1024**3) == 4 * 1024**3
+    assert _build_disk_reserve(4 * 1024**4) == 64 * 1024**3
 
 
 def setup(
@@ -2113,9 +2115,7 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     )
     peak_bytes = max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
     disk_total_bytes = 2 * 1024**4
-    required_bytes = peak_bytes + recipe_builds_module._build_disk_reserve(
-        disk_total_bytes
-    )
+    required_bytes = peak_bytes + _build_disk_reserve(disk_total_bytes)
     # The envelope itself fits, but accepting it would violate the filesystem
     # reserve retained for the Spark host.
     newer = now + timedelta(seconds=1)
@@ -2419,7 +2419,7 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
     selected = publish(canonical.model_dump(mode="json"))
     service = RecipeBuildService(sessions, bundles=bundles)
     first = service.plan(selected.id, node_id, now=now)
-    assert recipe_builds_module._build_effective_settings(canonical.settings) == {
+    assert _build_effective_settings(canonical.settings) == {
         "values": {
             "knobs.compiler": "clang",
             "knobs.enabled": False,
@@ -2545,7 +2545,9 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     assert rederived == []
     fault[0] = "permission"
     from vonk_agent_protocol import Disposition, SecurityRefusalError
-    from vonk_control.recipe_image_availability import availability_disposition
+    from vonk_control.recipe_image_availability.contracts import (
+        availability_disposition,
+    )
 
     with pytest.raises(SecurityRefusalError) as denied:
         builds.reusable_build_id(revision.id)

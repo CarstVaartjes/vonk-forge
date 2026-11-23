@@ -28,16 +28,17 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Optional, Union, cast, get_args
 
 from pydantic import BaseModel, Field, TypeAdapter, create_model
-from vonk_control.artifact_jobs import ArtifactJobResponse
-from vonk_control.artifact_jobs.contracts import ArtifactJobState
-from vonk_control.fleet_profile_contract import (
-    FleetProfileApplicationView,
-    FleetProfileEndpointsView,
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobState
+from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileList,
-    FleetProfilePreview,
     FleetProfileReadView,
 )
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_profile_contract.endpoints import FleetProfileEndpointsView
+from vonk_control.fleet_profile_contract.review import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
+from vonk_control.fleet_projection.common import FleetSnapshot
 from vonk_control.library.contract import RecipeDetailResponse, RecipeLibraryResponse
 from vonk_control.strict_json import StrictModel
 

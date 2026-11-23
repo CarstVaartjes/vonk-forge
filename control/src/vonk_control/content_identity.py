@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 from vonk_forge_contracts import RecipeDefinition
 
 if TYPE_CHECKING:
-    from .model_cache_contract import CacheResolution
+    from .model_cache.contract import CacheResolution
 
 
 def cache_resolution_answers_revision(
@@ -217,7 +217,7 @@ def _chosen_runtime(execution: RecipeExecution) -> object | None:
 
     from .catalog.revision_contract import shared_catalog_document
     from .lifecycle.evidence import Residue, read_or_rebuild
-    from .models import CatalogDocumentRevision
+    from .models.catalog import CatalogDocumentRevision
 
     recipe = read_or_rebuild(
         kind=CatalogDocumentRevision.__tablename__,
@@ -309,7 +309,7 @@ def recipe_content_membership(column, digests: Collection[str]):
     """
     from sqlalchemy import select
 
-    from .models import CatalogDocumentRevision
+    from .models.catalog import CatalogDocumentRevision
 
     return column.in_(
         select(CatalogDocumentRevision.id).where(
@@ -357,7 +357,7 @@ def recipe_model_digests(
     """
     from sqlalchemy import select
 
-    from .models import CatalogRecipeModelReference
+    from .models.catalog import CatalogRecipeModelReference
 
     found: dict[str, set[str]] = {}
     if revision_ids:
@@ -384,11 +384,8 @@ def installations_using_models(session, contents: Collection[str]) -> frozenset[
     from vonk_agent_protocol import InstallationState
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .models import (
-        CatalogDocumentRevision,
-        CatalogRecipeModelReference,
-        RecipeInstallation,
-    )
+    from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
+    from .models.execution import RecipeInstallation
 
     lineage = select(CatalogDocumentRevision.id).where(
         CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
@@ -418,7 +415,7 @@ def recipes_bound_to(session, contents: Collection[str]) -> frozenset[tuple[str,
     from sqlalchemy import select
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .models import CatalogDocumentRevision, CatalogRecipeModelReference
+    from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
 
     if not contents:
         return frozenset()
@@ -450,7 +447,7 @@ def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
     from sqlalchemy import select
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .models import CatalogDocumentHead, CatalogDocumentRevision
+    from .models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 
     return {
         (head.publisher, head.slug): revision

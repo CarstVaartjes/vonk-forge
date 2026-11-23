@@ -13,7 +13,7 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
+from vonk_control.model_cache.ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.recipe_packages.contracts import RecipePackageError
@@ -115,10 +115,10 @@ def test_cache_pagination_uses_authenticated_observation_cursors():
     from unittest.mock import Mock
 
     from vonk_control.auth import CursorCodec, CursorError
-    from vonk_control.model_cache import ModelCacheService
-    from vonk_control.model_cache_api import (
+    from vonk_control.model_cache.api import (
         ModelCacheOperationProvider,
     )
+    from vonk_control.model_cache.service import ModelCacheService
 
     provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService))
     assert (
@@ -163,7 +163,7 @@ def test_incomplete_cached_build_enters_normal_preparation():
     from vonk_control.availability_production.build_observation import (
         _cached_build_receipt,
     )
-    from vonk_control.recipe_builds import RecipeBuildResolution
+    from vonk_control.recipe_builds.common import RecipeBuildResolution
 
     resolution = RecipeBuildResolution(
         recipe_revision_id="revision",
@@ -185,7 +185,7 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
         UnknownOutcomeError,
     )
     from vonk_control import profile_capacity
-    from vonk_control.models import ResourceReservation
+    from vonk_control.models.execution import ResourceReservation
 
     claims = {
         node: ResourceReservation(
@@ -233,7 +233,8 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
         ManagedRecipeCatalogSyncService,
         RecipeLibrarySyncReader,
     )
-    from vonk_control.models import Base, RecipeLibrarySyncRun
+    from vonk_control.model_primitives import Base
+    from vonk_control.models.cache import RecipeLibrarySyncRun
     from vonk_control.source_bundles import SourceBundleUnknown
 
     from .non_blocking import assert_ended_without_blocking
@@ -315,7 +316,7 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
     from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.auth import CursorCodec
     from vonk_control.catalog.service import CatalogService
-    from vonk_control.models import Base
+    from vonk_control.model_primitives import Base
     from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
     engine = create_engine("sqlite:///:memory:")

@@ -21,7 +21,7 @@ _SCOPE = "control/src/vonk_control/unused_storage_collection/"
 _FILES = frozenset(
     {
         "control/src/vonk_control/model_cache/fleet_removal.py",
-        "control/src/vonk_control/recipe_update_notice.py",
+        "control/src/vonk_control/recipe_update_batches/notice.py",
         "control/src/vonk_control/observed_run_memory.py",
     }
 )

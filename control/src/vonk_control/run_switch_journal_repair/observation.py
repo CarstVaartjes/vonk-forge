@@ -14,20 +14,15 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import AdmissionLockBusy
-from ..models import (
-    AgentOperation,
-    AgentOperationAttempt,
-    Job,
-    RunSwitchJournalRepairPending,
-)
+from ..journal_models import RunSwitchJournalRepairPending
+from ..models.jobs import Job
+from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..persisted_waits import schedule_wait
-from ..run_switch_contract import (
-    RunSwitchOperationResult,
-)
-from ..run_switch_journal_contract import (
+from ..run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
 )
+from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_operations.results import _persisted_result
 from ..stall_window import Verdict, Wait, progress_verdict, stall_deadline
 from .discovery import REPAIR_WAIT, _candidate

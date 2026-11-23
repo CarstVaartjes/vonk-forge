@@ -22,20 +22,17 @@ from vonk_control.inventory.repository import (
 )
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.assessment import LibraryAssessment
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.models import (
-    AgentNode,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    Job,
-    ModelCacheSet,
-    NodeInventorySnapshot,
-    RecipeBuild,
-    ResourceReservation,
-)
-from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheSet, RecipeBuild
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.telemetry import NodeInventorySnapshot
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles.cli import main

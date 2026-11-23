@@ -12,12 +12,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base, User
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import User
 from vonk_control.passwords import hash_password
 
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment

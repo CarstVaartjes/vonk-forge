@@ -14,16 +14,12 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_collection import CatalogRevisionCollector
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.errors import ModelCacheConflictUnknown
 from vonk_control.model_cache.persistence import _manifest_of
-from vonk_control.models import (
-    CatalogDocument,
-    CatalogDocumentRevision,
-    ModelCacheOperation,
-    ModelCacheSet,
-)
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded

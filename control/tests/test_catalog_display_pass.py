@@ -29,9 +29,9 @@ from vonk_control.catalog.sync_contract import (
     ManagedCatalogSyncRequest,
 )
 from vonk_control.db.schema import reconcile_schema
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import (
-    Base,
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,

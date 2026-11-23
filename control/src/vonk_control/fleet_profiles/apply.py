@@ -18,7 +18,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
 
-from .. import fleet_profile_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -29,15 +28,16 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_contract import (
-    FleetProfileApplicationProgress,
+from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
+from ..fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
 )
 from ..lifecycle.evidence import Residue
-from ..models import AgentNode, FleetProfile, FleetProfileApplication
+from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
 from ..strict_json import read_stored_model
 from ..workload_intent import allocate_workload_intent
+from . import states as fleet_profile_states
 from .assessment_support import (
     _deferral_code,
     _profile_preview_is_waitable,

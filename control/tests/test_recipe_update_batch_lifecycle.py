@@ -13,21 +13,17 @@ from typing import Any
 
 import pytest
 from vonk_agent_protocol import LifecycleState
-from vonk_control.lifecycle import (
-    CancelRequested,
-    Outcome,
-    Reported,
-    State,
-    Tick,
-    transition,
-)
+from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.recipe_update_batch import (
     CANCEL_BUDGET,
     RecipeUpdateBatchAdapter,
 )
-from vonk_control.models import Job
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
-from vonk_control.recipe_update_contract import (
+from vonk_control.lifecycle.types import CancelRequested, Outcome, Reported, State, Tick
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -143,7 +139,7 @@ def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
     document = _document("running")
     job = _job("observing")
     job.updated_at = NOW
-    from vonk_control.recipe_lifecycle_contract import (
+    from vonk_control.recipe_operations.lifecycle_contract import (
         RecipeOperationCancellationResult,
     )
 

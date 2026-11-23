@@ -293,6 +293,10 @@ def _annotation_names(node: ast.AST | None) -> Iterator[str]:
             yield child.attr
 
 
+def _is_models_module(module: str) -> bool:
+    return f".{module}.".find(".models.") >= 0
+
+
 def _import_aliases(tree: ast.Module) -> dict[str, str]:
     """Local name -> canonical lifecycle model, from ``.models`` imports."""
 
@@ -301,7 +305,7 @@ def _import_aliases(tree: ast.Module) -> dict[str, str]:
         if (
             isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and (node.module == "models" or node.module.endswith(".models"))
+            and _is_models_module(node.module)
             and node.level >= 0
         ):
             for imported in node.names:
@@ -321,7 +325,7 @@ class _Resolver:
             for node in tree.body
             if isinstance(node, ast.ImportFrom)
             and node.module is not None
-            and (node.module == "models" or node.module.endswith(".models"))
+            and _is_models_module(node.module)
             and node.level >= 0
             for imported in node.names
             if imported.name not in LIFECYCLE_MODELS

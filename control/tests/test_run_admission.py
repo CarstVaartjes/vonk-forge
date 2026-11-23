@@ -15,19 +15,18 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
+from vonk_control.models.execution import (
     InstallationNode,
-    NodeInventorySnapshot,
-    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
@@ -899,7 +898,7 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
     # Catches unsupported-metric admission, an invented zero-byte physical
     # capacity refusal after driver loss, and a sticky manual health flag.
     from vonk_agent_protocol.inventory import GPU_RESET_RECOVERY
-    from vonk_control.fleet_projection import FleetProjection
+    from vonk_control.fleet_projection.service import FleetProjection
 
     engine = request.getfixturevalue("postgres_engine") if postgres else None
     sessions, now, node, installation = setup(tmp_path, engine=engine)

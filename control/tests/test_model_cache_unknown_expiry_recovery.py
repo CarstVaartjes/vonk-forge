@@ -14,11 +14,13 @@ from pytest import CaptureFixture
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import WaitReason
-from vonk_control.lifecycle import STOP_BUDGET, Effect, Outcome, Reported, State
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache_api import model_cache_operation_provider
-from vonk_control.models import Base, ModelCacheOperation
-from vonk_control.operation_api import operation_detail_response
+from vonk_control.lifecycle.core import STOP_BUDGET
+from vonk_control.lifecycle.types import Effect, Outcome, Reported, State
+from vonk_control.model_cache.api import model_cache_operation_provider
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.operation_api.responses import operation_detail_response
 
 from cluster_profiles.cli_render import render_payload
 

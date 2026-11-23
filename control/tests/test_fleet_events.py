@@ -10,9 +10,8 @@ import pytest
 from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeStopPayload, canonical_message
-from vonk_control import models
 from vonk_control.auth import TokenCodec
-from vonk_control.db import session_factory
+from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
     FleetEventPayload,
     JobPayload,
@@ -26,7 +25,23 @@ from vonk_control.fleet_events import (
     _walk_payload,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
-from vonk_control.operation_api import durable_operation_services
+from vonk_control.model_primitives import Base
+from vonk_control.models.execution import (
+    InstallationNode,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
+from vonk_control.models.fleet import AgentNode, AgentNodeProfile
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.models.telemetry import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeTelemetryLatest,
+    NodeTelemetrySample,
+)
+from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry.samples import (
     TelemetryRepository,
@@ -48,7 +63,7 @@ def _rows_carry_private_values_on_purpose():
 @pytest.fixture
 def sessions(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'fleet-events.sqlite'}")
-    models.Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
     return factory
 
@@ -75,8 +90,8 @@ def _draft(
     )
 
 
-def _job(identifier: str) -> models.Job:
-    return models.Job(
+def _job(identifier: str) -> Job:
+    return Job(
         id=identifier,
         request_id=f"request-{identifier}",
         kind="deploy",
@@ -94,8 +109,8 @@ def _job(identifier: str) -> models.Job:
     )
 
 
-def _installation(identifier: str = "installation-1") -> models.RecipeInstallation:
-    return models.RecipeInstallation(
+def _installation(identifier: str = "installation-1") -> RecipeInstallation:
+    return RecipeInstallation(
         id=identifier,
         recipe_revision_id="revision-1",
         mapping_id="mapping-1",
@@ -111,8 +126,8 @@ def _installation(identifier: str = "installation-1") -> models.RecipeInstallati
     )
 
 
-def _installation_node() -> models.InstallationNode:
-    return models.InstallationNode(
+def _installation_node() -> InstallationNode:
+    return InstallationNode(
         id="installation-node-1",
         installation_id="installation-1",
         node_id="spk_" + "a" * 32,
@@ -125,8 +140,8 @@ def _installation_node() -> models.InstallationNode:
     )
 
 
-def _run(identifier: str = "run-1", *, alias: str = "chat") -> models.RecipeRun:
-    return models.RecipeRun(
+def _run(identifier: str = "run-1", *, alias: str = "chat") -> RecipeRun:
+    return RecipeRun(
         id=identifier,
         installation_id="installation-1",
         mapping_id="mapping-1",
@@ -146,8 +161,8 @@ def _run(identifier: str = "run-1", *, alias: str = "chat") -> models.RecipeRun:
     )
 
 
-def _run_node() -> models.RunNode:
-    return models.RunNode(
+def _run_node() -> RunNode:
+    return RunNode(
         id="run-node-1",
         run_id="run-1",
         node_id="spk_" + "a" * 32,
@@ -162,8 +177,8 @@ def _run_node() -> models.RunNode:
     )
 
 
-def _operation() -> models.AgentOperation:
-    return models.AgentOperation(
+def _operation() -> AgentOperation:
+    return AgentOperation(
         id="operation-1",
         parent_job_id="job-1",
         node_id="spk_" + "a" * 32,
@@ -178,12 +193,10 @@ def _operation() -> models.AgentOperation:
     )
 
 
-def _event_rows(sessions) -> list[models.FleetStreamEvent]:
+def _event_rows(sessions) -> list[FleetStreamEvent]:
     with sessions() as session:
         return list(
-            session.scalars(
-                select(models.FleetStreamEvent).order_by(models.FleetStreamEvent.id)
-            )
+            session.scalars(select(FleetStreamEvent).order_by(FleetStreamEvent.id))
         )
 
 
@@ -260,7 +273,7 @@ def test_database_rejects_payload_over_8192_utf8_bytes(sessions) -> None:
 def test_postgres_payload_byte_limit_ends_without_blocking_fresh_event(
     postgres_engine,
 ) -> None:
-    models.Base.metadata.create_all(postgres_engine)
+    Base.metadata.create_all(postgres_engine)
     test_database_rejects_payload_over_8192_utf8_bytes(
         sessionmaker(postgres_engine, expire_on_commit=False)
     )
@@ -292,7 +305,7 @@ def test_sqlite_ids_follow_commit_order_not_append_order(tmp_path) -> None:
         f"sqlite:///{tmp_path / 'fleet-events-concurrent.sqlite'}",
         connect_args={"check_same_thread": False, "timeout": 1},
     )
-    models.Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
     concurrent_sessions = sessionmaker(engine, expire_on_commit=False)
     repository = FleetEventRepository(concurrent_sessions, clock=lambda: NOW)
     first_appended = threading.Event()
@@ -336,12 +349,9 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
         raise RuntimeError("forced rollback")
 
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(models.Job)) == 0
-        assert (
-            session.scalar(select(func.count()).select_from(models.FleetStreamEvent))
-            == 0
-        )
-        assert session.get(models.FleetEventCursor, 1).last_id == 0
+        assert session.scalar(select(func.count()).select_from(Job)) == 0
+        assert session.scalar(select(func.count()).select_from(FleetStreamEvent)) == 0
+        assert session.get(FleetEventCursor, 1).last_id == 0
 
 
 @pytest.mark.parametrize(
@@ -368,12 +378,9 @@ def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
         repository.append_in_session(session, draft)
 
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(models.Job)) == 0
-        assert (
-            session.scalar(select(func.count()).select_from(models.FleetStreamEvent))
-            == 0
-        )
-        assert session.get(models.FleetEventCursor, 1).last_id == 0
+        assert session.scalar(select(func.count()).select_from(Job)) == 0
+        assert session.scalar(select(func.count()).select_from(FleetStreamEvent)) == 0
+        assert session.get(FleetEventCursor, 1).last_id == 0
 
 
 def test_a_typed_change_payload_rejects_unknown_fields() -> None:
@@ -418,10 +425,7 @@ def test_repository_reads_are_bounded_ordered_and_semantically_unexpired(
     assert [event.id for event in repository.after(0, replay_at, limit=1)] == [2]
     assert [event.id for event in repository.after(2, replay_at, limit=128)] == [3]
     with sessions() as session:
-        assert (
-            session.scalar(select(func.count()).select_from(models.FleetStreamEvent))
-            == 3
-        )
+        assert session.scalar(select(func.count()).select_from(FleetStreamEvent)) == 3
 
 
 def test_retention_window_reads_one_database_snapshot(sessions) -> None:
@@ -489,9 +493,7 @@ def test_recorder_captures_every_authoritative_insert_with_public_payloads(
     with sessions.begin() as session:
         session.add_all(
             [
-                models.NodeTelemetryLatest(
-                    node_id="spk_" + "a" * 32, sample_id="sample-1"
-                ),
+                NodeTelemetryLatest(node_id="spk_" + "a" * 32, sample_id="sample-1"),
                 _installation(),
                 _installation_node(),
                 _run(),
@@ -595,10 +597,10 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
     node_id = "spk_" + "a" * 32
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
-        session.add(models.AgentNode(node_id=node_id, state="active"))
+        session.add(AgentNode(node_id=node_id, state="active"))
         session.flush()
         session.add(
-            models.AgentNodeProfile(
+            AgentNodeProfile(
                 node_id=node_id,
                 display_name=node_id,
                 lifecycle="ready",
@@ -643,9 +645,7 @@ def test_recorder_uses_attribute_history_for_every_authoritative_transition(
     with sessions.begin() as session:
         session.add_all(
             [
-                models.NodeTelemetryLatest(
-                    node_id="spk_" + "a" * 32, sample_id="sample-1"
-                ),
+                NodeTelemetryLatest(node_id="spk_" + "a" * 32, sample_id="sample-1"),
                 _installation(),
                 _installation_node(),
                 _run(),
@@ -655,21 +655,19 @@ def test_recorder_uses_attribute_history_for_every_authoritative_transition(
             ]
         )
     with sessions.begin() as session:
-        session.get(
-            models.NodeTelemetryLatest, "spk_" + "a" * 32
-        ).sample_id = "sample-2"
-        session.get(models.RecipeInstallation, "installation-1").state = "installed"
-        installation_node = session.get(models.InstallationNode, "installation-node-1")
+        session.get(NodeTelemetryLatest, "spk_" + "a" * 32).sample_id = "sample-2"
+        session.get(RecipeInstallation, "installation-1").state = "installed"
+        installation_node = session.get(InstallationNode, "installation-node-1")
         installation_node.state = "installed"
         installation_node.installed_bytes = 1000
-        run = session.get(models.RecipeRun, "run-1")
+        run = session.get(RecipeRun, "run-1")
         run.state = "running"
         run.route_state = "published"
-        run_node = session.get(models.RunNode, "run-node-1")
+        run_node = session.get(RunNode, "run-node-1")
         run_node.state = "running"
         run_node.observed_memory_bytes = 1500
-        session.get(models.Job, "job-1").state = "running"
-        operation = session.get(models.AgentOperation, "operation-1")
+        session.get(Job, "job-1").state = "running"
+        operation = session.get(AgentOperation, "operation-1")
         operation.state = "running"
         operation.current_attempt = 1
 
@@ -697,9 +695,7 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
     with sessions.begin() as session:
         session.add_all(
             [
-                models.NodeTelemetryLatest(
-                    node_id="spk_" + "a" * 32, sample_id="sample-1"
-                ),
+                NodeTelemetryLatest(node_id="spk_" + "a" * 32, sample_id="sample-1"),
                 _installation(),
                 _installation_node(),
                 _run(),
@@ -709,21 +705,17 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
             ]
         )
     with sessions.begin() as session:
-        session.get(
-            models.NodeTelemetryLatest, "spk_" + "a" * 32
-        ).sample_id = "sample-1"
-        session.get(models.RecipeInstallation, "installation-1").updated_at = (
-            NOW + timedelta(seconds=1)
-        )
-        session.get(models.InstallationNode, "installation-node-1").updated_at = (
-            NOW + timedelta(seconds=1)
-        )
-        session.get(models.RecipeRun, "run-1").updated_at = NOW + timedelta(seconds=1)
-        session.get(models.RunNode, "run-node-1").updated_at = NOW + timedelta(
+        session.get(NodeTelemetryLatest, "spk_" + "a" * 32).sample_id = "sample-1"
+        session.get(RecipeInstallation, "installation-1").updated_at = NOW + timedelta(
             seconds=1
         )
-        session.get(models.Job, "job-1").updated_at = NOW + timedelta(seconds=1)
-        session.get(models.AgentOperation, "operation-1").updated_at = NOW + timedelta(
+        session.get(InstallationNode, "installation-node-1").updated_at = (
+            NOW + timedelta(seconds=1)
+        )
+        session.get(RecipeRun, "run-1").updated_at = NOW + timedelta(seconds=1)
+        session.get(RunNode, "run-node-1").updated_at = NOW + timedelta(seconds=1)
+        session.get(Job, "job-1").updated_at = NOW + timedelta(seconds=1)
+        session.get(AgentOperation, "operation-1").updated_at = NOW + timedelta(
             seconds=1
         )
 
@@ -733,7 +725,7 @@ def test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay(
 def test_telemetry_repository_emits_only_when_latest_pointer_advances(sessions) -> None:
     node_id = "spk_" + "a" * 32
     with sessions.begin() as session:
-        session.add(models.AgentNode(node_id=node_id, state="active"))
+        session.add(AgentNode(node_id=node_id, state="active"))
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     telemetry = TelemetryRepository(sessions, clock=lambda: NOW)
     latest = _telemetry_sample(
@@ -769,8 +761,7 @@ def test_telemetry_repository_emits_only_when_latest_pointer_advances(sessions) 
     ]
     with sessions() as session:
         assert (
-            session.scalar(select(func.count()).select_from(models.NodeTelemetrySample))
-            == 2
+            session.scalar(select(func.count()).select_from(NodeTelemetrySample)) == 2
         )
 
 
@@ -784,18 +775,15 @@ def test_recorder_source_flush_and_event_are_rolled_back_together(sessions) -> N
         pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
         sessions.begin() as session,
     ):
-        job = session.get(models.Job, "job-1")
+        job = session.get(Job, "job-1")
         job.state = "running"
         session.flush()
         raise RuntimeError("forced rollback")
 
     with sessions() as session:
-        assert session.get(models.Job, "job-1").state == "queued"
-        assert session.get(models.FleetEventCursor, 1).last_id == 1
-        assert (
-            session.scalar(select(func.count()).select_from(models.FleetStreamEvent))
-            == 1
-        )
+        assert session.get(Job, "job-1").state == "queued"
+        assert session.get(FleetEventCursor, 1).last_id == 1
+        assert session.scalar(select(func.count()).select_from(FleetStreamEvent)) == 1
 
 
 def test_recorder_installation_is_idempotent_and_uninstall_removes_listeners(
@@ -820,7 +808,7 @@ def test_recorder_clears_failed_and_closed_session_state(sessions) -> None:
     session = sessions()
     session.add(_run("run-too-large", alias="x" * 8192))
     session.commit()
-    assert session.get(models.RecipeRun, "run-too-large") is not None
+    assert session.get(RecipeRun, "run-too-large") is not None
     session.add(_run("run-valid", alias="valid"))
     session.commit()
     session.close()
@@ -838,16 +826,16 @@ def test_recorder_clears_failed_and_closed_session_state(sessions) -> None:
         ("job", "job-committed"),
     ]
     with sessions() as check:
-        assert check.get(models.Job, "job-abandoned") is None
-        assert check.get(models.FleetEventCursor, 1).last_id == 3
+        assert check.get(Job, "job-abandoned") is None
+        assert check.get(FleetEventCursor, 1).last_id == 3
 
 
 def test_production_session_factory_installs_the_recorder(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'production-seam.sqlite'}")
-    models.Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
     production_sessions = session_factory(engine)
     with production_sessions() as session:
-        cursor = session.get(models.FleetEventCursor, 1)
+        cursor = session.get(FleetEventCursor, 1)
         assert cursor is not None
         assert cursor.last_id == 0
     with production_sessions.begin() as session:
@@ -863,7 +851,7 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
     tmp_path,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'operation-resume-events.sqlite'}")
-    models.Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
     production_sessions = session_factory(engine)
     parked = "needs-operator"
     job = _job("operation-projection-resume")
@@ -872,9 +860,7 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
     job.payload_digest = hashlib.sha256(canonical_message(job.payload)).hexdigest()
     with production_sessions.begin() as session:
         session.add(
-            models.AgentNode(
-                node_id=job.targets[0], state="active", workload_intent_ordinal=1
-            )
+            AgentNode(node_id=job.targets[0], state="active", workload_intent_ordinal=1)
         )
         session.add(job)
         session.flush()
@@ -956,7 +942,7 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
             ),
         )
     with sessions() as session:
-        row = session.get(models.FleetStreamEvent, 1)
+        row = session.get(FleetStreamEvent, 1)
         assert row is not None
         assert row.payload["observed_memory_bytes"] == 0
     replay = repository.replay_after(0, NOW, limit=1)
@@ -972,8 +958,8 @@ def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessio
         session.add(_run("damaged-projection", alias="x" * 8192))
         session.add(_job("healthy-sibling"))
     with sessions() as session:
-        assert session.get(models.RecipeRun, "damaged-projection") is not None
-        assert session.get(models.Job, "healthy-sibling") is not None
+        assert session.get(RecipeRun, "damaged-projection") is not None
+        assert session.get(Job, "healthy-sibling") is not None
     try:
         repository.replay_after(0, NOW, limit=128)
     except _FleetStoredEventGap:
@@ -994,7 +980,7 @@ def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
     with sessions.begin() as session:
         repository.append_in_session(session, _draft(entity_id="before-loss"))
     with sessions.begin() as session:
-        session.execute(delete(models.FleetEventCursor))
+        session.execute(delete(FleetEventCursor))
     assert repository.high_watermark() == 1
     with sessions.begin() as session:
         repository.append_in_session(session, _draft(entity_id="after-loss"))

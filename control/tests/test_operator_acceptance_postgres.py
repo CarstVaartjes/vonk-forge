@@ -14,13 +14,17 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs.queue import JobService
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Base, FleetProfile, FleetProfileApplication, Job, User
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import FleetProfile, FleetProfileApplication, User
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
+)
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
@@ -253,7 +257,7 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
 
 def test_recipe_cancellation_receipt_survives_restart(tmp_path, postgres_engine):
     """Catches cancellation lookup depending on process memory or original request id."""
-    from vonk_control.models import CatalogDocument
+    from vonk_control.models.catalog import CatalogDocument
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -476,8 +480,8 @@ def test_artifact_create_upload_and_cancel_resolve_existing_job(
 
 def test_fleet_rename_is_a_committed_resource_receipt(tmp_path, postgres_engine):
     """Catches returning a renamed projection before the node profile committed."""
-    from vonk_control.fleet_projection import FleetProjection
-    from vonk_control.models import AgentNode, AgentNodeProfile
+    from vonk_control.fleet_projection.service import FleetProjection
+    from vonk_control.models.fleet import AgentNode, AgentNodeProfile
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -652,7 +656,7 @@ def test_save_receipt_cannot_adopt_an_intervening_revision(
     postgres_engine, monkeypatch
 ):
     """Catches accepting the same content after its reviewed revision was replaced."""
-    from vonk_control.fleet_profiles import FleetProfileService
+    from vonk_control.fleet_profiles.service import FleetProfileService
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

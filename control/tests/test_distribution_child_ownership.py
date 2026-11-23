@@ -6,17 +6,18 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import AgentInstallResult, LifecycleState, RecipeStopResult
 from vonk_agent_protocol.agent_words import FailureStage, ProfileEffectState
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.distribution import DistributionService, MemoryObjectSource
-from vonk_control.distribution_executor import (
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
+from vonk_control.distribution_executor.durable import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
-    DurableDistributionPhaseExecutor,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import Job
-from vonk_control.recipe_operations import RecipeOperationView
-from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.models.jobs import Job
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
+from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
 from .test_recipe_operations import NOW, complete_started_recipe, setup_services
 

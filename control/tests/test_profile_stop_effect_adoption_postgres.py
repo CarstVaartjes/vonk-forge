@@ -14,32 +14,32 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.fleet_profile_contract import (
-    FleetProfileInput,
-    FleetProfilePreview,
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profile_contract.review import FleetProfilePreview
+from vonk_control.fleet_profile_contract.vocabulary import (
     profile_switch_child_request_key,
 )
-from vonk_control.fleet_profiles import (
-    FleetProfileService,
-    RunSwitchFleetProfileAdapter,
+from vonk_control.fleet_profiles.persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
 )
+from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import (
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import (
     AgentNode,
     AgentNodeContact,
-    AgentOperation,
-    CatalogDocumentRevision,
     FleetProfileApplication,
-    Job,
-    ResourceReservation,
 )
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation

@@ -9,14 +9,14 @@ from threading import Event
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.db import build_engine
+from vonk_control.db.connections import build_engine
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentEnrollment,
     AgentEnrollmentGrant,
-    Base,
 )
 from vonk_control.pki import IssuedCertificate
 from vonk_control.settings import DATABASE_WAIT_BUDGETS
@@ -151,9 +151,9 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
 def test_enrollment_transactions_commit_durably_on_async_controller_connections(
     postgres_engine,
 ):
-    from vonk_control import db
+    from vonk_control.db.connections import build_engine as db_build_engine
 
-    engine = db.build_engine(postgres_engine.url.render_as_string(hide_password=False))
+    engine = db_build_engine(postgres_engine.url.render_as_string(hide_password=False))
     try:
         with engine.connect() as connection:
             assert (

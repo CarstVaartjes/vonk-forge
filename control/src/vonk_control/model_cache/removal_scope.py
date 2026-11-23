@@ -12,11 +12,11 @@ from ..cache_removal_review import (
     CacheAssetDisposition,
     CacheRemovalAsset,
 )
-from ..model_cache_ranges import range_partial_bytes
-from ..models import ModelCacheSet
+from ..models.cache import ModelCacheSet
 from . import constants
 from .artifacts import _unique_artifacts
 from .constants import _PARALLEL_RANGE_WORKERS
+from .ranges import range_partial_bytes
 from .views import ModelCacheRemovalScope
 
 if TYPE_CHECKING:

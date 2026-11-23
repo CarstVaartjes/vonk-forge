@@ -13,16 +13,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    ModelCacheSet,
-    ModelCacheSetArtifact,
-    User,
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models.catalog import CatalogDocument
+from vonk_control.models.fleet import User
+from vonk_control.recipe_image_availability.service import (
+    RecipeImageAvailabilityService,
 )
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_model_cache import _artifact, _canonical_model, _download

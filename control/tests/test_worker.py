@@ -11,7 +11,7 @@ from vonk_agent_protocol import Disposition, LifecycleState
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.jobs import states as job_states
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base
+from vonk_control.model_primitives import Base
 from vonk_control.telemetry import maintenance as telemetry_maintenance
 from vonk_control.worker.liveness import WorkerWatchdog
 from vonk_control.worker.loop import HandlerRequest, Worker
@@ -655,7 +655,7 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
     assert set(calls) == labels
-    from vonk_control.models import CoordinatorFailure
+    from vonk_control.models.coordinator import CoordinatorFailure
 
     with failures._sessions() as session:
         assert session.scalar(select(CoordinatorFailure)) is None
@@ -672,7 +672,7 @@ def _persisting_fault(tmp_path, now, verdict_error):
     def due_in() -> float:
         engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
         with sessionmaker(engine)() as session:
-            from vonk_control.models import CoordinatorFailure
+            from vonk_control.models.coordinator import CoordinatorFailure
 
             row = session.get(CoordinatorFailure, "source")
             assert row is not None and row.next_action_at is not None
@@ -860,7 +860,7 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     from vonk_agent_protocol import Disposition, WaitOwnerKind, WaitResumeCondition
     from vonk_control.coordinator_contract import CoordinatorFailureEvidence
     from vonk_control.due_waits import DueWaitBackstop, WaitSource
-    from vonk_control.models import CoordinatorFailure
+    from vonk_control.models.coordinator import CoordinatorFailure
     from vonk_control.observation.platform import PlatformObserver
     from vonk_control.persisted_waits import read_wait
 
@@ -1178,7 +1178,7 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
     """Catches the over-budget alarm changing scheduling: a slow success that
     parks its source (or creates a due-wait row) delays the very work it
     names."""
-    from vonk_control.models import CoordinatorFailure
+    from vonk_control.models.coordinator import CoordinatorFailure
     from vonk_control.worker.loop import _STEP_BUDGET_SECONDS, _background_source_name
 
     monotonic = [1000.0]
@@ -1288,9 +1288,9 @@ def test_production_assembly_hands_the_step_heartbeat_to_the_worker(
     tmp_path, request
 ) -> None:
     """Catches assemble_production_worker dropping the step heartbeat."""
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
     from vonk_control.presence import ManagementAddressPolicy
     from vonk_control.worker.assembly import assemble_production_worker
 
@@ -1439,7 +1439,7 @@ def test_slow_recipe_subtask_is_named_in_the_over_budget_alarm(
     """Catches the coarse `recipes` step hiding which sub-task is slow."""
     from datetime import UTC, datetime
 
-    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
     from vonk_control.worker.loop import _STEP_BUDGET_SECONDS
 
     monotonic = [1000.0]

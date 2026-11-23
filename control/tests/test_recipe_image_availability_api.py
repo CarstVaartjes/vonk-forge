@@ -20,22 +20,24 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
-from vonk_control.recipe_availability_intent import RecipeRevisionIntent
-from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityError,
-    RecipeImageAvailabilityView,
-)
-from vonk_control.recipe_image_availability_api import (
+from vonk_control.recipe_image_availability.api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
     _child,
     _progress,
     _view_document,
     install_recipe_operator_routes,
 )
-from vonk_control.recipe_image_availability_view_contract import (
-    RecipeCacheRemovalStatus,
+from vonk_control.recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
 )
-from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+from vonk_control.recipe_image_availability.view_contract import (
+    RecipeCacheRemovalStatus,
+    RecipeImageAvailabilityView,
+)
+from vonk_control.recipe_operations.availability_intent import RecipeRevisionIntent
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationCancellationResult,
+)
 
 
 @pytest.mark.parametrize(
@@ -637,8 +639,10 @@ def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
-    from vonk_control.models import Base
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    from vonk_control.model_primitives import Base
+    from vonk_control.runtime_image_preparation.storage import (
+        FilesystemRuntimeImageStorage,
+    )
 
     from .test_recipe_image_availability import (
         ARCHIVE_SHA,

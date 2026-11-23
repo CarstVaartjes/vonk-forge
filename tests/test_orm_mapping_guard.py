@@ -23,6 +23,8 @@ from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control import models
 from vonk_control.inventory.items_contract import AgentInventoryItems
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.stored.json_values import (
     ContractJSON,
     JsonColumn,
@@ -45,12 +47,12 @@ def test_all_models_share_metadata_and_resolve_foreign_keys() -> None:
         for _, model in getmembers(module, isclass):
             mapper = inspect(model, raiseerr=False)
             if mapper is not None and hasattr(mapper, "local_table"):
-                assert mapper.registry is models.Base.registry
-                assert mapper.local_table.metadata is models.Base.metadata
-    for table in models.Base.metadata.tables.values():
+                assert mapper.registry is Base.registry
+                assert mapper.local_table.metadata is Base.metadata
+    for table in Base.metadata.tables.values():
         for foreign_key in table.foreign_keys:
             target = foreign_key.column.table
-            assert target is models.Base.metadata.tables[target.key]
+            assert target is Base.metadata.tables[target.key]
 
 
 def test_mapper_graph_matches_pre_split_snapshot() -> None:
@@ -59,7 +61,7 @@ def test_mapper_graph_matches_pre_split_snapshot() -> None:
     # and no relationships. Pin mapper ordering alongside the relationship set.
     configure_mappers()
     actual = []
-    for mapper in models.Base.registry.mappers:
+    for mapper in Base.registry.mappers:
         table = mapper.local_table
         assert isinstance(table, Table)
         relationships = sorted(
@@ -387,7 +389,7 @@ def node_fact_violations(
     if nodes is not None:
         problems.extend(
             f"agent_nodes.{name}: contact fact belongs in agent_node_contacts"
-            for name in set(models.AgentNodeContact.__table__.columns.keys())
+            for name in set(AgentNodeContact.__table__.columns.keys())
             .difference({"node_id"})
             .intersection(nodes.columns.keys())
         )
@@ -403,7 +405,7 @@ def node_fact_violations(
 
 
 def test_per_node_columns_have_one_reviewed_owner_and_typed_json() -> None:
-    assert node_fact_violations(models.Base.metadata, bindings()) == []
+    assert node_fact_violations(Base.metadata, bindings()) == []
 
 
 @pytest.mark.parametrize(
@@ -539,9 +541,10 @@ def _table_declaring_modules_outside_models(
 def _modules_imported_by_models(source: Path) -> set[str]:
     tree = ast.parse((source / "models/__init__.py").read_text())
     return {
-        node.module
+        node.module or alias.name
         for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.level == 2 and node.module
+        if isinstance(node, ast.ImportFrom) and node.level == 2
+        for alias in node.names
     }
 
 

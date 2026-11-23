@@ -28,23 +28,19 @@ from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..installation_transitions import end_unfinished_installation
 from ..jobs import states as job_states
-from ..lifecycle import CancelRequested, OperatorAction, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
     set_parent_state,
 )
 from ..lifecycle.evidence import Residue
-from ..models import (
-    AgentNode,
-    AgentOperationAttempt,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-    ResourceReservation,
-)
-from ..models import AgentOperation as StoredOperation
+from ..lifecycle.types import CancelRequested, OperatorAction, Reported
+from ..models.execution import RecipeInstallation, RecipeRun, ResourceReservation
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..persisted_waits import schedule_wait
-from ..recipe_lifecycle_contract import (
+from ..recipe_operations.lifecycle_contract import (
     RecipeOperationCancellationResult,
 )
 from .contracts import _WORKLOAD_INTENT_OPERATIONS, OperatorRetirementRefused

@@ -26,8 +26,9 @@ from ..content_identity import same_build_units
 from ..jobs import states as job_states
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
 from ..lifecycle.evidence import Residue
-from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, Job
+from ..models.jobs import Job
+from ..models.operations import AgentOperation as StoredOperation
+from ..models.operations import AgentOperationAttempt
 from ..recovery_policy import FailureKind
 from .stored import column_field, column_is_document
 

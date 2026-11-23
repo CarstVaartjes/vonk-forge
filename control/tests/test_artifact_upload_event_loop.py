@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from vonk_control.artifact_blob_store import (
+from vonk_control.artifact_jobs.blob_store import (
     ArtifactBlobStore,
     ArtifactBlobUnsafePath,
     StoredArtifactBlob,

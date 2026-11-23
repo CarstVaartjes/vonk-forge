@@ -6,10 +6,7 @@ from dataclasses import dataclass
 
 from vonk_agent_protocol.package_source import AgentPackageSource
 
-from ..agent_upgrade_contract import (
-    AgentUpgradePackage,
-    AgentUpgradeRequestIntent,
-)
+from .contract import AgentUpgradePackage, AgentUpgradeRequestIntent
 
 
 @dataclass(frozen=True, slots=True)

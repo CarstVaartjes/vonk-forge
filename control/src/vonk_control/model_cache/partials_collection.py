@@ -39,12 +39,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..catalog.revision_collection import GRACE, INTERVAL
 from ..categorized_errors import InvalidValue
 from ..logging import log_event
-from ..model_cache_contract import CacheOperationKind
-from ..model_cache_states import LIVE
-from ..models import ModelCacheOperation
+from ..models.cache import ModelCacheOperation
 from ..terminal_history_collection import BACKLOG_PAUSE, PASS_BUDGET_SECONDS
+from .contract import CacheOperationKind
 from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .split_transfer import REPAIR_PARTIALS_PREFIX
+from .states import LIVE
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, RunState
 
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnverified,
     clear_removal,
@@ -21,20 +21,20 @@ from ..artifact_lifecycle import (
     release_dead_removal_nowait,
     reserve_removal,
 )
-from ..artifact_reference_scan import (
-    model_set_reference_findings,
-    runtime_image_reference_findings,
-)
+from ..artifact_reference_scan.image_references import runtime_image_reference_findings
+from ..artifact_reference_scan.model_references import model_set_reference_findings
 from ..capabilities import CapabilityUnavailableError
-from ..models import AgentNode, ModelCacheSet, RecipeRun
+from ..models.cache import ModelCacheSet
+from ..models.execution import RecipeRun
+from ..models.fleet import AgentNode
 from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
-from ..runtime_image_preparation import RuntimeImagePreparationError
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from .common import _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
 from .evidence import _CollectorEvidence, _Evidence, _Item
 from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
 
 if TYPE_CHECKING:
-    from ..runtime_image_preparation import FilesystemRuntimeImageStorage
+    from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
     from .service import UnusedStorageCollector
 
 

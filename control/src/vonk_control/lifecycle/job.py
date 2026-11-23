@@ -62,7 +62,7 @@ from vonk_agent_protocol import (
 from ..agent_operation_facts import aware
 from ..jobs import states as job_states
 from ..logging import redact_text
-from ..models import Job, JobAttempt
+from ..models.jobs import Job, JobAttempt
 from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due
 from .adapter import Dispatch
 from .core import transition

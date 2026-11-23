@@ -14,25 +14,23 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import (
-    Base,
-    CatalogDocumentHead,
-    CatalogDocumentRevision,
-    Job,
-    User,
-)
-from vonk_control.operation_api import OperationQuery, operation_detail_response
+from vonk_control.model_cache.service import ModelCacheService
+from vonk_control.model_primitives import Base
+from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
+from vonk_control.models.fleet import User
+from vonk_control.models.jobs import Job
+from vonk_control.operation_api.contracts import OperationQuery
+from vonk_control.operation_api.responses import operation_detail_response
 from vonk_control.operations.item_contract import operation_item
-from vonk_control.recipe_image_availability import (
+from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
+)
+from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
-from vonk_control.recipe_update_contract import RecipeUpdateResponse
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    prepare_runtime_image,
-)
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
+from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
@@ -179,7 +177,9 @@ def test_unknown_child_admission_retries_even_without_retryable_hint(
 ):
     """Unknown evidence cannot permanently fail an exact frozen child."""
     from vonk_agent_protocol import RecipeUpdateCode, WaitReason
-    from vonk_control.recipe_image_availability import RecipeImageAvailabilityUnknown
+    from vonk_control.recipe_image_availability.contracts import (
+        RecipeImageAvailabilityUnknown,
+    )
 
     _, recipes, now, fresh = update_env
     service = fresh()
@@ -290,9 +290,9 @@ from datetime import datetime
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.models import CatalogDocumentRevision
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
-from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.recipe_image_availability.service import RecipeImageAvailabilityService
+from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 sessions = sessionmaker(create_engine(sys.argv[1]))
 def authority(recipe_revision_id, **kwargs):
@@ -601,7 +601,7 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
     from vonk_control.auth import Actor
-    from vonk_control.recipe_image_availability_api import (
+    from vonk_control.recipe_image_availability.api import (
         install_recipe_operator_routes,
     )
 
@@ -1387,7 +1387,7 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         delattr(damaged, missing_field)
 
     def unreadable(*_args, **_kwargs):
-        from vonk_control.recipe_image_availability import (
+        from vonk_control.recipe_image_availability.contracts import (
             RecipeImageAvailabilityError,
             RecipeImageAvailabilityInvalid,
         )

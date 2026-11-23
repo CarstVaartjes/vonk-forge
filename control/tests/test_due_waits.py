@@ -15,7 +15,8 @@ from vonk_agent_protocol import LifecycleState, WaitOwnerKind
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Base, Job
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
@@ -43,7 +44,7 @@ from vonk_control.coordinator_failures import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs.queue import JobService
-from vonk_control.models import Job
+from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.worker.loop import Worker
 sessions = sessionmaker(create_engine(os.environ['WAIT_TEST_DATABASE']))
@@ -381,8 +382,8 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     from uuid import uuid4
 
     from vonk_agent_protocol.state_machines import CertificateRecordState
-    from vonk_control.enrollment import EnrollmentService
-    from vonk_control.models import AgentIssuedCertificateRevocation
+    from vonk_control.enrollment.service import EnrollmentService
+    from vonk_control.models.fleet import AgentIssuedCertificateRevocation
     from vonk_control.persisted_waits import read_wait
     from vonk_control.step_ca import StepCAUnavailable
 
@@ -520,9 +521,9 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
 ):
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
-    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.agent_jobs.service import AgentJobService
     from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.models import AgentOperation
+    from vonk_control.models.operations import AgentOperation
     from vonk_control.presence import ManagementAddressPolicy
     from vonk_control.worker.assembly import assemble_production_worker
 
@@ -577,7 +578,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         )
     saved_result = None
     if missing_receipt:
-        from vonk_control.recipe_lifecycle_contract import (
+        from vonk_control.recipe_operations.lifecycle_contract import (
             RecipeOperationProgressResult,
             RecipeOperationResult,
         )
@@ -677,7 +678,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
         AutomaticCatalogSync,
         ManagedRecipeCatalogSyncService,
     )
-    from vonk_control.models import RecipeLibrarySyncRun
+    from vonk_control.models.cache import RecipeLibrarySyncRun
 
     from .test_catalog_sync import Reader, _fixture
     from .test_catalog_sync_retry import Inline

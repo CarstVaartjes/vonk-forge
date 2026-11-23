@@ -13,17 +13,15 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import admitting
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan import require_model_sets_open
+from ..artifact_reference_scan.model_sets import require_model_sets_open
 from ..distribution_assignment import NodeDistributionAssignment
 from ..identity_insert import insert_identity
-from ..models import (
-    ArtifactDistributionAssignment,
-)
+from ..models.operations import ArtifactDistributionAssignment
 
 if TYPE_CHECKING:
     from .service import DistributionService

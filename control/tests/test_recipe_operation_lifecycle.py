@@ -14,11 +14,13 @@ from datetime import UTC, datetime
 
 import pytest
 from vonk_agent_protocol import FailureCode, WaitReason
-from vonk_control.lifecycle import Effect, State, transition
+from vonk_control.lifecycle.core import transition
 from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
-from vonk_control.lifecycle.types import Observed, Tick
-from vonk_control.models import AgentOperation, Job, RecipeBuild
-from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.lifecycle.types import Effect, Observed, State, Tick
+from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation
+from vonk_control.recipe_operations.errors import RecipeOperationConflict
 
 from .test_build_cancellation_recovery import _issue, _services
 

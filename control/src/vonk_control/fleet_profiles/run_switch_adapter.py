@@ -26,38 +26,33 @@ from vonk_agent_protocol.agent_words import (
 
 from ..categorized_errors import MissingRecord
 from ..failure_classification import is_definite, is_redownload, is_security_failure
-from ..fleet_profile_contract import (
+from ..fleet_profile_contract.applications import FleetProfileChildOperation
+from ..fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
-    FleetProfileAssignment,
     FleetProfileAssignmentAssessment,
-    FleetProfileChildOperation,
-    FleetProfilePreview,
-    FleetProfileSwitchAdapterState,
 )
+from ..fleet_profile_contract.definitions import FleetProfileAssignment
+from ..fleet_profile_contract.review import FleetProfilePreview
+from ..fleet_profile_contract.switch_state import FleetProfileSwitchAdapterState
 from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models import (
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    NodeInventorySnapshot,
-    ResourceReservation,
-)
+from ..models.catalog import CatalogDocumentRevision
+from ..models.execution import ResourceReservation
+from ..models.fleet import FleetProfileApplication
+from ..models.telemetry import NodeInventorySnapshot
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs
-from ..profile_error_summary import _error_summary, _normalized_failure_text
-from ..recipe_runtime_specs import resolve_recipe_entities
-from ..run_switch_contract import (
+from ..recipe_operations.runtime_specs import resolve_recipe_entities
+from ..run_switch_contract.operations import RunSwitchOperation
+from ..run_switch_contract.plans import RunSwitchAssessment
+from ..run_switch_contract.requests import (
     RunSwitchApplyRequest,
-    RunSwitchAssessment,
-    RunSwitchOperation,
-    RunSwitchPlacementAction,
     SparkGroup,
     SparkGroupNode,
 )
-from ..run_switch_operations import (
-    RunSwitchOperationConflict,
-    RunSwitchOperationService,
-)
+from ..run_switch_contract.vocabulary import RunSwitchPlacementAction
+from ..run_switch_operations.errors import RunSwitchOperationConflict
+from ..run_switch_operations.service import RunSwitchOperationService
 from .assessment_support import (
     _disk_shortfalls,
 )
@@ -68,6 +63,7 @@ from .contracts import (
     FleetProfileResourceRecheckUnavailable,
 )
 from .dependencies import _LOGGER
+from .error_summary import _error_summary, _normalized_failure_text
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,

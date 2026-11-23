@@ -11,14 +11,14 @@ from ..lifecycle.evidence import (
     Residue,
     read_or_rebuild,
 )
-from ..recipe_lifecycle_contract import (
+from .errors import RecipeRequestInvalid
+from .lifecycle_contract import (
     LifecycleCodeFailureResult,
     LifecycleNodeResult,
     RecipeLifecycleResult,
     RecipeOperationProgressResult,
     parse_recipe_lifecycle_result,
 )
-from .errors import RecipeRequestInvalid
 
 
 def _validated_result(kind: str, value: object) -> RecipeLifecycleResult:

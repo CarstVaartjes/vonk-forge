@@ -18,36 +18,32 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import admission_attempts
-from ..artifact_lifecycle import (
+from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
     require_reference_open,
 )
-from ..artifact_reference_scan import (
-    _run_switch_runtime_image_intent,
-)
+from ..artifact_reference_scan.intents import _run_switch_runtime_image_intent
 from ..bounded_json import require_integer
 from ..jobs import states as job_states
 from ..jobs.documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.run_switch import (
     LIVE_STATES as _LIVE_STATES,
 )
-from ..models import (
-    AgentNode,
-    Job,
-)
+from ..models.fleet import AgentNode
+from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
 from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
 )
-from ..run_switch_contract import (
-    RunSwitchCancellation,
+from ..run_switch_contract.identity import RunSwitchCancellation
+from ..run_switch_contract.operations import (
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchRuntimeImageReferenceIntent,
-    RunSwitchStopApplyRequest,
 )
+from ..run_switch_contract.requests import RunSwitchStopApplyRequest
 from ..stored.json_values import read_row_column
 from ..strict_json import (
     read_stored_model,
@@ -101,8 +97,8 @@ class CancellationRetryMixin:
     ) -> RunSwitchOperation:
         """Stop at the next safe phase boundary, keeping shared immutable work."""
         service = typing_cast("RunSwitchOperationService", self)
-        from ..run_switch_journal_repair import (
-            is_zero_transfer_journal_fault,
+        from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
+        from ..run_switch_journal_repair.observation import (
             try_repair_zero_transfer_journal,
         )
         from ..run_switch_journal_repair.pending import record_repair_cancellation

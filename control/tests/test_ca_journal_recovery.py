@@ -9,11 +9,11 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.models import (
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
-    Base,
 )
 from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCAUnavailable

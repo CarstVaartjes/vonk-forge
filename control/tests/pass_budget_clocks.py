@@ -35,7 +35,7 @@ PASS_BUDGET_MODULES = (
     "vonk_control.library_projection.local_state",
     "vonk_control.library.assessment",
     "vonk_control.library.image_presence",
-    "vonk_control.profile_read_observation",
+    "vonk_control.fleet_profiles.read_observation",
 )
 
 
@@ -99,9 +99,11 @@ def frozen_pass_budgets(monkeypatch: pytest.MonkeyPatch) -> PassClock:
     )
     for owner in (
         "vonk_control.library.image_presence",
-        "vonk_control.profile_read_observation",
+        "vonk_control.fleet_profiles.read_observation",
     ):
         monkeypatch.setattr(f"{owner}.wait", completing_wait)
     # Completed probes stay fresh until this clock advances; never across tests.
-    monkeypatch.setattr("vonk_control.profile_read_observation._RECENT", OrderedDict())
+    monkeypatch.setattr(
+        "vonk_control.fleet_profiles.read_observation._RECENT", OrderedDict()
+    )
     return clock

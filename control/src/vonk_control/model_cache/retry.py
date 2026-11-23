@@ -14,23 +14,22 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.http_failure import TransientReason
 
-from .. import model_cache_states
 from ..admission_locking import admitting
-from ..lifecycle import Effect, Outcome, Reported
-from ..model_cache_contract import (
-    ModelCacheAccessRecheck,
-    ModelCacheDownloadResult,
-    ModelCacheOperationPhase,
-    ModelCacheTransfer,
-)
-from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation
+from ..lifecycle.types import Effect, Outcome, Reported
+from ..models.cache import ModelCacheOperation
 from ..strict_json import serialize_json_value
+from . import states as model_cache_states
 from .artifacts import (
     ArtifactSetManifest,
     _optional_digest,
 )
 from .constants import _TRANSFER_CLAIM_SECONDS
+from .contract import (
+    ModelCacheAccessRecheck,
+    ModelCacheDownloadResult,
+    ModelCacheOperationPhase,
+    ModelCacheTransfer,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheNotFoundInvalid,
@@ -42,6 +41,7 @@ from .persistence import (
     _updated,
     _write_operation_payload,
 )
+from .progress import cache_phase, progress_document
 from .source_helpers import _request_key
 from .transfer_admission import admit_transfer, refreshes
 from .views import CacheOperationView

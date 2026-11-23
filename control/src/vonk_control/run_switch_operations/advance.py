@@ -37,31 +37,25 @@ from ..lifecycle.types import (
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
-from ..recipe_builds import RecipeBuildAdmissionBusy
 from ..recipe_builds.cancellation import needs_container_build
-from ..recipe_operations import (
-    RecipeOperationView,
-)
-from ..run_switch_contract import (
-    RunSwitchDistributionChildResult,
-    RunSwitchOperationResult,
-)
-from ..run_switch_progress import RECOVERY_STALL_WINDOW
-from ..run_switch_progress import (
+from ..recipe_builds.common import RecipeBuildAdmissionBusy
+from ..recipe_operations.interfaces import RecipeOperationView
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
+from ..run_switch_contract.progress_view import RECOVERY_STALL_WINDOW
+from ..run_switch_contract.progress_view import (
     _complete_operation_progress as _complete_operation_progress,  # noqa: PLC0414 -- shared helper export
 )
-from ..run_switch_progress import (
+from ..run_switch_contract.progress_view import (
     _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
 )
-from ..run_switch_progress import (
+from ..run_switch_contract.progress_view import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import stall_deadline
@@ -118,8 +112,10 @@ class AdvanceMixin:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
         from ..distribution_executor.receipts import _ChildView
-        from ..run_switch_journal_contract import JournalRepairDisposition
-        from ..run_switch_journal_repair import try_repair_zero_transfer_journal
+        from ..run_switch_contract.journal import JournalRepairDisposition
+        from ..run_switch_journal_repair.observation import (
+            try_repair_zero_transfer_journal,
+        )
 
         repair = try_repair_zero_transfer_journal(service._sessions, operation_id, now)
         if repair != JournalRepairDisposition.NOT_APPLICABLE:

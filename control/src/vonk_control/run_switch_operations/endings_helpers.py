@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..models import (
-    Job,
-)
+from ..models.jobs import Job
 from .provider import _ADAPTER
 
 

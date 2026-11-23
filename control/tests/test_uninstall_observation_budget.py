@@ -25,9 +25,10 @@ from vonk_agent_protocol import (
     RecipeUninstallResult,
     WaitReason,
 )
-from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
-from vonk_control.models import AgentCertificate, AgentNode, Job
+from vonk_control.agent_jobs.service import AgentJobService
+from vonk_control.models.fleet import AgentCertificate, AgentNode
+from vonk_control.models.jobs import Job
 
 from .agent_fences import fenced_operation
 from .node_contacts import contact_row
@@ -169,7 +170,7 @@ def test_delayed_first_claim_does_not_consume_recovery_budget(service) -> None:
     assert claim is not None
     clock.now += timedelta(seconds=11)
     jobs.reconcile_orders()
-    from vonk_control.models import AgentOperation as StoredOperation
+    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     with sessions() as session:
         stored = session.get(StoredOperation, operation.id)
@@ -255,7 +256,7 @@ def test_live_retry_crosses_its_recovery_deadline_without_losing_ownership(
     service,
 ) -> None:
     jobs, sessions, clock = service
-    from vonk_control.models import AgentOperation as StoredOperation
+    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
@@ -371,7 +372,7 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
     long, and the window restarts when it is back (then a present Spark that
     leaves the order unresolved for a whole window ends it).
     """
-    from vonk_control.models import AgentOperation as StoredOperation
+    from vonk_control.models.operations import AgentOperation as StoredOperation
 
     jobs, sessions, clock = service
     with sessions.begin() as session:

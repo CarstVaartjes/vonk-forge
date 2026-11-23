@@ -80,14 +80,10 @@ from .installation_transitions import end_orphaned_installation
 from .jobs import states as job_states
 from .logging import log_event
 from .machine_states import DISTRIBUTION_HELD, rank_installed
-from .models import (
-    ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
-    InstallationNode,
-    Job,
-    RecipeInstallation,
-    RecipeRun,
-)
+from .models.catalog import CatalogDocumentRevision
+from .models.execution import InstallationNode, RecipeInstallation, RecipeRun
+from .models.jobs import Job
+from .models.operations import ArtifactDistributionAssignment
 from .owner_liveness import (
     OWNER_SETTLE_GRACE,
     OwnerKind,

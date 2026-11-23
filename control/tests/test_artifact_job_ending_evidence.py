@@ -35,27 +35,32 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import operation_api
-from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
-from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
+from vonk_control.agent_jobs.contracts import (
+    CLAIM_LEASE_SECONDS,
+    controller_result_consumer,
+)
+from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import (
-    AgentNode,
-    AgentOperation,
-    AgentOperationAttempt,
+from vonk_control.models.execution import (
     ArtifactJob,
     InstallationNode,
-    Job,
     RecipeInstallation,
     RecipeRun,
+)
+from vonk_control.models.fleet import AgentNode
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_api.responses import (
+    _operation_item,
+    operation_detail_response,
 )
 from vonk_control.operations.contract import OperationFailureEvidence
 from vonk_control.operations.item_contract import agent_receipt_for
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
-from vonk_control.recipe_operations import (
+from vonk_control.recipe_operations.errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRetryLater,
 )
@@ -195,9 +200,7 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
         receipt, unreadable = agent_receipt_for(
             operation.kind, operation.state, attempt.result
         )
-        detail = operation_api.operation_detail_response(
-            operation_api._operation_item(operation, attempt)
-        )
+        detail = operation_detail_response(_operation_item(operation, attempt))
     assert not unreadable
     # The order's typed failure is the job's process receipt, not an
     # unreadable stored result.

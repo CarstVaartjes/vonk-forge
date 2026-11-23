@@ -9,13 +9,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
 from vonk_control import build_identity
-from vonk_control.api import create_app
+from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import RuntimeBuildIdentity
-from vonk_control.models import Base, ControlProcessHeartbeat
+from vonk_control.model_primitives import Base
+from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
 from vonk_control.observation.platform import PlatformObservation, PlatformObserver
-from vonk_control.operation_api import admin_openapi_schema
+from vonk_control.operation_api.openapi import admin_openapi_schema
 from vonk_control.worker.liveness import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity

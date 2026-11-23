@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
-from ..model_cache_contract import CacheManifestArtifactPart
 from ..strict_json import StrictModel
+from .contract import CacheManifestArtifactPart
 
 
 class CatalogArtifactPart(StrictModel):

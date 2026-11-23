@@ -27,30 +27,31 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from ..catalog.revision_contract import RecipeRevisionProjection
-from ..fleet_profile_contract import (
-    MAX_PROFILE_WARNINGS,
+from ..fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
     FleetProfileApplicationProgress,
+)
+from ..fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
-    FleetProfileChildResult,
     FleetProfileDefinition,
-    FleetProfileEffects,
-    FleetProfilePreview,
-    FleetProfileReviewedDecision,
-    FleetProfileRunEffect,
-    FleetProfileSwitchAdapterState,
-    FleetProfileSwitchQueueItem,
     FleetProfileView,
 )
-from ..lifecycle.evidence import Residue
-from ..models import (
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
-    InstallationNode,
+from ..fleet_profile_contract.effects import FleetProfileEffects, FleetProfileRunEffect
+from ..fleet_profile_contract.review import (
+    FleetProfilePreview,
+    FleetProfileReviewedDecision,
 )
+from ..fleet_profile_contract.switch_state import (
+    FleetProfileChildResult,
+    FleetProfileSwitchAdapterState,
+    FleetProfileSwitchQueueItem,
+)
+from ..fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
+from ..lifecycle.evidence import Residue
+from ..models.execution import InstallationNode
+from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
 from ..stored.json_values import read_row_column
 from .contracts import (
     FleetProfileReviewStale,

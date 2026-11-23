@@ -8,7 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.state_machines import CertificateRecordState
 from vonk_control.agent_contacts import record_contact
 from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.models import AgentCertificate, AgentNode, AgentNodeContact, Base
+from vonk_control.model_primitives import Base
+from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeContact
 from vonk_control.presence import (
     AgentPresenceService,
     ManagementAddressObservation,

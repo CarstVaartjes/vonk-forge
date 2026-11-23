@@ -14,9 +14,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.agent_jobs.stored import column_value
-from vonk_control.distribution import DistributionService, MemoryObjectSource
+from vonk_control.distribution.service import DistributionService
+from vonk_control.distribution.sources import MemoryObjectSource
 from vonk_control.host_helper_authority import HostHelperAuthorityError
-from vonk_control.models import AgentOperation
+from vonk_control.models.operations import AgentOperation
 
 from .test_host_helper_authority import NOW, runtime_service
 
@@ -145,10 +146,10 @@ def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
     """A Spark that holds the model's files still needs its grant to pull the
     image. The accepted plan names the files, so the grant needs no NAS copy;
     the files themselves stay unreadable while the NAS lacks them."""
-    from vonk_control.distribution import CompositeObjectSource
     from vonk_control.distribution.model_cache import ModelCacheObjectSource
+    from vonk_control.distribution.sources import CompositeObjectSource
     from vonk_control.distribution.types import DistributionError
-    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.model_cache.service import ModelCacheService
 
     authority = runtime_service(operation_kind=ProtocolAgentOperation.RECIPE_START)
     with authority._sessions() as session:

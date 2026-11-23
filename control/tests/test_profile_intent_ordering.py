@@ -9,18 +9,16 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import select, text
 from vonk_agent_protocol import LifecycleState
-from vonk_control.fleet_profile_contract import FleetProfileInput
-from vonk_control.fleet_profiles import (
-    build_production_fleet_profile_service,
-)
-from vonk_control.models import (
+from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.models.catalog import CatalogDocumentRevision
+from vonk_control.models.fleet import (
     AgentNode,
-    CatalogDocumentRevision,
     FleetProfileApplication,
     FleetProfileSelection,
-    Job,
 )
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.models.jobs import Job
+from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
 from .test_profile_installed_execution import _profile_service
 from .test_recipe_operations import setup_services
@@ -318,7 +316,7 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
     """Equal persisted acceptance timestamps use UUID4 as a stable tie-break."""
-    import vonk_control.fleet_profiles as fleet_profiles_module
+    import uuid
 
     start = datetime(2026, 9, 2, tzinfo=UTC)
     sessions, profiles, nodes, selector, clock = _profile_order_services(
@@ -333,9 +331,7 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     lower_id = UUID("00000000-0000-4000-8000-000000000010")
     higher_id = UUID("00000000-0000-4000-8000-000000000020")
     generated_ids = iter((lower_id, higher_id))
-    monkeypatch.setattr(
-        fleet_profiles_module.uuid, "uuid4", lambda: next(generated_ids)
-    )
+    monkeypatch.setattr(uuid, "uuid4", lambda: next(generated_ids))
     lower = _pending(profiles, older_review, str(uuid4()))
     higher = _pending(profiles, newer_review, str(uuid4()))
     assert lower.id == str(lower_id)

@@ -24,14 +24,10 @@ import uuid
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.models import (
-    AgentOperation,
-    FleetProfileApplication,
-    ModelCacheOperation,
-    RecipeInstallation,
-    RecipeRun,
-    RunNode,
-)
+from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.operations import AgentOperation
 
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.reach import reach_simulation

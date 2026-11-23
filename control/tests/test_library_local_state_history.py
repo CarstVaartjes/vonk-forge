@@ -21,13 +21,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelAccessReason, OperationProgress
 from vonk_control.auth import TokenCodec
 from vonk_control.library.contract import LibraryLocalState
-from vonk_control.library_projection import LibraryProjection, local_state
-from vonk_control.model_cache_contract import (
+from vonk_control.library_projection import local_state
+from vonk_control.library_projection.service import LibraryProjection
+from vonk_control.model_cache.contract import (
     CacheManifest,
     CacheOperationKind,
     ModelCacheOperationProgress,
 )
-from vonk_control.models import Base, ModelCacheOperation, ModelCacheSet
+from vonk_control.model_primitives import Base
+from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.stored.json_values import write_guard_mode
