@@ -45,8 +45,8 @@ from vonk_control.source_bundles import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .recipe_operations_support import installed_recipe, setup_services
-from .test_artifact_jobs import _configure_artifact_recipe
 from .test_catalog_entities import NOW, _model, _recipe
 from .test_distribution import _assignment
 

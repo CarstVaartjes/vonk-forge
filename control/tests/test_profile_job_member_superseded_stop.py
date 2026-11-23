@@ -24,10 +24,10 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_operations import job_run_stop
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.world import SOLO, build_world
-from .test_artifact_jobs import _configure_artifact_recipe
 
 
 @pytest.mark.slow(30)  # a whole member load, then its Stop load, on PostgreSQL

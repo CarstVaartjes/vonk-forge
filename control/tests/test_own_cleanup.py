@@ -650,12 +650,12 @@ def _lost_job_run(tmp_path):
     operator: its container may remain, so the run's Stop must remove it."""
     from vonk_control.artifact_jobs import states as ajs
 
-    from .recipe_operations_support import NOW as RECIPE_NOW
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         MutableClock,
         running_artifact_service,
         submitted_artifact_job,
     )
+    from .recipe_operations_support import NOW as RECIPE_NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path

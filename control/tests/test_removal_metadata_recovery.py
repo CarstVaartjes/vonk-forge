@@ -24,10 +24,10 @@ from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 from vonk_control.models.execution import ArtifactJobBlob
 from vonk_control.models.jobs import Job
 
+from .artifact_jobs_support import running_artifact_service
 from .model_cache_support import _download, cache  # noqa: F401
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_artifact_jobs import running_artifact_service
 from .test_model_cache_lifecycle import _clock_at, _queue
 
 

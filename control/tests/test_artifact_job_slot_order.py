@@ -7,15 +7,15 @@ import hashlib
 from vonk_agent_protocol import RecipeJobRunRequest
 from vonk_control.agent_jobs.service import AgentJobService
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
-    NOW,
+from .artifact_jobs_support import (
     MutableClock,
     _mapping,
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
 )
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 
 def _slot(slot_id: str, media_type: str, extension: str, *, min_files: int):

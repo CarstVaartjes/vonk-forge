@@ -19,13 +19,13 @@ from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.failure_evidence import FailureEvidenceService
 
-from .recipe_operations_support import NOW
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     MutableClock,
     running_artifact_service,
     submitted_artifact_job,
 )
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 STDERR = "stub job failed on purpose\n"
 

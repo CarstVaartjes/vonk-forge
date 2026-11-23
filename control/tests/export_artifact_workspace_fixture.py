@@ -26,8 +26,10 @@ from vonk_control.models.execution import RecipeRun
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition
 
-from tests.test_artifact_jobs import NOW, _mapping, running_artifact_service
+from tests.artifact_jobs_support import _mapping, running_artifact_service
 from tests.test_platform_observation import Jobs
+
+from .recipe_operations_support import NOW
 
 INITIAL = 9_007_199_254_740_993
 EDITED = 9_007_199_254_740_995

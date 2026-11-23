@@ -47,6 +47,7 @@ from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
 
+from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.sparks import Spark, Sparks
@@ -58,7 +59,6 @@ from .run_switch_operations_support import (
     _request,
 )
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
 
 _ACTIVATION = "recipe.job.activate.v1"
 

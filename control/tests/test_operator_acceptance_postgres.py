@@ -419,7 +419,7 @@ def test_artifact_create_upload_and_cancel_resolve_existing_job(
     """Catches accepting a terminal no-op cancel or losing an upload's publication."""
     import hashlib
 
-    from .test_artifact_jobs import artifact_create_request, running_artifact_service
+    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, owner, run_id, _node = running_artifact_service(
         tmp_path, engine=postgres_engine

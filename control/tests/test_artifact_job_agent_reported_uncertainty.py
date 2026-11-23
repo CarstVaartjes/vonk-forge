@@ -10,13 +10,13 @@ from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
-    NOW,
+from .artifact_jobs_support import (
     MutableClock,
     running_artifact_service,
     submitted_artifact_job,
 )
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 _REASON = "job custody or delivery remains unobserved"
 _CAUSE = "order authority ended during the input delivery"

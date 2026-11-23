@@ -409,8 +409,8 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
     from vonk_control.models.jobs import Job
     from vonk_control.models.operations import AgentOperation
 
+    from .artifact_jobs_support import _configure_artifact_recipe
     from .recipe_operations_support import installed_recipe, setup_services
-    from .test_artifact_jobs import _configure_artifact_recipe
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
