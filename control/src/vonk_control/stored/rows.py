@@ -9,6 +9,7 @@ process that reads rows or builds an engine.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import event
@@ -67,7 +68,12 @@ def read_row_column(row: object, column: str) -> Any | Residue | None:
     )
 
 
-_GUARD_INSTALLED = False
+@dataclass
+class _WriteGuardInstallation:
+    installed: bool = False
+
+
+_WRITE_GUARD = _WriteGuardInstallation()
 
 
 def install_write_guard(*, strict: bool | None = None) -> None:
@@ -82,12 +88,10 @@ def install_write_guard(*, strict: bool | None = None) -> None:
     not relax a mode chosen once for the process.
     """
 
-    global _GUARD_INSTALLED
-
     if strict is not None:
         set_write_guard_mode(strict=strict)
-    if _GUARD_INSTALLED:
+    if _WRITE_GUARD.installed:
         return
-    _GUARD_INSTALLED = True
+    _WRITE_GUARD.installed = True
     event.listen(Base, "before_insert", _guard_row, propagate=True)
     event.listen(Base, "before_update", _guard_row, propagate=True)
