@@ -13,14 +13,12 @@ import { phaseWords } from "../../lib/phase-words";
 import { useLibraryNodeName } from "./library-node-names";
 import { Time } from "../ui/time";
 
-export type AvailabilityMember = {
-  memberId: string;
-  phase: string;
-  completedBytes?: WireNumber | undefined;
-  totalBytes?: WireNumber | undefined;
-  bytesPerSecond?: number | undefined;
-  etaSeconds?: number | undefined;
-};
+/** One Spark's meter: the same fields as the overall one, keyed by member. */
+export type AvailabilityMember = Pick<
+  AvailabilityProgress,
+  "phase" | "completedBytes" | "totalBytes" | "bytesPerSecond" | "etaSeconds"
+> &
+  Record<"memberId", string>;
 
 export type AvailabilityProgress = {
   phase: string;
