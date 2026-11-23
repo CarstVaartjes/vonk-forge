@@ -400,9 +400,14 @@ const LIVE_JOB_STATES = new Set<string>([
   "waiting",
 ]);
 
+/** The one decision "this card polls itself": live work needs no Refresh button. */
+function stateUpdatesItself(state: string): boolean {
+  return LIVE_JOB_STATES.has(state);
+}
+
 function jobUpdatesAutomatically(detail: JobDetail): boolean {
   return (
-    LIVE_JOB_STATES.has(detail.state) ||
+    stateUpdatesItself(detail.state) ||
     (isOperatorWait(detail.state) &&
       (detail.agent_upgrade_diagnostics?.targets.some((target) => target.retry_queued) ?? false))
   );
@@ -625,7 +630,7 @@ function JobProgressDetails({
               disabled={loading}
               onClick={() => void loadDetail()}
             >
-              {loading ? "Retrying…" : "Try again"}
+              {loading ? "Retrying…" : "Retry"}
             </button>
           </div>
         )}
@@ -636,14 +641,16 @@ function JobProgressDetails({
                 <span>Current state</span>
                 <strong>{detail.summary}</strong>
               </div>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={loading || resuming}
-                onClick={() => void loadDetail()}
-              >
-                {loading ? "Refreshing…" : "Refresh details"}
-              </button>
+              {(!jobUpdatesAutomatically(detail) || error) && (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={loading || resuming}
+                  onClick={() => void loadDetail()}
+                >
+                  {loading ? "Refreshing…" : "Refresh details"}
+                </button>
+              )}
             </header>
             {jobUpdatesAutomatically(detail) && (
               <p className="activity-job-live" role="status">
@@ -865,7 +872,6 @@ function ActivityTimeline({
             <article>
               <header>
                 <div>
-                  <span className="activity-category">{activityCategory(event)}</span>
                   <h2>{activityTitle(event)}</h2>
                 </div>
                 <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
@@ -991,7 +997,6 @@ function ActivityOverview({
     },
     { recorded: 0, in_progress: 0, attention: 0, unsuccessful: 0, called_off: 0, unknown: 0 },
   );
-  const total = Math.max(events.length, 1);
   const scope = filtering
     ? `${events.length} matching ${events.length === 1 ? "event" : "events"} from ${loadedCount} loaded`
     : `${loadedCount} loaded ${loadedCount === 1 ? "event" : "events"}`;
@@ -1024,27 +1029,6 @@ function ActivityOverview({
       <div>
         <span>Unknown state</span>
         <strong>{counts.unknown}</strong>
-      </div>
-      <div
-        className="activity-outcome-bar"
-        role="img"
-        aria-label={`${counts.recorded} recorded, ${counts.in_progress} in progress, ${counts.attention} need review, ${counts.unsuccessful} unsuccessful, ${counts.called_off} cancelled, ${counts.unknown} unknown`}
-      >
-        <span className="is-recorded" style={{ width: `${(counts.recorded / total) * 100}%` }} />
-        <span
-          className="is-in-progress"
-          style={{ width: `${(counts.in_progress / total) * 100}%` }}
-        />
-        <span className="is-attention" style={{ width: `${(counts.attention / total) * 100}%` }} />
-        <span
-          className="is-unsuccessful"
-          style={{ width: `${(counts.unsuccessful / total) * 100}%` }}
-        />
-        <span
-          className="is-called_off"
-          style={{ width: `${(counts.called_off / total) * 100}%` }}
-        />
-        <span className="is-unknown" style={{ width: `${(counts.unknown / total) * 100}%` }} />
       </div>
     </section>
   );
@@ -1130,13 +1114,7 @@ function CanonicalOperationDetails({
         );
     }
   }, [api, detail.id, onUpdate]);
-  const active = [
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    "pending",
-    "planned",
-  ].includes(detail.state);
+  const active = stateUpdatesItself(detail.state);
   useEffect(() => {
     if (!active) return;
     let loading = false;
@@ -1193,7 +1171,7 @@ function CanonicalOperationDetails({
       ) : (
         detail.recovery?.explanation && <p style={{ margin: 0 }}>{detail.recovery.explanation}</p>
       )}
-      {!operationEnded(detail.state) && (
+      {!operationEnded(detail.state) && (!active || error) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: ".5rem" }}>
           <button type="button" className="button secondary" onClick={() => void refresh()}>
             Refresh operation
@@ -1558,7 +1536,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             </div>
             <button
               type="button"
-              className="button"
+              className="button secondary"
               disabled={loading || loadingMore}
               onClick={() => setAttempt((value) => value + 1)}
             >
@@ -1750,7 +1728,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
             disabled={loading || loadingMore}
             onClick={() => setAttempt((value) => value + 1)}
           >
-            Try again
+            Retry
           </button>
         </section>
       )}

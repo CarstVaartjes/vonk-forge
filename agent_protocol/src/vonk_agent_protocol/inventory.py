@@ -12,7 +12,7 @@ from .contracts import canonical_message
 from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
-from .host_tuning import HostTuning
+from .host_tuning import FabricDevice, HostTuning, MemoryFragmentation
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -124,6 +124,12 @@ class HostSettings(WireModel):
     swap: SwapObservation | None = None
     # None: the agent predates the host checks.
     tuning: HostTuning | None = None
+    # SecPageTables after idle workload stops since boot; None before the first
+    # idle stop.
+    memory_fragmentation: MemoryFragmentation | None = None
+    # Traffic per RDMA device over the window since the last report; empty
+    # before the agent has a previous reading.
+    fabric_devices: list[FabricDevice] = Field(default=[], max_length=16)
 
 
 class ModelStoreObject(WireModel):

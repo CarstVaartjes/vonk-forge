@@ -82,6 +82,7 @@ export function WorkloadsPage({
                       now={fleet.now}
                       live={live === "live"}
                       onOpen={onOpenSpark}
+                      compact
                     />
                     {unit.alias && <EnginePanel api={api} alias={unit.alias} title={unit.title} />}
                   </WorkloadRow>

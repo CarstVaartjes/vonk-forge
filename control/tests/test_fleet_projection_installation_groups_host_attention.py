@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, text, update
@@ -13,6 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_tuning import MemoryFragmentation
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
@@ -23,6 +25,7 @@ from vonk_control.fleet_projection.common import (
     RecipePresence,
     _install_partial_warnings,
 )
+from vonk_control.fleet_projection.memory_fragmentation import assess
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -1317,3 +1320,67 @@ def test_system_memory_is_everything_in_use_outside_gpu_processes(
         )
     )
     assert telemetry_point(view).system_memory_bytes == expected
+
+
+def _fragmentation_vector() -> dict[str, Any]:
+    return json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/memory-fragmentation-v1.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize(
+    "case", _fragmentation_vector()["cases"], ids=lambda case: case["name"]
+)
+def test_memory_fragmentation_readings_decide_the_reboot_advice(
+    case: dict[str, object],
+) -> None:
+    host: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+    }
+    if case["readings"] is not None:
+        host["memory_fragmentation"] = case["readings"]
+        readings = MemoryFragmentation.model_validate(case["readings"])
+        assert assess(readings).grown_bytes == case["grown_bytes"]
+    advised = "host.memory-fragmented" in _host_codes(host)
+    assert advised is case["fragmented"]
+
+
+def test_page_table_growth_is_judged_in_pages_not_bytes() -> None:
+    # 512 leftover pages is the margin at any page size: 2 MiB at 4 KiB, 32 MiB
+    # at 64 KiB; one page more advises a reboot.
+    for page_size in (4096, 65536):
+        for pages, advised in ((512, False), (513, True)):
+            readings = MemoryFragmentation.model_validate(
+                {
+                    "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+                    "page_size_bytes": page_size,
+                    "idle_stop_first_bytes": 1000,
+                    "idle_stop_latest_bytes": 1000 + pages * page_size,
+                }
+            )
+            assert assess(readings).reboot_advised is advised
+
+
+def _rail_vector() -> dict[str, list[dict[str, object]]]:
+    return json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/fabric-devices-v1.json")
+        .read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize("case", _rail_vector()["cases"], ids=lambda case: case["name"])
+def test_one_flat_rail_beside_a_busy_sibling_reaches_the_node_as_attention(
+    case: dict[str, object],
+) -> None:
+    host: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+        "fabric_devices": case["fabric_devices"],
+    }
+    node = _host_node(host)
+    reasons = [w for w in node.warnings if w.code == "network.rails-underused"]
+    assert bool(reasons) is case["underused"]

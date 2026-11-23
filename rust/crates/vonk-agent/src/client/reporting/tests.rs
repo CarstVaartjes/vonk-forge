@@ -345,6 +345,8 @@ fn inventory_with_all_evidence() -> vonk_agent_protocol::InventoryRequest {
         display_memory: None,
         swap: None,
         tuning: None,
+        memory_fragmentation: None,
+        fabric_devices: Vec::new(),
     });
     request.installations = Some(vec![uuid::Uuid::nil()]);
     request.runs = Some(vec![uuid::Uuid::nil()]);

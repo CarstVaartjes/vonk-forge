@@ -18,6 +18,7 @@ from .common import (
     _activity_target,
     _add_output,
     _add_profile_selection,
+    _add_show_all,
     _add_verbose,
     _add_yes,
     _filters,
@@ -304,6 +305,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         epilog="Without a command, lists cached recipes.",
     )
     _add_output(recipe)
+    _add_show_all(recipe)
     recipe_actions = recipe.add_subparsers(
         dest="recipe_action", parser_class=type(recipe)
     )

@@ -444,7 +444,7 @@ export function LibraryPage({
         actions={
           view !== "profiles" ? (
             <a
-              className="button"
+              className="button secondary"
               href="/library/profiles"
               onClick={(event) => contextualNavigate(event, "/library/profiles")}
             >

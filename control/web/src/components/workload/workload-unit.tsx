@@ -15,6 +15,7 @@ export function WorkloadUnit({
   cluster,
   reads,
   live,
+  compact = false,
   children,
 }: {
   /** Reads a job workload's recipe and jobs; without it every workload shows as a model. */
@@ -22,6 +23,8 @@ export function WorkloadUnit({
   cluster: WorkloadCluster;
   reads: WorkloadReads;
   live: boolean;
+  /** Opened under its own row: the hero leaves out what the row repeats. */
+  compact?: boolean;
   children: ReactNode;
 }) {
   const names = cluster.nodes.map(nodeDisplayName);
@@ -32,7 +35,14 @@ export function WorkloadUnit({
     >
       {cluster.units.map((unit, index) =>
         index === 0 ? (
-          <WorkloadHero key={unit.runId} api={api} unit={unit} reads={reads} live={live} />
+          <WorkloadHero
+            key={unit.runId}
+            api={api}
+            unit={unit}
+            reads={reads}
+            live={live}
+            compact={compact}
+          />
         ) : (
           // A second workload on the same Sparks is one line under the first.
           <div className="workload-strip" key={unit.runId}>

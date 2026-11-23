@@ -115,7 +115,7 @@ export function LibraryRecipeAuthority({
               <div>
                 <strong>
                   {item.model_display?.model_title ?? item.model_document.identity.slug}
-                </strong>
+                </strong>{" "}
                 <small>
                   {item.model_document.identity.publisher}/{item.model_document.identity.slug} ·{" "}
                   {item.selection.files.length} Recipe mount
