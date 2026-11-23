@@ -16,9 +16,9 @@ from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.jobs import Job
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .model_cache_support import _remove_model, threaded_cache  # noqa: F401 - fixture
 from .recipe_removal_review_support import remove_after_review
 from .removal_settle import release_ended_gates
-from .test_model_cache import _remove_model, threaded_cache  # noqa: F401 - fixture
 from .test_model_removal_reference_lifecycle import (
     _force_model_request,
     _one_model,

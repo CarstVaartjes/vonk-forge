@@ -137,7 +137,7 @@ def main() -> int:
         [
             "agent_protocol/tests",
             *[str(path.relative_to(repository)) for path in bridges],
-            "control/tests/test_agent_jobs.py::test_queue_stores_and_claims_the_canonical_payload_hash",
+            "control/tests/test_agent_jobs_distribution_recovery_claims.py::test_queue_stores_and_claims_the_canonical_payload_hash",
         ],
         [
             "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",

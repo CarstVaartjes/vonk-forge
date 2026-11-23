@@ -30,9 +30,9 @@ from vonk_control.models.execution import RecipeInstallation
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from vonk_control.unused_storage_collection.common import _Kept
 
+from .model_cache_support import _artifact, _download
 from .removal_settle import advance_until_ended
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import _artifact, _download
 from .test_unused_storage_collection import (
     ACTOR,
     GIB,

@@ -25,6 +25,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
+from .agent_jobs_support import COMMIT, parent
 from .recipe_operations_support import (
     NOW,
     installed_recipe,
@@ -32,7 +33,6 @@ from .recipe_operations_support import (
     start_evidence,
 )
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import COMMIT, parent
 from .test_distributed_recovery_budget import _AdvancingClock
 
 _PREFLIGHT = {

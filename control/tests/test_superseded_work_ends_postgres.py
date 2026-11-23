@@ -41,6 +41,7 @@ from vonk_control.run_switch_contract.requests import (
 )
 from vonk_control.run_switch_operations.executor import RecipeLifecyclePhaseExecutor
 
+from .agent_jobs_support import superseded_order_payload
 from .recipe_operations_support import (
     ConcurrentPublisher,
     bind_route_publications,
@@ -50,7 +51,6 @@ from .recipe_operations_support import (
 from .recipe_stop_fixtures import recipe_stop_payload
 from .run_switch_operations_support import _request
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import superseded_order_payload
 from .test_agent_jobs_postgres import COMMIT, NODE_B, parent, service  # noqa: F401
 from .test_profile_port_claims import _ready_profile
 

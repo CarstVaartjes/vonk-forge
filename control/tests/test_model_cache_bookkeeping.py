@@ -10,7 +10,6 @@ observed, is *unknown*, never a reason to stop a load.  Three families:
 3. the security and input-validation refusals still refuse.
 """
 
-# ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
 from __future__ import annotations
 
 import hashlib
@@ -28,13 +27,9 @@ from vonk_control.models.cache import (
     ModelCacheSetArtifact,
 )
 
+from .model_cache_support import _artifact, _download
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_model_cache import (
-    _artifact,
-    _download,
-    cache,  # noqa: F401 - the fixture
-)
 from .test_model_cache_lifecycle import _edit, _queue
 from .test_model_cache_recovery_support import observe_unknown
 from .test_model_removal_reference_lifecycle import (

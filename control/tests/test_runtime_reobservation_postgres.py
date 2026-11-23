@@ -57,7 +57,7 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     if kind is Kind.RECIPE_START:
         from vonk_agent_protocol import RecipeStartPayload
 
-        from .test_agent_jobs import canonical_start_payload
+        from .agent_jobs_support import canonical_start_payload
         from .test_agent_jobs_postgres import Clock
 
         return RecipeStartPayload.model_validate_json(

@@ -46,12 +46,12 @@ from vonk_control.persisted_waits import read_wait
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 
+from .agent_jobs_support import canonical_start_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     inventory_items_fixture,
 )
-from .test_agent_jobs import canonical_start_payload
 from .test_fleet_profiles import (
     NOW,
     _assessment,

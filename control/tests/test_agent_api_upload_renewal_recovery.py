@@ -52,7 +52,7 @@ from .agent_api_support import (
     parent,
     upgrade_payload,
 )
-from .test_agent_jobs import canonical_start_payload
+from .agent_jobs_support import canonical_start_payload
 
 
 @pytest.mark.parametrize(

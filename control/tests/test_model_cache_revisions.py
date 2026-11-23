@@ -23,8 +23,8 @@ from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
 from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
+from .model_cache_support import _artifact, _canonical_model, _download
 from .removal_settle import advance_until_ended
-from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model, _removal_service
 
 

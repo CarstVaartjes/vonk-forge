@@ -80,10 +80,10 @@ from vonk_control.unused_storage_collection.evidence import _Evidence
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 from vonk_forge_contracts.model import ModelReference
 
+from .model_cache_support import _artifact, _download
 from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
-from .test_model_cache import _artifact, _download
 from .test_model_removal_decided_by_evidence import _installation
 from .test_run_switch_build_fencing import _direct_parent
 

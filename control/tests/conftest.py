@@ -27,6 +27,9 @@ from . import metadata_type_snapshot
 from .agent_api_support import (  # noqa: F401 - pytest fixtures
     agent_system,
 )
+from .agent_jobs_support import (  # noqa: F401 - pytest fixtures
+    service,
+)
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
 )
@@ -44,6 +47,10 @@ from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
 from .catalog_head_seed import install_seeded_heads
+from .model_cache_support import (  # noqa: F401 - pytest fixtures
+    cache,
+    threaded_cache,
+)
 from .pass_budget_clocks import (
     frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
 )
@@ -558,7 +565,7 @@ def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
     """Fail the test when code touches a model-cache object on storage.
 
     Worker entry points that must answer from stored facts opt in by running
-    under this fixture; ``cache`` is the ``ModelCacheService`` whose objects
+    under this fixture; ``model_cache`` is the ``ModelCacheService`` whose objects
     directory is guarded.
     """
     from pathlib import Path
@@ -567,8 +574,8 @@ def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
 
     real_lstat = Path.lstat
 
-    def guard(cache: ModelCacheService) -> None:
-        objects = cache._root / "objects"
+    def guard(model_cache: ModelCacheService) -> None:
+        objects = model_cache._root / "objects"
 
         def refuse_object(*_args, **_kwargs):
             raise AssertionError("model object touched on storage")

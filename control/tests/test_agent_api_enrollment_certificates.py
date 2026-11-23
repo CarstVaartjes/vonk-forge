@@ -41,7 +41,7 @@ from .agent_api_support import (
     valid_enrollment_body,
 )
 from .agent_fences import fenced_attempt, fenced_operation
-from .test_agent_jobs import canonical_start_payload
+from .agent_jobs_support import canonical_start_payload
 
 
 class ChunkedEnrollmentRequest:
@@ -528,7 +528,7 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
     both acceptance and the preserved receipt.
     """
 
-    from .test_agent_jobs import distribution_payload
+    from .agent_jobs_support import distribution_payload
 
     client, services, _, clock = agent_system
     services.operations.enqueue(

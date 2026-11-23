@@ -24,7 +24,7 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .test_model_cache import _artifact, _canonical_model, _download
+from .model_cache_support import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model
 from .test_recipe_image_availability import (
     _add_revision,

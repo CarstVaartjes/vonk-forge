@@ -46,12 +46,8 @@ from vonk_control.run_switch_operations.artifact_inspection import (
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .model_cache_support import _canonical_model, _canonical_recipe
 from .test_library_local_state_history import _cache_set, _operation
-from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
-    _canonical_model,
-    _canonical_recipe,
-    cache,
-)
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
 LIBRARY_SRC = Path(__file__).parents[1] / "src/vonk_control/library_projection"
@@ -276,7 +272,7 @@ def _put_image(service, present: bool) -> None:
 
 @pytest.mark.parametrize("count", [1, 2])
 def test_a_recipe_prepares_while_its_set_downloads_then_is_cached(
-    cache,  # noqa: F811
+    cache,
     count: int,
 ):
     service, sessions = cache
@@ -323,7 +319,7 @@ def test_a_recipe_prepares_while_its_set_downloads_then_is_cached(
 
 
 def test_a_first_model_set_alone_does_not_make_a_two_model_recipe_cached(
-    cache,  # noqa: F811
+    cache,
 ):
     """Admission reads the recipe's own set, not the first model's set alone."""
 
@@ -356,7 +352,7 @@ def test_a_first_model_set_alone_does_not_make_a_two_model_recipe_cached(
     list(itertools.product([1, 2], ["cached", "downloading"], ["present", "missing"])),
 )
 def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
-    cache,  # noqa: F811
+    cache,
     count: int,
     set_state: str,
     image_state: str,
@@ -419,7 +415,7 @@ def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
     ],
 )
 def test_an_ended_installation_does_not_pull_a_cached_set_down(
-    cache,  # noqa: F811
+    cache,
     count: int,
     installation: str,
     expected: str,
@@ -496,7 +492,7 @@ def test_a_recipes_facts_reach_the_result_only_through_the_fold():
 
 @pytest.mark.parametrize("first", ["resolver-recipe", "resolver-dual"])
 def test_a_sibling_recipe_sharing_the_prebuilt_image_and_models_is_cached(
-    cache,  # noqa: F811
+    cache,
     first: str,
 ):
     """The recipe that reached the build first does not own it: identity is content.
@@ -531,7 +527,7 @@ def test_a_sibling_recipe_sharing_the_prebuilt_image_and_models_is_cached(
 
 @pytest.mark.parametrize("first", ["resolver-recipe", "resolver-dual"])
 def test_a_sibling_recipe_follows_the_shared_set_while_it_downloads(
-    cache,  # noqa: F811
+    cache,
     first: str,
 ):
     """Cache facts follow the recipe's own artifact set, not the recipe that
@@ -571,7 +567,7 @@ def test_a_sibling_recipe_follows_the_shared_set_while_it_downloads(
 
 
 def test_image_presence_never_reads_a_builds_plan_or_policy(
-    cache,  # noqa: F811
+    cache,
 ):
     """An image is its build's archive columns; the build documents stay unread.
 
@@ -614,7 +610,7 @@ def test_image_presence_never_reads_a_builds_plan_or_policy(
 
 
 def test_cache_resolution_reads_the_shared_catalog_parse_without_copying(
-    cache,  # noqa: F811
+    cache,
     monkeypatch,
 ):
     """Resolution only reads recipe and model documents, so it copies none."""
@@ -664,7 +660,7 @@ def _count_artifact_builds(service, monkeypatch) -> list[str]:
 
 @pytest.mark.parametrize(("models", "expected"), [(1, 1), (2, 2)])
 def test_a_model_content_identity_builds_its_artifact_specs_once(
-    cache,  # noqa: F811
+    cache,
     monkeypatch,
     models,
     expected,
@@ -683,7 +679,7 @@ def test_a_model_content_identity_builds_its_artifact_specs_once(
 
 
 def test_each_recipe_set_is_resolved_once_across_library_reads(
-    cache,  # noqa: F811
+    cache,
     monkeypatch,
 ):
     from vonk_control.library_projection import local_state
@@ -711,7 +707,7 @@ def test_each_recipe_set_is_resolved_once_across_library_reads(
 
 @pytest.mark.parametrize("refused", [False, True])
 def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
-    cache,  # noqa: F811
+    cache,
     monkeypatch,
     refused: bool,
 ):
@@ -745,7 +741,7 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
 
 
 def test_cache_resolution_loads_documents_only_where_it_reads_them(
-    cache,  # noqa: F811
+    cache,
 ):
     """Row lookups select revision columns; only content checks load a document."""
 
