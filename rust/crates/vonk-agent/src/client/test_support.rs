@@ -633,6 +633,7 @@ pub(super) fn progress() -> AgentProgress {
             smoothed_bytes_per_second: None,
             eta_seconds: None,
             elapsed_seconds: None,
+            fetched: None,
             checkpoint: None,
             members: Vec::new(),
         }),
