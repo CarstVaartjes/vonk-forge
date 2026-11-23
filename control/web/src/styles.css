@@ -2127,15 +2127,6 @@ progress {
   }
 }
 
-.library-page a:not(.button) {
-  color: var(--green-text);
-}
-
-.library-page a:not(.button):hover,
-.library-page a:not(.button):focus-visible {
-  color: var(--ink);
-}
-
 @media (max-width: 42rem) {
   .fleet-enrollment {
     grid-template-columns: minmax(0, 1fr);
