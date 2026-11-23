@@ -89,7 +89,7 @@ def _pinned_case_counts(source: str) -> list[int]:
         for node in ast.walk(assertion.test)
         if isinstance(node, ast.Compare)
         for left, op, right in zip(
-            [node.left, *node.comparators], node.ops, node.comparators
+            [node.left, *node.comparators], node.ops, node.comparators, strict=False
         )
         if isinstance(op, ast.Eq)
         and (

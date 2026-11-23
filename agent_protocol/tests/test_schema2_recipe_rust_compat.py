@@ -529,7 +529,9 @@ def test_required_and_exact_type_fields_are_rejected_by_both_models(
             labels.append((operation.value, *path))
             checked_array_items.add(path)
     for (label, expected), accepted in zip(
-        zip(labels, expectations), _rust_accepts_many(wire_probe, cases)
+        zip(labels, expectations, strict=False),
+        _rust_accepts_many(wire_probe, cases),
+        strict=False,
     ):
         assert accepted == expected, (label, expected)
     assert ("compiled_execution_plan", "runtime", "argv", 0) in checked_array_items
@@ -611,7 +613,7 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                     cases.append((operation, changed))
                     labels.append((operation.value, (*path, name), str(candidate)))
     for (operation_name, path, candidate), accepted in zip(
-        labels, _rust_accepts_many(wire_probe, cases)
+        labels, _rust_accepts_many(wire_probe, cases), strict=False
     ):
         assert accepted, (path, candidate)
         checked.add((operation_name, path, candidate))

@@ -169,7 +169,7 @@ def git_checkout_reads(source: str) -> list[int]:
         if node.func.id not in wrappers:
             continue
         positional, targets = wrappers[node.func.id]
-        supplied = dict(zip(positional, node.args))
+        supplied = dict(zip(positional, node.args, strict=False))
         supplied.update(
             {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
         )

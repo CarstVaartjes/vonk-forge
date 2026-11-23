@@ -30,7 +30,7 @@ def _proof_environment_names(tree: ast.AST) -> set[str]:
         ):
             names.add(node.value)
         if isinstance(node, (ast.List, ast.Tuple)):
-            for flag, program in zip(node.elts, node.elts[1:]):
+            for flag, program in zip(node.elts, node.elts[1:], strict=False):
                 if (
                     isinstance(flag, ast.Constant)
                     and flag.value == "-c"

@@ -76,7 +76,7 @@ def test_management_address_policy_accepts_exact_host_routes() -> None:
 
 
 def test_management_address_policy_rejects_ambiguous_network_policy() -> None:
-    for allowed, forbidden, error in (
+    for allowed, forbidden, _error in (
         ("10.0.0.1/24", "", "canonical"),
         ("10.0.0.0/24,10.0.0.0/24", "", "duplicate"),
         ("", "", "empty"),

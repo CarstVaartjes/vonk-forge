@@ -218,7 +218,7 @@ def _recipe_removal_impact_in_session(
         )
         for finding in model_owner_findings
     )
-    for kind, findings_by_asset, label, code in (
+    for _kind, findings_by_asset, label, code in (
         (
             "runtime-image",
             image_findings,

@@ -307,7 +307,7 @@ class DistributedRecoveryCoordinator:
                             )
                             run.plan = run_plan_document(run_plan)
                             for node, observation in zip(
-                                run_nodes, previous_observations
+                                run_nodes, previous_observations, strict=False
                             ):
                                 (
                                     node.observed_run_generation,

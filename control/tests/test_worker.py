@@ -1252,7 +1252,10 @@ def test_a_long_pass_writes_readiness_between_its_steps(tmp_path, monkeypatch) -
 
     written = [at for kind, at in events if kind == "readiness"]
     assert written == [12.0, 24.0, 24.0]  # two between steps, one at the end
-    gaps = [later - earlier for earlier, later in zip([0.0, *written], written)]
+    gaps = [
+        later - earlier
+        for earlier, later in zip([0.0, *written], written, strict=False)
+    ]
     assert max(gaps) < WORKER_READINESS_WINDOW_SECONDS
     assert _READINESS_BEAT_SECONDS < WORKER_READINESS_WINDOW_SECONDS
 

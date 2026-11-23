@@ -810,7 +810,7 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
             )
             for sequence, sample_id in enumerate(sample_ids)
         )
-        for sequence, sample_id in enumerate(sample_ids, start=1):
+        for _sequence, sample_id in enumerate(sample_ids, start=1):
             repository.append_in_session(
                 session,
                 FleetEventDraft(

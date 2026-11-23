@@ -990,7 +990,9 @@ def _cross_spark_ordinal_orders(source: str, path: str = "") -> list[int]:
             if not isinstance(compare, ast.Compare):
                 continue
             operands = [compare.left, *compare.comparators]
-            for op, left, right in zip(compare.ops, operands, operands[1:]):
+            for op, left, right in zip(
+                compare.ops, operands, operands[1:], strict=False
+            ):
                 if (
                     isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
                     and ordinal(left)
@@ -1081,7 +1083,9 @@ def _waiting_fence_identity_checks(source: str) -> list[int]:
             if not isinstance(compare, ast.Compare):
                 continue
             operands = [compare.left, *compare.comparators]
-            for op, left, right in zip(compare.ops, operands, operands[1:]):
+            for op, left, right in zip(
+                compare.ops, operands, operands[1:], strict=False
+            ):
                 if (
                     isinstance(op, (ast.Eq, ast.NotEq))
                     and ordinal(left)

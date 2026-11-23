@@ -107,7 +107,9 @@ def validate_outputs(
         raise FixtureError("artifact output media-type or size exceeds its limits")
     with tempfile.TemporaryDirectory(prefix="vonk-qualification-results-") as root:
         contents: list[tuple[dict[str, object], bytes, Path]] = []
-        for index, (item, metadata) in enumerate(zip(outputs, output_metadata)):
+        for index, (item, metadata) in enumerate(
+            zip(outputs, output_metadata, strict=False)
+        ):
             name, media_type, size, digest = metadata
             destination = Path(root) / f"{index:02d}-{name}"
             client.download_file(

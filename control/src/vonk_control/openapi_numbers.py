@@ -57,7 +57,7 @@ def _restore_numeric_keywords(raw: Any, rendered: Any) -> None:
             elif key in rendered:
                 _restore_numeric_keywords(value, rendered[key])
     elif isinstance(raw, list) and isinstance(rendered, list):
-        for original, item in zip(raw, rendered):
+        for original, item in zip(raw, rendered, strict=False):
             _restore_numeric_keywords(original, item)
 
 

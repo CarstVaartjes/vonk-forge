@@ -82,7 +82,7 @@ def test_commit_runs_after_all_four_copies(tmp_path: Path):
     assert all(state.values())
     assert log[-1] == "commit"
     copies = [line for line in log if line.startswith("skopeo copy")]
-    assert all(image in line for image, line in zip(IMAGES, copies))
+    assert all(image in line for image, line in zip(IMAGES, copies, strict=False))
 
 
 def test_commit_failure_rolls_back_available_old_aliases(tmp_path: Path):
@@ -109,7 +109,7 @@ def test_commit_failure_rolls_back_available_old_aliases(tmp_path: Path):
         [str(SCRIPT), *base], env=env, capture_output=True, text=True, check=False
     )
     assert result.returncode != 0
-    assert json.loads(state.read_text()) == dict(zip(ROLES, OLD))
+    assert json.loads(state.read_text()) == dict(zip(ROLES, OLD, strict=False))
 
 
 def test_missing_first_publication_does_not_run_commit_before_copies(tmp_path: Path):

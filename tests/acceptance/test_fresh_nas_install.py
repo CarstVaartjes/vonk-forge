@@ -1250,7 +1250,8 @@ def _same_json_shape(actual: object, expected: object) -> bool:
             isinstance(actual, list)
             and len(actual) == len(expected)
             and all(
-                _same_json_shape(left, right) for left, right in zip(actual, expected)
+                _same_json_shape(left, right)
+                for left, right in zip(actual, expected, strict=False)
             )
         )
     return actual == expected

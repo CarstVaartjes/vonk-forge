@@ -628,7 +628,9 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
         return
     (step,) = (step for step in _image_steps() if step.get("id") == "pr_acceptance")
     roles = ("api", "worker", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abd")}
+    digests = {
+        role: "sha256:" + digit * 64 for role, digit in zip(roles, "abd", strict=False)
+    }
     outputs = {
         f"steps.pr_images.outputs.{role}_digest": digest
         for role, digest in digests.items()
@@ -1200,7 +1202,9 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     from datetime import UTC, datetime, timedelta
 
     roles = ("api", "worker", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abc")}
+    digests = {
+        role: "sha256:" + digit * 64 for role, digit in zip(roles, "abc", strict=False)
+    }
     pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
     assert pr["needs"] == ["source", "images"]
     # The scan runs beside acceptance, with no candidate consumer waiting on it.
