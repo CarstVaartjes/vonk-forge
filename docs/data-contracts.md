@@ -138,30 +138,30 @@ module defines its own.
 
 | Module | Kind | Models | Purpose |
 | --- | --- | --- | --- |
+| `agent_protocol/src/vonk_agent_protocol/agent_operations.py` | agent-protocol | 5 | Agent operation kinds and the result bodies the outcome envelope shares. |
 | `agent_protocol/src/vonk_agent_protocol/agent_state.py` | agent-protocol | 15 | Records the Rust agent and its privileged helper persist beside their work. |
 | `agent_protocol/src/vonk_agent_protocol/build_import.py` | agent-protocol | 13 | Typed recipe build request/result wire contracts. |
 | `agent_protocol/src/vonk_agent_protocol/claims.py` | agent-protocol | 2 | Canonical current-agent identity and work-claim request. |
 | `agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py` | agent-protocol | 18 | Typed compiled launch plan shared by Controller and agents. |
-| `agent_protocol/src/vonk_agent_protocol/contracts.py` | agent-protocol | 12 |  |
+| `agent_protocol/src/vonk_agent_protocol/contracts.py` | agent-protocol | 7 | Agent claim, progress, directive and result envelopes and their operation registries. |
 | `agent_protocol/src/vonk_agent_protocol/distribution.py` | agent-protocol | 2 | Pydantic contracts for authenticated Controller-to-Spark distribution. |
 | `agent_protocol/src/vonk_agent_protocol/enrollment.py` | agent-protocol | 6 | Canonical enrollment and certificate-rotation JSON messages. |
 | `agent_protocol/src/vonk_agent_protocol/failure_evidence.py` | agent-protocol | 3 | Current bounded failure diagnostics shared by agent and Controller. |
 | `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 2 | Current framed Unix-socket response from the privileged host helper. |
-| `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 10 | Canonical authorization protocol for the narrow root host helper. |
+| `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 11 | Canonical authorization protocol for the narrow root host helper. |
 | `agent_protocol/src/vonk_agent_protocol/http_failure.py` | agent-protocol | 1 | Shared typed temporary HTTP response and bounded retry delay. |
 | `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
 | `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 23 | Documents the NAS and Spark setup programs read and exchange. |
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
-| `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 1 | The exact input manifest shared by job staging and container adapters. |
 | `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py` | agent-protocol | 1 | The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript. |
 | `agent_protocol/src/vonk_agent_protocol/optional_evidence.py` | agent-protocol | 1 | Mixin that drops invalid optional agent evidence and reports it as a typed warning instead of refusing the report. |
 | `agent_protocol/src/vonk_agent_protocol/outcome.py` | agent-protocol | 9 | The one outcome envelope of an agent operation result. |
 | `agent_protocol/src/vonk_agent_protocol/package_source.py` | agent-protocol | 1 | Immutable publication lookup for an exact installed agent binary. |
 | `agent_protocol/src/vonk_agent_protocol/package_upgrade.py` | agent-protocol | 3 | Exact source-bound rollback authority for the current package transaction. |
 | `agent_protocol/src/vonk_agent_protocol/reason_codes/vocabulary.py` | agent-protocol | 1 | Closed reason, blocker, warning and attention codes shared by Python, Rust and TypeScript. |
-| `agent_protocol/src/vonk_agent_protocol/recipe_jobs.py` | agent-protocol | 10 | Closed Pydantic protocol for one-shot artifact-producing recipe jobs. |
+| `agent_protocol/src/vonk_agent_protocol/recipe_jobs.py` | agent-protocol | 13 | Closed Pydantic protocol for one-shot artifact-producing recipe jobs. |
 | `agent_protocol/src/vonk_agent_protocol/recipe_observations.py` | agent-protocol | 2 | Recipe run observation report sent by the mTLS-authenticated agent. |
-| `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 10 | Closed declarative protocol for digest-bound recipe lifecycle work. |
+| `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 11 | Closed declarative protocol for digest-bound recipe lifecycle work. |
 | `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 2 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |
 | `agent_protocol/src/vonk_agent_protocol/runtime_preflight.py` | agent-protocol | 3 | Current recipe runtime preflight wire contract; no raw host diagnostics. |
 | `agent_protocol/src/vonk_agent_protocol/runtime_scan.py` | agent-protocol | 3 | Node-local durable traversal checkpoint for managed run observation; native filesystem witnesses remain authoritative. |

@@ -23,15 +23,14 @@ from sqlalchemy import delete
 from cluster_profiles import cli
 from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.control_client.transfers import ControlClient
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
     AgentProgress,
     AgentResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     EnrollmentObservationReply,
     EnrollmentSubmitRequest,
@@ -47,7 +46,7 @@ from vonk_agent_protocol.telemetry import (
     TelemetryRequest,
     TelemetrySample,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_api import routes
 from vonk_control.agent_api.common import (
     EnrollmentRateLimiter,

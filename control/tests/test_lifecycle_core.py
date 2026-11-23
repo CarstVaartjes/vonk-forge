@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from vonk_agent_protocol.contracts import AgentFailureKind
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_control.lifecycle.adapter import Dispatch
 from vonk_control.lifecycle.core import (

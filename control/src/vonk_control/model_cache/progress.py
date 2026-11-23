@@ -5,11 +5,11 @@ from datetime import datetime
 from typing import Any
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
 )
 
 from ..operations.progress import STALE_AFTER_SECONDS, project_progress, sample_progress

@@ -10,12 +10,8 @@ from typing import NamedTuple
 
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentOperation,
-    AgentProgress,
-    AgentResult,
-)
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

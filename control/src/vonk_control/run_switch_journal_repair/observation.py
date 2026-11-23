@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import AdmissionLockBusy
 from ..agent_operation_facts import attempt_is_live, aware

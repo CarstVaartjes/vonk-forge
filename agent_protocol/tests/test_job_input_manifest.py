@@ -3,8 +3,11 @@
 import pytest
 from pydantic import ValidationError
 
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
-from vonk_agent_protocol.recipe_jobs import RecipeJobInputFile, manifest_document
+from vonk_agent_protocol.recipe_jobs import (
+    RecipeJobInputFile,
+    RecipeJobInputManifest,
+    manifest_document,
+)
 
 
 def test_controller_input_manifest_is_the_adapter_contract() -> None:

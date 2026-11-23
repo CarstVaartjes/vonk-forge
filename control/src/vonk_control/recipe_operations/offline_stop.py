@@ -11,8 +11,7 @@ from sqlalchemy import or_, select, true
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import (
     InvalidRequestError,
@@ -21,6 +20,7 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profiles.stop_authority import OfflineStopIntent
 
 from ..admission_locking import (

@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import create_engine, select
 
 from cluster_profiles.control_client.schema import validate_control_document
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode

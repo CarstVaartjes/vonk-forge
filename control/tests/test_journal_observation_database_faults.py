@@ -7,7 +7,7 @@ import pytest
 from psycopg.errors import SerializationFailure
 from sqlalchemy.exc import OperationalError
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.journal_models import RunSwitchJournalRepairPending
 from vonk_control.run_switch_contract.journal import (

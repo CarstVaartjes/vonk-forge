@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from vonk_forge_contracts import CONTRACT_MAJOR
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.reason_codes.recipes import RecipePackageCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot

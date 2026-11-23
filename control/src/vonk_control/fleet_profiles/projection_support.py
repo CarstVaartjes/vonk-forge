@@ -20,12 +20,12 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract.applications import (

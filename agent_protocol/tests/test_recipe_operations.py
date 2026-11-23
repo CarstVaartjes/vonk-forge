@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from vonk_agent_protocol.contracts import AgentOperation, AgentProtocolError
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.recipe_operations import (
     RecipeOperationRequest,
     RecipeReconcilePayload,
@@ -12,6 +12,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallResult,
     parse_recipe_operation_result,
 )
+from vonk_agent_protocol.wire_model import AgentProtocolError
 
 INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000003"

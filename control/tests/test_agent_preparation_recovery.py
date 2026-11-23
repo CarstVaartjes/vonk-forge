@@ -10,12 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentResult,
-)
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,

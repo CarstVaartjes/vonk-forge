@@ -57,7 +57,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -65,6 +64,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS

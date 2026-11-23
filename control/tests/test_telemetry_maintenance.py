@@ -9,9 +9,9 @@ import pytest
 from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.fleet_stream import FleetStream

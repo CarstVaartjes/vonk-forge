@@ -13,9 +13,8 @@ from pydantic import (
     model_validator,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from ..lifecycle_preflight import LifecyclePreflightCheckpoint
 from ..operations.blockers import OperationBlocker

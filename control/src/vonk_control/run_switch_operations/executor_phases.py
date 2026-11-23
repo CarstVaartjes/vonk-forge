@@ -10,7 +10,7 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason

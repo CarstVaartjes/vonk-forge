@@ -8,13 +8,13 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import RecipeStartResult
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
     RecipeBuildRequest,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import RecipeStartResult, canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
@@ -25,6 +25,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.owner_liveness import run_has_live_operation
 
 from ..fleet_profiles.stop_authority import (

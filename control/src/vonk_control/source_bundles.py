@@ -16,7 +16,6 @@ from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
 from sqlalchemy import literal_column, select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -33,6 +32,7 @@ from vonk_agent_protocol.source_bundles import (
     SourceBundleFile,
     SourceBundleManifest,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .identity_insert import insert_identity
 from .models.catalog import RecipeSourceBundle, SourceBundleArchive

@@ -11,15 +11,15 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import delete, select, update
 
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
-    AgentResult,
     ArtifactDistributionResult,
-    canonical_message,
-    canonical_payload,
 )
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol.contracts import AgentResult, canonical_payload
 from vonk_agent_protocol.inventory import GpuHealth
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -32,6 +32,7 @@ from vonk_agent_protocol.outcome import OutcomeFailed
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.retirement import _release_retired_owner_in_session
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.stored import column_message, column_value

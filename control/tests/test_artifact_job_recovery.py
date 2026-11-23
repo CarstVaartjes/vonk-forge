@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import event, select
 
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     InvalidRequestReason,
@@ -31,6 +31,7 @@ from vonk_agent_protocol.recipe_jobs import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import (

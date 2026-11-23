@@ -6,9 +6,9 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..content_identity import ImageContent, differing_image_fields
 from ..preparation_contract import (

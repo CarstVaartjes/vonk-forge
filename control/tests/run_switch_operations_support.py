@@ -17,11 +17,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightRequest,
     RuntimePreflightResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.install_admission.contracts import (

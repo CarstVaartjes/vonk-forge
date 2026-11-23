@@ -21,10 +21,10 @@ from sqlalchemy import event
 from starlette.types import Message
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import (
     _commit_recipe_image_upload,
     _prepare_recipe_image_upload,

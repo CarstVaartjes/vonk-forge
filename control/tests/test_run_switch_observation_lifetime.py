@@ -7,10 +7,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact

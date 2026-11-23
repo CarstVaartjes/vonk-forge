@@ -23,7 +23,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan,
     validate_compiled_execution_plan,
 )
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .catalog_launch_fixtures import _receipts, compile_launch_plan
 from .recipe_library_source import recipe_library_root

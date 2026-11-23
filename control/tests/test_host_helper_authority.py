@@ -18,7 +18,6 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -26,22 +25,22 @@ from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
-from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
     PackageActivationReceipt,
 )
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_jobs import RecipeJobInputManifest, RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
+    RecipeReconciliationIdentity,
     RecipeStartPayload,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.agent_api.authority import (
     issue_host_runtime_grant as request_grant,
@@ -1175,7 +1174,9 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
     if state == "delivery-only":
         from sqlalchemy import select
 
-        from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+        from vonk_agent_protocol.agent_operations import (
+            AgentOperation as AgentOperationKind,
+        )
 
         with service._sessions.begin() as session:
             row = session.scalar(

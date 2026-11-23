@@ -12,12 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     WaitReason,
 )
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory.repository import (
     InventoryRepository,

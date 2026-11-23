@@ -141,7 +141,7 @@ def test_a_job_argument_does_not_turn_a_typed_other_row_into_a_job() -> None:
         "from .models import Job\ndef f(job: Job):\n    return job.state == 'queued'\n",
         "from .models import Job\ndef f(job: Job):\n    job.status_reason = 'queued'\n",
         (
-            "from vonk_agent_protocol.contracts import AgentOperation\n"
+            "from vonk_agent_protocol.agent_operations import AgentOperation\n"
             "def f(operation: AgentOperation):\n    operation.state = 'x'\n"
         ),
     ],

@@ -6,13 +6,12 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
     AgentInstallResult,
-    AgentResult,
-    canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     ModelStoreLayoutFault,
@@ -23,6 +22,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_projection.service import FleetProjection
 

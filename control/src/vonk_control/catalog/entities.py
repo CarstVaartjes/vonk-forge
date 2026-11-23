@@ -33,10 +33,10 @@ from vonk_forge_contracts.qualification_status import (
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import InvalidRequestError
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode, CatalogSyncCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import CursorCodec

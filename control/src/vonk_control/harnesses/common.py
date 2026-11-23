@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from pathlib import PurePosixPath
 
-from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
 
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 

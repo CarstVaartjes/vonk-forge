@@ -10,12 +10,11 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -29,6 +28,7 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..admission_locking import (

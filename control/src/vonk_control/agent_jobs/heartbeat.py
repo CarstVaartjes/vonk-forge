@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentDirective, AgentOperation, AgentProgress
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentDirective, AgentProgress
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,

@@ -19,8 +19,8 @@ from hashlib import sha256
 import pytest
 from sqlalchemy import func, select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.route_activation import SupervisorPhase
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distributed_recovery import common
 from vonk_control.distributed_recovery.authority import _recovery_authority

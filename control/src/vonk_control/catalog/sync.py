@@ -24,11 +24,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.state_machines import CatalogSyncState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from ..capabilities import CapabilityUnavailableError

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as Kind
+from vonk_agent_protocol.agent_operations import AgentOperation as Kind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitOwnerKind
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest

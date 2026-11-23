@@ -7,10 +7,14 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
-from .host_helper import Uuid4Text
-from .wire_model import MAX_RUN_GENERATION, WireModel
+from .wire_model import (
+    MAX_RUN_GENERATION,
+    AgentProtocolError,
+    Uuid4Text,
+    WireModel,
+    canonical_message,
+)
 
 
 def _strict_datetime(value: object) -> object:

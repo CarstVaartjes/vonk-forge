@@ -25,14 +25,8 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    AgentProtocolError,
-    AgentResult,
-    canonical_message,
-    validate_result_for_operation,
-)
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
+from vonk_agent_protocol.contracts import AgentResult, validate_result_for_operation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     RETIRED_RESULT_STATE_SPELLINGS,
     AgentResultState,
@@ -49,6 +43,7 @@ from vonk_agent_protocol.outcome import (
     outcome_state,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 from .agent_upgrades.status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
 

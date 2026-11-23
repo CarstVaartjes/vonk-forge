@@ -5,9 +5,7 @@ import json
 import re
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
-from enum import StrEnum
 from types import MappingProxyType
 from typing import Annotated, Any, ClassVar, Literal
 from urllib.parse import parse_qsl, urlsplit
@@ -17,32 +15,73 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import (
     BaseModel,
     Field,
-    RootModel,
     TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
 )
 
-from .failure_evidence import FailureDiagnostics, ModelStoreLayoutFault
-from .lifecycle_vocabulary import AgentResultState, FailureCode, WaitReason
+from .agent_operations import (
+    AgentFailureResult,
+    AgentInstallResult,
+    AgentOperation,
+    AgentUpgradeResult,
+    ArtifactDistributionResult,
+    RecipeStartResult,
+)
+from .build_import import (
+    RecipeBuildCleanupEvidence,
+    RecipeBuildCleanupRequest,
+    RecipeBuildEvidence,
+    RecipeBuildRequest,
+)
+from .distribution import DistributionAssignment
+from .document_limits import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    MAX_DOCUMENT_BYTES,
+)
+from .failure_evidence import ModelStoreLayoutFault
+from .lifecycle_vocabulary import AgentResultState, FailureCode
 from .optional_evidence import (
-    EvidenceDrop,
     EvidenceGroup,
     OptionalEvidenceModel,
     fail_open_on_optional_evidence,
     redacted_prose,
 )
-from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import ErrorCode, OperationProgress, WireEnum, WireModel
-
-# Backstop above a full 4096-object distribution assignment (~0.5 MiB); the
-# real GLM shape is ~18 KiB, only 3x under the previous 64 KiB.
-MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
-MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
-MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
-    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
+from .outcome import (
+    OUTCOME_ARMS,
+    OUTCOME_KINDS,
+    OperationOutcome,
+    OutcomeDone,
+    OutcomeFailed,
+    OutcomeUnknown,
+    outcome_body,
+    outcome_state,
 )
+from .package_upgrade import PackageRollbackAuthority
+from .reason_codes.evidence import AgentEvidenceCode
+from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
+from .recipe_operations import (
+    RecipeInstallPayload,
+    RecipeReconcilePayload,
+    RecipeReconcileResult,
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeStopResult,
+    RecipeUninstallPayload,
+    RecipeUninstallResult,
+)
+from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
+from .wire_model import (
+    AgentProtocolError,
+    CanonicalUUID,
+    DigestText,
+    OperationProgress,
+    WireModel,
+    canonical_message,
+)
+
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 VERSIONED_PLATFORM_TARGET = re.compile(
     r"platform/releases/"
@@ -96,41 +135,6 @@ AGENT_PACKAGE_URL = re.compile(
 )
 
 
-class AgentProtocolError(ValueError):
-    """A protocol message is invalid or outside the agent trust boundary."""
-
-
-_UUID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-CanonicalUUID = Annotated[
-    str,
-    Field(
-        strict=True,
-        min_length=36,
-        max_length=36,
-        pattern=_UUID_PATTERN,
-        json_schema_extra={"format": "uuid"},
-    ),
-]
-DigestText = Annotated[
-    str,
-    Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
-]
-
-
-class AgentOperation(StrEnum):
-    RUNTIME_PREFLIGHT = "runtime.preflight.v1"
-    AGENT_UPGRADE = "agent.upgrade.v1"
-    ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
-    RECIPE_BUILD = "recipe.build.v1"
-    RECIPE_BUILD_CLEANUP = "recipe.build.cleanup.v1"
-    RECIPE_INSTALL = "recipe.install"
-    RECIPE_START = "recipe.start"
-    RECIPE_JOB_RUN = "recipe.job.run.v1"
-    RECIPE_STOP = "recipe.stop"
-    RECIPE_UNINSTALL = "recipe.uninstall"
-    RECIPE_RECONCILE = "recipe.reconcile"
-
-
 _COMPILED_PLAN_OPERATIONS = frozenset(
     {
         AgentOperation.RECIPE_INSTALL,
@@ -140,9 +144,6 @@ _COMPILED_PLAN_OPERATIONS = frozenset(
         AgentOperation.RECIPE_UNINSTALL,
     }
 )
-
-
-from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority
 
 
 class AgentUpgradePayload(WireModel):
@@ -171,77 +172,6 @@ class AgentUpgradePayload(WireModel):
     target_build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
 
-class AgentInstallResult(WireModel):
-    installed_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
-
-
-class AgentUpgradeStatus(WireEnum):
-    UPGRADED = "upgraded"
-
-
-class AgentUpgradeResult(WireModel):
-    """Evidence emitted after the Rust agent reports an exact upgrade."""
-
-    architecture: Literal["linux-arm64"]
-    binary_digest: DigestText
-    build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
-    package_sha256: DigestText
-    package_version: Annotated[
-        str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
-    ]
-    status: AgentUpgradeStatus
-    activation_receipt: PackageActivationReceipt
-
-
-class RecipeStartResult(WireModel):
-    """The serving rank reports its endpoint; every other rank reports ``{}``."""
-
-    endpoint: str | None = None
-
-
-class ArtifactDistributionResult(WireModel):
-    downloaded_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
-
-
-class AgentFailureKind(StrEnum):
-    TEMPORARY_DEPENDENCY = "temporary-dependency"
-    UNCERTAIN_EFFECT = "uncertain-effect"
-    INVALID_AUTHORITY = "invalid-authority"
-    INVALID_CONTRACT = "invalid-contract"
-    INTEGRITY_FAILURE = "integrity-failure"
-    RESOURCE_PREREQUISITE = "resource-prerequisite"
-
-
-class AgentFailureResult(WireModel):
-    failure_kind: AgentFailureKind | None = None
-    retry_after_seconds: int | None = Field(
-        default=None, strict=True, ge=0, le=2**32 - 1
-    )
-    diagnostics: FailureDiagnostics | None = None
-    package_activation: PackageActivationReceipt | None = None
-    reason: str | None = Field(default=None, min_length=1, max_length=1024)
-    error_code: ErrorCode | None = None
-    summary: str | None = Field(default=None, min_length=1, max_length=1024)
-    uncertain: bool | None = None
-    recovery: str | None = Field(default=None, min_length=1, max_length=128)
-    wait_reason: WaitReason | None = None
-    status: Literal["failed"] | None = None
-    operation: AgentOperation | None = None
-    stage: str | None = Field(default=None, min_length=1, max_length=128)
-    diagnostic: str | None = Field(default=None, min_length=1, max_length=512)
-    helper_error_code: str | None = Field(default=None, min_length=1, max_length=128)
-    helper_exit_code: int | None = Field(default=None, strict=True, ge=0, le=255)
-    #: The optional evidence the Controller dropped from the agent's report,
-    #: each with the field that refused it: a lost group is never silent.
-    dropped_evidence: list[EvidenceDrop] | None = Field(default=None, max_length=8)
-
-    @model_validator(mode="after")
-    def requires_failure_identity(self) -> AgentFailureResult:
-        if self.reason is None and self.error_code is None:
-            raise ValueError("failure result requires reason or error_code")
-        return self
-
-
 PROTOCOL_FORMAT_CHECKER = FormatChecker()
 
 
@@ -256,80 +186,6 @@ def _is_utc_date_time(value: Any) -> bool:
     return deadline.tzinfo is not None and deadline.utcoffset() == UTC.utcoffset(
         deadline
     )
-
-
-def canonical_message(value: Any) -> bytes:
-    """Encode a protocol value with deterministic UTF-8 JSON."""
-    try:
-        return json.dumps(
-            _to_wire(value),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as error:
-        raise AgentProtocolError("message must contain JSON values") from error
-
-
-def _model_field_to_wire(original: Any, serialized: Any) -> Any:
-    """Retain nested model metadata after Pydantic applies field serializers."""
-    if isinstance(original, RootModel):
-        return _model_field_to_wire(original.root, serialized)
-    if isinstance(original, BaseModel) and isinstance(serialized, Mapping):
-        return _model_to_wire(original, serialized)
-    if isinstance(original, Mapping) and isinstance(serialized, Mapping):
-        return {
-            str(key): _model_field_to_wire(original[key], item)
-            for key, item in serialized.items()
-        }
-    if isinstance(original, (tuple, list)) and isinstance(serialized, (tuple, list)):
-        return [
-            _model_field_to_wire(source, item)
-            for source, item in zip(original, serialized, strict=True)
-        ]
-    return _to_wire(serialized)
-
-
-def _model_to_wire(value: BaseModel, document: Mapping[str, Any]) -> dict[str, Any]:
-    fields = {
-        (field.serialization_alias or name)
-        if value.model_config.get("serialize_by_alias", False)
-        else name: (name, field)
-        for name, field in type(value).model_fields.items()
-    }
-    result = {}
-    for name, item in document.items():
-        declared = fields.get(name)
-        if declared is not None:
-            attribute, field = declared
-            if not field.is_required() and field.default is None and item is None:
-                continue
-            result[name] = _model_field_to_wire(getattr(value, attribute), item)
-        else:
-            # Declared extension data has its own meaning; null is not absence.
-            result[name] = _to_wire(item)
-    return result
-
-
-def _to_wire(value: Any) -> Any:
-    if isinstance(value, RootModel):
-        return _model_field_to_wire(value.root, value.model_dump(mode="json"))
-    if isinstance(value, BaseModel):
-        return _model_to_wire(value, value.model_dump(mode="json"))
-    if isinstance(value, StrEnum):
-        return value.value
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _to_wire(getattr(value, field.name)) for field in fields(value)
-        }
-    if isinstance(value, Mapping):
-        return {str(key): _to_wire(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_to_wire(item) for item in value]
-    return value
 
 
 def _canonical_copy(value: Any, *, name: str) -> Any:
@@ -761,37 +617,6 @@ def _deadline(value: Any) -> datetime:
     if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(deadline):
         raise AgentProtocolError("deadline must be aware UTC")
     return deadline.astimezone(UTC)
-
-
-from .build_import import (
-    RecipeBuildCleanupEvidence,
-    RecipeBuildCleanupRequest,
-    RecipeBuildEvidence,
-    RecipeBuildRequest,
-)
-from .distribution import DistributionAssignment
-from .outcome import (
-    OUTCOME_ARMS,
-    OUTCOME_KINDS,
-    OperationOutcome,
-    OutcomeDone,
-    OutcomeFailed,
-    OutcomeUnknown,
-    outcome_body,
-    outcome_state,
-)
-from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
-from .recipe_operations import (
-    RecipeInstallPayload,
-    RecipeReconcilePayload,
-    RecipeReconcileResult,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    RecipeStopResult,
-    RecipeUninstallPayload,
-    RecipeUninstallResult,
-)
-from .runtime_preflight import RuntimePreflightRequest, RuntimePreflightResult
 
 
 class ArtifactDistributionPayload(WireModel):
@@ -1322,9 +1147,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
     }
     if schema_name == "recipe-job-run.schema.json":
         # Recipe job wire shape is generated from the Pydantic model graph.
-        # Keep the import local because recipe_jobs imports these primitives.
-        from .recipe_jobs import RecipeJobRunRequest
-
         registry[schema_name] = RecipeJobRunRequest
     document = registry[schema_name].model_json_schema()
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
@@ -1420,24 +1242,9 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-directive.schema.json": AgentDirective.parse,
     }
     if schema_name == "recipe-job-run.schema.json":
-        from .recipe_jobs import RecipeJobRunRequest
-
         parsers[schema_name] = RecipeJobRunRequest.parse
     try:
         parser = parsers[schema_name]
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
     return parser(raw)
-
-
-# The helper request refers to the recipe payloads by name only: they import
-# this module, so the references resolve once everything is loaded.
-from .host_helper import HostRuntimeRequest
-
-HostRuntimeRequest.model_rebuild(
-    _types_namespace={
-        "RecipeStartPayload": RecipeStartPayload,
-        "RecipeJobRunRequest": RecipeJobRunRequest,
-        "RecipeStopPayload": RecipeStopPayload,
-    }
-)

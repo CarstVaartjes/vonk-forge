@@ -40,15 +40,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
 from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .catalog.entities import build_policy_projection
 from .catalog.revision_contract import BuildSecurityProjection

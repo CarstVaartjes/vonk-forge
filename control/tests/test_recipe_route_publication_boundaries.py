@@ -20,7 +20,7 @@ import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,

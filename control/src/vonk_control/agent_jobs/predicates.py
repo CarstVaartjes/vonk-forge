@@ -15,13 +15,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.functions import FunctionElement
 
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    canonical_message,
-    canonical_payload,
-)
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..agent_operation_facts import aware as _aware

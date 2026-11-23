@@ -7,8 +7,8 @@ from collections.abc import Mapping
 
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 

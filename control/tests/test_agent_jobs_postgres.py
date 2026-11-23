@@ -14,17 +14,17 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
-    AgentResult,
     ArtifactDistributionResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Operation
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.helper_response import HostHelperResponse
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -38,7 +38,11 @@ from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_agent_protocol.wire_model import OperationCheckpoint, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationCheckpoint,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt

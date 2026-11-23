@@ -8,13 +8,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentResultPayload,
-    canonical_message,
-    canonical_payload,
-)
+from vonk_agent_protocol.contracts import AgentResultPayload, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState
 from vonk_agent_protocol.outcome import (
     OutcomeDone,
@@ -25,6 +21,7 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import job_output_retention_expiry

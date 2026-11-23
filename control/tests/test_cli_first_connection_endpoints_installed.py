@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles.cli_json_contract import DocumentKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.fleet_profile_contract.applications import (

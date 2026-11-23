@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 

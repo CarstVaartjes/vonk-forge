@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
 from ..lifecycle.evidence import Residue

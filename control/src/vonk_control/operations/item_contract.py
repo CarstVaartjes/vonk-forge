@@ -29,11 +29,8 @@ from pydantic import (
     model_validator,
 )
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    validate_result_for_operation,
-)
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
+from vonk_agent_protocol.contracts import validate_result_for_operation
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason

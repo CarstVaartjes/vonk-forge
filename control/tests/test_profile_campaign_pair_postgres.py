@@ -11,8 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,

@@ -24,17 +24,15 @@ from cluster_profiles.generated_control.client import AuthenticatedClient
 from cluster_profiles.generated_control.models.job_detail_response import (
     JobDetailResponse as GeneratedJobDetailResponse,
 )
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
-    AgentFailureResult,
-    AgentOperation,
     AgentProgress,
     AgentResult,
-    canonical_message,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.failure_evidence import safe_text
 from vonk_control.models.operations import AgentOperationAttempt

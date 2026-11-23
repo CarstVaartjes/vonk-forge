@@ -12,11 +12,11 @@ from sqlalchemy import delete, select
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode, SupersedeCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import admission_locking
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.fleet_profile_contract.applications import (

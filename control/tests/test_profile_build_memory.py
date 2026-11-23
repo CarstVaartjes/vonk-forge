@@ -8,10 +8,10 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 from sqlalchemy import select, update
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.items import runtime_value
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations

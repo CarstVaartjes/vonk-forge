@@ -10,17 +10,14 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import ArtifactDistributionResult
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,
     ProgressPhase,
 )
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentResult,
-    ArtifactDistributionResult,
-)
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.distribution import DistributionObject
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,

@@ -8,9 +8,9 @@ from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_jobs.service import AgentJobService
 from ..fleet_profile_contract.applications import FleetProfileApplicationProgress

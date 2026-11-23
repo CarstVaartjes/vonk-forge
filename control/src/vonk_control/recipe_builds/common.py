@@ -21,7 +21,6 @@ from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildOptions
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -38,6 +37,7 @@ from vonk_agent_protocol.state_machines import (
     ReservationState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.revision_contract import (
     BuildModelArtifactProjection,

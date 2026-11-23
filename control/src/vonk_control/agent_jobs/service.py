@@ -10,17 +10,18 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation,
+    ArtifactDistributionResult,
+)
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
-    AgentOperation,
     AgentProgress,
     AgentResult,
     AgentResultPayload,
-    ArtifactDistributionResult,
-    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
@@ -30,7 +31,7 @@ from vonk_agent_protocol.outcome import (
     OutcomeUnknown,
     UnknownOutcomeError,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from .. import agent_operation_states
 from ..agent_operation_facts import aware as _aware

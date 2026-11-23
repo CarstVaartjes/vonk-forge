@@ -25,12 +25,12 @@ if __name__ == "__main__":
 sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
 from typing import get_args
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileChildJobKind,
     ProfileEffectState,
 )
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
 from vonk_agent_protocol.gpu_clock import GpuClockMetric
 from vonk_agent_protocol.lifecycle_vocabulary import (
