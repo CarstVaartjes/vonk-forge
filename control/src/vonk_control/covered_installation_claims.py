@@ -69,7 +69,7 @@ def release_covered_installation_claims(
                     newest_snapshot_ids(sorted({r.node_id for r, _, _ in rows}))
                 )
             )
-        )
+        ).all()
     )
     for reservation, installation, node in rows:
         observed = newest.get(reservation.node_id)
