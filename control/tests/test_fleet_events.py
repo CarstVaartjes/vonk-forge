@@ -65,8 +65,7 @@ def _rows_carry_private_values_on_purpose():
 def sessions(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'fleet-events.sqlite'}")
     Base.metadata.create_all(engine)
-    factory = sessionmaker(engine, expire_on_commit=False)
-    return factory
+    return sessionmaker(engine, expire_on_commit=False)
 
 
 def _draft(

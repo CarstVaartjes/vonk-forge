@@ -339,7 +339,7 @@ def _removal_progress_document(
         checkpoint.image_reclaimed_bytes + checkpoint.model_reclaimed_bytes
     )
     successful = operation.state == LifecycleState.SUCCEEDED
-    progress = OperationProgress(
+    return OperationProgress(
         phase=(
             ProgressPhase.COMPLETED
             if successful
@@ -355,7 +355,6 @@ def _removal_progress_document(
         observed_at=_iso(operation.updated_at),
         activity=_ACTIVE if operation.state == LifecycleState.RUNNING else _WAITING,
     )
-    return progress
 
 
 def _read_removal_result(
@@ -375,7 +374,7 @@ def removal_status(
     intent = owner.plan.intent
     if operation.state == LifecycleState.SUCCEEDED:
         self._stored_removal_result(operation, intent, owner)
-    status = RecipeCacheRemovalStatus(
+    return RecipeCacheRemovalStatus(
         schema_version=SCHEMA_VERSION,
         action=intent.action,
         selector=intent.selector,
@@ -398,7 +397,6 @@ def removal_status(
         cancelled_builds=[],
         model_removals=[child.operation_id for child in owner.plan.model_children],
     )
-    return status
 
 
 def _stored_removal_result(

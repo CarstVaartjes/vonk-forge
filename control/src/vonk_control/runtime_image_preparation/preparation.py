@@ -178,12 +178,11 @@ def stored_runtime_image_resolver(
         _document: object, image_digest: str, runtime_spec: RuntimeSpec
     ) -> RuntimeImageReceipt | None:
         expectations = runtime_image_expectations(runtime_spec.runtime)
-        receipt = storage.find_verified(
+        return storage.find_verified(
             image_digest,
             expected_architecture=expectations["architecture"],
             expected_runtime_interface=expectations["interface"],
         )
-        return receipt
 
     return resolve
 

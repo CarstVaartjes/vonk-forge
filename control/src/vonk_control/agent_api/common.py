@@ -330,7 +330,7 @@ def _agent_identity_state(
         return None
     now = _now(services.clock())
     with services.sessions() as session:
-        valid = session.scalar(
+        return session.scalar(
             select(AgentCertificate.state)
             .join(AgentNode, AgentNode.node_id == AgentCertificate.node_id)
             .where(
@@ -344,7 +344,6 @@ def _agent_identity_state(
                 AgentNode.revoked_at.is_(None),
             )
         )
-    return valid
 
 
 def _authenticated_identity(request: Request) -> AgentIdentity:

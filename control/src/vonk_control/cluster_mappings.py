@@ -287,8 +287,7 @@ class ClusterMappingService:
                 )
                 for item in plan.nodes
             )
-            mapping_id = mapping.id
-        return mapping_id
+            return mapping.id
 
 
 def _active_nodes(

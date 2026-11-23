@@ -111,7 +111,7 @@ def _model_operation(state: str = "succeeded") -> dict[str, Any]:
 
 
 def _library(kind: str) -> dict[str, Any]:
-    value = {
+    return {
         "generated_at": NOW,
         kind: [],
         "facets": {
@@ -125,7 +125,6 @@ def _library(kind: str) -> dict[str, Any]:
         "filters": {},
         "freshness_policy": {},
     }
-    return value
 
 
 def _fleet() -> FleetSnapshot:

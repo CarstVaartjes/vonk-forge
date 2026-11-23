@@ -139,7 +139,7 @@ class FileSupervisorAcknowledger:
         while True:
             now = _aware(self._clock(), "supervisor acknowledgement clock")
             if self._matches(marker, required, now=now):
-                return
+                return None
             if self._monotonic() >= deadline:
                 return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
             self._sleep(self._poll_seconds)
@@ -215,7 +215,7 @@ class AtomicRouteBundlePublisher:
         self, marker: ActivationMarker, required: SupervisorPhase
     ) -> UnknownError | None:
         if self._await_supervisor_ack is None:
-            return
+            return None
         try:
             return self._await_supervisor_ack(marker, required)
         except (RouteRuntimeError, SecurityRefusalError):
@@ -303,7 +303,7 @@ class AtomicRouteBundlePublisher:
         while True:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
+                return None
             except BlockingIOError:
                 if time.monotonic() >= deadline:
                     return _unknown(WaitReason.LEASE_LAPSED)

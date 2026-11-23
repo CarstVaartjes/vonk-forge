@@ -442,8 +442,7 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
     document["collector_errors"] = [
         safe_text(error)[:256] for error in document["collector_errors"]
     ]
-    diagnostics = read_stored_model(FailureDiagnostics, document)
-    return diagnostics
+    return read_stored_model(FailureDiagnostics, document)
 
 
 def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBundle:

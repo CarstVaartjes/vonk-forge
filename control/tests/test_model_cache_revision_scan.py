@@ -186,8 +186,7 @@ def _unreadable(alias: dict) -> dict:
 
 def _divergent(alias: dict) -> dict:
     # Readable, but its file is not the held file: it resolves to another set.
-    document = {**alias, "files": [{**alias["files"][0], "size_bytes": 4}]}
-    return document
+    return {**alias, "files": [{**alias["files"][0], "size_bytes": 4}]}
 
 
 @pytest.mark.parametrize(

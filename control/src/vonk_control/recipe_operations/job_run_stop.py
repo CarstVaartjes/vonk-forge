@@ -553,7 +553,7 @@ class JobRunStopMixin:
         )
         run.state = RunState.STOPPING
         run.updated_at = now
-        parent = service._queue_in_session(
+        return service._queue_in_session(
             session,
             kind=WireAgentOperation.RECIPE_STOP.value,
             owner_kind="run",
@@ -574,7 +574,6 @@ class JobRunStopMixin:
             },
             adopt_stop_parent=pending_job,
         )
-        return parent
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:
         service = typing_cast("RecipeOperationService", self)

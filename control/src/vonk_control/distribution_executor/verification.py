@@ -36,7 +36,7 @@ class DistributionVerification(DistributionIdentity):
         resolved_image_digest, resolved_layout_digest, _image_bytes, build_id = (
             DistributionIdentity._runtime_identity(plan, progress)
         )
-        result = RunSwitchVerifyResult(
+        return RunSwitchVerifyResult(
             phase=ProfileChildPhase.VERIFY.value,
             subphase=ProfileChildPhase.TARGET_COPY.value,
             skipped=skipped,
@@ -56,7 +56,6 @@ class DistributionVerification(DistributionIdentity):
             cached_target_totals=dict(cached_target_totals or {}),
             evidence=list(evidence),
         )
-        return result
 
     def _verify_evidence(
         self,

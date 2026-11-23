@@ -254,8 +254,7 @@ def _node_evidence_models(kind: str) -> tuple[type[LifecycleNodeResult], ...]:
         evidence_models = (RecipeReconcileResult,)
     else:
         evidence_models = ()
-    evidence_models = (*evidence_models, AgentFailureResult, LifecycleCodeFailureResult)
-    return evidence_models
+    return (*evidence_models, AgentFailureResult, LifecycleCodeFailureResult)
 
 
 def _typed_node_evidence(kind: str, value: LifecycleNodeResult) -> LifecycleNodeResult:

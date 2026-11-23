@@ -22,7 +22,7 @@ def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
         return value
     if value is None:
         return None
-    loaded = read_or_rebuild(
+    return read_or_rebuild(
         kind="run-switch.result",
         subject="stored-result",
         read=lambda: read_stored_document(
@@ -32,7 +32,6 @@ def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
             value,
         ),
     )
-    return loaded
 
 
 def _persisted_result(value: RunSwitchOperationResult) -> Any:

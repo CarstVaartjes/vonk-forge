@@ -328,10 +328,10 @@ class RetryMixin:
                 ModelCacheOperation, operation_id, with_for_update=True
             )
             if operation is None or operation.state == LifecycleState.CANCELLED:
-                return  # gone or cancelled: nothing left to record (rule 5)
+                return None  # gone or cancelled: nothing left to record (rule 5)
             payload = cache._payload_or_none(operation)
             if payload is None or payload.cancellation is not None:
-                return  # unreadable: the claim loop reconciles it
+                return None  # unreadable: the claim loop reconciles it
             if cache._lifecycle.renew(
                 operation, cache._claim_owner, _TRANSFER_CLAIM_SECONDS, now
             ):

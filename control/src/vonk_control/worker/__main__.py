@@ -118,7 +118,7 @@ if __name__ == "__main__":
     )
 
     def build_cache() -> ModelCacheService:
-        cache = ModelCacheService(
+        return ModelCacheService(
             sessions,
             settings.model_cache_root,
             free_fraction=FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
@@ -128,7 +128,6 @@ if __name__ == "__main__":
             huggingface_token_path=settings.huggingface_token_path,
             runtime_archive_available=runtime_image_storage.build_archive_available,
         )
-        return cache
 
     model_cache = capabilities.guard(
         ControllerCapability.MODEL_CACHE,

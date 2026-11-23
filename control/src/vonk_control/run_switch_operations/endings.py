@@ -339,7 +339,7 @@ class EndingsMixin:
                     job.result = _persisted_result(progress)
                     job.updated_at = now
                 return
-            elif (
+            if (
                 not definite
                 and not is_security_failure(failure_code)
                 and checkpoint is not None

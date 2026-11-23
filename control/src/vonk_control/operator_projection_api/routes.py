@@ -205,7 +205,7 @@ def install_operator_projection_routes(
                 status_code=503, detail="fleet log evidence unavailable"
             )
         try:
-            value = fleet_services.logs.list(
+            return fleet_services.logs.list(
                 node.id,
                 since=since,
                 lines=lines,
@@ -213,7 +213,6 @@ def install_operator_projection_routes(
                 source=source,
                 follow=follow,
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -283,12 +282,11 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            value = fleet_services.enrollment.create_named(
+            return fleet_services.enrollment.create_named(
                 name=body.name,
                 actor=actor.subject,
                 request_id=body.request_key,
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
@@ -309,10 +307,9 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            value = fleet_services.enrollment.create_reenrollment(
+            return fleet_services.enrollment.create_reenrollment(
                 node.id, actor.subject, body.request_key
             )
-            return value
         except (OSError, RuntimeError, TypeError, ValueError, SQLAlchemyError) as error:
             raise _operator_error(error) from None
 
@@ -357,10 +354,7 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
         try:
-            result = fleet_services.enrollment.revoke_grant(
-                grant_id, actor=actor.subject
-            )
-            return result
+            return fleet_services.enrollment.revoke_grant(grant_id, actor=actor.subject)
         except (
             KeyError,
             OSError,
@@ -389,13 +383,12 @@ def install_operator_projection_routes(
             raise HTTPException(status_code=503, detail="fleet removal unavailable")
         try:
             revocation = fleet_services.enrollment.revoke_node(node.id, actor.subject)
-            result = FleetActionResponse(
+            return FleetActionResponse(
                 action="remove",
                 state=ModelCacheOperatorStatus.ACCEPTED,
                 node_id=node.id,
                 revocation=revocation,
             )
-            return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -426,7 +419,7 @@ def install_operator_projection_routes(
                 request_intent=request_intent,
             )
             if existing is not None:
-                result = FleetActionResponse(
+                return FleetActionResponse(
                     action="upgrade",
                     state=_fleet_work_state(existing.state),
                     operation_id=str(getattr(existing, "id", "")) or None,
@@ -434,7 +427,6 @@ def install_operator_projection_routes(
                     request_key=body.request_key,
                     targets=list(getattr(existing, "targets", ())),
                 )
-                return result
             fleet_snapshot = snapshot()
             nodes = (
                 list(fleet_snapshot.nodes)
@@ -456,7 +448,7 @@ def install_operator_projection_routes(
                 request_id=body.request_key,
                 request_intent=request_intent,
             )
-            result = FleetActionResponse(
+            return FleetActionResponse(
                 action="upgrade",
                 state=_fleet_work_state(job.state),
                 operation_id=str(getattr(job, "id", "")) or None,
@@ -464,7 +456,6 @@ def install_operator_projection_routes(
                 request_key=body.request_key,
                 targets=list(getattr(job, "targets", node_ids)),
             )
-            return result
         except ObservationCaptureUnavailable:
             raise
         except (OSError, RuntimeError, TypeError, ValueError) as error:

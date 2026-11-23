@@ -134,12 +134,11 @@ def _withdraw_runs_once(
         withdrawal = self.prepare_withdrawal_in_session(session, run_ids, served)
         if before_withdrawal is not None:
             before_withdrawal(session)
-        publication = self._withdrawal_publication(
+        return self._withdrawal_publication(
             session,
             withdrawal,
             after=record_reason if reason else None,
         )
-        return publication
 
     publication = self.decide_publication(decide)
     return self._execute(publication)

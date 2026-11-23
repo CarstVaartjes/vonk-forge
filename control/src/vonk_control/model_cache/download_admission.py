@@ -157,74 +157,73 @@ class DownloadAdmissionMixin:
                     )
                     if replay is not None:
                         return replay
-                    else:
-                        now = cache._clock()
-                        # Serialize metadata repair under the exact set gate before
-                        # reading derived membership. Byte verification stays in storage.
+                    now = cache._clock()
+                    # Serialize metadata repair under the exact set gate before
+                    # reading derived membership. Byte verification stays in storage.
 
-                        def prepare(now: datetime = now) -> None:
-                            cache._ensure_set(session, manifest)
-                            session.flush()
-                            cache._require_model_sets_open(
-                                session,
-                                (set_digest,),
-                                now=now,
-                                object_digests=tuple(
-                                    item.sha256 for item in manifest.artifacts
-                                ),
-                                allow_pending_removal=True,
-                            )
-
-                        # An operator request's receipt is read by its own key.
-                        admitted = admit_transfer(
-                            cache,
-                            session,
-                            artifact_set_sha256=set_digest,
-                            now=now,
-                            force=force,
-                            attach=selector is None,
-                            prepare=prepare,
-                            request_key=request_key,
-                            schema_version=SCHEMA_VERSION,
-                            kind="download",
-                            next_action_at=wait_until,
-                            attempt=1,
-                            plan_digest=requested_plan,
-                            payload=serialize_json_value(payload),
-                            progress=progress_document(
-                                cache._progress(
-                                    manifest,
-                                    phase="queued",
-                                    expected_bytes=transfer.total_bytes,
-                                )
-                            ),
-                            actor=actor,
-                        )
-                        if isinstance(admitted, CacheOperationView):
-                            return admitted
-                        operation = admitted
-                        if has_pending_removal(
-                            session,
-                            (
-                                ArtifactIdentity("model-set", set_digest),
-                                *(
-                                    ArtifactIdentity("model-object", item.sha256)
-                                    for item in manifest.artifacts
-                                ),
-                            ),
-                        ):
-                            cache._store_failure(
-                                operation,
-                                _cache_failure(
-                                    ArtifactLifecycleCode.DELETION_IN_PROGRESS,
-                                    "Waiting for the prior model removal fence to settle",
-                                    retryable=True,
-                                    recovery="retry",
-                                ),
-                            )
-                        session.add(operation)
+                    def prepare(now: datetime = now) -> None:
+                        cache._ensure_set(session, manifest)
                         session.flush()
-                        operation_id = operation.id
+                        cache._require_model_sets_open(
+                            session,
+                            (set_digest,),
+                            now=now,
+                            object_digests=tuple(
+                                item.sha256 for item in manifest.artifacts
+                            ),
+                            allow_pending_removal=True,
+                        )
+
+                    # An operator request's receipt is read by its own key.
+                    admitted = admit_transfer(
+                        cache,
+                        session,
+                        artifact_set_sha256=set_digest,
+                        now=now,
+                        force=force,
+                        attach=selector is None,
+                        prepare=prepare,
+                        request_key=request_key,
+                        schema_version=SCHEMA_VERSION,
+                        kind="download",
+                        next_action_at=wait_until,
+                        attempt=1,
+                        plan_digest=requested_plan,
+                        payload=serialize_json_value(payload),
+                        progress=progress_document(
+                            cache._progress(
+                                manifest,
+                                phase="queued",
+                                expected_bytes=transfer.total_bytes,
+                            )
+                        ),
+                        actor=actor,
+                    )
+                    if isinstance(admitted, CacheOperationView):
+                        return admitted
+                    operation = admitted
+                    if has_pending_removal(
+                        session,
+                        (
+                            ArtifactIdentity("model-set", set_digest),
+                            *(
+                                ArtifactIdentity("model-object", item.sha256)
+                                for item in manifest.artifacts
+                            ),
+                        ),
+                    ):
+                        cache._store_failure(
+                            operation,
+                            _cache_failure(
+                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                "Waiting for the prior model removal fence to settle",
+                                retryable=True,
+                                recovery="retry",
+                            ),
+                        )
+                    session.add(operation)
+                    session.flush()
+                    operation_id = operation.id
             except ConstraintReplay as duplicate:
                 # The request key was taken by a concurrent identical request.
                 with cache._session() as session:

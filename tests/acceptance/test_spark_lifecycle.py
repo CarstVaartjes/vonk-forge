@@ -4968,7 +4968,7 @@ class SparkLifecycle:
             )
             os.chmod(bundle, 0o600)
             os.chmod(key_v1, 0o600)
-            result = self._run_command(
+            return self._run_command(
                 [
                     "/usr/bin/curl",
                     "--config",
@@ -4994,7 +4994,6 @@ class SparkLifecycle:
                 report_failure_output=True,
                 allowed_returncodes=(0, 56) if retired else (0,),
             )
-            return result
         finally:
             shutil.rmtree(probe)
 

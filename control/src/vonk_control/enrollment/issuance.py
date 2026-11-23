@@ -405,9 +405,9 @@ class EnrollmentCore:
                     raise EnrollmentIssuanceUncertain(
                         "enrollment attempt ended without a receipt"
                     )
-                elif enrollment.state == EnrollmentRecordState.ENDED:
+                if enrollment.state == EnrollmentRecordState.ENDED:
                     raise EnrollmentIssuanceUncertain("enrollment observation ended")
-                elif not _replay_matches(enrollment, csr, evidence):
+                if not _replay_matches(enrollment, csr, evidence):
                     failure = "enrollment replay does not match original request"
                 else:
                     # Refresh observations independently of credential content.

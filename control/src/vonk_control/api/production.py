@@ -320,7 +320,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def build_cache() -> ModelCacheService:
-        cache = ModelCacheService(
+        return ModelCacheService(
             sessions,
             settings.model_cache_root,
             free_fraction=FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
@@ -330,7 +330,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             huggingface_token_path=settings.huggingface_token_path,
             runtime_archive_available=runtime_image_storage.build_archive_available,
         )
-        return cache
 
     model_cache = capabilities.guard(
         ControllerCapability.MODEL_CACHE,
@@ -457,7 +456,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
 
     def build_artifact_jobs() -> ArtifactJobService:
-        service = ArtifactJobService(
+        return ArtifactJobService(
             sessions,
             recipe_operations=recipe_operations,
             blob_store=ArtifactBlobStore(
@@ -467,7 +466,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             clock=clock,
             retention_seconds=ARTIFACT_JOB_RETENTION_SECONDS,
         )
-        return service
 
     artifact_jobs = capabilities.guard(
         ControllerCapability.ARTIFACT_STORAGE,
