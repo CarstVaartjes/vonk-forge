@@ -15,8 +15,8 @@ from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
 from vonk_control.operator_projection_api.wiring import build_fleet_operator_services
 
+from .agent_api_support import NODE_A, NODE_B, Jobs, make_agent_system
 from .runtime_identity_support import set_inventory_hostname
-from .test_agent_api import NODE_A, NODE_B, Jobs, make_agent_system
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)

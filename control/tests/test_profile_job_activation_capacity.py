@@ -20,10 +20,10 @@ import uuid
 from sqlalchemy import select
 from vonk_control.models.execution import RecipeRun, ResourceReservation
 
+from .artifact_jobs_support import _configure_artifact_recipe
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.sparks import Memory
 from .lifecycle_simulation.world import SOLO, build_world
-from .test_artifact_jobs import _configure_artifact_recipe
 
 #: spark-3542: 128 GB, about 125 GB free when idle.
 _SPARK = Memory(total=12_800, idle_free=12_500)

@@ -10,7 +10,7 @@ from vonk_control.models.execution import RecipeInstallation, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.run_admission import RunPlanInvalid
 
-from .test_recipe_operations import installed_recipe, setup_services
+from .recipe_operations_support import installed_recipe, setup_services
 
 
 @pytest.mark.parametrize("method", ["install", "start", "activate_job_run"])
@@ -18,7 +18,7 @@ def test_precommit_retry_refuses_changed_execution_effects(
     method, tmp_path, monkeypatch
 ):
     """Catch a retry that quietly substitutes another image or endpoint port."""
-    from .test_artifact_jobs import _configure_artifact_recipe
+    from .artifact_jobs_support import _configure_artifact_recipe
 
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,

@@ -15,9 +15,8 @@ from vonk_control.run_switch_operations.phase_planning import PhasePlanningMixin
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 from vonk_control.strict_json import read_stored_model
 
-from .test_recipe_operations import setup_services
-from .test_run_switch_operations import (
-    NOW,
+from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import (
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,

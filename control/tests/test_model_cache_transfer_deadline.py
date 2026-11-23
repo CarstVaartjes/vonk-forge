@@ -3,16 +3,11 @@ import time
 import httpx2
 import vonk_control.model_cache.download as download_module
 
-from .test_model_cache import (  # noqa: F401
-    _download,
-    _http_artifact,
-    _http_cache_service,
-    cache,
-)
+from .model_cache_support import _download, _http_artifact, _http_cache_service
 
 
 def test_slow_finalization_after_the_last_byte_completes_without_retry(
-    cache,  # noqa: F811
+    cache,
     tmp_path,
     monkeypatch,
 ) -> None:

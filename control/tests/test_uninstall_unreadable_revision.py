@@ -20,13 +20,13 @@ from vonk_control.models.jobs import Job
 from vonk_control.run_switch_contract.requests import RunSwitchCleanupApplyRequest
 from vonk_forge_contracts import RecipeDefinition
 
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _child_operation_id,
     _service,
 )
-from .test_unused_storage_collection import (
+from .unused_storage_collection_support import (
     _agents_succeed,
     _real_collector,
     _real_lifecycle,

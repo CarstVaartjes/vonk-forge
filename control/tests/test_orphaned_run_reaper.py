@@ -31,7 +31,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 from vonk_control.owner_liveness import OWNER_SETTLE_GRACE, runs_named_by_live_work
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,

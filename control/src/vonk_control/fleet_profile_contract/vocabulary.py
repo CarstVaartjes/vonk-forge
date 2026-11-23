@@ -22,6 +22,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileInstallationPolicy,
     ProfileOperationKind,
+    ProfileSwitchChildKind,
 )
 
 
@@ -131,6 +132,11 @@ if TYPE_CHECKING:
     FleetProfileAction = Literal["switch", "keep", "adopt"]
 else:
     FleetProfileAction = Literal[tuple(member.value for member in ProfileAction)]
+
+if TYPE_CHECKING:
+    FleetProfileRunOwnerKind = Literal["run"]
+else:
+    FleetProfileRunOwnerKind = Literal[ProfileSwitchChildKind.RUN.value]
 
 FleetProfilePlanStepKind = Literal["switch", "prepare"]
 

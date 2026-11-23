@@ -6,30 +6,6 @@
       "rule": "reportArgumentType",
       "reason": "The case deliberately constructs AgentSource with a raw mapping where AgentIdentity is declared, to prove the frozen dataclass refuses an untyped identity at runtime. The mismatch is the assertion, so it cannot be annotated away without deleting the case.",
       "source": "identity={\"node_id\": NODE},"
-    },
-    {
-      "file": "tests/acceptance/spark_canary_catalog_import.py",
-      "rule": "reportAttributeAccessIssue",
-      "reason": "The upgrade carry runs this program in the previous release's Controller first, which still has the flat modules Wave 4 moved into packages. The fallback import names a module this tree no longer has; delete it and this entry once a release with the packages is the carry baseline.",
-      "source": "from vonk_control.recipe_packages import RecipePackageClient, load_recipe_package"
-    },
-    {
-      "file": "tests/acceptance/spark_canary_catalog_import.py",
-      "rule": "reportMissingImports",
-      "reason": "The upgrade carry runs this program in the previous release's Controller first, which still has the flat modules Wave 4 moved into packages. The fallback import names a module this tree no longer has; delete it and this entry once a release with the packages is the carry baseline.",
-      "source": "from vonk_control.catalog_service import CatalogService"
-    },
-    {
-      "file": "tests/acceptance/spark_canary_catalog_import.py",
-      "rule": "reportMissingImports",
-      "reason": "The upgrade carry runs this program in the previous release's Controller first, which still has the flat modules Wave 4 moved into packages. The fallback import names a module this tree no longer has; delete it and this entry once a release with the packages is the carry baseline.",
-      "source": "from vonk_control.catalog_sync import ("
-    },
-    {
-      "file": "tests/acceptance/spark_canary_catalog_import.py",
-      "rule": "reportMissingImports",
-      "reason": "The upgrade carry runs this program in the previous release's Controller first, which still has the flat modules Wave 4 moved into packages. The fallback import names a module this tree no longer has; delete it and this entry once a release with the packages is the carry baseline.",
-      "source": "from vonk_control.catalog_sync_contract import ("
     }
   ]
 }

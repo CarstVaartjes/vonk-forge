@@ -41,7 +41,9 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
     ),
     "control/src/vonk_control/agent_upgrades/resume.py": ("resume",),
     "control/src/vonk_control/prebuilt_images.py": ("_release", "_finish", "_renew"),
-    "control/src/vonk_control/profile_capacity.py": ("profile_build_memory_claims",),
+    "control/src/vonk_control/fleet_profiles/capacity.py": (
+        "profile_build_memory_claims",
+    ),
     "control/src/vonk_control/recipe_image_availability/cancellation.py": (
         "_cancel_update_child",
         "cancel",

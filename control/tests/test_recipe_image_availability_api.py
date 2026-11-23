@@ -644,7 +644,7 @@ def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_
         FilesystemRuntimeImageStorage,
     )
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE_SHA,
         Transport,
         _add_head,

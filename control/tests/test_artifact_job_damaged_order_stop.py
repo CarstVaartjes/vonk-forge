@@ -22,7 +22,7 @@ from vonk_control.models.execution import ArtifactJob, RecipeRun
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 
-from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
+from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
 
 
 @pytest.mark.parametrize("damage", ["order-kind", "order-owner", "order-targets"])

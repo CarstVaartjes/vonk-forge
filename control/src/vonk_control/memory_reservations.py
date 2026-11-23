@@ -9,15 +9,15 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState, RunState
 from vonk_agent_protocol.inventory import MemoryPool
 
-from .models.cache import RecipeBuild
-from .models.execution import RecipeRun, ResourceReservation, RunNode
-from .owner_liveness import OwnerKind, OwnerRef, build_may_run
-from .profile_capacity import (
+from .fleet_profiles.capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
     profile_memory_replacements,
     reservation_visible,
 )
+from .models.cache import RecipeBuild
+from .models.execution import RecipeRun, ResourceReservation, RunNode
+from .owner_liveness import OwnerKind, OwnerRef, build_may_run
 from .recipe_operations.execution_contract import parse_stored_run_plan
 from .resource_planning.memory_kinds import memory_reservation_kinds
 from .resource_planning.types import (

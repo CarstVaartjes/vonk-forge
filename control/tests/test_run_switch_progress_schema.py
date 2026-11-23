@@ -17,8 +17,8 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 
-from .test_recipe_operations import NOW, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import (
     ColdStartPhaseExecutor,
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
