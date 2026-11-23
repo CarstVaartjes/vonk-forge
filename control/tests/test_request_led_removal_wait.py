@@ -16,17 +16,8 @@ from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
 from vonk_control.models.jobs import Job
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
-from .recipe_removal_review_support import remove_after_review
-from .removal_settle import release_ended_gates
-from .test_model_cache import _remove_model, threaded_cache  # noqa: F401 - fixture
-from .test_model_removal_reference_lifecycle import (
-    _force_model_request,
-    _one_model,
-    _register_model,
-    _removal_service,
-    _seed_model,
-)
-from .test_recipe_image_availability import (
+from .model_cache_support import _remove_model, threaded_cache  # noqa: F401 - fixture
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     _add_head,
@@ -36,7 +27,16 @@ from .test_recipe_image_availability import (
     _reference_receipt,
     _runtime,
     _service,
-    place_test_image,
+)
+from .recipe_removal_review_support import remove_after_review
+from .removal_settle import release_ended_gates
+from .runtime_image_fixtures import place_test_image
+from .test_model_removal_reference_lifecycle import (
+    _force_model_request,
+    _one_model,
+    _register_model,
+    _removal_service,
+    _seed_model,
 )
 
 

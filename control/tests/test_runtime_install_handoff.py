@@ -14,9 +14,9 @@ from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
 from vonk_control.run_switch_contract.phase_results import RunSwitchRuntimeInstallResult
 from vonk_control.run_switch_operations.result_helpers import _persisted_result
 
+from .run_switch_operations_support import _cold_compile_switch
 from .runtime_identity_support import set_inventory_fingerprint
 from .test_lifecycle_preflight import _clear, _finish
-from .test_run_switch_operations import _cold_compile_switch
 
 
 @pytest.mark.parametrize("damaged_attempts", [False, True])

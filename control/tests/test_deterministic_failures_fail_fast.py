@@ -4,7 +4,7 @@ The same input raises the same error on every attempt, so retrying or replanning
 it can only loop.  Each layer that decides a retry is driven here by behaviour:
 the run-switch phase handler, the run-switch tick guard, and an agent result
 the Controller refuses at its input contract (see also
-``test_agent_api.test_boundary_failures_record_a_correlated_operator_reason``).
+``test_agent_api_enrollment_certificates.test_boundary_failures_record_a_correlated_operator_reason``).
 """
 
 from __future__ import annotations
@@ -25,9 +25,8 @@ from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,
@@ -35,6 +34,7 @@ from .test_run_switch_operations import (
     _request,
     _service,
 )
+from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
 
 
 def _evidence(harness: _Harness) -> str:

@@ -53,9 +53,9 @@ from vonk_control.recipe_operations.execution_contract import (
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .recipe_image_availability_support import _availability_payload
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_fleet_model_removal_postgres import inventory
-from .test_recipe_image_availability import _availability_payload
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 PUBLISHER = "vonk-forge"
 FILES = 4

@@ -82,6 +82,7 @@ from ..fleet_profile_contract.applications import (
 from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import LabelName, LabelValue
+from ..fleet_profiles.stop_authority import ProfileJobRunStopJob
 from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
@@ -109,7 +110,6 @@ from ..model_cache.contract import (
     ModelCacheRepairPayload,
 )
 from ..operator_receipt_contract import ReceiptOwner
-from ..profile_stop_authority import ProfileJobRunStopJob
 from ..recipe_image_availability.removal_contract import (
     RecipeCacheRemovalOwner,
     RecipeCacheRemovalResult,

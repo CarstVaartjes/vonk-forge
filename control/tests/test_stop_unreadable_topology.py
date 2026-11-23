@@ -11,7 +11,7 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.recipe_operations import progress as recipe_progress
 from vonk_control.recipe_operations.runtime_specs import RecipeRuntimeSpecError
 
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 
 
 def test_run_whose_recipe_topology_became_unreadable_is_still_stopped(

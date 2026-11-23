@@ -25,8 +25,8 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .recipe_builds_support import RecordingQueue, setup
 from .test_build_cancellation_recovery import _active_claims, _issue
-from .test_recipe_builds import RecordingQueue, setup
 
 _CLEANUP = "recipe.build.cleanup.v1"
 # Past the bounded retry clock's longest pause, within the builder's inventory

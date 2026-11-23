@@ -28,9 +28,7 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
-from .node_contacts import contact_row
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     _assessment,
     _exact_preparation,
     _input,
@@ -39,6 +37,8 @@ from .test_fleet_profiles import (
     _SwitchAdapter,
     _uuid,
 )
+from .node_contacts import contact_row
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles_canonical import (
     NODE_1,
     RECIPE_REVISION_ID,
@@ -843,7 +843,7 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     from vonk_agent_protocol.state_machines import NodeIdentityState
     from vonk_control.fleet_profile_contract.assessment import FleetProfileReason
 
-    from .test_fleet_profiles import _seed_dual_solo_without_runtime_state
+    from .fleet_profiles_support import _seed_dual_solo_without_runtime_state
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)

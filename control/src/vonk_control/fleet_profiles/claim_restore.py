@@ -1,6 +1,6 @@
 """Take back the claims a failed profile load released, by admission's own rule.
 
-The inverse of ``profile_capacity.release_unassigned_profile_claims``. Other
+The inverse of ``capacity.release_unassigned_profile_claims``. Other
 admissions may have used the released memory and disk meanwhile, so the claims
 return only if the Spark still admits them. The decision is the one every
 admission makes: the node's admission key serialises the check with the

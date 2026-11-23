@@ -32,7 +32,7 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
-from .test_recipe_image_availability import _runtime, _service
+from .recipe_image_availability_support import _runtime, _service
 
 
 @pytest.mark.parametrize("same_source", [False, True])

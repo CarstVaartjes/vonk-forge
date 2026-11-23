@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import httpx2
 import pytest
+from cluster_profiles.generated_control.models.gateway_key_created import (
+    GatewayKeyCreated,
+)
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import _validate_generated_request
 from cluster_profiles.controller_cli.dispatch import run_controller
-from cluster_profiles.generated_control.models.gateway_key_created import (
-    GatewayKeyCreated,
-)
-from tests.cluster_profiles.test_controller_cli import FakeClient
+from tests.cluster_profiles.controller_cli_support import FakeClient
 
 FIRST = "10000000-0000-4000-8000-000000000001"
 SECOND = "10000000-0000-4000-8000-000000000002"

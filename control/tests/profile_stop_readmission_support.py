@@ -18,9 +18,9 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.recipe_operations.service import RecipeOperationService
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import start_evidence
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_fleet_profile_cancel import _agent_result
-from .test_recipe_operations import start_evidence
 
 
 def start_on_released_gang(

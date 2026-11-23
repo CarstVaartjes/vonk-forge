@@ -35,7 +35,6 @@ from ..models.execution import (
 from ..models.fleet import AgentNode
 from ..models.mapping import ClusterMapping, ClusterMappingNode
 from ..preparation_contract import RuntimeImageIdentity
-from ..profile_capacity import serving_run
 from ..recipe_operations.execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
@@ -43,6 +42,7 @@ from ..recipe_operations.execution_contract import (
 from ..recipe_operations.rank_authority import _run_is_one_shot
 from ..run_readiness import run_not_ready_for_profile
 from ..stored.states import ClusterMappingState, RecipeBuildState
+from .capacity import serving_run
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (
