@@ -439,7 +439,8 @@ def _version_tuple(
     match = pattern.fullmatch(value)
     if match is None:
         raise ContractError(f"{label} is invalid")
-    return tuple(int(part) for part in match.groups()[:3])
+    major, minor, patch = (int(part) for part in match.groups()[:3])
+    return major, minor, patch
 
 
 def _validate_graph(

@@ -279,6 +279,7 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
             "transferred_bytes": 0,
         }
     else:
+        model_detail, model_digest = None, None
         receipt = {
             "action": "remove",
             "selector": selector,

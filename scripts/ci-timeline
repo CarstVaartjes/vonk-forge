@@ -16,15 +16,15 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Required, TypedDict
 
 
 class JobRecord(TypedDict, total=False):
     """The fields of a GitHub Actions job record the timeline reads."""
 
-    name: str
+    name: Required[str]
     conclusion: str | None
-    created_at: str
+    created_at: Required[str]
     started_at: str | None
     completed_at: str | None
     labels: list[str]

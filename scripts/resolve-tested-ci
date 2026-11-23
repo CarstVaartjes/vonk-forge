@@ -469,8 +469,9 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
         raise EvidenceError("invalid release source")
     target_tree = git("rev-parse", f"{source}^{{tree}}")
     deadline = monotonic() + LOOKUP_SECONDS
+    compared: list[str] = []
     for lookups, pause in enumerate((*LATE_LISTING_PAUSES, None), start=1):
-        compared: list[str] = []
+        compared = []
         run_id = _lookup(
             source, repo, target_tree, deadline=deadline, compared=compared
         )

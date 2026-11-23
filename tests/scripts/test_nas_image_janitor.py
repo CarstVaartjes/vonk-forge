@@ -726,8 +726,7 @@ def test_repair_backoff_stays_short_after_a_long_outage() -> None:
     """Catches a recovered gateway waiting most of an hour for its next repair."""
     backoff = janitor.Backoff(lambda: 1.0)
     key = [("vonk-forge-caddy-1", "vonk-forge_ingress")]
-    for _ in range(20):
-        held = backoff.attempted(key, 0.0)
+    held = [backoff.attempted(key, 0.0) for _ in range(20)][-1]
     assert held == janitor.MAX_REPAIR_BACKOFF
 
 

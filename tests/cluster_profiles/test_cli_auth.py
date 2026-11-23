@@ -80,8 +80,7 @@ def test_an_expired_stored_login_warns_once_and_still_connects(
 ) -> None:
     login(_NOW - timedelta(days=1))
 
-    for _ in range(2):
-        client = ControlClient.from_environment(now=lambda: _NOW)
+    client = [ControlClient.from_environment(now=lambda: _NOW) for _ in range(2)][-1]
 
     assert isinstance(client, ControlClient)
     assert capsys.readouterr().err.count("vonkctl auth login") == 1

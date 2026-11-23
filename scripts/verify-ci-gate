@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from typing import NotRequired, TypedDict
 
 AREAS = (
     "rust",
@@ -69,11 +70,18 @@ RULED_JOBS = frozenset(
 )
 
 
+class Need(TypedDict):
+    """One entry of the workflow's ``toJSON(needs)``: a job's result and outputs."""
+
+    result: str
+    outputs: NotRequired[dict[str, str]]
+
+
 def from_needs(
     document: str,
 ) -> tuple[str, dict[str, str], dict[str, str], list[str]]:
     """Read `toJSON(needs)`: selector result, selections, results, unruled jobs."""
-    needs = json.loads(document)
+    needs: dict[str, Need] = json.loads(document)
     changes = needs["changes"]
     selected = {
         key.replace("_", "-"): value
