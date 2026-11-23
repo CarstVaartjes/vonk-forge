@@ -2,21 +2,12 @@
 
 import json
 import shutil
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-import pytest
-
-pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [
-    str(ROOT / path)
-    for path in ("scripts", "agent_protocol/src", "control/src", "tests/scripts")
-]
 import httpx2
+import pytest
 import yaml
 from agent_package_source_publication import package_source
 from test_agent_deb import (
@@ -27,6 +18,10 @@ from test_agent_deb import (
 )
 
 from vonk_control.agent_package_source import load_package_source
+
+pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class PackageSourcePublicationTests(unittest.TestCase):

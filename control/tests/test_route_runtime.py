@@ -27,11 +27,10 @@ from vonk_control.gateway.route_runtime import (
     verify_active_route_bundle,
 )
 
+from .observed_actions import observe_action
+
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 ROOT = Path(__file__).resolve().parents[2]
-
-
-from .observed_actions import observe_action
 
 
 def _encoded(value):

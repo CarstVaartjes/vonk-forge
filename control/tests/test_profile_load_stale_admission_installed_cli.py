@@ -12,14 +12,14 @@ from sqlalchemy import select
 
 from vonk_control.models.fleet import FleetProfileApplication
 
-pytest_plugins = ("tests.test_profile_load_installed_cli",)
-
 from .test_profile_load_installed_cli import (
     KEY,
     _https_api_peer,
     _process_environment,
 )
 from .test_profile_load_submission import _profile_api
+
+pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 @pytest.mark.lane

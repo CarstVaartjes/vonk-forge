@@ -49,6 +49,7 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
+from .test_route_runtime import _verified_bundle
 
 
 class _Gate:
@@ -544,9 +545,6 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
     assert ended.state == LifecycleState.SUCCEEDED
     assert fresh.id != continued[0].id
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
-
-
-from .test_route_runtime import _verified_bundle
 
 
 def test_postgres_held_route_owner_never_fails_a_serving_route(

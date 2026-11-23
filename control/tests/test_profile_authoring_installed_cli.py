@@ -35,17 +35,16 @@ from vonk_control.models.telemetry import NodeInventorySnapshot
 
 from .recipe_operations_support import setup_services
 from .test_fleet_profile_api import _client, _headers
-from .test_profile_installed_execution import _profile_service
-
-pytest_plugins = ("tests.test_profile_load_installed_cli",)
-
 from .test_fleet_profiles_canonical import NODE_1
+from .test_profile_installed_execution import _profile_service
 from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
     _run_pty,
 )
 from .test_profile_load_submission import _profile_api
+
+pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
 def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save(

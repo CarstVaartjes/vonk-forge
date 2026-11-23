@@ -43,9 +43,9 @@ from .agent_jobs_support import (
 )
 from .agent_jobs_support import service as _service_fixture
 from .runtime_identity_support import claim_agent
+from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 
 agent_service = _service_fixture
-from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 
 
 # Wrong implementation caught: exhausted recovery retains the queue head
