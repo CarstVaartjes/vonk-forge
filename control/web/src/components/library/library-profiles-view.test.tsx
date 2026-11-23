@@ -787,7 +787,20 @@ test("preserves legitimate wide byte progress while presenting its ratio", async
   const wide = {
     ...application,
     progress: {
-      child_progress: { phase: "copy", node_ids: [nodeA], bytes: completed, total_bytes: total },
+      child_progress: {
+        phase: "target-copy",
+        node_ids: [nodeA, nodeB],
+        operation: {
+          phase: "target-copy",
+          completed_bytes: completed,
+          total_bytes: total,
+          total_bytes_known: true,
+          members: [
+            { member_id: nodeA, phase: "target-copy", completed_bytes: 10, total_bytes: 100 },
+            { member_id: nodeB, phase: "target-copy", completed_bytes: 20, total_bytes: 100 },
+          ],
+        },
+      },
     },
   } as unknown as FleetProfileApplicationView;
   const api = apiFor({
@@ -796,10 +809,8 @@ test("preserves legitimate wide byte progress while presenting its ratio", async
   });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
   await user.click(await screen.findByRole("button", { name: "Load profile" }));
-  expect(await screen.findByRole("progressbar", { name: "Profile load progress" })).toHaveAttribute(
-    "aria-valuenow",
-    "50",
-  );
+  const bars = await screen.findAllByRole("progressbar");
+  expect(bars.map((bar) => bar.getAttribute("aria-valuenow"))).toEqual(["50", "10", "20"]);
   expect(completed.value).toBe("9007199254740992");
   expect(total.value).toBe("18014398509481984");
 });

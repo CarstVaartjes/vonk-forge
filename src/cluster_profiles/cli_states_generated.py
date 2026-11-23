@@ -170,6 +170,50 @@ UNSUCCESSFUL_LIFECYCLE_STATES = frozenset(
     }
 )
 
+# Plain words for a phase, one table for every client.
+PHASE_WORDS: dict[str, str] = {
+    "transfer": "Copying model files to the Sparks",
+    "copying": "Copying model files to the Sparks",
+    "target-copy": "Copying model files to the Sparks",
+    "uploading": "Uploading files",
+    "downloading": "Downloading the model",
+    "model-download": "Downloading the model",
+    "container-download": "Downloading the container image",
+    "pulling": "Downloading the container image",
+    "container-build": "Building the container image",
+    "building": "Building the container image",
+    "runtime-install": "Installing the runtime",
+    "installing": "Installing the runtime",
+    "reconciling-installation": "Checking the installation",
+    "start": "Starting on the Sparks",
+    "starting": "Starting on the Sparks",
+    "final-verify": "Checking the result",
+    "final_verify": "Checking the result",
+    "verify": "Checking the result",
+    "verifying": "Checking the result",
+    "prepare": "Preparing the load",
+    "preparing": "Preparing the load",
+    "finalizing": "Finishing up",
+    "stop": "Stopping the running workload",
+    "stopping": "Stopping the running workload",
+    "uninstall": "Removing the old install",
+    "uninstalling": "Removing the old install",
+    "cleanup": "Cleaning up",
+    "reclaiming": "Cleaning up",
+    "queued": "Waiting in the queue",
+    "pending": "Waiting in the queue",
+    "waiting": "Waiting in the queue",
+    "updating": "Updating",
+    "executing": "Working",
+    "completed": "Finished",
+    "failed": "Failed",
+}
+
+# Plain words for a wait, one table for every client.
+WAIT_WORDS: dict[str, str] = {
+    "queue.spark_busy": "the Spark's current operation to finish",
+}
+
 # The shared HTTP status disposition table, first match wins:
 # (first status, last status, disposition); anything else is observed.
 HTTP_STATUS_DISPOSITIONS = (
