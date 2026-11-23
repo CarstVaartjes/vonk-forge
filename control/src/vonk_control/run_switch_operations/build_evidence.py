@@ -114,7 +114,7 @@ class BuildEvidenceMixin:
             if (identity := inventory_items(node).runtime_identity) is not None
         )
         compatibility_state = "unknown"
-        if expected_architecture != "unknown" and observed_architecture is not None:
+        if observed_architecture is not None:
             compatibility_state = (
                 "compatible"
                 if (

@@ -86,6 +86,7 @@ from vonk_control.operation_api.route_snapshot import (
     _ActiveRouteSnapshot,
     _stored_activation_marker,
 )
+from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.operations.item_contract import OperationItem, OperationOwnerReference
 from vonk_control.operations.progress import aggregate_progress, member_progress
 from vonk_control.operations.summary import workload_aliases
@@ -837,7 +838,7 @@ class _DurableOperationProjection:
             else None
         )
         actions = (
-            [action for action in raw if isinstance(action, str) and action != "resume"]
+            [action for action in raw if action != OperationRecoveryAction.RESUME]
             if isinstance(raw, list)
             else []
         )
