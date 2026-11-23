@@ -138,11 +138,13 @@ export function AppShell({
         </div>
       </header>
       <main ref={mainContent} id="main-content" tabIndex={-1}>
-        <div className="content-frame">
-          {children}
-          {footer}
-        </div>
+        <div className="content-frame">{children}</div>
       </main>
+      {footer && (
+        <div className="shell-footer">
+          <div className="content-frame">{footer}</div>
+        </div>
+      )}
     </div>
   );
 }

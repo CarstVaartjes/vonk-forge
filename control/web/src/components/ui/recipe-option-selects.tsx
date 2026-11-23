@@ -9,11 +9,11 @@ export function effectiveChoices(
   stored: OptionChoices = {},
 ): OptionChoices {
   return Object.fromEntries(
-    options.flatMap((option) => {
+    options.map((option) => {
       const kept = option.choices.find((choice) => choice.value === stored[option.name]);
-      const fallback = option.choices.find((choice) => choice.default) ?? option.choices[0];
-      const choice = kept ?? fallback;
-      return choice ? [[option.name, choice.value] as const] : [];
+      // Ajv enforces at least two choices per option when the recipe is read, so the first exists.
+      const fallback = option.choices.find((choice) => choice.default) ?? option.choices[0]!;
+      return [option.name, (kept ?? fallback).value];
     }),
   );
 }

@@ -11,8 +11,7 @@ export function RangeSwitch({
   onChange(range: MetricRange): void;
 }) {
   return (
-    // biome-ignore lint/a11y/useSemanticElements: role=group names a styled wrapper; fieldset would need a user-agent style reset
-    <div className="segmented" role="group" aria-label="Range">
+    <fieldset className="segmented group-reset" aria-label="Range">
       {RANGES.map((value) => (
         <button
           key={value}
@@ -23,6 +22,6 @@ export function RangeSwitch({
           {value}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }

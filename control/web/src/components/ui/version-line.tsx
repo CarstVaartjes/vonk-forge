@@ -21,7 +21,6 @@ export function VersionLine({
   const [read, setRead] = useState(false);
   const [platform, setPlatform] = useState<PlatformObservation | null>(null);
   const [sync, setSync] = useState<CatalogSyncStatus | null | undefined>();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: readKey re-reads the platform and sync status
   useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
@@ -40,7 +39,7 @@ export function VersionLine({
   const syncedAt = sync && lastSyncAt(sync);
   const stamp = syncedAt ? utcTime(syncedAt) : null;
   return (
-    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the footer is outside <main>, so it is the page contentinfo and takes a name
     <footer className="version-line" aria-label="Versions">
       <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED_TEXT}</span>
       <span>Library version: {sync?.library_version ?? NOT_REPORTED_TEXT}</span>

@@ -223,8 +223,7 @@ export function LibrarySetupStrip({
         </label>
         <div className="library-toolbar-sparks">
           <span aria-hidden="true">Sparks</span>
-          {/* biome-ignore lint/a11y/useSemanticElements: role=group names a styled wrapper; fieldset would need a user-agent style reset */}
-          <div className="segmented" role="group" aria-label="Sparks per recipe">
+          <fieldset className="segmented group-reset" aria-label="Sparks per recipe">
             {tiles.map((tile) => {
               const pressed = filters.sparks === tile.value;
               return (
@@ -256,7 +255,7 @@ export function LibrarySetupStrip({
                 {anyCount}
               </small>
             </button>
-          </div>
+          </fieldset>
         </div>
         <label className="library-toggle">
           <input

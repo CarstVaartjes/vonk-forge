@@ -20,8 +20,7 @@ function dispositionText(disposition: string): string {
 /** Render the Controller decision without deriving a second removal policy. */
 export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalReview }) {
   return (
-    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by
-    <div aria-label="Cache removal review">
+    <section aria-label="Cache removal review">
       {review.fleet && (
         <section aria-label="Fleet removal effects">
           <h3>Controller cache</h3>
@@ -115,6 +114,6 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
           )}
         </p>
       ))}
-    </div>
+    </section>
   );
 }

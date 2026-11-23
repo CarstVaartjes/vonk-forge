@@ -515,7 +515,6 @@ export function ArtifactJobWorkspace({
   useEffect(() => {
     setValues(parameterDefaults(parameters));
   }, [parameters]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a different job interface resets the form
   useEffect(() => {
     setPrompt("");
     setFilesBySlot({});

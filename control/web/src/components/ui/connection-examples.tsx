@@ -47,10 +47,11 @@ export function ConnectionExamples({ apiBase, alias }: { apiBase: string; alias:
     <div className="connection-examples">
       {examples.map(({ label, code }) => (
         <div key={label}>
-          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find each example by */}
-          <pre aria-label={label}>
-            <code>{code}</code>
-          </pre>
+          <figure aria-label={label}>
+            <pre>
+              <code>{code}</code>
+            </pre>
+          </figure>
           <CopyButton label={label} value={code} />
         </div>
       ))}

@@ -56,7 +56,6 @@ export function useFleetStream(api: Pick<ControlApi, "visualFleet" | "fleetEvent
     await currentRefresh.current?.(signal);
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: generation restarts the stream
   useEffect(() => {
     let active = true;
     let requestInFlight = false;

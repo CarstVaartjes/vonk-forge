@@ -250,7 +250,6 @@ export function LibraryPage({
     fits: libraryFits,
   } = useMemo(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams), [path]);
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt re-runs the library load
   useEffect(() => {
     const controller = new AbortController();
     setError("");
@@ -283,7 +282,6 @@ export function LibraryPage({
       .catch(() => undefined);
     return () => controller.abort();
   }, [api]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetAttempt re-runs the fleet load
   useEffect(() => {
     if (!api.visualFleet) return;
     const controller = new AbortController();
@@ -304,7 +302,6 @@ export function LibraryPage({
       });
     return () => controller.abort();
   }, [api, fleetAttempt]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: detailAttempt re-runs the detail load
   useEffect(() => {
     const selector = route.kind === LibraryPath.RECIPES ? route.selector : undefined;
     if (!selector) {
@@ -349,7 +346,6 @@ export function LibraryPage({
   }, [onNavigatePath, route, snapshot]);
   // Focus the heading on a route, tab or Spark-workspace change, never on the
   // `?q=` rewrite of every search keystroke (it would steal the input's focus).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new view or preferred Spark moves focus to the heading
   useEffect(() => {
     if (
       route.kind === LibraryPath.MODELS &&

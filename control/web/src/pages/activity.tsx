@@ -1284,7 +1284,6 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
     params.delete("status");
     history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
   }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: attempt re-runs the load
   useEffect(() => {
     const generation = ++requestGeneration.current;
     let active = true;
@@ -1523,8 +1522,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
         description="Meaningful control-plane changes, without technical identifiers by default."
         actions={
           <>
-            {/* biome-ignore lint/a11y/useSemanticElements: role=group names a styled wrapper; fieldset would need a user-agent style reset */}
-            <div className="segmented" role="group" aria-label="Activity view">
+            <fieldset className="segmented group-reset" aria-label="Activity view">
               <button
                 type="button"
                 aria-pressed={view === "timeline"}
@@ -1539,7 +1537,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               >
                 Table
               </button>
-            </div>
+            </fieldset>
             <button
               type="button"
               className="button"

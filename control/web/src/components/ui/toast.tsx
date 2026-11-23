@@ -98,18 +98,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={toasts}>
       {children}
       {createPortal(
-        // biome-ignore lint/a11y/useSemanticElements: a live stack of notifications, not a page section
-        <ol
+        <section
           className="toast-region"
-          role="region"
           aria-label="Notifications"
           aria-live="polite"
           aria-relevant="additions"
         >
-          {items.map((item) => (
-            <Toast key={item.id} item={item} onDismiss={dismiss} />
-          ))}
-        </ol>,
+          <ol>
+            {items.map((item) => (
+              <Toast key={item.id} item={item} onDismiss={dismiss} />
+            ))}
+          </ol>
+        </section>,
         document.body,
       )}
     </ToastContext.Provider>

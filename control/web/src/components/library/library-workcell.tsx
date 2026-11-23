@@ -448,7 +448,6 @@ const SHOW_STEP = 40;
 /** Bounds a long list: the first page, a "Show more" button, back to one page when `resetKey` changes. */
 export function useShowMore(resetKey: string, total: number, atLeast = 0, noun = "rows") {
   const [pages, setPages] = useState(1);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new reset key shows the first page again
   useEffect(() => setPages(1), [resetKey]);
   const limit = Math.max(pages * SHOW_STEP, atLeast);
   const more =
@@ -560,7 +559,6 @@ export function LibraryWorkcell({
     "models",
   );
   const recipePaneRef = useRef<HTMLDivElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a changed selection brings the recipe pane into view
   useEffect(() => {
     if (
       (!filters.model && route.kind !== LibraryPath.MODELS) ||
@@ -607,9 +605,8 @@ export function LibraryWorkcell({
           <span>Recipes for selected Model · {selectedRecipes.length}</span>
         </div>
         <div className="library-paired-panes">
-          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by */}
-          <div className="library-model-pane" aria-label="Models">
-            <ul>
+          <div className="library-model-pane">
+            <ul aria-label="Models">
               {models.slice(0, limit).map((model) => (
                 <li key={recordModelKey(model)!}>
                   <NavigateLink
@@ -650,8 +647,7 @@ export function LibraryWorkcell({
               />
             )}
           </div>
-          {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label is the handle the tests and e2e find this block by */}
-          <div
+          <section
             className="library-recipe-pane"
             aria-label="Recipes matching selected Model"
             ref={recipePaneRef}
@@ -755,7 +751,7 @@ export function LibraryWorkcell({
             {!selectedModel && (
               <p className="library-empty-state">Select a Model to see matching Recipes.</p>
             )}
-          </div>
+          </section>
         </div>
       </div>
     </section>

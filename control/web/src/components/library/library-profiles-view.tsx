@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionExamples } from "../ui/connection-examples";
 import type { MouseEvent, ReactNode } from "react";
 import {
@@ -507,6 +507,9 @@ export function LibraryProfilesView({
   const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);
   const [selectedNumber, setSelectedNumber] = useState<FleetProfileNumber>();
   const [draft, setDraft] = useState<ProfileDraft>();
+  // The opening load reads the draft as it is when the profiles arrive, not as it was at render.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [editing, setEditing] = useState(initialCreate);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -623,6 +626,7 @@ export function LibraryProfilesView({
     const number = selectedNumber;
     observer.start(next, (signal) => api.profileProgress(number, signal));
   };
+  const selectedProfileId = selectedProfile?.id;
   const dirty = Boolean(draft && isDirty(draft, selectedProfile));
   useEffect(() => {
     if (!draft) return;
@@ -631,7 +635,6 @@ export function LibraryProfilesView({
   }, [dirty, draft]);
   const applicationRunning = Boolean(application && !ended(application));
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the draft is read only to keep an open edit; depending on it would reload the profiles on every edit
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -639,7 +642,7 @@ export function LibraryProfilesView({
       .then((result) => {
         if (!result) return;
         const first = openingProfile(result.profiles);
-        if (!initialCreate && first && !draft) {
+        if (!initialCreate && first && !draftRef.current) {
           const kept = unsavedDrafts.get(formatWire(first.number));
           setDraft(kept ?? draftFromProfile(first));
           setEditing(Boolean(kept));
@@ -656,9 +659,8 @@ export function LibraryProfilesView({
     return () => controller.abort();
   }, [refreshProfiles, initialCreate]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the preview restarts when the selected profile's identity changes, not on every field of it
   useEffect(() => {
-    if (selectedNumber === undefined || !selectedProfile || editing) {
+    if (selectedNumber === undefined || selectedProfileId === undefined || editing) {
       setPreview(undefined);
       return;
     }
@@ -673,12 +675,11 @@ export function LibraryProfilesView({
           setError(value instanceof Error ? value.message : "The profile preview is unavailable.");
       });
     return () => controller.abort();
-  }, [api, editing, selectedNumber, selectedProfile?.id]);
+  }, [api, editing, selectedNumber, selectedProfileId]);
 
   const loadedNumber =
     selectedProfile?.status === "loaded" && !editing ? selectedProfile.number : undefined;
   const applicationState = application?.state;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a finished application re-reads the endpoints
   useEffect(() => {
     setEndpoints(undefined);
     if (loadedNumber === undefined) return;
@@ -1097,17 +1098,18 @@ export function LibraryProfilesView({
                 </div>
                 <span>{availableFleet.length} Sparks</span>
               </div>
-              {/* biome-ignore lint/a11y/useSemanticElements: a div list keeps the profile scope layout; ul would need a style reset */}
-              <div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">
-                {availableFleet.map((item) => (
-                  // biome-ignore lint/a11y/useSemanticElements: a div list keeps the profile scope layout; li would need a style reset
-                  <div key={item.id} role="listitem">
-                    <strong>{item.name}</strong>
-                    <small>{item.state}</small>
-                  </div>
-                ))}
-                {availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}
-              </div>
+              {availableFleet.length === 0 ? (
+                <p>No enrolled Sparks are visible yet.</p>
+              ) : (
+                <ul className="library-profile-scope-list" aria-label="Enrolled Sparks">
+                  {availableFleet.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.name}</strong>
+                      <small>{item.state}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
             <section className="library-profile-assignments" aria-label="Profile assignments">
               <header>

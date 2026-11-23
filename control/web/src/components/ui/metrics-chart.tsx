@@ -148,7 +148,6 @@ export function MetricsChart({
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
   const catalogue = useMetricCatalogue(api, retry);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retry re-runs the load
   useEffect(() => {
     const controller = new AbortController();
     setTiles({});

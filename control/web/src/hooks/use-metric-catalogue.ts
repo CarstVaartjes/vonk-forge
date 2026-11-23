@@ -12,7 +12,6 @@ export function useMetricCatalogue(
   retry = 0,
 ): MetricSpec[] | string | undefined {
   const [catalogue, setCatalogue] = useState<MetricSpec[] | string>();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retry re-runs the load
   useEffect(() => {
     const controller = new AbortController();
     setCatalogue(undefined);
