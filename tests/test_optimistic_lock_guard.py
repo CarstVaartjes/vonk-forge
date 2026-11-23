@@ -390,8 +390,8 @@ def test_added_run_write_outside_transition_is_rejected(write, binding) -> None:
         f"        {binding}\n        {write}\n"
     )
     # Classifications never exempt additions, even in a reviewed file.
-    for path in ["new_owner.py", *RECIPE_RUN_WRITE_VERDICTS]:
-        path = "control/src/vonk_control/" + path
+    for name in ["new_owner.py", *RECIPE_RUN_WRITE_VERDICTS]:
+        path = "control/src/vonk_control/" + name
         assert check_source(path, source, {5}, modes=("optimistic",))
         assert not check_source(path, source, {1}, modes=("optimistic",))
 

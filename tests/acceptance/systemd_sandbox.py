@@ -60,8 +60,8 @@ class SandboxError(RuntimeError):
 def _policy(document: str) -> dict[str, str]:
     section = ""
     result: dict[str, str] = {}
-    for line in document.splitlines():
-        line = line.strip()
+    for raw_line in document.splitlines():
+        line = raw_line.strip()
         if line.startswith("["):
             section = line
         if section != "[Service]":

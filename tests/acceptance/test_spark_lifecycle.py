@@ -726,8 +726,8 @@ def _rebuild_recipe_entry(
         gzip.GzipFile(fileobj=archive, mode="wb", mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w") as target,
     ):
-        for member, payload in members:
-            payload = changed.get(member.name, payload)
+        for member, original in members:
+            payload = changed.get(member.name, original)
             if member.name == "manifest.json":
                 manifest = json.loads(payload)
                 manifest["recipe_content_sha256"] = digest
@@ -1709,11 +1709,12 @@ class SparkLifecycle:
             allowance = (remaining - heading_cost) // len(unrendered)
             if allowance <= 0:
                 break
+            shown = body
             if title == "installer error" and len(body) > allowance:
                 # Keep outer type and the innermost cause/phase when logs fill the budget.
                 prefix = min(256, allowance // 2)
-                body = body[:prefix] + " ... " + body[-(allowance - prefix - 5) :]
-            entry = f"{title}: " + self._redact_diagnostics(body, limit=allowance)
+                shown = body[:prefix] + " ... " + body[-(allowance - prefix - 5) :]
+            entry = f"{title}: " + self._redact_diagnostics(shown, limit=allowance)
             rendered.append(entry)
             remaining -= len(entry) + (1 if index < len(sections) - 1 else 0)
         return "\n".join(rendered)

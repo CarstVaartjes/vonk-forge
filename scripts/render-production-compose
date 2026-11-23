@@ -71,9 +71,9 @@ def render(
     try:
         if template.samefile(output):
             raise ValueError("template and output must be different files")
-    except FileNotFoundError:
+    except FileNotFoundError as error:
         if template.resolve() == output.resolve():
-            raise ValueError("template and output must be different files")
+            raise ValueError("template and output must be different files") from error
     _validate_image(api_image, "api")
     _validate_image(worker_image, "worker")
     _validate_image(litellm_image, "litellm")

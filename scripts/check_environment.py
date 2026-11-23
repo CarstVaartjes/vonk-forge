@@ -52,12 +52,12 @@ def prepare(
             try:
                 fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except BlockingIOError:
+            except BlockingIOError as error:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(
                         f"Timed out waiting for {label} preparation lock"
-                    )
+                    ) from error
                 time.sleep(min(0.1, remaining))
         if ready():
             return
@@ -163,7 +163,7 @@ def ensure_catalog(root: Path, library: Path) -> None:
         root,
         library / ".state/check-catalog.lock",
         "recipe catalog",
-        lambda: (library / "catalog-index.json").is_file(),
+        (library / "catalog-index.json").is_file,
         [[str(root / "scripts/build-recipe-library"), str(library)]],
     )
 

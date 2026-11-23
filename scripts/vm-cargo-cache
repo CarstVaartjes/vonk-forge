@@ -53,7 +53,7 @@ def prepare(checkout: Path, cache: Path) -> None:
 
 
 if __name__ == "__main__":
-    try:
+    try:  # noqa: SIM105 - best-effort cache link; suppress() trips the malformed-value guard
         prepare(Path(sys.argv[1]), Path(sys.argv[2]))
     except (OSError, ValueError):
         pass

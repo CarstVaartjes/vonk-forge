@@ -234,7 +234,7 @@ def run_interactive(
             missing = ", ".join(prompt for prompt, _ in pending)
             raise AcceptanceError(f"interactive prompts were not observed: {missing}")
         return rendered
-    except BaseException:
+    except BaseException as error:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(pid, signal.SIGTERM)
         if status is None:
@@ -249,7 +249,9 @@ def run_interactive(
                     os.killpg(pid, signal.SIGKILL)
                 child, _ = os.waitpid(pid, 0)
             if child != pid:
-                raise AcceptanceError("interactive child could not be reaped")
+                raise AcceptanceError(
+                    "interactive child could not be reaped"
+                ) from error
         raise
     finally:
         os.close(terminal)

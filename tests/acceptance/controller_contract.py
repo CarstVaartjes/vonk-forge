@@ -200,11 +200,17 @@ class ControllerContract:
         if body is None:
             return
         route = path.partition("?")[0]
-        for pattern, template, operations in self._operations:
-            if pattern.fullmatch(route):
-                break
-        else:
+        found = next(
+            (
+                (template, operations)
+                for pattern, template, operations in self._operations
+                if pattern.fullmatch(route)
+            ),
+            None,
+        )
+        if found is None:
             raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        template, operations = found
         operation = operations.get(method.lower())
         if not isinstance(operation, dict):
             raise ContractSkew(f"{self._label} has no operation {method} {template}")
@@ -235,11 +241,17 @@ class ControllerContract:
     ) -> None:
         """Validate a receipt against the source of the Controller that sent it."""
         route = path.partition("?")[0]
-        for pattern, template, operations in self._operations:
-            if pattern.fullmatch(route):
-                break
-        else:
+        found = next(
+            (
+                (template, operations)
+                for pattern, template, operations in self._operations
+                if pattern.fullmatch(route)
+            ),
+            None,
+        )
+        if found is None:
             raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        template, operations = found
         operation = operations.get(method.lower())
         if not isinstance(operation, dict):
             raise ContractSkew(f"{self._label} has no operation {method} {template}")

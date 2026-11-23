@@ -818,9 +818,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _controller_request_guard(self):
         # The harness is newer than both Controllers it drives: every request
         # must be one the Controller in front of it accepts (#1086).
-        return lambda method, path, body: self._current_release().contract.check(
-            method, path, body
-        )
+        def guard(method: str, path: str, body: bytes | None) -> None:
+            self._current_release().contract.check(method, path, body)
+
+        return guard
 
     def _release_environment(self, release: ReleaseInput) -> dict[str, str]:
         assert self.temporary_root is not None

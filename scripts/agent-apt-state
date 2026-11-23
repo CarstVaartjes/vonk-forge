@@ -507,7 +507,7 @@ def _read_objects(store: ObjectStore, keys: list[str]) -> dict[str, bytes]:
 
 
 def _write_objects(store: ObjectStore, objects: dict[str, bytes]) -> None:
-    _bounded_object_operations(objects, lambda key, raw: store.write(key, raw))
+    _bounded_object_operations(objects, store.write)
 
 
 def _write_immutable_objects(
