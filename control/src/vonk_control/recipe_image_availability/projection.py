@@ -18,10 +18,7 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_errors import InvalidValue, MissingRecord
-from ..job_documents import (
-    AvailabilityJobPayload,
-    AvailabilityRetry,
-)
+from ..jobs.documents import AvailabilityJobPayload, AvailabilityRetry
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import (
     Job,
@@ -39,7 +36,7 @@ from ..recipe_image_removal_contract import (
     RecipeRemovalUnavailableView,
 )
 from ..recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
-from ..stored_json import Residue
+from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

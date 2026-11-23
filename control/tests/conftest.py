@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_control.models import Base
-from vonk_control.stored_json import install_write_guard
+from vonk_control.stored.json_values import install_write_guard
 
 from . import metadata_type_snapshot
 from .api_response_witness import (
@@ -92,7 +92,7 @@ def load_tools_module(name: str):
 def damaged_json_rows() -> Iterator[None]:
     """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
 
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     with write_guard_mode(strict=False):
         yield
@@ -532,8 +532,8 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
 def shared_catalog_parses_unchanged() -> Iterator[None]:
     """Readers share one parse per catalog content identity; none may mutate it."""
     yield
-    from vonk_control import catalog_revision_contract as contract
     from vonk_control.bounded_json import require_mapping
+    from vonk_control.catalog import revision_contract as contract
     from vonk_forge_contracts import read_model, read_recipe
 
     changed = [

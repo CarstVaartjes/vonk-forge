@@ -1,0 +1,259 @@
+"""Authenticated Model and Recipe operator read routes."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Any, Literal
+
+from fastapi import FastAPI, HTTPException, Path, Query
+from vonk_agent_protocol.error_response import RequestValidationProblem
+from vonk_forge_contracts import CatalogVocabulary
+
+from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
+from ..api_availability import AVAILABILITY_ERRORS
+from ..auth import CursorError
+from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..library_projection import LibrarySelectorAmbiguous
+from ..model_cache.errors import ModelCacheError
+from ..operation_api import bounded_error_responses
+from ..request_fault import RequestFault
+from .contract import (
+    ModelDetailResponse,
+    ModelLibraryResponse,
+    RecipeDetailResponse,
+    RecipeLibraryResponse,
+)
+
+# Friendly names may contain spaces.  Keep selectors bounded and reject control
+# characters; path routing remains safe because the projection resolves only an
+# exact publisher/slug or slug match.
+_SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
+
+LIBRARY_OPERATION_IDS = {
+    ("get", "/api/library/vocabulary"): "getLibraryVocabulary",
+    ("get", "/api/model/library"): "listModelLibrary",
+    ("get", "/api/model/{selector}"): "getModel",
+    ("get", "/api/recipe/library"): "listRecipeLibrary",
+    ("get", "/api/recipe/{selector}"): "getRecipe",
+}
+
+
+class SelectorAmbiguityHTTPError(HTTPException):
+    """Carry canonical choices separately from bounded, redacted error copy."""
+
+    def __init__(
+        self,
+        error: LibrarySelectorAmbiguous,
+        *,
+        status_code: int = 422,
+        code: str | None = None,
+    ) -> None:
+        self.problem = RequestValidationProblem(
+            detail="selector is ambiguous; choose an exact canonical candidate",
+            issues=[],
+            candidates=list(error.candidates),
+        )
+        super().__init__(
+            status_code=status_code,
+            detail=self.problem.detail,
+            headers={"x-vonk-error-code": code} if code is not None else None,
+        )
+
+
+def _error(error: Exception) -> HTTPException:
+    if isinstance(error, ModelCacheError):
+        from ..model_cache_api import model_cache_http_error
+
+        return model_cache_http_error(error)
+    if isinstance(error, LibrarySelectorAmbiguous):
+        return SelectorAmbiguityHTTPError(error)
+    if isinstance(error, KeyError):
+        return HTTPException(status_code=404, detail="operator object not found")
+    if isinstance(error, (CursorError, RequestFault)):
+        # As in the operator surface: only an explicit request fault is 422,
+        # so unreadable stored state cannot be reported as a bad request.
+        return HTTPException(status_code=422, detail=str(error)[:256])
+    if isinstance(error, AVAILABILITY_ERRORS):
+        return HTTPException(status_code=503, detail="library projection unavailable")
+    raise error
+
+
+def install_library_routes(
+    app: FastAPI,
+    *,
+    actor_dependency: Any,
+    projection: Any | None,
+) -> None:
+    """Install the singular read hierarchy; no legacy library aliases remain."""
+
+    from ..operation_api import _ADMIN_OPERATION_IDS
+
+    _ADMIN_OPERATION_IDS.update(LIBRARY_OPERATION_IDS)
+    authenticated = actor_dependency
+
+    def library() -> Any:
+        if projection is None:
+            raise HTTPException(
+                status_code=503, detail="library projection unavailable"
+            )
+        return projection
+
+    @app.get(
+        "/api/library/vocabulary",
+        response_model=CatalogVocabulary,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getLibraryVocabulary",
+    )
+    def library_vocabulary(_actor: Any = authenticated) -> CatalogVocabulary:
+        """The capability, category and status words of the synced release."""
+        vocabulary = projection.library_vocabulary() if projection else None
+        if vocabulary is None:
+            raise HTTPException(status_code=404, detail="no vocabulary synced yet")
+        return vocabulary
+
+    @app.get(
+        "/api/model/library",
+        response_model=ModelLibraryResponse,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="listModelLibrary",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
+    )
+    def model_library(
+        limit: Annotated[int, Query(ge=1, le=512)] = 100,
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
+        usage: Annotated[list[str] | None, Query(max_length=64)] = None,
+        family: Annotated[list[str] | None, Query(max_length=64)] = None,
+        version: Annotated[list[str] | None, Query(max_length=64)] = None,
+        quantization: Annotated[list[str] | None, Query(max_length=64)] = None,
+        publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
+        alignment: Annotated[list[str] | None, Query(max_length=64)] = None,
+        search: Annotated[str | None, Query(max_length=256)] = None,
+        updated_since: Annotated[datetime | None, Query()] = None,
+        sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        cached: Annotated[bool, Query()] = False,
+        _actor: Any = authenticated,
+    ) -> ModelLibraryResponse:
+        try:
+            return library().models(
+                limit=limit,
+                cursor=cursor,
+                usage=usage or [],
+                family=family or [],
+                version=version or [],
+                quantization=quantization or [],
+                publisher=publisher or [],
+                alignment=alignment or [],
+                search=search,
+                updated_since=updated_since,
+                sort=sort,
+                cached=cached,
+            )
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/model/{selector:path}",
+        response_model=ModelDetailResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
+        operation_id="getModel",
+    )
+    def model_detail(
+        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
+        _actor: Any = authenticated,
+    ) -> ModelDetailResponse:
+        try:
+            return library().model_detail(selector)
+        except (
+            ModelCacheError,
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/recipe/library",
+        response_model=RecipeLibraryResponse,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="listRecipeLibrary",
+        openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
+    )
+    def recipe_library(
+        limit: Annotated[int, Query(ge=1, le=512)] = 100,
+        cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
+        model: Annotated[list[str] | None, Query(max_length=64)] = None,
+        cached: Annotated[bool, Query()] = False,
+        ready: Annotated[bool | None, Query()] = None,
+        fits_fleet: Annotated[bool | None, Query()] = None,
+        assess: Annotated[bool, Query()] = False,
+        usage: Annotated[list[str] | None, Query(max_length=64)] = None,
+        publisher: Annotated[list[str] | None, Query(max_length=64)] = None,
+        alignment: Annotated[list[str] | None, Query(max_length=64)] = None,
+        sparks: Annotated[list[int] | None, Query(max_length=64)] = None,
+        engine: Annotated[list[str] | None, Query(max_length=64)] = None,
+        creator: Annotated[list[str] | None, Query(max_length=64)] = None,
+        search: Annotated[str | None, Query(max_length=256)] = None,
+        updated_since: Annotated[datetime | None, Query()] = None,
+        sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        _actor: Any = authenticated,
+    ) -> RecipeLibraryResponse:
+        try:
+            return library().recipe_library(
+                limit=limit,
+                cursor=cursor,
+                model_selectors=model or [],
+                cached=cached,
+                ready=ready,
+                fits_fleet=fits_fleet,
+                assess=assess,
+                usage=usage or [],
+                publisher=publisher or [],
+                alignment=alignment or [],
+                sparks=sparks or [],
+                engine=engine or [],
+                creator=creator or [],
+                search=search,
+                updated_since=updated_since,
+                sort=sort,
+            )
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
+            raise _error(error) from None
+
+    @app.get(
+        "/api/recipe/{selector:path}",
+        response_model=RecipeDetailResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getRecipe",
+    )
+    def recipe_detail(
+        selector: Annotated[str, Path(pattern=_SELECTOR_PATTERN)],
+        _actor: Any = authenticated,
+    ) -> RecipeDetailResponse:
+        try:
+            return library().recipe_detail(selector)
+        except (
+            LibrarySelectorAmbiguous,
+            CursorError,
+            RequestFault,
+            KeyError,
+            *AVAILABILITY_ERRORS,
+        ) as error:
+            raise _error(error) from None
+
+
+__all__ = ["LIBRARY_OPERATION_IDS", "install_library_routes"]

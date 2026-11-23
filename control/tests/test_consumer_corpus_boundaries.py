@@ -38,7 +38,7 @@ from vonk_control.operation_api import (
     OperationApiServices,
     OperationPage,
 )
-from vonk_control.operation_item_contract import OperationItem, OperationResultFacts
+from vonk_control.operations.item_contract import OperationItem, OperationResultFacts
 
 from cluster_profiles.generated_control.api.default import get_job
 from cluster_profiles.generated_control.client import AuthenticatedClient

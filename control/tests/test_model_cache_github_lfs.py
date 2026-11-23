@@ -33,7 +33,7 @@ from vonk_control.model_cache.errors import (
 from vonk_control.model_cache.provider_contracts import _GitHubLfsBatch
 from vonk_control.model_cache_contract import ModelCacheDownloadPayload
 from vonk_control.models import Base, ModelCacheOperation
-from vonk_control.operation_contract import AvailabilityRecoveryAction
+from vonk_control.operations.contract import AvailabilityRecoveryAction
 
 from .github_lfs_fake import (
     OBJECT_HOST,

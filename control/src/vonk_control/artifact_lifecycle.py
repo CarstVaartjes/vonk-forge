@@ -28,8 +28,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from . import job_states, model_cache_states
+from . import model_cache_states
 from .categorized_errors import InvalidValue
+from .jobs import states as job_states
 from .models import ArtifactLifecycleGate, Job, ModelCacheOperation
 
 ArtifactKind = Literal["model-set", "model-object", "runtime-image"]

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import ClusterMappingCode, machine_check
 
 from ..model_primitives import Base, _lower_hex
-from ..stored_states import ClusterMappingState
+from ..stored.states import ClusterMappingState
 
 
 class ClusterMapping(Base):

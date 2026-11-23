@@ -356,7 +356,7 @@ def test_preexisting_certificate_can_rotate(local_ca):
         ).generation
         == 2
     )
-    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca.revoke_node("1234", NOW)
     expiry = leaf.not_valid_after_utc
@@ -424,7 +424,7 @@ def test_local_journal_retention_preserves_recovery_and_live_revocations(local_c
     from vonk_control.models.fleet import (
         LocalCertificateIssuance,
     )
-    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca, _, options = local_ca
     sessions = options["sessions"]
@@ -496,7 +496,7 @@ def test_a_serial_known_only_from_revocation_evidence_leaves_the_crl(local_ca):
     """
     from vonk_control.models import AgentIssuedCertificateRevocation
     from vonk_control.step_ca import CERTIFICATE_LIFETIME
-    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     ca, _, options = local_ca
     sessions = options["sessions"]
@@ -530,7 +530,7 @@ def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
 ):
     """Catches old HTTP wiring and a CRL that loses a confirmed revocation."""
     from vonk_control.agent_services import build_enrollment_service
-    from vonk_control.enrollment_contract import EnrollmentGrant
+    from vonk_control.enrollment.contract import EnrollmentGrant
     from vonk_control.pki import IssuedCertificate
     from vonk_control.settings import Settings
 

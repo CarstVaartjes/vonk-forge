@@ -17,20 +17,18 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
-from .. import job_states
-from ..job_documents import (
-    AvailabilityJobPayload,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import AvailabilityJobPayload
 from ..lifecycle.core import STOP_BUDGET
 from ..model_cache import ModelCacheError
 from ..models import (
     Job,
 )
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.contract import AvailabilityOperationFailure
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_json import Residue
+from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     OPERATION_KIND,

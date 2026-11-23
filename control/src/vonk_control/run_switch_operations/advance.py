@@ -17,13 +17,13 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
-from .. import job_states
 from ..admission_locking import (
     admission_attempts,
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import disposition, is_definite
+from ..jobs import states as job_states
 from ..lifecycle.evidence import BookkeepingReason
 from ..lifecycle.run_switch import (
     KEEP as _KEEP_REASON,
@@ -40,15 +40,13 @@ from ..lifecycle.types import (
 from ..models import (
     Job,
 )
-from ..operation_blockers import BlockingOperation, make_blocker
+from ..operations.blockers import BlockingOperation, make_blocker
 from ..persisted_waits import schedule_wait, wait_due
 from ..profile_capacity import (
     accepted_profile_runtime_image,
 )
-from ..recipe_build_cancellation import (
-    needs_container_build,
-)
 from ..recipe_builds import RecipeBuildAdmissionBusy
+from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_operations import (
     RecipeOperationView,
 )
@@ -67,7 +65,7 @@ from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _OBSERVING,

@@ -28,7 +28,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     build_production_fleet_profile_service,
 )
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
@@ -41,7 +41,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .profile_stop_readmission_support import start_on_released_gang

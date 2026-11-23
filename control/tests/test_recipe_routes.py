@@ -33,8 +33,11 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
-from vonk_control.job_documents import RecipeStartParent
-from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.gateway.route_runtime import (
+    AtomicRouteBundlePublisher,
+)
+from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -62,9 +65,6 @@ from vonk_control.recipe_routes import (
     RecipeRouteOwnerBusy,
     RecipeRouteService,
     RecipeRouteSuperseded,
-)
-from vonk_control.route_runtime import (
-    AtomicRouteBundlePublisher,
 )
 from vonk_forge_contracts import (
     EndpointAlias,
@@ -1311,7 +1311,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     routes = json.loads((directory / "routes.json").read_text())
     assert routes["generation"] == generation.generation
     assert routes["state"] == "published"
-    from vonk_control.route_runtime import verify_active_route_bundle
+    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     verified = verify_active_route_bundle(tmp_path / "live")
     assert not isinstance(verified, UnknownError)
@@ -1821,7 +1821,7 @@ def _recipe_owner_id(session) -> str:
 def test_postgres_current_publication_withdrawal_and_owner_recovery(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
-    from vonk_control.route_runtime import verify_active_route_bundle
+    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     from .test_route_runtime import _supervisor
 
@@ -2239,7 +2239,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
 ) -> None:
     from copy import deepcopy
 
-    from vonk_control.route_runtime import verify_active_route_bundle
+    from vonk_control.gateway.route_runtime import verify_active_route_bundle
 
     clock = MutableClock(NOW)
     base, _publisher, _applied, first = setup(tmp_path / "database", clock=clock)

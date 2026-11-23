@@ -30,16 +30,16 @@ from vonk_agent_protocol import (
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..content_identity import recipe_content_membership
-from ..library_assessment import unassessed
-from ..library_contract import (
+from ..library.assessment import unassessed
+from ..library.contract import (
     LibraryCacheState,
     LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
-from ..library_image_presence import ImageKey, ImagePresence
+from ..library.image_presence import ImageKey, ImagePresence
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache.errors import ModelCacheError
 from ..model_cache.lineage import verifies_model
@@ -61,8 +61,8 @@ from ..models import (
 from ..operator_receipt_contract import ReceiptOwner
 from ..persisted_waits import read_wait
 from ..revision_images import revision_images
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState, RecipeBuildState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState, RecipeBuildState
 from .common import (
     _ACTIVE_RUN_STATES,
     _RUN_STATES,

@@ -1,9 +1,9 @@
-vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+vi.mock("../components/ui/metrics-chart", () => ({ MetricsChart: () => null }));
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { OverviewPage } from "./overview";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
-import { ToastProvider } from "../components/toast";
+import { ToastProvider } from "../components/ui/toast";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { spark } from "../test-fixtures/fleet-spark";
 

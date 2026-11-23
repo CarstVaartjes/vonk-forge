@@ -17,16 +17,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from vonk_control.gateway.route_runtime import (
+    ActivationMarker,
+    AtomicRouteBundlePublisher,
+)
 from vonk_control.models import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteService,
-)
-from vonk_control.route_runtime import (
-    ActivationMarker,
-    AtomicRouteBundlePublisher,
 )
 
 from .observed_actions import observe_action
@@ -592,8 +592,8 @@ def test_postgres_stale_executor_is_fenced_before_first_activation(
 
 def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
     from vonk_agent_protocol import RoutePublicationState, RunState
+    from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
     from vonk_control.models import RecipeRun
-    from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 
     from .observed_actions import observe_action
 

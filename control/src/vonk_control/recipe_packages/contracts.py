@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import CONTRACT_MAJOR
 
-from ..catalog_sync_contract import ManagedCatalogSyncProblem
+from ..catalog.sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")

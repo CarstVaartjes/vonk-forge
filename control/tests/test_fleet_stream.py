@@ -54,7 +54,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.passwords import hash_password
-from vonk_control.telemetry import (
+from vonk_control.telemetry.samples import (
     TelemetryRepository,
     TelemetrySampleView,
 )

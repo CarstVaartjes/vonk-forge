@@ -1,6 +1,6 @@
 """Portable cache-index recovery without catalog or container prerequisites."""
 
-from vonk_control.library_image_presence import ImagePresenceIndex
+from vonk_control.library.image_presence import ImagePresenceIndex
 
 
 def test_unreadable_image_recovers_after_refresh_without_reprobing_healthy_image():

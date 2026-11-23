@@ -970,7 +970,7 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
     let hooks = repository.join("rust/crates/vonk-agent-helper/src/package_hooks");
     for entry in fs::read_dir(&hooks).unwrap() {
         let source = entry.unwrap().path();
-        if source.file_name().is_some_and(|name| name == "tests.rs") {
+        if source.is_dir() || source.file_name().is_some_and(|name| name == "tests.rs") {
             continue;
         }
         for (root, name) in

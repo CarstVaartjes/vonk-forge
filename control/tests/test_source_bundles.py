@@ -260,7 +260,7 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog.service import CatalogService
     from vonk_control.models import Base, RecipeSourceBundle
 
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})

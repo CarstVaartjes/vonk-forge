@@ -24,12 +24,12 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
     ModelCacheObjectSource,
 )
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_cache import (
     _CHUNK_BYTES,
     ArtifactSetManifest,
@@ -66,10 +66,10 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
     RecipeBuild,
 )
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operations.item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
 
@@ -1860,7 +1860,8 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
-    from vonk_control import operation_api, operation_contract
+    from vonk_control import operation_api
+    from vonk_control.operations import contract as operation_contract
 
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()

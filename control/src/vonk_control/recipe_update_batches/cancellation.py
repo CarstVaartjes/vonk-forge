@@ -12,8 +12,8 @@ from vonk_agent_protocol import (
     LifecycleState,
 )
 
-from .. import job_states
 from ..categorized_errors import InvalidValue, MissingRecord
+from ..jobs import states as job_states
 from ..logging import redact_text
 from ..models import Job
 from ..persisted_waits import schedule_wait

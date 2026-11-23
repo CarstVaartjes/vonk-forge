@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
-from ..enrollment_contract import (
+from ..enrollment.contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
@@ -31,8 +31,13 @@ from ..fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
 )
+from ..metrics.prometheus_api import PrometheusReader, install_metrics_routes
 from ..models import RecipeRun, RunNode
-from ..observation_transfer import (
+from ..observation.platform_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
+from ..observation.transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
     observation_openapi,
@@ -40,14 +45,6 @@ from ..observation_transfer import (
 )
 from ..operation_api import bounded_error_responses
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
-from ..platform_observation_errors import (
-    ObservationCaptureUnavailable,
-    observation_capture_unavailable_response,
-)
-from ..prometheus_api import (
-    PrometheusReader,
-    install_metrics_routes,
-)
 from ..run_states import ENDED_RUN_STATES
 from .contracts import (
     _SELECTOR_PATTERN,
@@ -81,7 +78,7 @@ def install_operator_projection_routes(
     module never falls back to SSH or synthetic values.
     """
 
-    from ..library_api import install_library_routes
+    from ..library.api import install_library_routes
     from ..operation_api import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(FLEET_OPERATION_IDS)

@@ -5,10 +5,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_control.metrics import MetricsRegistry
+from vonk_control.metrics.registry import MetricsRegistry
 from vonk_control.storage_demands import StorageDemands
-from vonk_control.worker import Worker
-from vonk_control.worker_memory import (
+from vonk_control.worker.loop import Worker
+from vonk_control.worker.memory import (
     LinuxProcessProbe,
     ProcessReading,
     WorkerMemoryMonitor,
@@ -16,7 +16,7 @@ from vonk_control.worker_memory import (
     worker_memory_report_path,
     worker_memory_trace_request_path,
 )
-from vonk_control.worker_memory_contract import (
+from vonk_control.worker.memory_contract import (
     WorkerMemoryCgroupKind,
     WorkerMemoryCgroupSize,
     WorkerMemoryComponent,
@@ -244,12 +244,12 @@ def test_metrics_export_bounded_worker_gauges_and_trace_growth(tmp_path) -> None
 def test_production_worker_reports_every_declared_component(tmp_path) -> None:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_control.jobs import JobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
+    from vonk_control.jobs.queue import JobService
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.models import Base
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.worker import assemble_production_worker
+    from vonk_control.worker.assembly import assemble_production_worker
 
     engine = create_engine(f"sqlite:///{tmp_path / 'w.sqlite'}")
     Base.metadata.create_all(engine)

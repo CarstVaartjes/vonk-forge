@@ -50,10 +50,14 @@ from .models import (
     Job,
     ModelCacheOperation,
 )
-from .operation_blockers import OperationBlocker, read_blockers
-from .operation_contract import OperationEvidenceDownload
-from .operation_item_contract import OperationItem, OperationResultFacts, operation_item
-from .stored_json import read_row_column
+from .operations.blockers import OperationBlocker, read_blockers
+from .operations.contract import OperationEvidenceDownload
+from .operations.item_contract import (
+    OperationItem,
+    OperationResultFacts,
+    operation_item,
+)
+from .stored.json_values import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 from .summary_cut import summary_cut
 
@@ -674,7 +678,7 @@ class FailureEvidenceService:
                 elif not (result.reason or result.summary) and job.status_reason:
                     result = result.model_copy(update={"reason": job.status_reason})
                 if result.diagnostics is None and not result.diagnostics_invalid:
-                    from .job_documents import AvailabilityJobPayload
+                    from .jobs.documents import AvailabilityJobPayload
                     from .lifecycle.run_switch import _stored_child
 
                     # A run-switch phase issues its Spark work through a child

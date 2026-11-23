@@ -33,13 +33,13 @@ from vonk_control.agent_jobs import (
     StaleAgentAttempt,
     _failure_result,
 )
-from vonk_control.inventory_items import inventory_items
+from vonk_control.inventory.items import inventory_items
 from vonk_control.models import AgentNode
 from vonk_control.recipe_operations.observation_helpers import (
     prepare_exact_recipe_run_observation_nodes,
 )
 from vonk_control.recovery_policy import FailureKind
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from ..runtime_identity_support import PACKAGED_RUNTIME_IDENTITY
 from ..test_recipe_operations import start_evidence

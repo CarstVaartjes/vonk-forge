@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import AdmissionLockKey, node_admission_key
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.distribution import (
     DistributionIntegrityError,
     DistributionService,

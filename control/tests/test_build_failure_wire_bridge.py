@@ -24,9 +24,11 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.availability_production import build_recipe_image_availability
-from vonk_control.inventory_items import runtime_value
-from vonk_control.inventory_repository import (
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

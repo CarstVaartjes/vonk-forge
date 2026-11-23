@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrandMark } from "../components/brand-mark";
+import { BrandMark } from "../components/ui/brand-mark";
 
 type LoginFailure = { status?: unknown };
 

@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, RootModel, ValidationError
 from vonk_agent_protocol.grant_requests import HostHelperGrantResponse
-from vonk_control.library_contract import (
+from vonk_control.library.contract import (
     FreshnessPolicy,
     LibraryFacetValues,
     LibraryFilterValues,
@@ -18,7 +18,7 @@ from vonk_control.library_contract import (
     ModelLibraryResponse,
 )
 from vonk_control.model_cache_contract import ModelCacheOperatorRequest
-from vonk_control.operation_contract import AvailabilityOperationFailure
+from vonk_control.operations.contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability_api import RecipeOperatorRequest
 from vonk_control.strict_json import (
     ControllerAPIRoute,

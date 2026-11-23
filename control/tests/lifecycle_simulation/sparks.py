@@ -36,7 +36,7 @@ from vonk_agent_protocol import (
     outcome_body,
 )
 from vonk_control.agent_jobs.retry import result_disposition
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

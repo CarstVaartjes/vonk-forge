@@ -21,8 +21,8 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
+from ..jobs import states as job_states
 from ..model_cache_contract import CacheManifest
 from ..models import ModelCacheSet
 from ..recipe_action_plans import StopPlan
@@ -31,7 +31,7 @@ from ..storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 if TYPE_CHECKING:
     from .evidence import _Item

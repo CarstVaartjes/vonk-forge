@@ -25,20 +25,20 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_assessment import LibraryAssessment, unavailable
-from vonk_control.library_contract import (
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.assessment import LibraryAssessment, unavailable
+from vonk_control.library.contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
     RecipeReadiness,
     RecipeReadinessCheck,
 )
-from vonk_control.library_image_presence import ImagePresenceIndex
-from vonk_control.library_projection import LibraryProjection
-from vonk_control.library_storage_observation import (
+from vonk_control.library.image_presence import ImagePresenceIndex
+from vonk_control.library.storage_observation import (
     STORAGE_OBSERVATION_DEADLINE_SECONDS,
     LibraryStorageObserver,
 )
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.model_cache_contract import (
     CacheOperationKind,
@@ -78,7 +78,7 @@ def _expire_image_wait(monkeypatch, clock: PassClock, entered: threading.Event):
         clock.advance(timeout)
         return wait(futures, timeout=0, return_when=return_when)
 
-    monkeypatch.setattr("vonk_control.library_image_presence.wait", expired)
+    monkeypatch.setattr("vonk_control.library.image_presence.wait", expired)
     return wait
 
 
@@ -261,7 +261,7 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
         assert listing.recipes[0].local.controller == "unknown"
     finally:
         release.set()
-    monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
+    monkeypatch.setattr("vonk_control.library.image_presence.wait", wait)
     # The answer arrives in the background; the next listing has it.
     deadline = time.monotonic() + 30
     state = "unknown"
@@ -290,7 +290,7 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "vonk_control.library_assessment.threading",
+        "vonk_control.library.assessment.threading",
         SimpleNamespace(
             Thread=_expiring_thread(frozen_pass_budgets, entered),
             Lock=threading.Lock,
@@ -370,7 +370,7 @@ def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "vonk_control.library_assessment.threading",
+        "vonk_control.library.assessment.threading",
         SimpleNamespace(
             Thread=FirstJoinExpires, Lock=OverrunEndsWhileWaited, Event=threading.Event
         ),
@@ -483,7 +483,7 @@ def test_image_presence_is_asked_once_for_concurrent_and_recent_readers(
         answer.state for answer in index.lookup(wanted, budget_seconds=0.05).values()
     } == {"unknown"}
     release.set()
-    monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
+    monkeypatch.setattr("vonk_control.library.image_presence.wait", wait)
     settled = index.lookup(wanted, budget_seconds=2)
     assert settled[("kept", 1)].state == "present"
     assert settled[("gone", 2)].state == "absent"
@@ -683,7 +683,7 @@ def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses(
         assert entered.wait(timeout=30)
         for _ in range(20):
             index.lookup({("blocked", 1)}, budget_seconds=0)
-        monkeypatch.setattr("vonk_control.library_image_presence.wait", wait)
+        monkeypatch.setattr("vonk_control.library.image_presence.wait", wait)
         observed = index.lookup({("independent", 1)}, budget_seconds=1)
         assert observed[("independent", 1)].state == "present"
         assert calls.count("blocked") == 1
@@ -739,7 +739,7 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "vonk_control.library_assessment.threading",
+        "vonk_control.library.assessment.threading",
         SimpleNamespace(Thread=worker, Lock=threading.Lock, Event=threading.Event),
     )
     assessment = LibraryAssessment(
@@ -1000,7 +1000,7 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
 ):
     """The DB batch owns list/filter/detail state even when byte observations disagree."""
     from vonk_agent_protocol import LifecycleState
-    from vonk_control.library_contract import LibraryCacheState
+    from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache import ModelCacheService
 
     from .removal_settle import advance_until_ended, release_ended_gates
@@ -1076,9 +1076,9 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
     references,
 ):
     """One bad manifest must not turn unrelated cached rows into unknown state."""
-    from vonk_control.library_contract import LibraryCacheState
+    from vonk_control.library.contract import LibraryCacheState
     from vonk_control.model_cache_contract import CacheManifest
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     projection, sessions, *_ = assessed_library
     healthy = projection.models().models[0]

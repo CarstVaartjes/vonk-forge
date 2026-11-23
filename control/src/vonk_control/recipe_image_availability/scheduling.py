@@ -17,13 +17,14 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
 )
 from ..categorized_errors import InvalidValue
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilitySupersession,
     AvailabilityUnknownEnd,
@@ -33,16 +34,14 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
-from ..operation_contract import (
+from ..operations.blockers import make_blocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
 from ..persisted_waits import schedule_wait
 from ..stall_window import Verdict, Wait, progress_verdict
-from ..stored_json import Residue
+from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     _CLAIM_SCAN_WINDOW,

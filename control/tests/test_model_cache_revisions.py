@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_collection import CatalogRevisionCollector
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_collection import CatalogRevisionCollector
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.errors import ModelCacheConflictUnknown

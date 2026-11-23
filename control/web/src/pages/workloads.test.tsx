@@ -1,12 +1,12 @@
-vi.mock("../components/metrics-chart", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../components/metrics-chart")>()),
+vi.mock("../components/ui/metrics-chart", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../components/ui/metrics-chart")>()),
   MetricsChart: () => null,
 }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { WorkloadsPage } from "./workloads";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
-import { ToastProvider } from "../components/toast";
+import { ToastProvider } from "../components/ui/toast";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { spark } from "../test-fixtures/fleet-spark";
 

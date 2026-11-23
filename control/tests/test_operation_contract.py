@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.models import AgentOperation, Base, RecipeRun
-from vonk_control.operation_contract import (
+from vonk_control.operations.contract import (
     OperationMemberProgress,
     OperationPhase,
     OperationProgress,
@@ -27,7 +27,7 @@ from vonk_control.operation_contract import (
     sanitize_failure_evidence,
     validate_progress_update,
 )
-from vonk_control.operation_summary import operation_summary, workload_aliases
+from vonk_control.operations.summary import operation_summary, workload_aliases
 
 
 @pytest.mark.parametrize("phase", list(OperationPhase))

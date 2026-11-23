@@ -11,14 +11,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncProblem,
     ManagedCatalogSyncRequest,
@@ -104,7 +104,7 @@ def test_sync_withdraws_pins_only_after_a_complete_authoritative_observation(par
 
 
 def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monkeypatch):
-    import vonk_control.catalog_entities as entities
+    from vonk_control.catalog import entities
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

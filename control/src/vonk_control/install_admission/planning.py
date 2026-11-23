@@ -32,9 +32,9 @@ from ..disk_reservations import (
     outstanding_disk_charges,
     runtime_images_named_on_nodes,
 )
-from ..gpu_health import gpu_health_reason
-from ..inventory_items import inventory_items
-from ..inventory_repository import (
+from ..gpu.health import gpu_health_reason
+from ..inventory.items import inventory_items
+from ..inventory.repository import (
     INVENTORY_MAX_AGE_SECONDS,
     InventoryRepository,
     InventorySnapshotView,
@@ -52,14 +52,14 @@ from ..recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from ..resource_planning import installation_disk_requirement
-from ..runtime_preflight import (
+from ..runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,
     request_digest,
 )
 from ..spark_disk import spark_free_bytes
-from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from ..topology import Placement, TopologyError, validate_topology
 from .contracts import (
     AGENT_UPGRADE_REQUIRED_DETAIL,

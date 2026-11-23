@@ -2,7 +2,7 @@
 
 ``Job`` is the base every kind shares: the parent row of a recipe order, a
 Run/Switch operation, an upgrade rollout, and the executor jobs of
-:class:`~vonk_control.jobs.JobService` (``reconcile``, distribution children,
+:class:`~vonk_control.jobs.queue.JobService` (``reconcile``, distribution children,
 runtime preflight, recovery stops).  The kinds that have their own adapter
 (:mod:`.run_switch`, :mod:`.agent_operation`'s parent aggregate, ...) decide their
 own state; this module owns what is generic and is the **only** writer of the
@@ -59,8 +59,8 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
 )
 
-from .. import job_states
 from ..agent_operation_facts import aware
+from ..jobs import states as job_states
 from ..logging import redact_text
 from ..models import Job, JobAttempt
 from ..persisted_waits import initialize_wait, lifecycle_wait, wait_due

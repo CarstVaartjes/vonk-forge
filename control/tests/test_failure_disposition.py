@@ -467,7 +467,7 @@ def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -
 def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
     from pathlib import Path
 
-    from .added_line_guards import rust_test_lines
+    from .added_line_guards.scans import rust_test_lines
     from .deterministic_retries import scan_rust_dispositions
 
     root = Path(__file__).resolve().parents[2]

@@ -26,8 +26,8 @@ from pathlib import Path, PurePosixPath
 
 import httpx2
 import pytest
-from vonk_control import recipe_packages
-from vonk_control.recipe_packages import PACKAGE_REPOSITORY, RecipePackageClient
+from vonk_control.recipe_packages import client as recipe_packages
+from vonk_control.recipe_packages.client import PACKAGE_REPOSITORY, RecipePackageClient
 from vonk_control.recipe_release import (
     RELEASE_BUNDLE,
     RELEASE_CHECKSUMS,

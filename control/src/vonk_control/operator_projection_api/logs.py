@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .. import agent_operation_states
-from ..catalog_revision_collection import GRACE
+from ..catalog.revision_collection import GRACE
 from ..failure_evidence import (
     AttemptPhase,
     FailedAttempt,
@@ -33,7 +33,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
-from ..operation_item_contract import OperationResultFacts
+from ..operations.item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 
 #: How far back the log projection narrates failed agent attempts by default:

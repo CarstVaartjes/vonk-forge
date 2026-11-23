@@ -17,7 +17,7 @@ from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
-from vonk_control.runtime_writable_paths import (
+from vonk_control.runtime.writable_paths import (
     effective_environment,
     environment,
     telemetry_contract,

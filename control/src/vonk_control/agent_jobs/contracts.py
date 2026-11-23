@@ -21,8 +21,9 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..content_identity import same_build_units
+from ..jobs import states as job_states
 from ..lifecycle.agent_operation import AGGREGATE_FINAL_STATES
 from ..lifecycle.evidence import Residue
 from ..models import AgentOperation as StoredOperation

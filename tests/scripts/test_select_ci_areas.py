@@ -72,7 +72,7 @@ def test_transitive_or_unknown_inputs_run_all_integrations(
     [
         "control/Dockerfile",
         "control/src/vonk_control/runtime_init.py",
-        "control/src/vonk_control/runtime_asset_contract.py",
+        "control/src/vonk_control/runtime/asset_contract.py",
         "control/src/vonk_control/api_preexec.py",
         "scripts/render-dev-compose",
     ],

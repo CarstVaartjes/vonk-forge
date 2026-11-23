@@ -34,7 +34,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeSetting, RecipeSettings
 
-from ..catalog_revision_contract import (
+from ..catalog.revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
     BuildSecurityProjection,
@@ -42,8 +42,8 @@ from ..catalog_revision_contract import (
 )
 from ..categorized_errors import InvalidType
 from ..categorized_faults import security_reason
-from ..inventory_items import inventory_items
-from ..inventory_repository import InventorySnapshotView
+from ..inventory.items import inventory_items
+from ..inventory.repository import InventorySnapshotView
 from ..memory_reservations import memory_reservations, memory_reserve_floor
 from ..models import (
     AgentNode,
@@ -57,7 +57,7 @@ from ..prebuilt_images import PrebuiltDecision
 from ..profile_capacity import profile_build_memory_claims
 from ..recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..resource_planning import memory_capacity_snapshot
-from ..runtime_adapters import (
+from ..runtime.adapters import (
     RuntimeAdapter,
     RuntimeAdapterError,
     resolve_runtime_adapter,
@@ -68,8 +68,8 @@ from ..source_bundles import (
     generate_source_bundle,
 )
 from ..source_policy import SourcePolicyReport, inspect_build_source_policy
-from ..stored_json import read_row_column
-from ..stored_states import RecipeBuildState
+from ..stored.json_values import read_row_column
+from ..stored.states import RecipeBuildState
 
 """Durable source-build planning and exact OCI result recording."""
 

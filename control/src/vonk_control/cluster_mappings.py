@@ -18,8 +18,8 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
-from .inventory_items import runtime_value
-from .inventory_repository import newest_snapshot_ids
+from .inventory.items import runtime_value
+from .inventory.repository import newest_snapshot_ids
 from .mapping_parameters import MappingParameters
 from .models import (
     AgentNode,
@@ -34,7 +34,7 @@ from .recipe_runtime_specs import (
     recipe_topology,
     split_option_choices,
 )
-from .stored_states import CatalogRevisionState, ClusterMappingState
+from .stored.states import CatalogRevisionState, ClusterMappingState
 from .strict_json import StrictModel
 from .topology import Placement, TopologyError, validate_topology
 

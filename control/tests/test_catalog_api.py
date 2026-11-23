@@ -5,12 +5,12 @@ from fastapi import Depends, FastAPI
 from pydantic import ValidationError
 from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import Actor
-from vonk_control.catalog_api import (
+from vonk_control.catalog.api import (
     ManagedCatalogSyncProblem,
     ManagedCatalogSyncResponse,
     install_catalog_routes,
 )
-from vonk_control.catalog_sync_contract import CatalogSyncTrigger
+from vonk_control.catalog.sync_contract import CatalogSyncTrigger
 
 
 def _administrator() -> Actor:
@@ -51,7 +51,7 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
     from datetime import datetime
 
     from fastapi.testclient import TestClient
-    from vonk_control.catalog_sync import CatalogSyncView
+    from vonk_control.catalog.sync import CatalogSyncView
 
     from cluster_profiles.generated_control.models.managed_catalog_sync_response import (
         ManagedCatalogSyncResponse as ClientSyncResponse,

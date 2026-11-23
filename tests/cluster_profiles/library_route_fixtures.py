@@ -169,7 +169,7 @@ def _recipe_projection(
         document.models[0].model.publisher = model_publisher
         document.models[0].model.slug = model_slug
     models = [f"{item.model.publisher}/{item.model.slug}" for item in document.models]
-    from vonk_control.catalog_entities import recipe_document_projection
+    from vonk_control.catalog.entities import recipe_document_projection
     from vonk_forge_contracts import read_recipe
 
     from cluster_profiles.generated_control.models.recipe_revision_projection import (

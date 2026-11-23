@@ -15,8 +15,8 @@ from vonk_agent_protocol.route_activation import (
     ActivationMarker,
     SupervisorPhase,
 )
-from vonk_control.litellm import render_empty_config
-from vonk_control.route_runtime import (
+from vonk_control.gateway.litellm import render_empty_config
+from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,

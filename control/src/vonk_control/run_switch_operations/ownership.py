@@ -15,8 +15,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
-from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
+from ..jobs import states as job_states
 from ..models import (
     AgentNode,
     Job,
@@ -26,7 +26,7 @@ from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .errors import RunSwitchRetryLater, _RunSwitchBuildParentChanged
 from .observation_helpers import _phase_request_key
 from .planning_helpers import _run_switch_payload, _stored_job_plan

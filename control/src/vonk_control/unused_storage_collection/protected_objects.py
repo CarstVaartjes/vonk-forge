@@ -10,7 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition
 
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog.revision_contract import read_catalog_document
 from ..model_cache_contract import CacheManifest
 from ..models import CatalogDocumentRevision, ModelCacheSet
 from ..strict_json import read_stored_model

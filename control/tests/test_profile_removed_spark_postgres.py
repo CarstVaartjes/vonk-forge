@@ -13,8 +13,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.inventory_items import runtime_value
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

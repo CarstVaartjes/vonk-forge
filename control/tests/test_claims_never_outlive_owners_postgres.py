@@ -43,8 +43,8 @@ from vonk_control.artifact_lifecycle import (
     reserve_removal,
 )
 from vonk_control.attempt_residues import AttemptResidueReconciler
-from vonk_control.catalog_sync import CatalogSyncUnsettled
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync import CatalogSyncUnsettled
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )

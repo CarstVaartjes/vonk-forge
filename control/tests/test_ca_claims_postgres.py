@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.db import build_engine
+from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
     AgentEnrollment,

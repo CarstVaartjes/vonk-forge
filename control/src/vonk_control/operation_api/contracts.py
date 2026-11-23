@@ -26,15 +26,15 @@ from ..fleet_profile_contract import (
     FleetProfileApplicationCancellationView,
     FleetProfileEndpointsView,
 )
-from ..job_operator_receipts import JobOperatorReceipt
+from ..jobs.operator_receipts import JobOperatorReceipt
 from ..model_cache_contract import ModelCacheCancellation
-from ..operation_blockers import OperationBlocker
-from ..operation_contract import (
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import (
     OperationEvidenceDownload,
     OperationFailure,
     OperationRecovery,
 )
-from ..operation_item_contract import OperationOwnerReference, OperationRow
+from ..operations.item_contract import OperationOwnerReference, OperationRow
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
 from .constants import DIGEST_PATTERN, NODE_PATTERN, BoundedIdentifier, NodeIdentifier

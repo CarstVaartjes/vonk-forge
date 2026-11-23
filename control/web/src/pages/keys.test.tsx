@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { KeysPage } from "./keys";
-import { ToastProvider } from "../components/toast";
+import { ToastProvider } from "../components/ui/toast";
 import type { ControlApi } from "../api/types";
 
 const key = { name: "laptop", models: [], created_at: null, expires_at: null, last_used_at: null };

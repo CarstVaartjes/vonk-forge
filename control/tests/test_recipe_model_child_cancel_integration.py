@@ -69,7 +69,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
-from vonk_control.job_documents import AvailabilityJobPayload, AvailabilityModelChild
+from vonk_control.jobs.documents import AvailabilityJobPayload, AvailabilityModelChild
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Job
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService

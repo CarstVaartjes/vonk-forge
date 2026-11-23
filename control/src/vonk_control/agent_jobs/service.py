@@ -30,11 +30,11 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentResultPayload, ArtifactDistributionResult
 
 from .. import agent_operation_states
-from ..agent_job_contract import ClaimFacts
 from ..agent_operation_facts import aware as _aware
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..categorized_errors import InvalidType, InvalidValue
+from ..jobs.agent_contract import ClaimFacts
 from ..lifecycle import (
     Reconciler,
     Reported,
@@ -47,8 +47,8 @@ from ..models import (
     Job,
 )
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import validate_progress_update
-from ..operation_progress import progress_document, sample_progress, stored_progress
+from ..operations.contract import validate_progress_update
+from ..operations.progress import progress_document, sample_progress, stored_progress
 from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
 from ..settings import DATABASE_WAIT_BUDGETS

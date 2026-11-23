@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_control import catalog_revision_collection
+from vonk_control.catalog import revision_collection as catalog_revision_collection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base
 from vonk_control.spark_store_retention import store_retention_request

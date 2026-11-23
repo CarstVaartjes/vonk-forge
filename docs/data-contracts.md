@@ -27,7 +27,7 @@ that no longer occurs fails as stale.
 | CLI release projection | `installer_release.py` | `src/cluster_profiles/schemas/cli-release-projection.schema.json` | none | CLI self-updater |
 | Installer release manifest | `installer_release.py` | `generated.rs`; `schemas/install-release-manifest.schema.json` | none | publisher scripts |
 | Controller API requests and responses | `control/src/vonk_control/*_contract.py` and the registered API modules below | none (the agent does not call these) | `control/web/src/api/generated.d.ts` from `control/openapi.json` | `src/cluster_profiles/generated_control` (CLI client) |
-| Prometheus metric catalogue, series with summaries, and alert attention | `control/src/vonk_control/metrics_contract.py`; external Prometheus replies in `prometheus_api.py` | none | generated Controller API types | generated Controller client |
+| Prometheus metric catalogue, series with summaries, and alert attention | `control/src/vonk_control/metrics/contract.py`; external Prometheus replies in `metrics/prometheus_api.py` | none | generated Controller API types | generated Controller client |
 | Lifecycle and reason-code vocabulary | `lifecycle_vocabulary.py`, `reason_codes/`, `state_machines.py` | `generated.rs` | `control/web/src/api/vocabulary.generated.ts` | the CLI words in `src/cluster_profiles/cli_states_generated.py` |
 | CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/generate-python-vocabulary`) |
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
@@ -94,34 +94,34 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 | `control/web/src/api/types.ts` | `LibraryViewSnapshot` | UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas |
 | `control/web/src/auth.tsx` | `AuthContextValue` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/auth.tsx` | `BrowserAuthApi` | method-signature interface over the generated schema types (client seam for tests); declares no data fields |
-| `control/web/src/components/admin-menu.tsx` | `AdminMenuProps` | component props: UI-only, not API data |
-| `control/web/src/components/app-shell.tsx` | `AppShellProps` | component props: UI-only, not API data |
-| `control/web/src/components/app-shell.tsx` | `Operator` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-hash.ts` | `ArtifactHashProgress` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.ts` | `HashWorker` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.ts` | `WorkerMessage` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
-| `control/web/src/components/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
-| `control/web/src/components/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
-| `control/web/src/components/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
-| `control/web/src/components/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
-| `control/web/src/components/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
-| `control/web/src/components/library-workcell.tsx` | `LibraryWorkcellFilters` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/sort-header.tsx` | `Sort` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/toast.tsx` | `ToastItem` | UI-only state or form draft; never serialized to the API |
-| `control/web/src/components/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/admin-menu.tsx` | `AdminMenuProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/app-shell.tsx` | `AppShellProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/app-shell.tsx` | `Operator` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `ArtifactHashProgress` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `HashWorker` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.ts` | `WorkerMessage` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `HashRequest` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-hash.worker.ts` | `WorkerScope` | browser-local upload hashing progress and worker messages; not API data |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `ActiveRun` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `CancelRecovery` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `InputPayload` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/artifact-job/artifact-job-workspace.tsx` | `RecipeParameter` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/ui/confirm-dialog.tsx` | `ConfirmDialogProps` | component props: UI-only, not API data |
+| `control/web/src/components/ui/empty-state.tsx` | `EmptyStateProps` | component props: UI-only, not API data |
+| `control/web/src/components/library/library-availability-feedback.tsx` | `AvailabilityFailure` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-availability-progress.tsx` | `AvailabilityProgress` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-models-view.tsx` | `LibraryModelsViewProps` | component props: UI-only, not API data |
+| `control/web/src/components/library/library-profiles-view.tsx` | `AssignmentDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profiles-view.tsx` | `FleetEntry` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-profiles-view.tsx` | `PendingProfileLoad` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-profiles-view.tsx` | `ProfileDraft` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/library/library-recipe-files.ts` | `SelectedRecipeFiles` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-technical-details.tsx` | `TechnicalValue` | UI-only view model parsed defensively from an untyped error or progress payload; not an API document |
+| `control/web/src/components/library/library-workcell.tsx` | `LibraryRecipeRecord` | UI-only view model derived from generated API types for one screen; not an API document |
+| `control/web/src/components/library/library-workcell.tsx` | `LibraryWorkcellFilters` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/sort-header.tsx` | `Sort` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/toast.tsx` | `ToastItem` | UI-only state or form draft; never serialized to the API |
+| `control/web/src/components/ui/toast.tsx` | `Toasts` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/fleet-stream-state.ts` | `FleetStreamState` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/hooks/use-operation-observer.ts` | `Options` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/pages/activity.tsx` | `ActivitySummary` | UI-only view model derived from generated API types for one screen; not an API document |
@@ -170,7 +170,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
 | `control/src/vonk_control/agent_api/common.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
 | `control/src/vonk_control/agent_upgrade_contract.py` | controller-contract | 5 | Package, request intent, plan and result documents of an agent upgrade rollout. |
-| `control/src/vonk_control/agent_job_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
+| `control/src/vonk_control/jobs/agent_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
 | `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
 | `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
 | `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
@@ -180,16 +180,16 @@ module defines its own.
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
 | `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 1 | Exact accepted CA issuance binding and the typed refusal reason. |
 | `control/src/vonk_control/cache_removal_review.py` | declared | 6 | Canonical review contract shared by cache-removal owners and clients. |
-| `control/src/vonk_control/catalog_api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
-| `control/src/vonk_control/catalog_revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
-| `control/src/vonk_control/catalog_sync_contract.py` | controller-contract | 5 | Canonical sync request identity, trigger and reviewed content plus durable synchronization evidence shared with the API. |
+| `control/src/vonk_control/catalog/api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
+| `control/src/vonk_control/catalog/revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
+| `control/src/vonk_control/catalog/sync_contract.py` | controller-contract | 5 | Canonical sync request identity, trigger and reviewed content plus durable synchronization evidence shared with the API. |
 | `control/src/vonk_control/cli_update_contract.py` | controller-contract | 1 | Authenticated CLI compatibility observation; its canonical schema is generated into the installed updater package. |
 | `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
 | `control/src/vonk_control/distribution_assignment.py` | declared | 1 | The Controller's record of one node's artifact distribution grant. |
 | `control/src/vonk_control/endpoint_contract.py` | controller-contract | 1 | Secret-free projection of one published recipe endpoint. |
-| `control/src/vonk_control/enrollment_contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
+| `control/src/vonk_control/enrollment/contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
 | `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
@@ -202,26 +202,26 @@ module defines its own.
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
-| `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
+| `control/src/vonk_control/gateway/keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
-| `control/src/vonk_control/job_documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
-| `control/src/vonk_control/library_contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
+| `control/src/vonk_control/jobs/documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
+| `control/src/vonk_control/library/contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight.py` | declared | 1 | Durable, recipe-bound admission probes without replaying expensive phases. |
-| `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
+| `control/src/vonk_control/gateway/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache/input_contracts.py` | controller-contract | 3 | Typed catalog artifact locators and explicit fixture ingress. |
 | `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
-| `control/src/vonk_control/observation_transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
+| `control/src/vonk_control/observation/transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
 | `control/src/vonk_control/operation_api/contracts.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
-| `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
-| `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
-| `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
+| `control/src/vonk_control/operations/blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
+| `control/src/vonk_control/operations/contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
+| `control/src/vonk_control/operations/item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api/contracts.py` | declared | 10 | Operator projection api: contracts. |
-| `control/src/vonk_control/platform_observation.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
+| `control/src/vonk_control/observation/platform.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
-| `control/src/vonk_control/recipe_build_cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
+| `control/src/vonk_control/recipe_builds/cancellation.py` | declared | 1 | The lifecycle job owns cancellation of an exact build attempt. |
 | `control/src/vonk_control/recipe_execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
 | `control/src/vonk_control/recipe_image_availability_api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
 | `control/src/vonk_control/recipe_image_availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
@@ -235,7 +235,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
-| `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
+| `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |
 | `control/src/vonk_control/run_switch_contract/plans.py` | controller-contract | 2 | Run switch contract: plans. |
@@ -246,12 +246,12 @@ module defines its own.
 | `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
 | `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
-| `control/src/vonk_control/runtime_spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
-| `control/src/vonk_control/stored_documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
+| `control/src/vonk_control/runtime/spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
+| `control/src/vonk_control/stored/documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |
 | `control/src/vonk_control/strict_json.py` | declared | 1 | Controller JSON models and their field-presence serialization policy. |
-| `control/src/vonk_control/worker_memory_contract.py` | controller-contract | 5 | Typed memory report the worker publishes and the Controller API exports. |
+| `control/src/vonk_control/worker/memory_contract.py` | controller-contract | 5 | Typed memory report the worker publishes and the Controller API exports. |
 
-`stored_json.py` and `stored_columns.py` hold no wire models: they bind every JSON column of `models.py` to its typed contract (36 of 36), and `tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
+`stored/json_values.py` and `stored/columns.py` hold no wire models: they bind every JSON column of `models.py` to its typed contract (36 of 36), and `tests/test_json_column_contracts.py` fails on an untyped level. The only open values are the declared `ExternalPassthrough` annotations (engine argument values, generic job queue documents), each with a reason.
 
 ## Counts
 
@@ -312,7 +312,7 @@ Native renewal acceptance uses `NativeRenewalEvidence` and `RenewalHelperManifes
 from the registered `vonk_agent_protocol.agent_state` module. The source journal
 is persisted before rotation; an absent replacement is an observation miss.
 
-Gateway mutation recovery uses `gateway_keys.GatewayMutationReceipt` to bind
+Gateway mutation recovery uses `gateway.keys.GatewayMutationReceipt` to bind
 a request identity and durable completion to the exact `_KeyGenerateRequest`.
 Completed receipts remain independent of alias history; a fresh request ID
 creates a new secret and a repeated ID reuses its original receipt. The proposed alias, scope, lifetime, and secret are persisted before
@@ -327,9 +327,9 @@ Malformed records are misses; current requests replace them before effects.
 `OperatorActionName.STOP` and `OperatorActionName.RETRY` choices for stop and
 recovery follow-ups after recipe route withdrawal.
 
-`control/src/vonk_control/runtime_asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
+`control/src/vonk_control/runtime/asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
 
-`job_documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.
+`jobs.documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.
 
 The Activity observation contracts expose `continuation_unavailable` separately
 from a completed page, and `observation_unavailable` for detail facts that do

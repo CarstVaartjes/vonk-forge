@@ -50,7 +50,7 @@ from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.bounded_json import require_mapping, require_sequence
-from vonk_control.catalog_entities import _digest
+from vonk_control.catalog.entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
@@ -58,6 +58,13 @@ from vonk_control.execution_plan_service import (
 )
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
+from vonk_control.gateway.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.gateway.route_runtime import (
+    RECIPE_ROUTE_AUTHORITY_ID,
+    AtomicRouteBundlePublisher,
+    FileSupervisorAcknowledger,
+    verify_active_route_bundle,
+)
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -73,13 +80,12 @@ from vonk_control.install_admission import (
 from vonk_control.install_admission import (
     require_admissible as require_install_admissible,
 )
-from vonk_control.inventory_items import inventory_items
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import inventory_items
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.job_documents import RecipeStopParent
-from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -121,15 +127,9 @@ from vonk_control.recipe_routes import (
     RecipeRecoveryDeadlineError,
     RecipeRouteService,
 )
-from vonk_control.route_runtime import (
-    RECIPE_ROUTE_AUTHORITY_ID,
-    AtomicRouteBundlePublisher,
-    FileSupervisorAcknowledger,
-    verify_active_route_bundle,
-)
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,

@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.model_cache import ModelCacheService, model_artifact_cache
 from vonk_control.model_cache.artifacts import _unique_artifacts
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheSet

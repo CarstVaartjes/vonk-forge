@@ -157,7 +157,7 @@ Lock and ordering guards:
   contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
 - `fixed_tick_polls` (added-line mode `tick-polls`, in
-  `control/tests/added_line_guards.py`) refuses a test that calls
+  `control/tests/added_line_guards/`) refuses a test that calls
   `.tick()` in a fixed-count loop to poll a threaded model-cache outcome, or
   asserts that outcome after such a loop. Wait with `_drain`, `_drain_until` or
   `_wait_for`.

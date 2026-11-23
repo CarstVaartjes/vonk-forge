@@ -79,13 +79,13 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
-from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.enrollment.bootstrap import EnrollmentBootstrapConfig
+from vonk_control.enrollment.contract import EnrollmentGrant
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.inventory_items import runtime_value
+from vonk_control.inventory.items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -106,7 +106,7 @@ from vonk_control.models import (
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from vonk_control.telemetry import TelemetryRepository
+from vonk_control.telemetry.samples import TelemetryRepository
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
@@ -5059,7 +5059,7 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     )
     from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
     from vonk_control.fleet_projection import FleetProjection
-    from vonk_control.telemetry import TelemetryRepository
+    from vonk_control.telemetry.samples import TelemetryRepository
 
     from cluster_profiles.cli_render import render_payload
 
@@ -5144,7 +5144,7 @@ def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_sys
         TelemetrySample,
     )
     from vonk_control.fleet_projection import telemetry_point
-    from vonk_control.telemetry import TelemetryRepository
+    from vonk_control.telemetry.samples import TelemetryRepository
 
     client, services, _, clock = agent_system
     failed = TelemetrySample(

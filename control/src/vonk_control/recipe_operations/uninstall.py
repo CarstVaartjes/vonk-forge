@@ -36,7 +36,7 @@ from ..agent_operation_facts import aware
 from ..install_admission import (
     InstallAdmissionBusy,
 )
-from ..job_documents import controller_recipe_document
+from ..jobs.documents import controller_recipe_document
 from ..lifecycle.evidence import Residue
 from ..models import (
     InstallationNode,

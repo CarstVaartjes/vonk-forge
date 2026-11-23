@@ -22,7 +22,7 @@ from vonk_control.models import (
     ModelCacheSet,
     RecipeBuild,
 )
-from vonk_control.operation_blockers import OperationBlocker, StorageReliefEvidence
+from vonk_control.operations.blockers import OperationBlocker, StorageReliefEvidence
 from vonk_control.spark_store_retention import store_retention_request
 
 from .test_catalog_revision_collection import NODE, NOW, Catalog
@@ -188,7 +188,7 @@ def test_live_operation_protects_file_identity_without_a_matching_cache_owner(
         )
         expected = {file.sha256 for file in definition.files}
         assert expected
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
 
     world.job(
         RecipeStopParent(
@@ -233,7 +233,7 @@ def test_missing_model_dependency_defers_collection_instead_of_authorizing_parti
             .where(CatalogDocumentRevision.id == model_id)
             .values(document=document, content_digest=digest)
         )
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
 
     world.job(
         RecipeStopParent(

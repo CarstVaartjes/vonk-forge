@@ -29,16 +29,16 @@ from sqlalchemy import func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, AuthError, TokenCodec
-from vonk_control.catalog_api import install_catalog_routes
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.api import install_catalog_routes
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
     reviewed_catalog_content,
 )
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_contract import (
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.contract import (
     LibraryModelProjection,
     LibraryRecipeProjection,
     ModelDetailResponse,
@@ -467,7 +467,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     assert multi_model_detail_seen, "frozen corpus has no multi-Model Recipe detail"
     lap("recipe_details_validation")
 
-    from vonk_control.catalog_api import CATALOG_OPERATION_IDS
+    from vonk_control.catalog.api import CATALOG_OPERATION_IDS
 
     forbidden_paths = {
         "/api/catalog/entities",

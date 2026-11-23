@@ -26,7 +26,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_forge_contracts import RecipeDefinition
 from vonk_forge_contracts.recipe import RecipeTopology
 
-from ..catalog_revision_contract import RecipeRevisionProjection
+from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract import (
     MAX_PROFILE_WARNINGS,
     FleetProfileApplicationCancellationView,
@@ -51,7 +51,7 @@ from ..models import (
     FleetProfileSelection,
     InstallationNode,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,

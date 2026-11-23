@@ -13,7 +13,7 @@ from ..agent_contacts import last_seen as contact_last_seen
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
 )
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..models import AgentNode
 from ..strict_json import read_stored_model
 from .constants import _ONLINE_WINDOW

@@ -17,7 +17,7 @@ from vonk_agent_protocol import AgentOperation as WireOperation
 from vonk_agent_protocol import ReservationState, canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

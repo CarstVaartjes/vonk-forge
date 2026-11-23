@@ -22,7 +22,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileView,
 )
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,

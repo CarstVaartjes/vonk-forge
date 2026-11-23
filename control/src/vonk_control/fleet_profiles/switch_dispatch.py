@@ -24,14 +24,14 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchQueueItem,
     profile_switch_child_request_key,
 )
-from ..job_documents import RunSwitchJobPayload
+from ..jobs.documents import RunSwitchJobPayload
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
     retire_as_unknown,
 )
 from ..models import FleetProfileApplication, Job
-from ..operation_blockers import OperationBlocker, make_blocker
+from ..operations.blockers import OperationBlocker, make_blocker
 from ..run_switch_contract import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
@@ -41,7 +41,7 @@ from ..run_switch_contract import (
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .assessment_support import (
     _disk_shortfalls,
     _require_recovery_preparation,

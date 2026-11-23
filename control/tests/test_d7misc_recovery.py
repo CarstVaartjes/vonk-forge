@@ -9,13 +9,14 @@ from typing import Never
 import httpx2
 import pytest
 from vonk_agent_protocol import InvalidRequestError
-from vonk_control.catalog_sync_contract import (
+from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
 from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
-from vonk_control.recipe_packages import RecipePackageClient, RecipePackageError
+from vonk_control.recipe_packages.client import RecipePackageClient
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .display_fixtures import model_entry
 
@@ -159,7 +160,9 @@ def test_cache_pagination_uses_authenticated_observation_cursors():
 
 
 def test_incomplete_cached_build_enters_normal_preparation():
-    from vonk_control.availability_production import _cached_build_receipt
+    from vonk_control.availability_production.build_observation import (
+        _cached_build_receipt,
+    )
     from vonk_control.recipe_builds import RecipeBuildResolution
 
     resolution = RecipeBuildResolution(
@@ -225,8 +228,8 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import LifecycleState, SourceBundleCode
     from vonk_control.auth import CursorCodec
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import (
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import (
         ManagedRecipeCatalogSyncService,
         RecipeLibrarySyncReader,
     )
@@ -311,7 +314,7 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.auth import CursorCodec
-    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog.service import CatalogService
     from vonk_control.models import Base
     from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
@@ -362,7 +365,7 @@ def test_invalid_availability_dependency_is_pre_effect_input(payload):
     from unittest.mock import Mock
 
     from sqlalchemy.orm import Session
-    from vonk_control.recipe_build_cancellation import (
+    from vonk_control.recipe_builds.cancellation import (
         lock_availability_build_dependency,
     )
 

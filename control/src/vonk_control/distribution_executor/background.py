@@ -17,7 +17,7 @@ from ..run_switch_operations.observation_window import checkpoint_verdict
 from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..run_switch_operations.result_helpers import _parse_persisted_result
 from ..stall_window import Verdict
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 if TYPE_CHECKING:
     from .preparation import CompositeDistributionPhaseExecutor

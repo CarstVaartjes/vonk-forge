@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import AgentOperation, canonical_message
 from vonk_control.bounded_json import require_mapping
-from vonk_control.job_documents import RecipeStopParent, controller_recipe_document
+from vonk_control.jobs.documents import RecipeStopParent, controller_recipe_document
 from vonk_control.models import Job
 from vonk_control.recipe_operations import (
     RecipeOperationService,

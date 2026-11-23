@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
-from .. import job_states
 from ..agent_jobs import (
     AgentJobService,
     authorize_operator_resume_in_session,
@@ -35,8 +34,11 @@ from ..fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
-from ..inventory_items import runtime_value
-from ..job_operator_receipts import (
+from ..gateway.route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
+from ..gateway.route_runtime import recipe_route_run_id, verify_active_route_bundle
+from ..inventory.items import runtime_value
+from ..jobs import states as job_states
+from ..jobs.operator_receipts import (
     JobOperatorReceipt,
     record_job_operator_receipt,
     replay_job_operator_receipt,
@@ -52,11 +54,9 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
-from ..operation_item_contract import OperationItem, OperationOwnerReference
-from ..operation_progress import aggregate_progress, member_progress
-from ..operation_summary import workload_aliases
-from ..route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
-from ..route_runtime import recipe_route_run_id, verify_active_route_bundle
+from ..operations.item_contract import OperationItem, OperationOwnerReference
+from ..operations.progress import aggregate_progress, member_progress
+from ..operations.summary import workload_aliases
 from ..state_filters import state_filter
 from .constants import _ACTIVE_PUBLICATION_STATES, NODE_PATTERN
 from .contracts import (

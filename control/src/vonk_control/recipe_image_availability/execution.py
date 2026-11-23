@@ -17,9 +17,10 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
 from ..failure_classification import is_security_failure
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityModelChild,
@@ -34,10 +35,8 @@ from ..models import (
     Job,
     ModelCacheOperation,
 )
-from ..operation_blockers import (
-    make_blocker,
-)
-from ..operation_contract import (
+from ..operations.blockers import make_blocker
+from ..operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
@@ -50,9 +49,9 @@ from ..recipe_image_availability_reader_contract import (
     StoredAvailabilityIdentity,
     StoredModelChildCancellation,
 )
-from ..stored_json import Residue, read_row_column
+from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from .contracts import (
     OPERATION_KIND,
     SCHEMA_VERSION,

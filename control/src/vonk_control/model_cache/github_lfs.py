@@ -40,7 +40,7 @@ from pydantic import ValidationError
 from vonk_agent_protocol import ModelCacheCode, OperatorActionName
 
 from ..bounded_retry import bounded_attempts
-from ..operation_contract import AvailabilityRecoveryAction
+from ..operations.contract import AvailabilityRecoveryAction
 from .catalog_helpers import _datetime, _github_lfs_binding
 from .constants import (
     _GITHUB_HOST,

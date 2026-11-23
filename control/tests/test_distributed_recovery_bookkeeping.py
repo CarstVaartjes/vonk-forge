@@ -15,7 +15,7 @@ from vonk_control.distributed_recovery import (
     _enqueue_recovery_stop,
     _RecoveryAuthority,
 )
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import Job, RecipeRun
 from vonk_control.strict_json import read_stored_model

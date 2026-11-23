@@ -18,7 +18,7 @@ from ..cluster_mappings import (
     ClusterMappingService,
     candidate_placements,
 )
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..model_cache import ModelCacheService
 from ..preparation_contract import (
     RuntimeImageIdentity,

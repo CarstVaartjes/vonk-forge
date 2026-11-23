@@ -3484,7 +3484,7 @@ class SparkLifecycle:
                 assert self.control is not None
                 del completed[1:]
                 phase = "recipe-resolution"
-                from vonk_control.library_contract import LibraryRecipeIdentity
+                from vonk_control.library.contract import LibraryRecipeIdentity
 
                 # A known identity resolves directly against committed catalog state.
                 # The periodically refreshed discovery index may still be older.

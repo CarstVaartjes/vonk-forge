@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import AgentOperation, InventoryVerdict, canonical_message
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )

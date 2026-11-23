@@ -24,30 +24,6 @@ from vonk_agent_protocol.state_machines import (
 
 from ..agent_contacts import ensure_contact
 from ..ca_issuance_contract import CertificateIssuanceBinding
-from ..enrollment_validation import (
-    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _digest as _digest,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _utc as _utc,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
-)
-from ..enrollment_validation import (
-    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
-)
 from ..models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -64,6 +40,30 @@ from ..security.enrollment import (
     require_node,
 )
 from .types import EnrollmentDenied, EnrollmentIssuanceUncertain, _RotationClaim
+from .validation import (
+    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _digest as _digest,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _utc as _utc,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
+)
+from .validation import (
+    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
+)
 
 
 def _persist_issued_enrollment(

@@ -51,7 +51,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _lower_hex_digest as _lower_hex_digest,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from .observation_helpers import _active_recipe_revision
 from .results import _AcceptedRanks

@@ -18,7 +18,7 @@ from vonk_control.models import (
     FleetProfileSelection,
     RecipeRun,
 )
-from vonk_control.operation_blockers import PHASE_RETRY_CODE
+from vonk_control.operations.blockers import PHASE_RETRY_CODE
 from vonk_control.recovery_policy import RECOVERY
 
 from .lifecycle_simulation.invariants import ENDED

@@ -24,8 +24,8 @@ from ..categorized_errors import InvalidValue
 from ..logging import log_event
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import validate_progress_update
-from ..operation_progress import (
+from ..operations.contract import validate_progress_update
+from ..operations.progress import (
     progress_document,
     progress_write_due,
     sample_progress,

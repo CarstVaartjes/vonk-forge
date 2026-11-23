@@ -6,12 +6,12 @@ import pytest
 from psycopg.errors import InFailedSqlTransaction
 from sqlalchemy.exc import InternalError
 from vonk_agent_protocol import CatalogSyncCode, RecipePackageCode
-from vonk_control.catalog_sync import (
+from vonk_control.catalog.sync import (
     ManagedRecipeCatalogSyncService,
     catalog_sync_failure_reason,
     catalog_sync_retry_delay,
 )
-from vonk_control.recipe_packages import RecipePackageError
+from vonk_control.recipe_packages.contracts import RecipePackageError
 
 from .signed_recipe_release import signed_recipe_releases
 
@@ -38,7 +38,7 @@ def test_failed_automatic_sync_retries_sooner_with_bounded_backoff(monkeypatch) 
     # A failure must not wait the full steady-state interval (the old loop
     # did), and repeated failures must back off without exceeding it.
     monkeypatch.setattr(
-        "vonk_control.catalog_sync.random.randint", lambda low, high: high
+        "vonk_control.catalog.sync.random.randint", lambda low, high: high
     )
     assert [catalog_sync_retry_delay(failures, 900) for failures in range(7)] == [
         900,
@@ -99,7 +99,7 @@ class Inline(Executor):
 def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
     tmp_path, monkeypatch
 ) -> None:
-    from vonk_control.catalog_sync import AutomaticCatalogSync, CatalogSyncUnsettled
+    from vonk_control.catalog.sync import AutomaticCatalogSync, CatalogSyncUnsettled
 
     from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
@@ -107,7 +107,7 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt(
         tmp_path, _Catalog(None), _item(_example("recipe-source-build.json"))
     )
     monkeypatch.setattr(
-        "vonk_control.catalog_sync.random.randint", lambda low, high: high
+        "vonk_control.catalog.sync.random.randint", lambda low, high: high
     )
 
     class _Service(_PeriodicCatalog):
@@ -147,7 +147,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     from dataclasses import replace
 
     from vonk_agent_protocol import CatalogSyncState
-    from vonk_control import catalog_sync
+    from vonk_control.catalog import sync as catalog_sync
 
     from .test_catalog_sync_topology import _Catalog, _example, _item, _sync
 
@@ -191,7 +191,7 @@ def test_worker_runs_the_first_sync_and_then_follows_the_persisted_wait(
     """Catches a fresh install never syncing, or a restart ignoring the recorded wait."""
     from datetime import UTC, datetime, timedelta
 
-    from vonk_control.catalog_sync import AutomaticCatalogSync
+    from vonk_control.catalog.sync import AutomaticCatalogSync
 
     from .test_catalog_sync import _fixture
 
@@ -222,7 +222,7 @@ def test_retry_jitter_keeps_the_delay_capped(
 ):
     """Catches synchronized retries and jitter escaping the interval cap."""
     monkeypatch.setattr(
-        "vonk_control.catalog_sync.random.randint", lambda low, high: low
+        "vonk_control.catalog.sync.random.randint", lambda low, high: low
     )
     assert catalog_sync_retry_delay(1, 60) == 15
     assert catalog_sync_retry_delay(10_000, 60) == 30

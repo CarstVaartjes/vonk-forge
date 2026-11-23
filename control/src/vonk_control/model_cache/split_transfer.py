@@ -23,7 +23,7 @@ from ..bounded_retry import bounded_attempts
 from ..categorized_faults import OperationInterrupted
 from ..model_cache_contract import ModelCacheRepairPayload
 from ..models import ModelCacheOperation
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from . import constants
 from .artifacts import ArtifactSpec
 from .constants import _CHUNK_BYTES, _TRANSFER_CLAIM_SECONDS

@@ -11,7 +11,7 @@ from vonk_agent_protocol import ArtifactDistributionPayload, LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from ..distribution_assignment import NodeDistributionAssignment
-from ..job_documents import (
+from ..jobs.documents import (
     DistributionJobIdentity,
     DistributionJobPayload,
     DistributionTransferProgress,

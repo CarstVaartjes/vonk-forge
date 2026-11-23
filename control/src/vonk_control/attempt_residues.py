@@ -74,10 +74,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
-from . import job_states
 from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
 from .installation_transitions import end_orphaned_installation
+from .jobs import states as job_states
 from .logging import log_event
 from .machine_states import DISTRIBUTION_HELD, rank_installed
 from .models import (

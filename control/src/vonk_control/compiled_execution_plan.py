@@ -57,7 +57,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from .content_identity import same_model_object
-from .runtime_spec_contract import RuntimeSpec
+from .runtime.spec_contract import RuntimeSpec
 from .strict_json import StrictModel
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]

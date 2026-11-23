@@ -16,11 +16,9 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
-from .. import job_states
 from ..failure_classification import error_code, is_security_failure
-from ..job_documents import (
-    RunSwitchIntent,
-)
+from ..jobs import states as job_states
+from ..jobs.documents import RunSwitchIntent
 from ..models import (
     ACTIVE_RUN_STATES,
     Job,

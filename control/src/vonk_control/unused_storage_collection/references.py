@@ -21,7 +21,7 @@ from ..content_identity import (
     runs_identically,
 )
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
-from ..inventory_repository import newest_snapshot_ids
+from ..inventory.repository import newest_snapshot_ids
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,

@@ -24,13 +24,14 @@ from vonk_agent_protocol.agent_words import (
     ProfileReportedPhase,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..fleet_profile_contract import (
     FleetProfileAssignmentState,
     FleetProfileChildPhase,
     FleetProfileInstallationPolicy,
     FleetProfileOperationState,
 )
+from ..jobs import states as job_states
 from ..lifecycle.types import (
     State as _LifecycleState,
 )

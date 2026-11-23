@@ -56,7 +56,9 @@ def in_scope(path: str) -> bool:
     return (
         path.startswith(SCOPE)
         and path.endswith(".py")
-        and not path.endswith(("_states.py", "_contract.py"))
+        and not path.endswith(
+            ("_states.py", "/states.py", "_contract.py", "/contract.py")
+        )
         and "_contract/" not in path
     )
 
@@ -65,6 +67,7 @@ def _lifecycle_owner(node: ast.expr) -> bool:
     """Whether ``node`` names the lifecycle vocabulary (not RunState and kin)."""
     name = ast.unparse(node).split(".")[-1]
     return name.endswith(("LifecycleState", "_states")) or name in {
+        "states",
         "State",
         "aos",
         "ajs",

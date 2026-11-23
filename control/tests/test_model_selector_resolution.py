@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.failure_classification import disposition
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService

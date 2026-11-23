@@ -44,14 +44,14 @@ from pathlib import Path
 from typing import ClassVar, cast
 
 import openai
-from vonk_control.gateway_route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
-from vonk_control.litellm import (
+from vonk_control.gateway.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
     RouteState,
     render_config,
 )
-from vonk_control.route_bundle_contract import RouteAcceptedModelPolicy
+from vonk_control.gateway.route_bundle_contract import RouteAcceptedModelPolicy
+from vonk_control.gateway.route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"

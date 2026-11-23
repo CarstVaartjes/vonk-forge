@@ -24,7 +24,7 @@ from vonk_control.nas_transfer_rate import (
     slow_nas_transfers,
     wifi_link_detail,
 )
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 

@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ControlApi, GatewayKeyCreated, GatewayKeyList } from "../api/types";
-import { ConfirmDialog } from "../components/confirm-dialog";
-import { CopyButton } from "../components/copy-button";
-import { EmptyState } from "../components/empty-state";
-import { PageHeader } from "../components/page-header";
-import { SkeletonRows } from "../components/skeleton";
-import { useToast } from "../components/toast";
-import { SortHeader, useSort } from "../components/sort-header";
-import { StatusPill } from "../components/status-pill";
-import { Time } from "../components/time";
+import { ConfirmDialog } from "../components/ui/confirm-dialog";
+import { CopyButton } from "../components/ui/copy-button";
+import { EmptyState } from "../components/ui/empty-state";
+import { PageHeader } from "../components/ui/page-header";
+import { SkeletonRows } from "../components/ui/skeleton";
+import { useToast } from "../components/ui/toast";
+import { SortHeader, useSort } from "../components/ui/sort-header";
+import { StatusPill } from "../components/ui/status-pill";
+import { Time } from "../components/ui/time";
 import { safeErrorText } from "../lib/error-display";
 
 function failure(error: unknown, fallback: string): string {

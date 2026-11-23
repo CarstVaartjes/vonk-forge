@@ -16,8 +16,8 @@ from ..agent_upgrade_contract import AgentUpgradePackage, AgentUpgradeRequestInt
 from ..enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
 )
-from ..enrollment_bootstrap import accepted_installer_url
-from ..enrollment_contract import (
+from ..enrollment.bootstrap import accepted_installer_url
+from ..enrollment.contract import (
     EnrollmentGrant,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,

@@ -25,7 +25,7 @@ from vonk_control.distribution_executor import CompositeDistributionPhaseExecuto
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -370,7 +370,7 @@ def _worker_process(config: dict, crash: str) -> None:
                 )
                 return
             from vonk_control.run_switch_contract import RunSwitchOperationResult
-            from vonk_control.stored_json import read_row_column
+            from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before
             # the accepted observation budget. No real-time sleep or new

@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from .content_identity import same_image
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from .machine_states import rank_installed
 from .models import (
     InstallationNode,

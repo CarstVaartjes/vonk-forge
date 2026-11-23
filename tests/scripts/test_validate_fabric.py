@@ -33,7 +33,9 @@ def parse_nccl(validate_module):
 
 def test_inventory_uses_two_fabric_functions_per_host(validate_module):
     """The canonical inventory uses function labels, not fictional rails."""
-    head, worker = validate_module.load_hosts(ROOT / "inventory" / "cluster.toml")
+    head, worker = validate_module.load_hosts(
+        ROOT / "tests/fixtures/fabric/cluster.toml"
+    )
 
     assert [function.name for function in head.rails] == ["function100", "function101"]
     assert [function.name for function in worker.rails] == [
@@ -43,7 +45,9 @@ def test_inventory_uses_two_fabric_functions_per_host(validate_module):
 
 
 def test_expected_fleet_nodes_bind_to_exact_inventory_ssh_aliases(validate_module):
-    head, worker = validate_module.load_hosts(ROOT / "inventory" / "cluster.toml")
+    head, worker = validate_module.load_hosts(
+        ROOT / "tests/fixtures/fabric/cluster.toml"
+    )
 
     selected = validate_module.validate_expected_nodes(
         [

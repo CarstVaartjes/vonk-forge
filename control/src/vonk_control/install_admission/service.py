@@ -29,7 +29,7 @@ from ..admission_locking import (
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes,
 )
-from ..inventory_items_contract import InventorySnapshotKind
+from ..inventory.items_contract import InventorySnapshotKind
 from ..machine_states import reservation_live
 from ..models import (
     AgentNode,
@@ -51,7 +51,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
-from ..stored_states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
+from ..stored.states import CatalogRevisionState, ClusterMappingState, RecipeBuildState
 from .contracts import (
     InstallAdmissionBusy,
     InstallEvidenceChanged,

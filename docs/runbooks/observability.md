@@ -38,7 +38,7 @@ data and is never drawn as zero. A metric with `fleet_sum` also returns, when no
 Spark is chosen, a first series without a label: the sum of the others, with its
 own summary. Each labelled series' `share` is its total over that fleet total, so
 a page shows "fleet tokens" and "model share" without adding anything up. Every
-query is fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM
+query is fixed in `metrics/prometheus_api.py`; a test fails if one reads a LiteLLM
 family listed in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
 
 Gateway counts (per model alias, basis `measured`): `request_rate`,

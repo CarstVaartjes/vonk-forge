@@ -28,7 +28,7 @@ from ..agent_operation_facts import aware as _aware
 from ..failure_evidence import safe_text, sanitize_diagnostics
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeRun, RunNode
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import sanitize_failure_evidence
+from ..operations.contract import sanitize_failure_evidence
 from ..recovery_policy import FailureKind
 from .contracts import _REFUSAL_PREFIXES, AgentResultRefused
 from .predicates import _document
@@ -166,7 +166,7 @@ def _exact_service_stop_receipt_covers_start(
     runtime generation is resolved; cancellation or a terminal parent alone
     proves nothing. Current node intent still fences every original Start claim.
     """
-    from ..job_documents import RecipeStartParent, RecipeStopParent
+    from ..jobs.documents import RecipeStartParent, RecipeStopParent
     from ..recipe_stop_payloads import (
         durable_run_stop_payloads,
         stop_payload_from_start,

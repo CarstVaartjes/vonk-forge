@@ -48,7 +48,7 @@ def schema_application(*, browser_auth: bool = True) -> FastAPI:
     from .api import create_app
     from .auth import TokenCodec
     from .browser_auth import BrowserAuthService
-    from .jobs import JobService
+    from .jobs.queue import JobService
 
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(

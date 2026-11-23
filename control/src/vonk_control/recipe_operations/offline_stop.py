@@ -29,9 +29,7 @@ from ..admission_locking import (
     node_admission_key,
 )
 from ..agent_contacts import last_seen
-from ..job_documents import (
-    RecipeStopParent,
-)
+from ..jobs.documents import RecipeStopParent
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..logging import redact_text
 from ..models import (
@@ -57,7 +55,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView
@@ -197,7 +195,7 @@ class OfflineStopMixin:
         attempt-fencing path. No request, slot or fleet queue waits for contact.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..job_documents import OfflineStopIntent
+        from ..jobs.documents import OfflineStopIntent
 
         now = service._clock()
         with service._sessions() as session:

@@ -29,21 +29,13 @@ from vonk_agent_protocol.enrollment import NodeId
 from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..failure_classification import disposition
-from ..litellm import (
-    LiteLlmGeneration,
-    LiteLlmPolicy,
-    RouteState,
-)
+from ..gateway.litellm import LiteLlmGeneration, LiteLlmPolicy, RouteState
+from ..gateway.route_bundle_contract import RouteEndpointDocument
+from ..gateway.route_runtime import ActivationMarker
 from ..models import (
     Job,
     RoutePublication,
     RoutePublicationOwner,
-)
-from ..route_bundle_contract import (
-    RouteEndpointDocument,
-)
-from ..route_runtime import (
-    ActivationMarker,
 )
 
 _NODE_ID = TypeAdapter(NodeId)

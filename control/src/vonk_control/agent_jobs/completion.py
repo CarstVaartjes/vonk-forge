@@ -29,7 +29,7 @@ from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
 from ..evidence_repeats import note_repeat
-from ..inventory_items import record_preflight
+from ..inventory.items import record_preflight
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
 from ..models import AgentNode, AgentOperationAttempt, Job

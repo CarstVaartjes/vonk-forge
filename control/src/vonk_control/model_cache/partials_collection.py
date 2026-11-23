@@ -36,7 +36,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..catalog_revision_collection import GRACE, INTERVAL
+from ..catalog.revision_collection import GRACE, INTERVAL
 from ..categorized_errors import InvalidValue
 from ..logging import log_event
 from ..model_cache_contract import CacheOperationKind

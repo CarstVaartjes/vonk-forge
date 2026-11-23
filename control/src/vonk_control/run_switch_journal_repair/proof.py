@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from ..content_identity import same_image
-from ..job_documents import RecipeInstallParent
+from ..jobs.documents import RecipeInstallParent
 from ..models import (
     AgentCertificate,
     AgentOperation,
@@ -22,7 +22,7 @@ from ..models import (
     FleetProfileApplication,
     Job,
 )
-from ..operation_progress import stored_progress
+from ..operations.progress import stored_progress
 from ..recipe_operations import current_recipe_progress_attribution
 from ..run_switch_contract import (
     RunSwitchOperationResult,
@@ -36,7 +36,7 @@ from ..run_switch_journal_contract import (
     JournalRepairPurpose,
     NativeProgressWitness,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 
 
 def _prove(

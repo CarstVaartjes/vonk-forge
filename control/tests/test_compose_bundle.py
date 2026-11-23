@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 from vonk_control.compose_bundle import ENVIRONMENT_VARIABLE, compose_bundle
-from vonk_control.metrics import MetricsRegistry
+from vonk_control.metrics.registry import MetricsRegistry
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"

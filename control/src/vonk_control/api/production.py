@@ -24,26 +24,23 @@ from ..auth import CursorCodec, TokenCodec
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
-from ..catalog_service import CatalogService
-from ..catalog_sync import (
-    ManagedRecipeCatalogSyncService,
-    catalog_sync_failure_reason,
-)
+from ..catalog.service import CatalogService
+from ..catalog.sync import ManagedRecipeCatalogSyncService, catalog_sync_failure_reason
 from ..cluster_mappings import ClusterMappingService
 from ..compose_bundle import compose_bundle
 from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
-from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
-from ..gateway_route_grants import recipe_key_routes
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
-from ..library_assessment import LibraryAssessment
+from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
+from ..gateway.route_grants import recipe_key_routes
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
+from ..library.assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging
-from ..metrics import MetricsRegistry, read_runnable_job_ages
+from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
 from ..model_cache import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
+from ..observation.platform import PlatformObserver
 from ..operator_projection_api import build_fleet_operator_services
-from ..platform_observation import PlatformObserver
 from ..recipe_builds import RecipeBuildService
 from ..recipe_operation_worker import RecipeOperationWorker
 from ..recipe_operations import RecipeOperationService
@@ -244,22 +241,25 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from sqlalchemy import func, select
 
     from ..agent_upgrades import AgentUpgradeService
-    from ..availability_production import build_recipe_image_availability
+    from ..availability_production.production import build_recipe_image_availability
     from ..db import build_engine, session_factory
     from ..execution_plan_service import ControllerExecutionPlanService
     from ..fleet_events import FleetEventRepository
     from ..fleet_projection import FleetProjection
     from ..fleet_stream import FleetStream
+    from ..gateway.route_runtime import (
+        AtomicRouteBundlePublisher,
+        FileSupervisorAcknowledger,
+    )
     from ..install_admission import (
         InstallAdmissionService,
     )
-    from ..jobs import JobService
-    from ..metrics import OperationalMetricsCollector
+    from ..jobs.queue import JobService
+    from ..metrics.registry import OperationalMetricsCollector
     from ..models import Job
     from ..operation_api import durable_operation_services
     from ..presence import ManagementAddressPolicy
     from ..recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-    from ..route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from ..run_admission import RunAdmissionService
     from ..runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
@@ -267,8 +267,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
     from ..runtime_image_preparation.transport import OciLayoutImageTransport
-    from ..telemetry import TelemetryRepository
-    from ..worker_memory import read_worker_memory_report, worker_memory_report_path
+    from ..telemetry.samples import TelemetryRepository
+    from ..worker.memory import read_worker_memory_report, worker_memory_report_path
 
     if settings is None:
         settings = Settings.from_env_and_secrets()

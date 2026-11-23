@@ -15,8 +15,8 @@ from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
 
-from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
-from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
+from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
+from ..catalog.revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..content_identity import (
     cache_resolution_answers_revision,
     catalog_selector_membership,
@@ -31,7 +31,7 @@ from ..model_cache_contract import CacheResolution
 from ..models import CatalogDocument, CatalogDocumentRevision, FleetProfile
 from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .contracts import (
     FleetProfileInvalid,
     FleetProfileStalePlanConflict,

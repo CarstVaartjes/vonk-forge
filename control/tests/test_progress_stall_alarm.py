@@ -39,13 +39,13 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     ResourceReservation,
 )
-from vonk_control.operation_blockers import (
+from vonk_control.observation.platform import PlatformObserver
+from vonk_control.operations.blockers import (
     BlockingOperation,
     ProgressAlarmCode,
     make_blocker,
 )
 from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
-from vonk_control.platform_observation import PlatformObserver
 from vonk_control.progress_stall import PROGRESS_STALL_WINDOW
 
 from .test_attempt_residues import _load, _loop, _switch
