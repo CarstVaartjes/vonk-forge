@@ -326,8 +326,6 @@ class ArtifactJobService:
         def mapped_endpoints() -> set[str] | None:
             # Rebuild from evidence: the cluster mapping names each node's role
             # in the run, independent of the stored run plan.
-            if run.mapping_id is None:
-                return None
             return set(
                 session.scalars(
                     select(ClusterMappingNode.node_id).where(

@@ -9,7 +9,6 @@ from typing import assert_never
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
-    read_model,
     read_recipe,
 )
 from vonk_forge_contracts.model import (
@@ -239,7 +238,7 @@ def _model_lineage_signature(
     are siblings, not revisions.
     """
 
-    model = document if isinstance(document, ModelDefinition) else read_model(document)
+    model = document
     identity = model.identity
     variant = identity.variant
     representation = model.format.model_dump(mode="json")
@@ -256,7 +255,7 @@ def _model_lineage_signature(
 
 
 def _revision_identity(row: CatalogDocumentRevision | None) -> ModelReference | None:
-    if row is None or not isinstance(row.content_digest, str):
+    if row is None:
         return None
     return ModelReference(
         publisher=row.publisher,

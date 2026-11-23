@@ -490,9 +490,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
         assert not planner.tick()
         with sessions() as observer:
             assert not tuple(observer.scalars(select(RecipeRun)))
-    after_due = (
-        due if isinstance(due, datetime) else datetime.fromisoformat(due)
-    ) + timedelta(seconds=1)
+    after_due = due + timedelta(seconds=1)
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     planner._clock = profiles._clock = lifecycle._clock = lambda: after_due

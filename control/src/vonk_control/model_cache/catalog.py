@@ -45,11 +45,7 @@ class CatalogMixin:
         session: Session, row: CatalogDocumentRevision
     ) -> CatalogDocumentRevision | None:
         """Recover exact content from another provenance record, never a head."""
-        if (
-            not isinstance(row.content_digest, str)
-            or not _is_hex(row.content_digest)
-            or len(row.content_digest) != 64
-        ):
+        if not _is_hex(row.content_digest) or len(row.content_digest) != 64:
             return None
         for candidate in session.scalars(
             select(CatalogDocumentRevision).where(

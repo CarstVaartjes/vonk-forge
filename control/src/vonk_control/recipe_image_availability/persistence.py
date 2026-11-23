@@ -122,7 +122,6 @@ def _recipe_removal_selection_in_session(
         revision is None
         or revision.kind != "recipe"
         or revision.state != CatalogRevisionState.ACTIVE
-        or not isinstance(revision.content_digest, str)
     ):
         raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.SELECTOR_MISSING,

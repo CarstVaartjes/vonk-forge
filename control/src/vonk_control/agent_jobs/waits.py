@@ -74,7 +74,7 @@ def record_queue_waits(
         .order_by(AgentOperation.created_at, AgentOperation.id)
     ):
         unconfirmed = running.state == agent_operation_states.OBSERVING or (
-            attempt is not None and agent_operation_states.attempt_is_observing(attempt)
+            agent_operation_states.attempt_is_observing(attempt)
         )
         if (
             running.state != agent_operation_states.RUNNING

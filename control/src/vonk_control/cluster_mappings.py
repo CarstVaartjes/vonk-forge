@@ -139,10 +139,7 @@ class ClusterMappingService:
             revision = _active_recipe_revision(session, recipe_revision_id)
             if revision is None:
                 raise KeyError(recipe_revision_id)
-            if (
-                revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision.state != CatalogRevisionState.ACTIVE:
                 raise ClusterMappingError(
                     ClusterMappingCode.RECIPE_UNRESOLVED,
                     "only a resolved recipe can be mapped",

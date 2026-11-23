@@ -385,7 +385,6 @@ def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthorit
         or mapping.generation != run.mapping_generation
         or revision.kind != "recipe"
         or revision.schema_version != 2
-        or revision.content_digest is None
         or stored.run_generation != run.run_generation
         or stored.installation_id != run.installation_id
         or stored.mapping_id != run.mapping_id

@@ -227,7 +227,7 @@ def _assignment_state(
     build = (
         (
             session.get(RecipeBuild, expected_image.build_id)
-            if expected_image is not None and expected_image.build_id is not None
+            if expected_image.build_id is not None
             else None
         )
         if expected_image is not None

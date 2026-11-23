@@ -167,7 +167,7 @@ def _recovery_authority(
         if installation is not None
         else None
     )
-    if installation is None or resolved is None or installation.image_digest is None:
+    if installation is None or resolved is None:
         return _unproven(run.id, _MISSING, "distributed recovery authority is missing")
     revision, recipe = resolved
     topology = recipe.topology
@@ -204,7 +204,6 @@ def _recovery_authority(
         run.installation_id != installation.id
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or run_plan is None
         or run_plan.installation_id != run.installation_id
         or run_plan.mapping_id != run.mapping_id
         or run_plan.mapping_generation != run.mapping_generation

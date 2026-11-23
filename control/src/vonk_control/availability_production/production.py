@@ -566,9 +566,7 @@ class _ImageAvailabilitySteps:
                 parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
-                if isinstance(parent_runtime, Mapping) and isinstance(
-                    parent_runtime.get("builder_node_id"), str
-                ):
+                if isinstance(parent_runtime.get("builder_node_id"), str):
                     builder_node_id = str(parent_runtime["builder_node_id"])
                 else:
                     candidates = tuple(
@@ -706,11 +704,7 @@ class _ImageAvailabilitySteps:
                 parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
-                assigned = (
-                    parent_runtime.get("builder_node_id")
-                    if isinstance(parent_runtime, Mapping)
-                    else None
-                )
+                assigned = parent_runtime.get("builder_node_id")
                 if isinstance(assigned, str):
                     builder_node_id = assigned
                     selected_candidate = None

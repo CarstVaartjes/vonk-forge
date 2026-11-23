@@ -112,7 +112,6 @@ def resolve_agent_receipt(
     # Enrollment already committed the public certificate and its exact CSR
     # binding. It is not browser token issuance and creates no second owner.
     if policy == ReceiptPolicy.ENROLLMENT_ISSUE:
-        _require(isinstance(result, Response))
         issued = IssuedCertificateResponse.model_validate_json(bytes(result.body))
         with required.sessions() as session:
             certificate = session.get(AgentCertificate, issued.serial)
@@ -253,7 +252,7 @@ def resolve_agent_receipt(
 
         claim: AgentClaim | None = None
         if policy == ReceiptPolicy.AGENT_CLAIM:
-            _require(isinstance(body, ClaimRequest) and isinstance(result, Response))
+            _require(isinstance(body, ClaimRequest))
             assert isinstance(body, ClaimRequest)
             node = session.get(AgentNode, identity.node_id)
             contact = None if node is None else node.contact
@@ -287,7 +286,6 @@ def resolve_agent_receipt(
             # Grants read an already accepted authority and mint a signed,
             # short-lived capability. No new execution intent is accepted.
 
-            _require(isinstance(result, Response))
             grant = HostHelperGrantResponse.model_validate_json(
                 bytes(result.body)
             ).grant

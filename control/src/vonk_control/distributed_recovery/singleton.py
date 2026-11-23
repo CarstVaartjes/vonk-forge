@@ -84,7 +84,6 @@ def _singleton_recovery_authority(
     if (
         installation is None
         or installation.state != InstallationState.INSTALLED
-        or installation.image_digest is None
         or resolved is None
     ):
         return _unproven(

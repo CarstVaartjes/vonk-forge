@@ -243,11 +243,8 @@ def _node(
             or clock.graphics_mhz is None
             or clock.sm_mhz is None
             or clock.throttle_reasons is None
-            or (
-                clock.graphics_mhz is not None
-                and clock.graphics_mhz > gpu_clock_desired.max_mhz
-            )
-            or (clock.sm_mhz is not None and clock.sm_mhz > gpu_clock_desired.max_mhz)
+            or clock.graphics_mhz > gpu_clock_desired.max_mhz
+            or clock.sm_mhz > gpu_clock_desired.max_mhz
         ):
             warnings.append(
                 ProjectionReason(

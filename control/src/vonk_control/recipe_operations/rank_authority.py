@@ -129,7 +129,7 @@ def _uninstall_recipe(
     revision = _active_recipe_revision(
         session, installation.recipe_revision_id, for_update=lock
     )
-    if revision is not None and revision.content_digest is not None:
+    if revision is not None:
         return _UninstallRecipe(
             revision.id,
             revision.document_id,

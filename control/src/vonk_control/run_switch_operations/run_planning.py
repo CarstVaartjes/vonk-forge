@@ -105,10 +105,7 @@ class RunPlanningMixin:
             )
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
-            if (
-                revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision.state != CatalogRevisionState.ACTIVE:
                 blockers.append(
                     _as_reason(
                         RunSwitchCode.RECIPE_UNRESOLVED,

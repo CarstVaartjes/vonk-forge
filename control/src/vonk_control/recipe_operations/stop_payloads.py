@@ -176,7 +176,7 @@ def durable_run_stop_payloads(
     # accepted plan recorded.
     recipe_content_sha256 = (
         revision.content_digest
-        if revision is not None and revision.content_digest is not None
+        if revision is not None
         else _installation_recipe_digest(installation)
     )
     if recipe_content_sha256 is None:

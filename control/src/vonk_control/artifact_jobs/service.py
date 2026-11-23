@@ -657,11 +657,7 @@ class ArtifactJobService(OutputService):
             first = launches[0]
             assert first is not None
             contract = first.contract
-            mapping = (
-                session.get(ClusterMapping, run.mapping_id)
-                if run.mapping_id is not None
-                else None
-            )
+            mapping = session.get(ClusterMapping, run.mapping_id)
             limits = self._stored_output_limits(session, artifact_job, repair=True)
             if isinstance(limits, Residue):
                 raise ArtifactJobUnavailableError(
@@ -848,8 +844,7 @@ class ArtifactJobService(OutputService):
                     reason=InvalidRequestReason.CONFLICT,
                 )
             if (
-                evidence is not None
-                and evidence.cancel_request_id == request_id
+                evidence.cancel_request_id == request_id
                 and evidence.cancel_actor == actor
                 and evidence.cancel_reason == cancellation_reason
             ):

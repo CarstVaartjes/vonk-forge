@@ -451,7 +451,7 @@ class InstallationPreparationMixin:
                     "next preparation installs afresh"
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            if revision is None or revision.content_digest is None:
+            if revision is None:
                 raise RecipeRetryLater("recipe revision is unavailable")
             installation.state = InstallationState.INSTALLING
             installation.updated_at = now

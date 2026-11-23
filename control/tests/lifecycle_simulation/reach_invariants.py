@@ -228,7 +228,7 @@ class ReachMonitor(Monitor):
                 f" {deadline}",
             )
             for operation_id, kind, deadline in rows
-            if deadline is not None and now - _aware(deadline) > LAPSED_LEASE_WINDOW
+            if now - _aware(deadline) > LAPSED_LEASE_WINDOW
         ]
 
     def _failures(self) -> list[Violation]:

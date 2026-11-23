@@ -178,10 +178,7 @@ def _submit_idempotent_request(
             isinstance(error, ControlHTTPError) and 500 <= error.status_code <= 599
         ):
             may_replay = True
-            if (
-                isinstance(error, (ControlHTTPError, ControlTransportError))
-                and error.retry_after_seconds is not None
-            ):
+            if error.retry_after_seconds is not None:
                 retry_error = error
                 now = time.monotonic()
                 # A delay beyond this invocation's budget needs no timer and

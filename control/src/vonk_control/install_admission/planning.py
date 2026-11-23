@@ -119,11 +119,7 @@ class InstallPlanningService:
                     reason=InvalidRequestReason.NOT_READY,
                 )
             revision = _active_recipe_revision(session, mapping.recipe_revision_id)
-            if (
-                revision is None
-                or revision.state != CatalogRevisionState.ACTIVE
-                or revision.content_digest is None
-            ):
+            if revision is None or revision.state != CatalogRevisionState.ACTIVE:
                 raise InvalidValue(
                     "recipe revision is not resolved",
                     reason=InvalidRequestReason.NOT_READY,

@@ -1,6 +1,6 @@
 """Accepted installation capacity survives handoff and parent restart."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -170,11 +170,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
             assert visible.owner_id == application_id
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    after_due = (
-        due + timedelta(seconds=1)
-        if isinstance(due, datetime)
-        else datetime.fromisoformat(due) + timedelta(seconds=1)
-    )
+    after_due = due + timedelta(seconds=1)
     planner._clock = profiles._clock = lifecycle._clock = lambda: after_due
     child_id = _drive_to_job(profiles, planner, sessions, "recipe.install")
     child = lifecycle.get(child_id)
