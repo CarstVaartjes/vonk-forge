@@ -126,7 +126,7 @@ def contract_verdict_or_wait(error: Exception) -> NoReturn:
             status_code=422,  # 422-verdict: the request's own bytes are refused
             detail=str(error),
         ) from None
-    _LOGGER.exception("agent route failed internally; answering a wait")
+    _LOGGER.error("agent route failed internally; answering a wait", exc_info=error)
     temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
 
 

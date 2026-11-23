@@ -14,7 +14,9 @@ from sqlalchemy.exc import (
     InterfaceError,
     OperationalError,
     SQLAlchemyError,
-    TimeoutError,
+)
+from sqlalchemy.exc import (
+    TimeoutError as SQLAlchemyTimeoutError,
 )
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -68,7 +70,7 @@ def _driver_detail(error: BaseException) -> str:
 
 
 def _startup_retryable(error: BaseException) -> bool:
-    if isinstance(error, (_DatabaseStartupContention, TimeoutError)):
+    if isinstance(error, (_DatabaseStartupContention, SQLAlchemyTimeoutError)):
         return True
     if not isinstance(error, (InterfaceError, OperationalError)):
         return False

@@ -28,7 +28,7 @@ from .errors import RunSwitchRequestInvalid
 from .planning_helpers import _run_switch_payload
 
 
-def _EstablishedEffect(child: RecipeOperationView, run_id: str) -> RecipeOperationView:
+def _established_effect(child: RecipeOperationView, run_id: str) -> RecipeOperationView:
     """Present the same exact child's established effect without duck delegation."""
     return replace(child, state=LifecycleState.SUCCEEDED.value, owner_id=run_id)
 

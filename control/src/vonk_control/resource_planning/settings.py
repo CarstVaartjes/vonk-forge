@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from pydantic import ValidationError
 from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeDecisionSettings, RecipeGenerationSettings
 
 from vonk_agent_protocol.reason_codes.resources import ResourcePlanningCode
 
@@ -122,7 +123,7 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
         )
     context = (
         settings.context_tokens.value
-        if (settings.kind == "generation" or settings.kind == "decision")
+        if isinstance(settings, RecipeGenerationSettings | RecipeDecisionSettings)
         else None
     )
     concurrency = (
@@ -137,7 +138,7 @@ def resolve_effective_settings(value: object) -> SettingsResolution:
     effects: dict[str, RunSwitchChangeEffect] = {
         name: setting.change_effect for name, setting in settings.knobs.items()
     }
-    if settings.kind == "generation" or settings.kind == "decision":
+    if isinstance(settings, RecipeGenerationSettings | RecipeDecisionSettings):
         effects["context_tokens"] = settings.context_tokens.change_effect
     if settings.concurrency is not None:
         effects["concurrency"] = settings.concurrency.change_effect

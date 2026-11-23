@@ -81,9 +81,9 @@ from .errors import (
 from .identity_helpers import _string_or_none
 from .image_receipts import _build_receipt_in_session, _plan_target_node_ids
 from .observation_helpers import (
+    _established_effect,
     _established_start_effect,
     _established_stop_effect,
-    _EstablishedEffect,
     _start_still_progressing,
 )
 from .observation_window import checkpoint_deadline
@@ -647,7 +647,7 @@ class AdvanceMixin:
                     # ordinary success path records the checkpoint the missing
                     # acknowledgement would have produced.
                     assert isinstance(child, RecipeOperationView)
-                    child = _EstablishedEffect(child, established)
+                    child = _established_effect(child, established)
                 elif _start_still_progressing(
                     service._lifecycle, plan.phases[phase_index], child
                 ):

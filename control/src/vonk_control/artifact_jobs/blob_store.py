@@ -846,7 +846,7 @@ class ArtifactBlobStore:
             ) from error
 
         class _Lock:
-            def __enter__(self_nonlocal):
+            def __enter__(self):
                 try:
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as error:
@@ -857,7 +857,7 @@ class ArtifactBlobStore:
                     ) from error
                 return stream
 
-            def __exit__(self_nonlocal, _kind, _value, _traceback):
+            def __exit__(self, _kind, _value, _traceback):
                 try:
                     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
                 except OSError as error:

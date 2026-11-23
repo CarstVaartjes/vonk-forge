@@ -239,7 +239,7 @@ def validate_recipe_lifecycle_terminal(kind: str, state: str, value: object) -> 
 
 
 def _node_evidence_models(kind: str) -> tuple[type[LifecycleNodeResult], ...]:
-    if kind in {"recipe.build.v1"}:
+    if kind == WireAgentOperation.RECIPE_BUILD:
         evidence_models = (RecipeBuildEvidence,)
     elif kind == "recipe.build.cleanup.v1":
         evidence_models = (RecipeBuildCleanupEvidence,)

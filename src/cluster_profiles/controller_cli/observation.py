@@ -364,7 +364,7 @@ def _cache_progress(
         result,
         args,
         deadline=deadline,
-        validate=lambda observed: identity_for_operation(observed),
+        validate=identity_for_operation,
         terminal=lambda observed: (
             _state(observed) in _TERMINAL_STATES and observed.get("residue") is None
         ),

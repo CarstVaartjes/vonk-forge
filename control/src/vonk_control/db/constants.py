@@ -6,7 +6,9 @@ from pathlib import Path
 from sqlalchemy.exc import (
     InterfaceError,
     OperationalError,
-    TimeoutError,
+)
+from sqlalchemy.exc import (
+    TimeoutError as SQLAlchemyTimeoutError,
 )
 
 _STARTUP_ADVISORY_LOCK = 8_241_779_103
@@ -28,7 +30,11 @@ _ALEMBIC_CONFIG = (
 _DATABASE_STARTUP_TIMEOUT_SECONDS = 120.0
 
 
-_DATABASE_RETRYABLE_ERRORS = (InterfaceError, OperationalError, TimeoutError)
+_DATABASE_RETRYABLE_ERRORS = (
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyTimeoutError,
+)
 
 
 _LOGGER = logging.getLogger(__package__)

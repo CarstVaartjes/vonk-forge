@@ -1296,8 +1296,9 @@ def install_gateway_key_routes(
     )
     @operator_acceptance(ReceiptPolicy.KEY)
     def revoke_gateway_key(
+        *,
         request_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-        name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        name: Annotated[str, PathParameter(pattern=_NAME_PATTERN, max_length=63)],
         actor: Actor = actor_dependency,
     ) -> GatewayKeyRevoked:
         authorize(actor, _REVOKE_PATH)
