@@ -120,35 +120,31 @@ class RecipeImageAvailabilityProduction:
             self.scheduler.close()
 
 
-def build_recipe_image_availability(
-    sessions: sessionmaker[Session],
-    *,
-    settings: Any | None = None,
-    artifact_root: Any | None = None,
-    recipe_builds: Any,
-    recipe_operations: Any,
-    model_cache: Any | None = None,
-    clock: Callable[[], datetime],
-    max_parallel: int = 4,
-    with_scheduler: bool = False,
-    storage: FilesystemRuntimeImageStorage,
-) -> RecipeImageAvailabilityProduction:
-    """Compose immutable catalog resolution, OCI storage and image execution."""
+@dataclass(frozen=True, slots=True)
+class _ImageAvailabilitySteps:
+    """The authority, recovery and builder steps of one availability service.
 
-    image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
-    if image_root is None:
-        raise InvalidValue(
-            "recipe image artifact root is required",
-            reason=InvalidRequestReason.INCOMPLETE,
-        )
-    transport = OciLayoutImageTransport()
+    The service is built from these steps, so it is reached through ``service_of``
+    once it exists."""
+
+    sessions: sessionmaker[Session]
+    recipe_builds: Any
+    recipe_operations: Any
+    storage: FilesystemRuntimeImageStorage
+    clock: Callable[[], datetime]
+    service_of: Callable[[], RecipeImageAvailabilityService]
+
+    @property
+    def service(self) -> RecipeImageAvailabilityService:
+        return self.service_of()
 
     def authority(
+        self,
         recipe_revision_id: str,
         *,
         force: bool = False,
     ) -> tuple[RecipeDefinition, AvailabilityRuntime]:
-        with sessions() as session:
+        with self.sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.id == recipe_revision_id,
@@ -178,7 +174,7 @@ def build_recipe_image_availability(
             session.close()
             package_handle: Mapping[str, object] | None = None
             resolution = None
-            resolve = getattr(recipe_builds, "resolve", None)
+            resolve = getattr(self.recipe_builds, "resolve", None)
             if isinstance(resolve, Callable):
                 try:
                     resolution = resolve(recipe_revision_id)
@@ -245,6 +241,7 @@ def build_recipe_image_availability(
                 ) from error
 
     def reobserve_authority(
+        self,
         recipe_revision_id: str,
         *,
         force: bool = False,
@@ -254,13 +251,14 @@ def build_recipe_image_availability(
         unknown: AvailabilityUnsettled | None = None
         for _attempt in range(3):
             try:
-                return authority(recipe_revision_id, force=force)
+                return self.authority(recipe_revision_id, force=force)
             except AvailabilityUnsettled as error:
                 unknown = error
         assert unknown is not None
         raise unknown
 
     def recover_build(
+        self,
         claim: RecipeImageAvailabilityClaim,
         *,
         join_active: bool = True,
@@ -272,8 +270,8 @@ def build_recipe_image_availability(
         :class:`BuildUnsettled` when what is committed does not settle (the
         caller returns it, nothing was written)."""
 
-        with sessions.begin() as session:
-            parent = service._require_claim(session, claim)
+        with self.sessions.begin() as session:
+            parent = self.service._require_claim(session, claim)
             payload = parent.payload
             runtime = payload.get("runtime")
             if not isinstance(runtime, Mapping):
@@ -304,7 +302,7 @@ def build_recipe_image_availability(
                         )
                     )
                     dependency = dependency.model_copy(update={"operation_id": None})
-                    accepted = service._payload(parent)
+                    accepted = self.service._payload(parent)
                     if isinstance(accepted, AvailabilityJobPayload):
                         parent.payload = accepted.model_copy(
                             update={"build_dependency": dependency}
@@ -430,6 +428,7 @@ def build_recipe_image_availability(
             return child.id, builder_id, digest
 
     def builder(
+        self,
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
         *,
@@ -439,19 +438,19 @@ def build_recipe_image_availability(
         progress: Callable[[Mapping[str, object]], None],
     ) -> Mapping[str, object] | BuildUnsettled:
         del recipe
-        reconcile_abandoned_builds(service, claim, recipe_operations)
-        recovered = recover_build(claim, join_active=False)
+        reconcile_abandoned_builds(self.service, claim, self.recipe_operations)
+        recovered = self.recover_build(claim, join_active=False)
         if isinstance(recovered, BuildUnsettled):
             return recovered
         if recovered is not None:
             child_id, child_builder, child_input = recovered
             return _observe_build(
-                sessions,
-                recipe_operations.get(child_id),
+                self.sessions,
+                self.recipe_operations.get(child_id),
                 builder_node_id=child_builder,
                 build_input_sha256=child_input,
                 progress=progress,
-                storage=storage,
+                storage=self.storage,
             )
         revision_id = runtime.get("recipe_revision_id")
         raw_builder_node_id = runtime.get("builder_node_id")
@@ -464,25 +463,25 @@ def build_recipe_image_availability(
                 "canonical build plan is unavailable after restart",
                 reason=WaitReason.RECEIPT_MISSING,
             )
-        resolution = recipe_builds.resolve(revision_id)
+        resolution = self.recipe_builds.resolve(revision_id)
         cached = None if force else _cached_build_receipt(resolution)
         if cached is not None and build_input_sha256 in {
             "",
             cached["build_input_sha256"],
         }:
             return cached
-        recovered = recover_build(claim, resolution=resolution)
+        recovered = self.recover_build(claim, resolution=resolution)
         if isinstance(recovered, BuildUnsettled):
             return recovered
         if recovered is not None:
             child_id, child_builder, child_input = recovered
             return _observe_build(
-                sessions,
-                recipe_operations.get(child_id),
+                self.sessions,
+                self.recipe_operations.get(child_id),
                 builder_node_id=child_builder,
                 build_input_sha256=child_input,
                 progress=progress,
-                storage=storage,
+                storage=self.storage,
             )
         # SQL may still record a succeeded build whose archive is gone. The
         # resolution reports that as stale cache loss, and dispatch must build
@@ -499,8 +498,8 @@ def build_recipe_image_availability(
             # Read the parent and choose a candidate in a short transaction.
             # The candidate is locked again only for final persistence, after
             # all source/policy/inventory work has completed.
-            with sessions.begin() as session:
-                parent = service._require_claim(session, claim)
+            with self.sessions.begin() as session:
+                parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
                 if isinstance(parent_runtime, Mapping) and isinstance(
@@ -657,10 +656,10 @@ def build_recipe_image_availability(
         while selected_plan is None and selected_candidate is not None:
             candidate_id = selected_candidate
             try:
-                prepared = recipe_builds.prepare_plan(
+                prepared = self.recipe_builds.prepare_plan(
                     revision_id,
                     candidate_id,
-                    now=clock(),
+                    now=self.clock(),
                     resolution=resolution,
                 )
             except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
@@ -688,7 +687,7 @@ def build_recipe_image_availability(
             if planned_decision is not None and not planned_decision.used:
                 prebuilt_unused = planned_decision
             pulls_prebuilt = planned_decision is not None and planned_decision.used
-            with sessions.begin() as session:
+            with self.sessions.begin() as session:
                 try:
                     acquire_admission_keys(
                         session,
@@ -711,7 +710,7 @@ def build_recipe_image_availability(
                         None,
                     )
                     continue
-                parent = service._require_claim(session, claim)
+                parent = self.service._require_claim(session, claim)
                 parent_payload = parent.payload
                 parent_runtime = require_mapping(parent_payload["runtime"], "runtime")
                 assigned = (
@@ -778,8 +777,8 @@ def build_recipe_image_availability(
                     )
                     continue
                 try:
-                    selected_plan = recipe_builds.persist_plan_in_session(
-                        session, prepared, now=clock()
+                    selected_plan = self.recipe_builds.persist_plan_in_session(
+                        session, prepared, now=self.clock()
                     )
                 except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                     code = str(getattr(error, "code", ""))
@@ -829,23 +828,26 @@ def build_recipe_image_availability(
                     "identity_key": build_input_sha256,
                     PREBUILT_PULL_KEY: pulls_prebuilt,
                 }
-                parent.updated_at = clock()
+                parent.updated_at = self.clock()
         if builder_node_id is None:
             # A resolved plan always carries the builder that produced it, so
             # without one the operation can only wait for capacity.
             return _capacity_wait(skipped, candidate_ids, prebuilt_unused)
         if selected_plan is None:
             try:
-                prepared = recipe_builds.prepare_plan(
-                    revision_id, builder_node_id, now=clock(), resolution=resolution
+                prepared = self.recipe_builds.prepare_plan(
+                    revision_id,
+                    builder_node_id,
+                    now=self.clock(),
+                    resolution=resolution,
                 )
             except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                 return _planning_failure(error)
-            with sessions.begin() as session:
-                service._require_claim(session, claim)
+            with self.sessions.begin() as session:
+                self.service._require_claim(session, claim)
                 try:
-                    selected_plan = recipe_builds.persist_plan_in_session(
-                        session, prepared, now=clock()
+                    selected_plan = self.recipe_builds.persist_plan_in_session(
+                        session, prepared, now=self.clock()
                     )
                 except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                     session.rollback()
@@ -866,8 +868,8 @@ def build_recipe_image_availability(
         # Publish the exact dependency before relying on the shared child.
         # This also re-enters ownership when a previously recorded image was
         # lost and its parent needs to prepare it again.
-        with sessions.begin() as session:
-            parent = service._require_claim(session, claim)
+        with self.sessions.begin() as session:
+            parent = self.service._require_claim(session, claim)
             try:
                 lock_build_dependency(
                     session,
@@ -905,11 +907,11 @@ def build_recipe_image_availability(
                 mode="json", exclude_none=True
             )
             parent.payload = parent_payload
-            parent.updated_at = clock()
+            parent.updated_at = self.clock()
         build_request_id = str(dependency.request_key)
 
         def admission_guard(session: Session) -> None:
-            parent = service._require_claim(session, claim)
+            parent = self.service._require_claim(session, claim)
             current = _build_dependency(parent.payload)
             runtime = require_mapping(parent.payload["runtime"], "runtime")
             if (
@@ -926,7 +928,7 @@ def build_recipe_image_availability(
                 )
 
         try:
-            operation = recipe_operations.build(
+            operation = self.recipe_operations.build(
                 plan,
                 build_input_sha256=build_input_sha256,
                 actor="recipe-image-availability",
@@ -943,14 +945,14 @@ def build_recipe_image_availability(
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         except RecipeOperationConflict:
-            recovered = recover_build(claim)
+            recovered = self.recover_build(claim)
             if isinstance(recovered, BuildUnsettled):
                 return recovered
             if recovered is None:
                 raise
-            operation = recipe_operations.get(recovered[0])
-        with sessions.begin() as session:
-            parent = service._require_claim(session, claim)
+            operation = self.recipe_operations.get(recovered[0])
+        with self.sessions.begin() as session:
+            parent = self.service._require_claim(session, claim)
             current = _build_dependency(parent.payload)
             if isinstance(current, BuildUnsettled):
                 return current
@@ -976,20 +978,52 @@ def build_recipe_image_availability(
                 "build_dependency": current.model_dump(mode="json", exclude_none=True)
             }
         return _observe_build(
-            sessions,
+            self.sessions,
             operation,
             builder_node_id=builder_node_id,
             build_input_sha256=build_input_sha256,
             progress=progress,
-            storage=storage,
+            storage=self.storage,
         )
 
+
+def build_recipe_image_availability(
+    sessions: sessionmaker[Session],
+    *,
+    settings: Any | None = None,
+    artifact_root: Any | None = None,
+    recipe_builds: Any,
+    recipe_operations: Any,
+    model_cache: Any | None = None,
+    clock: Callable[[], datetime],
+    max_parallel: int = 4,
+    with_scheduler: bool = False,
+    storage: FilesystemRuntimeImageStorage,
+) -> RecipeImageAvailabilityProduction:
+    """Compose immutable catalog resolution, OCI storage and image execution."""
+
+    image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
+    if image_root is None:
+        raise InvalidValue(
+            "recipe image artifact root is required",
+            reason=InvalidRequestReason.INCOMPLETE,
+        )
+    transport = OciLayoutImageTransport()
+
+    steps = _ImageAvailabilitySteps(
+        sessions=sessions,
+        recipe_builds=recipe_builds,
+        recipe_operations=recipe_operations,
+        storage=storage,
+        clock=clock,
+        service_of=lambda: service,
+    )
     service = RecipeImageAvailabilityService(
         sessions,
         storage=storage,
-        authority=reobserve_authority,
+        authority=steps.reobserve_authority,
         transport=transport,
-        builder=builder,
+        builder=steps.builder,
         clock=clock,
         model_cache=model_cache,
         max_parallel=max_parallel,
