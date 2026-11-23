@@ -546,21 +546,26 @@ schemas. CI runs `scripts/check-generated-determinism` for control clients and
 file membership. Existing contract round-trip tests still exercise the real
 producer and consumer boundaries.
 
-The repository does not type-check cleanly yet, but every surviving error is a
-reviewed one. `scripts/check-python-types` treats
-`tools/pyright-baseline.json` as an allowlist: each entry names a file, a
-pyright rule, the accepted count and the reason it is accepted. An error that
-is not listed fails even when the file's total count is unchanged; a listed
-entry whose count moves in either direction fails, so a second error of the
-same rule cannot hide and a fixed error must be removed; an entry that no
-longer occurs fails as stale; and an entry without a reason fails, so
-`--update` is not a way to accept an error without saying why. Run `--update`
-to write the current errors, then write the reason for anything it adds.
-With no file arguments, `pyright` runs over `control/src`, `src`, `tests` and
-`control/tests` in basic mode; generated clients and virtualenvs are excluded.
-The commit hook passes changed Python paths and checks only their diagnostics
-and reviewed exceptions. CI retains the full check, including errors in
-unchanged consumers. Partial checks cannot update the repository baseline.
+Python lint, formatting and types share one configuration, the root
+`pyproject.toml`, and one locked tool version each (uv.lock, control dev group).
+Ruff runs its default rules plus the families in `[tool.ruff.lint] extend-select`;
+every ignore, global or per file, states its reason next to it. `extend-include`
+makes every extensionless file in `scripts/` and `bin/` Python unless
+`extend-exclude` names it as a shell script, so a new script is either linted or
+fails Ruff loudly. Imports sit at module level (PLC0415, E402): a cycle is broken
+by moving shared definitions into a lower module, never by a function-local or
+`TYPE_CHECKING` import, and `tests/test_package_import_direction.py` keeps the
+runtime import graph of the four installable packages acyclic. Inside those
+packages imports are absolute (TID252); tests, scripts and tools keep relative
+ones, whose absolute name depends on how pytest roots them.
+
+`scripts/check-python-types` runs pyright in `standard` mode plus the nine strict
+checks listed in `[tool.pyright]`, on the Linux platform, over `include` and the
+extensionless scripts Ruff selects; `agent_protocol/src` is checked as Python
+3.12. There is no baseline: a justified site carries
+`# pyright: ignore[rule]` with its reason, and reportUnnecessaryTypeIgnoreComment
+fails an ignore that is no longer needed. The commit hook passes the staged
+files Ruff treats as Python; CI checks the whole tree with the same commands.
 
 New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
 an externally supplied unified diff. CI creates that patch against its explicit
@@ -598,7 +603,7 @@ prove that added violations fail, untouched old occurrences do not, and bounded
 waits and security ingress remain valid. Detection is a syntax check; behavior,
 process and PostgreSQL tests establish recovery and fresh admission.
 
-The model registry, pyright exceptions, Rust serde and TypeScript shape registries,
+The model registry, Rust serde and TypeScript shape registries,
 and generated wire/client/vocabulary checks retain their existing contracts.
 Controller startup and sparse-serialization exceptions remain semantic registries.
 Lifecycle writer ownership remains checked without a baseline.

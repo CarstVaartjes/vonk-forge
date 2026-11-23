@@ -1,10 +1,9 @@
-"""Type exceptions name reviewed source sites rather than per-file budgets."""
+"""The Python type check and the commit hook that runs it on staged files."""
 
 from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import json
 import os
 import shutil
 import subprocess
@@ -14,11 +13,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from vonk_control.typecheck_contract import TypecheckException
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check-python-types"
-sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def _module(script: Path = SCRIPT) -> ModuleType:
@@ -30,25 +26,7 @@ def _module(script: Path = SCRIPT) -> ModuleType:
     return module
 
 
-def _exception(**overrides: object) -> TypecheckException:
-    entry: dict[str, object] = {
-        "file": "control/tests/example.py",
-        "rule": "reportArgumentType",
-        "source": "call(wrong)",
-        "reason": "The case asserts the runtime refusal of an untyped value.",
-    }
-    entry.update(overrides)
-    return _module().TypecheckException.model_validate(entry)
-
-
-def test_a_reviewed_exception_with_a_reason_is_accepted() -> None:
-    module = _module()
-    key = ("control/tests/example.py", "reportArgumentType", "call(wrong)")
-
-    assert module.evaluate({key}, [_exception()]) == []
-
-
-def test_typecheck_timeout_ends_and_fresh_diagnostics_are_available(
+def test_typecheck_timeout_ends_with_a_named_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _module()
@@ -59,197 +37,7 @@ def test_typecheck_timeout_ends_and_fresh_diagnostics_are_available(
 
     monkeypatch.setattr(module.subprocess, "run", expired)
     with pytest.raises(SystemExit):
-        module._diagnostics()
-    monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            stdout=json.dumps({"generalDiagnostics": []}), stderr="", returncode=0
-        ),
-    )
-    assert module._diagnostics() == []
-
-
-def test_an_unlisted_source_site_fails() -> None:
-    module = _module()
-    listed = ("control/tests/example.py", "reportArgumentType", "call(wrong)")
-    hidden = ("control/tests/example.py", "reportReturnType", "return wrong")
-
-    problems = module.evaluate({listed, hidden}, [_exception()])
-
-    assert problems
-
-
-def test_a_different_source_with_the_same_rule_in_the_same_file_fails() -> None:
-    module = _module()
-    key = ("control/tests/example.py", "reportArgumentType", "call(wrong)")
-
-    problems = module.evaluate({key, (*key[:2], "other(wrong)")}, [_exception()])
-
-    assert problems
-
-
-def test_an_exception_that_no_longer_occurs_is_stale() -> None:
-    module = _module()
-
-    problems = module.evaluate(set(), [_exception()])
-
-    assert problems
-
-
-def test_an_exception_without_a_reason_fails() -> None:
-    module = _module()
-    key = ("control/tests/example.py", "reportArgumentType", "call(wrong)")
-
-    problems = module.evaluate({key}, [_exception(reason="")])
-
-    assert problems
-
-
-def test_a_duplicate_exception_fails() -> None:
-    module = _module()
-    key = ("control/tests/example.py", "reportArgumentType", "call(wrong)")
-
-    problems = module.evaluate({key}, [_exception(), _exception()])
-
-    assert problems
-
-
-def test_update_keeps_known_reasons_and_reports_new_ones(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    module = _module()
-    target = tmp_path / "baseline.json"
-    monkeypatch.setattr(module, "BASELINE", target)
-    known = _exception()
-    added = (
-        "control/src/example.py",
-        "reportGeneralTypeIssues",
-        "call(new_wrong)",
-    )
-
-    module._write(
-        {
-            ("control/tests/example.py", "reportArgumentType", "call(wrong)"),
-            added,
-        },
-        [known],
-    )
-
-    document = json.loads(target.read_text(encoding="utf-8"))
-    entries = {
-        (entry["file"], entry["rule"], entry["source"]): entry
-        for entry in document["exceptions"]
-    }
-    assert entries[("control/tests/example.py", "reportArgumentType", "call(wrong)")][
-        "reason"
-    ] == (known.reason)
-    assert entries[added]["source"] == "call(new_wrong)"
-    assert entries[added]["reason"] == ""
-    assert "control/src/example.py reportGeneralTypeIssues" in capsys.readouterr().err
-
-
-def test_failed_gate_preserves_the_actual_diagnostic_location_and_cause(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    module = _module()
-    target = tmp_path / "baseline.json"
-    target.write_text(json.dumps({"schema_version": 1, "exceptions": []}))
-    monkeypatch.setattr(module, "BASELINE", target)
-    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT)])
-    monkeypatch.setattr(module, "ROOT", tmp_path)
-    source = tmp_path / "control/src/example.py"
-    source.parent.mkdir(parents=True)
-    source.write_text("\n" * 29 + "CanonicalEvidence\n")
-    report = {
-        "generalDiagnostics": [
-            {
-                "file": str(tmp_path / "control/src/example.py"),
-                "severity": "error",
-                "rule": "reportAttributeAccessIssue",
-                "message": "CanonicalEvidence is not exported",
-                "range": {"start": {"line": 29, "character": 0}},
-            }
-        ]
-    }
-    monkeypatch.setattr(
-        module.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            stdout=json.dumps(report), stderr="", returncode=1
-        ),
-    )
-    assert module.main() == 1
-    detail = capsys.readouterr().err
-    assert "control/src/example.py:30:1: reportAttributeAccessIssue" in detail
-    assert "CanonicalEvidence is not exported" in detail
-
-
-def test_partial_check_does_not_require_exceptions_in_unchecked_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    module = _module()
-    target = tmp_path / "baseline.json"
-    target.write_text(
-        json.dumps({"schema_version": 1, "exceptions": [_exception().model_dump()]})
-    )
-    monkeypatch.setattr(module, "BASELINE", target)
-    selected = "tests/scripts/test_check_python_types.py"
-    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), selected])
-    observed: list[list[str]] = []
-
-    def diagnostics(files: list[str]) -> list[dict[str, object]]:
-        observed.append(files)
-        return []
-
-    monkeypatch.setattr(module, "_diagnostics", diagnostics)
-    assert module.main() == 0
-    assert observed == [[selected]]
-
-
-def test_partial_check_still_rejects_new_errors_and_stale_selected_exceptions(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    module = _module()
-    target = tmp_path / "baseline.json"
-    target.write_text(
-        json.dumps({"schema_version": 1, "exceptions": [_exception().model_dump()]})
-    )
-    monkeypatch.setattr(module, "BASELINE", target)
-    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "control/tests/example.py"])
-    monkeypatch.setattr(
-        module,
-        "_diagnostics",
-        lambda files: [
-            module.TypecheckDiagnostic.model_validate(
-                {
-                    "file": "control/tests/example.py",
-                    "rule": "reportReturnType",
-                    "message": "str is not assignable to int",
-                    "source": "return wrong",
-                    "line": 1,
-                    "column": 1,
-                }
-            )
-        ],
-    )
-    assert module.main() == 1
-    detail = capsys.readouterr().err
-    assert "stale exception" in detail
-    assert "unlisted type error" in detail
-    assert "str is not assignable to int" in detail
-
-
-def test_partial_check_cannot_rewrite_the_full_baseline(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _module()
-    monkeypatch.setattr(
-        module.sys, "argv", [str(SCRIPT), "--update", "tests/example.py"]
-    )
-    with pytest.raises(SystemExit) as failure:
-        module.main()
-    assert failure.value.code == 2
+        module.main(["control/src/vonk_control/__init__.py"])
 
 
 @pytest.mark.parametrize(
@@ -258,7 +46,7 @@ def test_partial_check_cannot_rewrite_the_full_baseline(
         ("value = missing_name\n", "F821"),
         ("value=1\n", "would be reformatted"),
         ('value: int = "wrong"\n', "reportAssignmentType"),
-        ("value: int = 1\n", "no unlisted errors"),
+        ("value: int = 1\n", "0 errors"),
     ],
 )
 def test_real_hook_checks_whitespace_paths_with_prepared_environment(
@@ -273,9 +61,6 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     )
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pyright]\ntypeCheckingMode = "basic"\n'
-    )
-    (tmp_path / "tools/pyright-baseline.json").write_text(
-        '{"schema_version": 1, "exceptions": []}\n'
     )
     shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
     shutil.copy2(

@@ -1,169 +1,50 @@
 #!/usr/bin/env -S uv run --project control --no-sync --offline python
-"""Fail when a Python type error appears outside the reviewed exception list.
+"""Type-check Python with pyright under pyproject.toml's [tool.pyright].
 
-Each exception identifies a diagnostic by file, rule and source line, with a
-reviewed reason. A different source site cannot consume another site's allowance.
-Missing sites are stale; missing reasons and duplicate identities fail.
-Run --update after source changes, then review reasons for newly named sites.
+No arguments: the configured ``include`` plus the extensionless Python scripts.
+pyright globs only ``*.py``; Ruff's file selection (``extend-include``) is the one
+owner of which files are Python, so the scripts come from ``ruff --show-files``.
+File arguments: only those files (the commit hook passes the staged ones).
+
+There is no baseline: a justified site carries ``# pyright: ignore[rule]`` with
+its reason, and reportUnnecessaryTypeIgnoreComment fails an ignore that is stale.
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from vonk_control.typecheck_contract import (
-    PyrightReport,
-    PyrightSeverity,
-    TypecheckDiagnostic,
-    TypecheckException,
-    TypecheckExceptionRegistry,
-    TypecheckSourceSite,
-)
-
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = ROOT / "tools/pyright-baseline.json"
 TYPECHECK_TIMEOUT_SECONDS = 600
 
 
-def _diagnostics(files: list[str] | None = None) -> list[TypecheckDiagnostic]:
-    # pyright is locked in the control dev group and resolves imports from
-    # this same interpreter; its version check is the only network access it
-    # would otherwise attempt.
-    try:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pyright",
-                "--outputjson",
-                "--pythonpath",
-                sys.executable,
-                *[str((ROOT / file).resolve()) for file in files or []],
-            ],
-            cwd=ROOT,
-            env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=TYPECHECK_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        raise SystemExit(
-            f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
-            "type-check diagnostics are unavailable"
-        ) from None
-    try:
-        payload = PyrightReport.model_validate_json(completed.stdout)
-    except ValidationError:
-        print(completed.stdout[-4000:], file=sys.stderr)
-        print(completed.stderr[-4000:], file=sys.stderr)
-        raise SystemExit("pyright did not return a JSON report")
-    diagnostics = []
-    if completed.returncode not in (0, 1):
-        print(completed.stderr[-4000:], file=sys.stderr)
-        raise SystemExit(f"pyright failed with exit status {completed.returncode}")
-    for diagnostic in payload.general_diagnostics:
-        if diagnostic.severity != PyrightSeverity.ERROR:
-            continue
-        diagnostics.append(
-            TypecheckDiagnostic(
-                file=Path(diagnostic.file).resolve().relative_to(ROOT).as_posix(),
-                rule=diagnostic.rule or "unclassified-pyright-rule",
-                message=diagnostic.message,
-                line=diagnostic.range.start.line + 1,
-                column=diagnostic.range.start.character + 1,
-                source=Path(diagnostic.file)
-                .read_text()
-                .splitlines()[diagnostic.range.start.line]
-                .strip(),
-            )
-        )
-    return diagnostics
-
-
-def _identity(entry: TypecheckSourceSite) -> tuple[str, str, str]:
-    return entry.file, entry.rule, entry.source
-
-
-def _sites(diagnostics: list[TypecheckDiagnostic]) -> set[tuple[str, str, str]]:
-    return {_identity(entry) for entry in diagnostics}
-
-
-def _load(path: Path) -> list[TypecheckException]:
-    document = TypecheckExceptionRegistry.model_validate_json(
-        path.read_text(encoding="utf-8")
+def extensionless_scripts() -> list[str]:
+    """The Python files Ruff selects that pyright's ``*.py`` globbing misses."""
+    shown = subprocess.run(
+        [sys.executable, "-m", "ruff", "check", "--show-files", "."],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout.splitlines()
+    return sorted(
+        Path(line).relative_to(ROOT).as_posix()
+        for line in shown
+        if line and not Path(line).suffix
     )
-    if document.schema_version != 1:
-        raise SystemExit(f"{path} is not a schema_version 1 exception list")
-    return document.exceptions
 
 
-def evaluate(
-    sites: set[tuple[str, str, str]], exceptions: list[TypecheckException]
-) -> list[str]:
-    """Compare source identities with reviewed exceptions, without a budget."""
-    problems: list[str] = []
-    listed: set[tuple[str, str, str]] = set()
-    for entry in exceptions:
-        key = _identity(entry)
-        label = " ".join(key)
-        if key in listed:
-            problems.append(f"duplicate exception: {label}")
-            continue
-        listed.add(key)
-        if not all(key):
-            problems.append(f"exception has no source identity: {label}")
-        if not entry.reason.strip():
-            problems.append(f"exception has no reason: {label}")
-        if key not in sites:
-            problems.append(f"stale exception (remove it with --update): {label}")
-    for key in sorted(sites - listed):
-        problems.append(f"unlisted type error: {' '.join(key)}")
-    return problems
+def full_scope() -> list[str]:
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return [*config["tool"]["pyright"]["include"], *extensionless_scripts()]
 
 
-def _write(
-    sites: set[tuple[str, str, str]], previous: list[TypecheckException]
-) -> None:
-    reasons = {_identity(entry): entry.reason for entry in previous}
-    document = TypecheckExceptionRegistry(
-        schema_version=1,
-        exceptions=[
-            TypecheckException(
-                file=file,
-                rule=rule,
-                source=source,
-                reason=reasons.get((file, rule, source), ""),
-            )
-            for file, rule, source in sorted(sites)
-        ],
-    )
-    BASELINE.write_text(document.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    print("reviewed source-site list updated")
-    for entry in document.exceptions:
-        if not entry.reason:
-            print(
-                f"write a reason for: {entry.file} {entry.rule} {entry.source}",
-                file=sys.stderr,
-            )
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--update", action="store_true", help="rewrite the baseline")
-    parser.add_argument(
-        "files", nargs="*", help="check only these files (default: full repository)"
-    )
-    args = parser.parse_args()
-    if args.update and args.files:
-        parser.error("--update requires a full repository check")
-
+def main(arguments: list[str]) -> int:
     if (ROOT / "src/cluster_profiles").is_dir() and not (
         ROOT / "src/cluster_profiles/generated_control/__init__.py"
     ).is_file():
@@ -173,36 +54,39 @@ def main() -> int:
             check=True,
             timeout=1200,
         )
-    diagnostics = _diagnostics(args.files)
-    selected = {
-        (ROOT / file).resolve().relative_to(ROOT).as_posix() for file in args.files
-    }
-    if selected:
-        diagnostics = [item for item in diagnostics if item.file in selected]
-    sites = _sites(diagnostics)
-    if args.update:
-        _write(sites, _load(BASELINE))
-        return 0
-
-    exceptions = _load(BASELINE)
-    if selected:
-        exceptions = [entry for entry in exceptions if entry.file in selected]
-    problems = evaluate(sites, exceptions)
-    for problem in problems:
-        print(problem, file=sys.stderr)
-    if problems:
-        reviewed = {_identity(entry) for entry in exceptions}
-        for diagnostic in diagnostics:
-            if _identity(diagnostic) not in reviewed:
-                print(
-                    f"{diagnostic.file}:{diagnostic.line}:{diagnostic.column}: "
-                    f"{diagnostic.rule}: {diagnostic.message}",
-                    file=sys.stderr,
-                )
-        return 1
-    print("python types: no unlisted errors")
-    return 0
+    files = arguments or full_scope()
+    # pyright is locked in the control dev group and resolves imports from this
+    # same interpreter; its version check is the only network access it would
+    # otherwise attempt.
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pyright",
+                "--pythonpath",
+                sys.executable,
+                *[str((ROOT / file).resolve()) for file in files],
+            ],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1",
+                # The whole scope exceeds Node's default ~2 GB heap.
+                "NODE_OPTIONS": os.environ.get(
+                    "NODE_OPTIONS", "--max-old-space-size=6144"
+                ),
+            },
+            check=False,
+            timeout=TYPECHECK_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
+            "type-check diagnostics are unavailable"
+        ) from None
+    return completed.returncode
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

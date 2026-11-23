@@ -587,9 +587,9 @@ def test_isolated_wheel_build_guard_rejects_a_rebuilt_contract_wheel(
 def test_python_targets_agree_across_projects() -> None:
     """CI runs Python 3.14; the agent protocol wheel also runs on adapter 3.12.
 
-    So three projects require 3.14, the protocol wheel requires 3.12, and the
-    one repository-wide ruff target is the lowest of them (see the
-    protocol-consumer step in ci.yml).
+    So three projects require 3.14 and the protocol wheel requires 3.12. Ruff
+    checks the protocol at its own 3.12 floor and everything else at 3.13 (the
+    3.14 target would make the formatter rewrite every `except (A, B):`).
     """
 
     def load(path: str) -> dict[str, Any]:
@@ -604,5 +604,12 @@ def test_python_targets_agree_across_projects() -> None:
         assert load(path)["project"]["requires-python"] == ">=3.14", path
     protocol = load("agent_protocol/pyproject.toml")
     assert protocol["project"]["requires-python"] == ">=3.12"
-    assert root["tool"]["ruff"]["target-version"] == "py312"
+    assert root["tool"]["ruff"]["per-file-target-version"] == {
+        "agent_protocol/**": "py312"
+    }
+    assert root["tool"]["ruff"]["target-version"] in {"py312", "py313", "py314"}
+    environments = root["tool"]["pyright"]["executionEnvironments"]
+    assert {"root": "agent_protocol/src", "pythonVersion": "3.12"}.items() <= (
+        environments[0].items()
+    )
     assert root["tool"]["pyright"]["pythonVersion"] == "3.14"

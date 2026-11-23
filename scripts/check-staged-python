@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 # The sibling helper, however this file is loaded.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).absolute().parent))
 from check_environment import ensure_control
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +22,6 @@ TYPE_INPUTS = {
     "control/pyproject.toml",
     "uv.lock",
     "pyrightconfig.json",
-    "tools/pyright-baseline.json",
     "scripts/check-python-types",
     "scripts/check-staged-python",
     "scripts/check-staged-code",
@@ -30,12 +29,47 @@ TYPE_INPUTS = {
 }
 
 
+def python_files(paths: list[str], python: Path) -> list[str]:
+    """The staged paths Ruff treats as Python, extensionless scripts included.
+
+    A ``.py`` path is Python (Ruff's ``--force-exclude`` still drops excluded
+    ones). Whether an extensionless file is a Python script is decided by Ruff's
+    ``extend-include``/``extend-exclude`` in pyproject.toml, the one owner of
+    that list; CI runs Ruff on the whole tree."""
+    bare = [path for path in paths if not Path(path).suffix]
+    selected: set[Path] = set()
+    if bare:
+        shown = subprocess.run(
+            [
+                str(python),
+                "-m",
+                "ruff",
+                "check",
+                "--show-files",
+                "--force-exclude",
+                "--",
+                *bare,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout.splitlines()
+        selected = {Path(line).resolve() for line in shown if line}
+    return [
+        path
+        for path in paths
+        if path.endswith(".py") or (ROOT / path).resolve() in selected
+    ]
+
+
 def type_checked(files: list[str]) -> list[str]:
     """The staged files inside pyright's configured scope.
 
-    The full check (CI) reports only ``include`` minus ``exclude`` from
-    pyproject.toml; handing pyright a file outside it reports errors CI never
-    sees. pyproject.toml is the one owner of the scope."""
+    The full check (CI) reports ``include`` minus ``exclude`` from pyproject.toml
+    plus the extensionless Python scripts; handing pyright a file outside that
+    reports errors CI never sees. pyproject.toml is the one owner of the scope."""
     try:
         config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -47,10 +81,14 @@ def type_checked(files: list[str]) -> list[str]:
     return [
         path
         for path in files
-        if any(
-            entry in (".", path) or path.startswith(entry + "/") for entry in include
+        if not Path(path).suffix
+        or (
+            any(
+                entry in (".", path) or path.startswith(entry + "/")
+                for entry in include
+            )
+            and not any(fnmatch.fnmatch(path, pattern) for pattern in exclude)
         )
-        and not any(fnmatch.fnmatch(path, pattern) for pattern in exclude)
     ]
 
 
@@ -61,9 +99,13 @@ def main() -> int:
         timeout=30,
     )
     paths = [os.fsdecode(path) for path in staged.split(b"\0") if path]
-    files = [path for path in paths if path.endswith(".py") and (ROOT / path).is_file()]
+    candidates = [
+        path
+        for path in paths
+        if (ROOT / path).is_file() and (path.endswith(".py") or not Path(path).suffix)
+    ]
     full_types = bool(TYPE_INPUTS.intersection(paths))
-    if not files and not full_types:
+    if not candidates and not full_types:
         return 0
     environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", ".venv"))
     if not environment.is_absolute():
@@ -77,6 +119,9 @@ def main() -> int:
             check=False,
             timeout=600,
         ).returncode
+    files = python_files(candidates, python)
+    if not files and not full_types:
+        return 0
     check_env = {
         **os.environ,
         "PYRIGHT_PYTHON_FORCE_VERSION": importlib.metadata.version("pyright"),

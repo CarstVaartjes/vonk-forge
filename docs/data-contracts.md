@@ -33,7 +33,6 @@ that no longer occurs fails as stale.
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
 | CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
-| Type-check diagnostics and source-site exceptions | `control/src/vonk_control/typecheck_contract.py` | none | none | CI and staged Python checks |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 
 Regenerate everything with `scripts/generate-agent-wire` (wire, installer
