@@ -9,7 +9,7 @@ from .common import ControllerClient
 from .selection import _resolve_spark_selectors, _spark_names
 
 
-def _metrics(args: argparse.Namespace, client: ControllerClient) -> dict:
+def _metrics(args: argparse.Namespace, client: ControllerClient) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     if getattr(args, "metrics_action", None) != "show":
         return {"metrics": [spec.to_dict() for spec in client.metrics_catalogue()]}
     query: dict[str, str] = {"metric": args.metric, "range": args.range}

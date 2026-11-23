@@ -82,7 +82,7 @@ def _review_and_submit_profile_load(
     question: str,
     review_when_confirmed: bool,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft | dict] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
 ) -> dict[str, object]:
     """Show the plan, ask, then submit a load bound to the effects just shown.
 
@@ -204,7 +204,7 @@ def _load_profile(
     question: str,
     review_when_confirmed: bool = False,
     lead: Callable[[object], Sequence[str]] | None = None,
-    draft: Callable[[], ReviewedDraft | dict] | None = None,
+    draft: Callable[[], ReviewedDraft | dict] | None = None,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
 ) -> dict[str, object]:
     """The one load path: review, confirm, submit, then follow the application.
 

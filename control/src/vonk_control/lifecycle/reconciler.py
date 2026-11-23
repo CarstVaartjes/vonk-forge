@@ -148,13 +148,13 @@ def _run(
     return None
 
 
-class Reconciler:
+class Reconciler[RowT]:
     """``reconcile(limit)``: one pass over the due rows."""
 
     def __init__(
         self,
         store: LifecycleStore,
-        adapters: Mapping[str, KindAdapter],
+        adapters: Mapping[str, KindAdapter[RowT]],
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         enabled: bool = False,

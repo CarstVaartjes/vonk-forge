@@ -86,7 +86,7 @@ def reconcile_orders(self: AgentJobService, limit: int = 100) -> bool:
     return gone or progressed or report.changed > 0 or healed > 0 or rollouts
 
 
-def _order_reconciler(self: AgentJobService) -> Reconciler:
+def _order_reconciler(self: AgentJobService) -> Reconciler[StoredOperation]:
     reconciler = getattr(self, "_reconciler", None)
     if reconciler is None:
         adapter = AgentOperationAdapter(

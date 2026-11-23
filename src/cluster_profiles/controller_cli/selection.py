@@ -180,7 +180,7 @@ def _library_pages(
     client: ControllerClient,
     path: str,
     key: str,
-    query: Mapping,
+    query: Mapping,  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     *,
     deadline: float,
 ) -> Iterator[list[object]]:

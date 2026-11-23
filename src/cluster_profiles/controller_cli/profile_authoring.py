@@ -180,7 +180,8 @@ def _profile_authoring(
     def check(definition) -> None:
         if action == "configure" and args.option:
             _configure_option_target(
-                cast(list, definition["assignments"]), args.assignment
+                cast(list, definition["assignments"]),  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
+                args.assignment,
             )
 
     def read_definition():
@@ -211,7 +212,7 @@ def _profile_authoring(
             else _skipped_read
         ),
     )
-    current = cast(dict, definition_outcome.get())
+    current = cast(dict, definition_outcome.get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     if args.observation.status != "complete":
         return current
     current_revision = cast(int, current["revision"])

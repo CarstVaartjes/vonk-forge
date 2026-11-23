@@ -147,7 +147,7 @@ class AgentJobService:
         self._advance_node: Callable[[str], None] | None = None
         self._configuration_lock = threading.Lock()
         self._started = False
-        self._reconciler: Reconciler | None = None
+        self._reconciler: Reconciler[StoredOperation] | None = None
         self._order_sweep_cursor: str | None = None
         self._order_sweep_retry_at: dict[str, datetime] = {}
         self._queue_wait_cursor: str | None = None
@@ -196,7 +196,7 @@ class AgentJobService:
     def reconcile_orders(self, limit: int = 100) -> bool:
         return reconcile_orders(self, limit)
 
-    def _order_reconciler(self) -> Reconciler:
+    def _order_reconciler(self) -> Reconciler[StoredOperation]:
         return _order_reconciler(self)
 
     def _sweep_lapsed_attempts(

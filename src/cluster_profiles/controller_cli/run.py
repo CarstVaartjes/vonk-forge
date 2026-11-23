@@ -126,7 +126,7 @@ def _run(
     # Option answers this run was given; they outlive a rebuilt draft.
     answered: dict[str, str] = {}
 
-    def own_choices(definition) -> dict:
+    def own_choices(definition) -> dict[str, str]:
         for assignment in definition["assignments"]:
             if (
                 assignment["recipe_selector"] == recipe_selector
@@ -135,13 +135,13 @@ def _run(
                 return assignment.get("option_choices") or {}
         return {}
 
-    def draft() -> ReviewedDraft | dict:
+    def draft() -> ReviewedDraft | dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
         """This run's edit on the newest saved profile; nothing is written yet.
 
         A read that did not complete is returned as its observation instead.
         """
         current = (
-            cast(dict, prefetched.pop().get())
+            cast(dict, prefetched.pop().get())  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
             if prefetched
             else _read_saved_definition(client, args)
         )

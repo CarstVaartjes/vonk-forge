@@ -59,7 +59,7 @@ def _models(annotation: Any) -> set[type[BaseModel]]:
     return set().union(*(_models(arg) for arg in get_args(annotation)))
 
 
-def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:
+def _routes(app: FastAPI, prefix: str = "") -> Iterator[tuple[str, Any, dict]]:  # pyright: ignore[reportMissingTypeArgument]  # FastAPI.openapi() document: the untyped-mapping guard refuses dict[str, Any]
     schema = app.openapi()
     framework_paths = {
         app.openapi_url,

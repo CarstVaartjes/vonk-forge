@@ -673,7 +673,7 @@ def _emit(
         )
 
 
-def _json_text(document: Mapping) -> str:
+def _json_text(document: object) -> str:
     """One versioned JSON document: indented for a person, compact for a pipe."""
 
     if sys.stdout.isatty():

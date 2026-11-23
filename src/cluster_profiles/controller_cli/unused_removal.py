@@ -91,7 +91,7 @@ class UnusedRemoval:
     totals: Totals
     submissions: list[Outcome] | None = field(default=None)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
         document = asdict(self)
         if self.submissions is None:
             del document["submissions"]
@@ -117,7 +117,7 @@ def _cached_selectors(client: ControllerClient) -> list[str]:
     return list(dict.fromkeys(selectors))
 
 
-def _reviewed(selector: str, document: dict) -> ReviewedModel:
+def _reviewed(selector: str, document: dict) -> ReviewedModel:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     review = CacheRemovalReview.from_dict(document)
     fleet = review.fleet
     if not isinstance(fleet, FleetModelRemovalEffects):
@@ -251,7 +251,7 @@ def _remove_unused(
     client: ControllerClient,
     args: argparse.Namespace,
     factory: Callable[[], str],
-) -> dict:
+) -> dict:  # pyright: ignore[reportMissingTypeArgument]  # JSON document: the untyped-mapping guard refuses dict[str, object]
     if args.selector is not None or args.request_key is not None:
         raise ValueError("model remove --unused takes no selector or request key")
     if getattr(args, "fleet", False):
