@@ -780,6 +780,11 @@ passes when it matches at least one path. There is no allowlist. It cannot see a
 that is composed (`Path / "a" / "b"`, an f-string, a regex), so write a scope as a plain
 full-path literal; move or delete the literal with the code it guards.
 
+`tests/test_package_no_reexports.py` fails when a `control/src/vonk_control/**/__init__.py` binds
+imported names (`from .x import Y`, `from vonk_control.x import Y`) or declares `__all__`. Import
+from the module that defines the name. The only `__init__` that imports anything is `models/`,
+which imports modules (not names) so every mapped table registers on `Base.metadata`.
+
 ### Cross-repo nightly
 
 Every other lane pins `vonk-forge-recipes` to a reviewed revision.
