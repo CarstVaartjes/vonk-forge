@@ -50,12 +50,11 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
 
     from datetime import datetime
 
-    from fastapi.testclient import TestClient
-    from vonk_control.catalog.sync import CatalogSyncView
-
     from cluster_profiles.generated_control.models.managed_catalog_sync_response import (
         ManagedCatalogSyncResponse as ClientSyncResponse,
     )
+    from fastapi.testclient import TestClient
+    from vonk_control.catalog.sync import CatalogSyncView
 
     class Sync:
         def latest(self) -> CatalogSyncView:

@@ -7,6 +7,9 @@ from enum import Enum
 from pathlib import Path
 
 import pytest
+from cluster_profiles.generated_control.models.lifecycle_vocabulary import (
+    LifecycleVocabulary as GeneratedVocabulary,
+)
 from vonk_agent_protocol import (
     LifecycleVocabulary,
     OutcomeCatalog,
@@ -15,10 +18,6 @@ from vonk_agent_protocol import (
     OutcomeUnknown,
     WaitReason,
     canonical_message,
-)
-
-from cluster_profiles.generated_control.models.lifecycle_vocabulary import (
-    LifecycleVocabulary as GeneratedVocabulary,
 )
 
 
