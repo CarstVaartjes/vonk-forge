@@ -401,13 +401,13 @@ class MetricsRegistry:
         with self._lock:
             self._backup_age = age
 
-    def set_backup_successful(self, successful: bool) -> None:
+    def set_backup_successful(self, *, successful: bool) -> None:
         if not isinstance(successful, bool):
             raise TypeError("backup success must be a boolean")
         with self._lock:
             self._backup_successful = successful
 
-    def set_backup_restore_verified(self, verified: bool) -> None:
+    def set_backup_restore_verified(self, *, verified: bool) -> None:
         if not isinstance(verified, bool):
             raise TypeError("backup restore verification must be a boolean")
         with self._lock:

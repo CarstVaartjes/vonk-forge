@@ -216,7 +216,7 @@ class StorageObserver:
 
                 def observe() -> None:
                     try:
-                        self._observe(manifest, refresh)
+                        self._observe(manifest, refresh=refresh)
                     finally:
                         collected.set()
 
@@ -270,7 +270,7 @@ class StorageObserver:
         except Exception:  # noqa: BLE001 -- next worker tick retries discovery
             _LOGGER.exception("cache observation discovery failed")
 
-    def _observe(self, manifest: ArtifactSetManifest, refresh: bool = True) -> None:
+    def _observe(self, manifest: ArtifactSetManifest, *, refresh: bool = True) -> None:
         root = self._cache.root / "observations"
         try:
             with (root / f"{manifest.digest}.lock").open("a") as lock:

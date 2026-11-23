@@ -338,14 +338,14 @@ def _child_failure_kind(child: object) -> FailureKind:
         or payload.uncertain
     ):
         return kind_for_failure_fields(
-            payload.failure_kind, payload.error_code, payload.uncertain
+            payload.failure_kind, payload.error_code, uncertain=payload.uncertain
         )
     kinds = []
     for members in (payload.node_evidence, payload.launch_evidence):
         if members is not None:
             kinds.extend(
                 kind_for_failure_fields(
-                    item.failure_kind, item.error_code, item.uncertain is True
+                    item.failure_kind, item.error_code, uncertain=item.uncertain is True
                 )
                 if isinstance(item, AgentFailureResult)
                 else FailureKind.INVALID_CONTRACT

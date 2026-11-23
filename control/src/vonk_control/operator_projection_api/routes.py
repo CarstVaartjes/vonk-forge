@@ -195,6 +195,7 @@ def install_operator_projection_routes(
         source: Annotated[
             Literal["client", "monitor", "runtime", "job"] | None, Query()
         ] = None,
+        *,
         follow: Annotated[bool, Query()] = False,
         _actor: Actor = authenticated,
     ) -> FleetLogResponse:

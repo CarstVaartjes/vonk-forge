@@ -314,7 +314,7 @@ class UnusedStorageCollector:
                 continue
             if (
                 self._remove_within_budget(
-                    item, kept, outcome.removed, attempted, reached
+                    item, kept, outcome.removed, attempted, reached=reached
                 )
                 is None
             ):

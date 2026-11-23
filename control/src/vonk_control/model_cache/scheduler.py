@@ -96,7 +96,7 @@ def _claim_held(row: Lifecycle, now: datetime) -> bool:
     )
 
 
-def _claim_backing_off(row: Lifecycle, now: datetime, respect_backoff: bool) -> bool:
+def _claim_backing_off(row: Lifecycle, now: datetime, *, respect_backoff: bool) -> bool:
     return (
         respect_backoff
         and row.next_action_at is not None
@@ -587,7 +587,7 @@ class SchedulerMixin:
                     # nothing here is irreversible, so it is retried with backoff)
                     # instead of the next claimant stealing the claim.
                     row = cache._lifecycle.lapse(operation, now)
-                if _claim_backing_off(row, now, respect_backoff):
+                if _claim_backing_off(row, now, respect_backoff=respect_backoff):
                     continue
                 try:
                     manifest = _manifest_of(payload)
@@ -709,7 +709,8 @@ class SchedulerMixin:
                 running = row.state is State.RUNNING
                 # A running row's backoff is decided after the claim lapses it.
                 if _claim_held(row, now) or (
-                    not running and _claim_backing_off(row, now, respect_backoff)
+                    not running
+                    and _claim_backing_off(row, now, respect_backoff=respect_backoff)
                 ):
                     continue
                 payload = cache._transfer_or_none(operation)

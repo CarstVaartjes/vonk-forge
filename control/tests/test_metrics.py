@@ -234,8 +234,8 @@ def test_backup_metrics_report_never_succeeded_and_restore_verification_age() ->
     assert "vonk_control_backup_restore_verified 0" in text
     assert "vonk_control_backup_age_seconds" not in text
 
-    metrics.set_backup_successful(True)
-    metrics.set_backup_restore_verified(True)
+    metrics.set_backup_successful(successful=True)
+    metrics.set_backup_restore_verified(verified=True)
     metrics.set_backup_age(120)
     metrics.set_backup_restore_verification_age(240)
     text = metrics.render()

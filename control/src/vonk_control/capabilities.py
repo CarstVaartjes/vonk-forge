@@ -156,7 +156,7 @@ class RecoveringService[T]:
         self._delay = min(60.0, self._delay * 2)
 
     def _construct(
-        self, generation: int, value: T | None, initialized: bool, done: Event
+        self, generation: int, value: T | None, *, initialized: bool, done: Event
     ) -> None:
         reason: CapabilityReason | None = None
         existing = value

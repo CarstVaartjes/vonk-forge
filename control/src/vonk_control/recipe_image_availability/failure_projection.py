@@ -208,7 +208,7 @@ def _fail(
                     "code": str(code)[:64],
                     "detail": str(detail)[:512],
                     "recovery_actions": list(getattr(error, "recovery_actions", ()))
-                    or _recovery_actions(str(code), retryable),
+                    or _recovery_actions(str(code), retryable=retryable),
                     "retryable": retryable,
                     "retry_time": preserved_retry_time
                     if isinstance(preserved_retry_time, str)

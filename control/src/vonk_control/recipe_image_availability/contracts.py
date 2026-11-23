@@ -629,7 +629,7 @@ def _log_excerpt(error: BaseException | BuildUnsettled) -> str | None:
     return value[-1024:]
 
 
-def _recovery_actions(code: str, retryable: bool) -> list[str]:
+def _recovery_actions(code: str, *, retryable: bool) -> list[str]:
     """Map stable failure classes to UI action identifiers."""
 
     if (

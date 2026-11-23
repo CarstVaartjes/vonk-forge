@@ -23,7 +23,7 @@ FailureKind = AgentFailureKind
 
 
 def kind_for_failure_fields(
-    failure_kind: str | None, error_code: str | None, uncertain: bool = False
+    failure_kind: str | None, error_code: str | None, *, uncertain: bool = False
 ) -> FailureKind:
     """The same failure decision for already validated typed observations."""
     raw_kind = failure_kind

@@ -74,6 +74,7 @@ class TerminalProjectionMixin:
         marker_nodes: set[str],
         now: datetime,
         recovery_error: DistributedLifecycleError | None,
+        *,
         cleanup_queued: bool,
     ) -> bool:
         service = typing_cast("RecipeOperationService", self)

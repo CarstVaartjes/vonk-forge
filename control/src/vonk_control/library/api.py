@@ -109,6 +109,7 @@ def install_library_routes(
         search: Annotated[str | None, Query(max_length=256)] = None,
         updated_since: Annotated[datetime | None, Query()] = None,
         sort: Annotated[Literal["updated", "name"], Query()] = "updated",
+        *,
         cached: Annotated[bool, Query()] = False,
         _actor: Any = authenticated,
     ) -> ModelLibraryResponse:
@@ -169,6 +170,7 @@ def install_library_routes(
         limit: Annotated[int, Query(ge=1, le=512)] = 100,
         cursor: Annotated[str | None, Query(max_length=MAX_CURSOR_LENGTH)] = None,
         model: Annotated[list[str] | None, Query(max_length=64)] = None,
+        *,
         cached: Annotated[bool, Query()] = False,
         ready: Annotated[bool | None, Query()] = None,
         fits_fleet: Annotated[bool | None, Query()] = None,

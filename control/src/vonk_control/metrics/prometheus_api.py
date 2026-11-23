@@ -111,7 +111,7 @@ class MetricQuery:
         return "requested_model" if self.source is Source.GATEWAY else SeriesLabel.ALIAS
 
     def _group(
-        self, expression: str, fleet: bool, keep: str = SeriesLabel.ALIAS
+        self, expression: str, *, fleet: bool, keep: str = SeriesLabel.ALIAS
     ) -> str:
         if fleet:
             return f"sum({expression})"
@@ -123,11 +123,13 @@ class MetricQuery:
             )
         return f"{'avg' if self.mean else 'sum'} by ({keep}) ({expression})"
 
-    def series(self, selector: str, step: int, fleet: bool = False) -> str:
+    def series(self, selector: str, step: int, *, fleet: bool = False) -> str:
         window = self.window(step)
 
         def read(function: str, family: str) -> str:
-            return self._group(f"{function}({family}{selector}[{window}s])", fleet)
+            return self._group(
+                f"{function}({family}{selector}[{window}s])", fleet=fleet
+            )
 
         match self.kind:
             case "gauge":
@@ -141,8 +143,8 @@ class MetricQuery:
             case "quantile":
                 buckets = self._group(
                     f"rate({self.family}_bucket{selector}[{window}s])",
-                    False,
-                    "alias, le",
+                    fleet=False,
+                    keep="alias, le",
                 )
                 return f"histogram_quantile({self.quantile}, {buckets})"
             case "rate":
@@ -154,23 +156,25 @@ class MetricQuery:
                 scaled = f"{self.scale} * " if self.scale != 1 else ""
                 return f"{scaled}{rate} / {read('rate', self.over)}"
 
-    def peak(self, selector: str, duration: int, fleet: bool = False) -> str | None:
+    def peak(self, selector: str, duration: int, *, fleet: bool = False) -> str | None:
         """The highest raw value in the range; averaged points would understate it."""
         if self.kind == "energy":
             return None
         if self.kind in ("gauge", "last") and not fleet and self.source is Source.NODE:
             return f"max_over_time({self.family}{selector}[{duration}s])"
         # Evaluated every floor seconds over a window that leaves no gap between them.
-        raw = self.series(selector, self.floor, fleet)
+        raw = self.series(selector, self.floor, fleet=fleet)
         return f"max_over_time(({raw})[{duration}s:{self.floor}s])"
 
-    def total(self, selector: str, duration: int, fleet: bool = False) -> str | None:
+    def total(self, selector: str, duration: int, *, fleet: bool = False) -> str | None:
         """What the range added up to; only for counted and energy metrics."""
         if self.kind == "energy":
             window = f"sum_over_time({self.family}{selector}[{duration}s])"
-            return f"{self._group(window, fleet)} * {self.scrape} / 3600"
+            return f"{self._group(window, fleet=fleet)} * {self.scrape} / 3600"
         if self.kind in ("rate", "increase") and self.over is None:
-            return self._group(f"increase({self.family}{selector}[{duration}s])", fleet)
+            return self._group(
+                f"increase({self.family}{selector}[{duration}s])", fleet=fleet
+            )
         return None
 
 
@@ -192,6 +196,7 @@ def _engine(
     kind: Literal["gauge", "rate"] = "rate",
     over: str | None = None,
     less: str | None = None,
+    *,
     mean: bool = False,
 ) -> MetricQuery:
     """An engine reading; `over` and `less` name families by their `vonk_engine_` suffix."""
@@ -483,7 +488,7 @@ class PrometheusReader:
         lines = (False, True) if spec.fleet_sum and node is None else (False,)
         reads = await asyncio.gather(
             *(
-                self._read_one(query, selector, duration, step, end, label, fleet)
+                self._read_one(query, selector, duration, step, end, label, fleet=fleet)
                 for fleet in lines
             )
         )
@@ -525,18 +530,19 @@ class PrometheusReader:
         step: int,
         end: float,
         label: SeriesLabel,
+        *,
         fleet: bool,
     ) -> tuple[list[_MatrixRow], dict[str, float], dict[str, float]]:
         """The range read with its peak and total reads, for the series or the fleet line."""
         peak, total = (
-            query.peak(selector, duration, fleet),
-            query.total(selector, duration, fleet),
+            query.peak(selector, duration, fleet=fleet),
+            query.total(selector, duration, fleet=fleet),
         )
         matrix, peaks, totals = await asyncio.gather(
             self.read(
                 "/api/v1/query_range",
                 _RangeQuery(
-                    query=query.series(selector, step, fleet),
+                    query=query.series(selector, step, fleet=fleet),
                     start=end - duration,
                     end=end,
                     step=step,

@@ -114,7 +114,7 @@ def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
         kind_for_failure_fields(
             failure_kind if isinstance(failure_kind, str) else None,
             error_code if isinstance(error_code, str) else None,
-            result.get("uncertain") is True,
+            uncertain=result.get("uncertain") is True,
         )
     )
     if (

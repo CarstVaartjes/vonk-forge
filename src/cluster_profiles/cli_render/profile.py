@@ -148,7 +148,7 @@ CONNECTION_NOTE = (
 )
 
 
-def _connection_examples(api_base: str, alias: str, wide: bool = False) -> None:
+def _connection_examples(api_base: str, alias: str, *, wide: bool = False) -> None:
     """Print the examples; the key is only ever read from the key file."""
     snippets = connection_snippets(terminal_text(api_base), terminal_text(alias))
     shown = [("Client setup", "setup"), ("curl example", "curl")]
@@ -190,7 +190,7 @@ def _set(value: object) -> object:
     return None if isinstance(value, Unset) else value
 
 
-def _profile_endpoints(view: FleetProfileEndpointsView, wide: bool = False) -> None:
+def _profile_endpoints(view: FleetProfileEndpointsView, *, wide: bool = False) -> None:
     assignments = view.assignments or []
     listing = endpoint_listing(
         _set(view.application_id), _set(view.projection_issue), view.assignments

@@ -140,7 +140,7 @@ def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
     )
 
     with pytest.raises(cli_auth.LoginFailed) as failure:
-        cli_auth._read_password(True)
+        cli_auth._read_password(from_stdin=True)
 
     assert "secret" not in str(failure.value)
     assert "\xff" not in str(failure.value)

@@ -154,7 +154,7 @@ def _session_cookies(headers: Message) -> dict[str, str]:
     return cookies
 
 
-def _read_password(from_stdin: bool) -> str:
+def _read_password(*, from_stdin: bool) -> str:
     try:
         if from_stdin:
             password = sys.stdin.readline().rstrip("\r\n")
@@ -251,7 +251,7 @@ def _login(url_argument: str | None, *, password_stdin: bool) -> LoginResult:
             "give the Controller address: vonkctl auth login https://<controller>"
         )
     url = validated_origin(chosen)
-    token, expires_at = _mint_token(url, _read_password(password_stdin))
+    token, expires_at = _mint_token(url, _read_password(from_stdin=password_stdin))
     write_private(login_token_path(), f"{token}\n".encode())
     write_private(connection_path(), StoredConnection(url, expires_at).document())
     # Prove the stored credential the way every other command will use it.

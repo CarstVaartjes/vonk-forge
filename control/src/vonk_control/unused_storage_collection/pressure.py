@@ -238,7 +238,7 @@ def _relieve(
         done = attempted.get((item.kind, item.key))
         if done is None:
             done = self._remove_within_budget(
-                item, kept, outcome.removed, attempted, reached
+                item, kept, outcome.removed, attempted, reached=reached
             )
             if done is None:
                 continue
@@ -273,6 +273,7 @@ def _remove_within_budget(
     kept: Counter[str],
     removed: Counter[str],
     attempted: dict[tuple[str, str], bool],
+    *,
     reached: bool,
 ) -> bool | None:
     """Remove ``item`` and record it; None when the pass's attempt budget is spent.

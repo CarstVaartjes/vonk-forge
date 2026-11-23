@@ -176,7 +176,7 @@ class RecipeOperationAdapter:
 
     @staticmethod
     def _write(
-        job: Job, after: Lifecycle, now: datetime, reason: str | None, keep: bool
+        job: Job, after: Lifecycle, now: datetime, reason: str | None, *, keep: bool
     ) -> None:
         if job_states.core(job.state) in TERMINAL_STATES:
             # A recorded end is final: a later decision is evidence, not a new
@@ -212,7 +212,7 @@ class RecipeOperationAdapter:
         if before.terminal:
             job.updated_at = aware(now)
             return
-        self._write(job, replace(before, state=State.RUNNING), now, reason, keep)
+        self._write(job, replace(before, state=State.RUNNING), now, reason, keep=keep)
 
     def finish(
         self,
@@ -237,7 +237,7 @@ class RecipeOperationAdapter:
             else Reported(Outcome.DONE, reason=reason)
         )
         decision = transition(before, event, self, aware(now))
-        self._write(job, decision.row, now, reason, False)
+        self._write(job, decision.row, now, reason, keep=False)
         return decision
 
     def cancelled(
@@ -258,7 +258,7 @@ class RecipeOperationAdapter:
             self,
             aware(now),
         )
-        self._write(job, decision.row, now, reason, keep)
+        self._write(job, decision.row, now, reason, keep=keep)
         return decision
 
     def request_cancel(
@@ -281,7 +281,7 @@ class RecipeOperationAdapter:
         decision = transition(
             before, CancelRequested(request_key, reason), self, aware(now)
         )
-        self._write(job, decision.row, now, reason, False)
+        self._write(job, decision.row, now, reason, keep=False)
         return decision.row
 
     def cancel_race(self, job: Job, now: datetime) -> Lifecycle:
@@ -298,7 +298,7 @@ class RecipeOperationAdapter:
             else replace(before, cancel_requested_at=aware(now))
         )
         decision = transition(flagged, Observed(Effect.UNKNOWN), self, aware(now))
-        self._write(job, decision.row, now, None, True)
+        self._write(job, decision.row, now, None, keep=True)
         return decision.row
 
     def heal(self, job: Job, now: datetime) -> bool:
@@ -310,7 +310,7 @@ class RecipeOperationAdapter:
         ):
             return False
         before = self.lifecycle(job, issued=True, now=now)
-        self._write(job, replace(before, state=State.OBSERVING), now, None, True)
+        self._write(job, replace(before, state=State.OBSERVING), now, None, keep=True)
         return True
 
 

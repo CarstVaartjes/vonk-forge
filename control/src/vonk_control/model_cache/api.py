@@ -298,6 +298,7 @@ def install_model_operator_routes(
     )
     def review_removal(
         selector: Annotated[str, Path(min_length=1, max_length=256)],
+        *,
         fleet: bool = False,
         actor: Actor = actor_dependency,
     ) -> CacheRemovalReview:
