@@ -13,6 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
+from vonk_control.run_switch_operations.results import _persisted_result
+
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
@@ -51,12 +53,7 @@ from .identity_helpers import _stated_bytes, _string_or_none
 from .image_receipts import _require_profile_runtime_image
 from .ownership import _lock_phase_owner
 from .planning_helpers import _now, _run_switch_payload, _stored_job_plan
-from .result_helpers import (
-    _bound_workload_intent,
-    _persisted_result,
-    _progress_damaged,
-    _read_progress,
-)
+from .result_helpers import _bound_workload_intent, _progress_damaged, _read_progress
 
 
 def _persist_run_switch_runtime_image_reference(

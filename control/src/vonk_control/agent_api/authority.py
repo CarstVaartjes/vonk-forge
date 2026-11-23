@@ -39,6 +39,9 @@ from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, Wait
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.admission import ControllerErrorCode as Code
 
+from vonk_control.enrollment.responses import _issued_response, _json_response
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..agent_jobs.contracts import (
     CLAIM_LEASE_SECONDS,
     AgentResultRefused,
@@ -66,7 +69,7 @@ from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operator_acceptance import ReceiptPolicy, operator_acceptance
+from ..operator_acceptance import operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..strict_json import ControllerAPIRoute
 from .common import (
@@ -75,8 +78,6 @@ from .common import (
     _authenticated_identity,
     _body_node_matches,
     _host_grant_response,
-    _issued_response,
-    _json_response,
     _log_evidence_warnings,
     _require_enrollment,
     _require_services,

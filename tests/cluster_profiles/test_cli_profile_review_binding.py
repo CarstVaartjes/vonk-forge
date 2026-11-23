@@ -13,8 +13,10 @@ from cluster_profiles.control_client.errors import (
     ControlMalformedResponse,
     ControlNotFound,
 )
-from cluster_profiles.controller_cli import common as common_module
 from cluster_profiles.controller_cli import profile_load as profile_load_module
+from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 
 KEY = "11111111-1111-4111-8111-111111111111"
 APPLICATION = "33333333-3333-4333-8333-333333333333"
@@ -92,7 +94,7 @@ class _Controller:
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
-    ) -> common_module.FleetProfileEndpointsView:
+    ) -> FleetProfileEndpointsView:
         pytest.fail("review submission must not look up serving endpoints")
 
     def loads(self) -> list[object]:

@@ -16,6 +16,11 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from vonk_control.enrollment.contract import (
+    EnrollmentRotationClaim,
+    EnrollmentRotationRecoveryClaim,
+)
+
 from ..admission_locking import ConstraintReplan, admitting
 from ..models.fleet import (
     AgentCertificate,
@@ -46,32 +51,12 @@ from .types import (
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
-    _RotationClaim,
-    _RotationRecoveryClaim,
 )
 from .validation import (
-    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _digest as _digest,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _utc as _utc,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
-)
-from .validation import (
-    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
+    _load_csr,
+    _stored_utc,
+    _utc,
+    _validate_node_id,
 )
 
 _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
@@ -228,7 +213,7 @@ class RotationService(EnrollmentCore):
         now: datetime,
         *,
         expired: bool = False,
-    ) -> _RotationRecoveryClaim | None:
+    ) -> EnrollmentRotationRecoveryClaim | None:
         with self._transaction() as session:
             node = session.scalar(
                 select(AgentNode)
@@ -316,7 +301,7 @@ class RotationService(EnrollmentCore):
                         # authorizes a CA effect or leaves a stale issuance gate.
                         session.delete(intent)
                         return None
-                    return _RotationRecoveryClaim(
+                    return EnrollmentRotationRecoveryClaim(
                         claim=_rotation_claim(intent, owner=True),
                         retiring_serial=retiring.serial,
                     )
@@ -364,7 +349,7 @@ class RotationService(EnrollmentCore):
             intent.provider_request_id = binding.request_id
             session.add(intent)
             session.flush()
-            return _RotationRecoveryClaim(
+            return EnrollmentRotationRecoveryClaim(
                 claim=_rotation_claim(intent, owner=True), retiring_serial=staged.serial
             )
 
@@ -372,7 +357,7 @@ class RotationService(EnrollmentCore):
         self,
         node_id: str,
         retiring_serial: str,
-        claim: _RotationClaim,
+        claim: EnrollmentRotationClaim,
         now: datetime,
     ) -> bool:
         with self._transaction() as session:
@@ -418,7 +403,7 @@ class RotationService(EnrollmentCore):
             return True
 
     def _issue_rotation_claim(
-        self, claim: _RotationClaim, now: datetime
+        self, claim: EnrollmentRotationClaim, now: datetime
     ) -> IssuedCertificate:
         try:
             if claim.provider_request is None:
@@ -483,7 +468,7 @@ class RotationService(EnrollmentCore):
         now: datetime,
         *,
         expired: bool = False,
-    ) -> _RotationClaim | IssuedCertificate:
+    ) -> EnrollmentRotationClaim | IssuedCertificate:
         with self._transaction() as session:
             node = session.scalar(
                 select(AgentNode)
@@ -529,7 +514,7 @@ class RotationService(EnrollmentCore):
                     except (RuntimeError, ValueError, UnicodeError):
                         binding = _issuance_binding(staged.provider_request)
                         if binding is not None:
-                            return _RotationClaim(
+                            return EnrollmentRotationClaim(
                                 node_id=node_id,
                                 source_serial=serial,
                                 generation=binding.generation,
@@ -625,14 +610,14 @@ class RotationService(EnrollmentCore):
 
     @staticmethod
     def _validate_renewal_result(
-        issued: IssuedCertificate, claim: _RotationClaim
+        issued: IssuedCertificate, claim: EnrollmentRotationClaim
     ) -> None:
         validate_renewal_result(issued, claim.node_id, claim.source_serial)
 
     def _persist_rotation(
         self,
         issued: IssuedCertificate,
-        claim: _RotationClaim,
+        claim: EnrollmentRotationClaim,
     ) -> str:
         now = _utc(self._clock())
         with self._transaction() as session:
@@ -758,7 +743,7 @@ class RotationService(EnrollmentCore):
     def _record_orphan_revocation(
         session: Session,
         issued: IssuedCertificate,
-        claim: _RotationClaim,
+        claim: EnrollmentRotationClaim,
         now: datetime,
     ) -> None:
         evidence = session.scalar(
@@ -800,7 +785,7 @@ class RotationService(EnrollmentCore):
     def _revoke_denied_rotation(
         self,
         serial: str,
-        claim: _RotationClaim,
+        claim: EnrollmentRotationClaim,
         now: datetime,
     ) -> None:
         try:
@@ -813,7 +798,7 @@ class RotationService(EnrollmentCore):
 
     def _mark_rotation_uncertain(
         self,
-        claim: _RotationClaim,
+        claim: EnrollmentRotationClaim,
         now: datetime,
     ) -> None:
         try:

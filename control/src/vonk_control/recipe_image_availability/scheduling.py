@@ -17,6 +17,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 
+from vonk_control.lifecycle.evidence import Residue
+
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
@@ -39,7 +41,6 @@ from ..operations.contract import (
 )
 from ..persisted_waits import schedule_wait
 from ..stall_window import Verdict, Wait, progress_verdict
-from ..stored.json_values import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
     _CLAIM_SCAN_WINDOW,

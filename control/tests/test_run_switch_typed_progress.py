@@ -12,10 +12,8 @@ from vonk_control.run_switch_contract.observation import (
     RunSwitchStoredIdentity,
 )
 from vonk_control.run_switch_contract.operations import RunSwitchOperationResult
-from vonk_control.run_switch_operations.result_helpers import (
-    _persisted_result,
-    _read_progress,
-)
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
 
 
 def test_canonical_retry_recovers_after_persisted_restart() -> None:

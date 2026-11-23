@@ -242,10 +242,8 @@ def test_background_collection_uses_the_parents_recovery_deadline(
     from vonk_control.run_switch_operations.constants import (
         _FINAL_VERIFICATION_MAX_SECONDS,
     )
-    from vonk_control.run_switch_operations.result_helpers import (
-        _persisted_result,
-        _read_progress,
-    )
+    from vonk_control.run_switch_operations.result_helpers import _read_progress
+    from vonk_control.run_switch_operations.results import _persisted_result
 
     accepted = _accepted(tmp_path)
     executor = _executor(accepted)

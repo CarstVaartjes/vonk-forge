@@ -35,15 +35,13 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobInputRequest, RecipeJobOutputLimits
 
+from vonk_control.operator_receipt_contract import ReceiptPolicy
+
 from ..auth import Actor, agent_identity_from_scope
 from ..compiled_artifact_contract import ParameterScalar
 from ..download_contract import download_responses, upload_request_body
 from ..operation_api.contracts import bounded_error_responses
-from ..operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
+from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from .blob_store import ArtifactBlobStore
 from .contracts import (
     ArtifactJobCapabilitiesResponse,

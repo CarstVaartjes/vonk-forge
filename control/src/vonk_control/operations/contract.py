@@ -11,13 +11,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
-from vonk_agent_protocol.wire_model import (
-    ERROR_CODE_PATTERN,
-    OperationCheckpoint,
-    OperationMemberProgress,
-    OperationProgress,
-    normalize_operation_progress,
-)
+from vonk_agent_protocol.wire_model import ERROR_CODE_PATTERN, OperationProgress
 
 from .. import agent_operation_states
 from ..logging import redact_text
@@ -454,15 +448,11 @@ def recovery_for_state(state: str, *, uncertain: bool = False) -> OperationRecov
 __all__ = [
     "AvailabilityOperationFailure",
     "AvailabilityRecoveryAction",
-    "OperationCheckpoint",
     "OperationEvidenceDownload",
     "OperationFailureEvidence",
-    "OperationMemberProgress",
     "OperationPhase",
-    "OperationProgress",
     "OperationRecovery",
     "OperationRecoveryAction",
-    "normalize_operation_progress",
     "recovery_for_operation",
     "recovery_for_state",
     "sanitize_failure_evidence",

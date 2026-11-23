@@ -47,10 +47,8 @@ from .execution_contract import (
 from .lifecycle_contract import JOB_ACTIVATION
 from .observation_helpers import _active_recipe_revision
 from .progress import (
-    _catalog_recipe as _catalog_recipe,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _lower_hex_digest as _lower_hex_digest,  # noqa: PLC0414 -- shared helper export
+    _catalog_recipe,
+    _lower_hex_digest,
 )
 from .results import _AcceptedRanks
 

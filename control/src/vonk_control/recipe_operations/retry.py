@@ -43,7 +43,7 @@ from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
 )
 
 if TYPE_CHECKING:

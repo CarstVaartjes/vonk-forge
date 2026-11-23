@@ -89,6 +89,7 @@ from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     TERMINAL_LIFECYCLE_STATES,
     LifecycleSubject,
+    WaitOwnerKind,
     WaitReason,
     stored_words,
 )
@@ -121,7 +122,6 @@ from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_images
 from ..run_states import ENDED_RUN_STATES
 from ..stored.json_values import binding_for
-from ..wait_contract import WaitOwnerKind
 from .revision_contract import UnprojectedRevision, shared_catalog_document
 
 _LOGGER = logging.getLogger(__name__)

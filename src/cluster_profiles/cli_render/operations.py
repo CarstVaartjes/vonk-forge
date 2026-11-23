@@ -6,7 +6,7 @@ import shlex
 from collections.abc import Mapping
 from enum import StrEnum
 
-from .. import cli_states
+from ..cli_states_generated import CANCELLED
 from .common import (
     _actions,
     _bytes,
@@ -112,8 +112,7 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
     )
     _field("State", payload.get("state"))
     if noun == "model" and (
-        payload.get("cancellation") is not None
-        or payload.get("state") == cli_states.CANCELLED
+        payload.get("cancellation") is not None or payload.get("state") == CANCELLED
     ):
         cancellation = _optional(payload.get("cancellation"), "model cancellation")
         observation = _optional(

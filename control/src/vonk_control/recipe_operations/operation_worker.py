@@ -18,6 +18,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState, RunState
 
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
+
 from ..categorized_errors import InvalidValue
 from ..failure_classification import disposition, error_detail, wait_reason
 from ..jobs import states as job_states
@@ -33,7 +35,6 @@ from ..recipe_routes.shared import (
     publication_disposition,
 )
 from ..recovery_policy import RECOVERY, ROUTE_RECOVERY, WAIT_STEP, schedule
-from ..reservation_owners import OwnerKind, OwnerRef, owner
 from ..stall_window import stall_deadline
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from .execution_contract import (

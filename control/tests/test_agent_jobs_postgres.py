@@ -1114,7 +1114,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     )
     original = claim_agent(first, NODE_A, "serial-a")
     assert original is not None
-    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.recovery_policy import RECOVERY
 
     attempts = RECOVERY.max_failures + 1 if exhausted else 1
     original_deadline = None

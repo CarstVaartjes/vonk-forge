@@ -15,6 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.jobs.documents import AvailabilityJobPayload
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.model_cache.contract import ModelCacheCancellation
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
@@ -33,7 +34,7 @@ from vonk_control.recipe_image_availability.view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import Residue, read_row_column
+from vonk_control.stored.json_values import read_row_column
 from vonk_forge_contracts import RecipeDefinition
 
 from .recipe_image_availability_support import (

@@ -10,12 +10,12 @@ from typing import cast
 import pytest
 from sqlalchemy import Engine, Table, select, text
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.artifact_jobs.lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
+    ArtifactLifecycleGate,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,

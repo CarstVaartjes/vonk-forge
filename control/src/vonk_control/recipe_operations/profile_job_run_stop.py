@@ -63,7 +63,7 @@ from .errors import (
     RecipeRetryLater,
 )
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
 )
 from .stop_payloads import (
     stop_payload_from_job_run,

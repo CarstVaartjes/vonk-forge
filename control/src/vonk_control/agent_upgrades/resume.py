@@ -13,6 +13,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
 )
 
+from vonk_control.operator_receipt_contract import JobOperatorReceipt
+
 from .. import agent_operation_states
 from ..agent_jobs.retry import schedule_agent_upgrade_retry
 from ..categorized_errors import (
@@ -21,7 +23,6 @@ from ..categorized_errors import (
 )
 from ..jobs import states as job_states
 from ..jobs.operator_receipts import (
-    JobOperatorReceipt,
     record_job_operator_receipt,
     replay_job_operator_receipt,
 )

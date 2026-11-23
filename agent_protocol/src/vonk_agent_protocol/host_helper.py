@@ -25,7 +25,11 @@ from .swap import SwapIntent
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
 if TYPE_CHECKING:
-    from .contracts import RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload
+    from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+    from vonk_agent_protocol.recipe_operations import (
+        RecipeStartPayload,
+        RecipeStopPayload,
+    )
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"

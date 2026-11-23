@@ -7,7 +7,14 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from .. import cli_states
+from ..cli_states_generated import (
+    ENDPOINT_EXPIRED,
+    ENDPOINT_INSTALLED_ONLY,
+    ENDPOINT_NOT_PUBLISHED_YET,
+    ENDPOINT_UNAVAILABLE,
+    ENDPOINT_WITHDRAWN,
+    PUBLISHED,
+)
 from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.endpoint_response import EndpointResponse
 from ..generated_control.models.fleet_profile_endpoints_view import (
@@ -160,9 +167,7 @@ def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
 
     Each row is (alias, recipe title, state).
     """
-    published = [
-        row for row in assignments if row[2] == cli_states.PUBLISHED and row[0]
-    ]
+    published = [row for row in assignments if row[2] == PUBLISHED and row[0]]
     if not published:
         return
     print("Serving now")
@@ -220,9 +225,7 @@ def _profile_endpoints(view: FleetProfileEndpointsView, wide: bool = False) -> N
         _field("Endpoint state", assignment.state)
         alias = _set(assignment.alias)
         endpoint = assignment.endpoint
-        if assignment.state == cli_states.PUBLISHED and isinstance(
-            endpoint, EndpointResponse
-        ):
+        if assignment.state == PUBLISHED and isinstance(endpoint, EndpointResponse):
             _field("Client model identifier", alias)
             _field("API base (inference gateway)", endpoint.api_base)
             if wide:
@@ -236,11 +239,11 @@ def _profile_endpoints(view: FleetProfileEndpointsView, wide: bool = False) -> N
         if alias is not None:
             _field("Client model identifier", alias)
         messages = {
-            cli_states.ENDPOINT_INSTALLED_ONLY: "Install-only assignment; no published endpoint was requested.",
-            cli_states.ENDPOINT_NOT_PUBLISHED_YET: "The current assignment route is not published yet.",
-            cli_states.ENDPOINT_EXPIRED: "The published route lease has expired.",
-            cli_states.ENDPOINT_WITHDRAWN: "No current published route is associated with this assignment.",
-            cli_states.ENDPOINT_UNAVAILABLE: "The Controller cannot verify a current route for this assignment.",
+            ENDPOINT_INSTALLED_ONLY: "Install-only assignment; no published endpoint was requested.",
+            ENDPOINT_NOT_PUBLISHED_YET: "The current assignment route is not published yet.",
+            ENDPOINT_EXPIRED: "The published route lease has expired.",
+            ENDPOINT_WITHDRAWN: "No current published route is associated with this assignment.",
+            ENDPOINT_UNAVAILABLE: "The Controller cannot verify a current route for this assignment.",
         }
         print(messages.get(assignment.state, "Endpoint state is unavailable."))
 

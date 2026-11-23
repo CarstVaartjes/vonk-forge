@@ -51,10 +51,8 @@ from .lifecycle_contract import (
 )
 from .observation_helpers import _aware
 from .progress import (
-    _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
-)
-from .progress import (
-    _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
+    _parent_identity,
+    _recorded_parent,
 )
 from .results import _recorded_result
 
@@ -191,7 +189,7 @@ class OfflineStopMixin:
         attempt-fencing path. No request, slot or fleet queue waits for contact.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..jobs.documents import OfflineStopIntent
+        from vonk_control.fleet_profiles.stop_authority import OfflineStopIntent
 
         now = service._clock()
         with service._sessions() as session:

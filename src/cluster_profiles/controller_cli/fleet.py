@@ -8,15 +8,14 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
+from cluster_profiles.cli_states_generated import NEEDS_OPERATOR
+
 from ..cli_files import PrivateOutput, _delivery_io
 from ..cli_json_contract import CliErrorType, failure_document
 from ..cli_outcome import (
     EnrollmentDeliveryError,
 )
 from ..cli_select import SelectorError
-from ..cli_states import (
-    NEEDS_OPERATOR,
-)
 from ..cli_states_generated import (
     ENDPOINT_UNAVAILABLE,
     ENROLLMENT_PENDING,
