@@ -213,7 +213,7 @@ class BuildMixin:
                     ),
                 )
             except AdmissionLockBusy as error:
-                raise RecipeBuildAdmissionBusy() from error
+                raise RecipeBuildAdmissionBusy from error
             build = next(iter(locked["build-recipe-build"]), None)
 
             # A parent-owned build must revalidate its exact execution claim
@@ -316,7 +316,7 @@ class BuildMixin:
                     ):
                         # A distinct independent request cannot acquire intent
                         # by silently borrowing a parent's pending execution.
-                        raise RecipeBuildAdmissionBusy()
+                        raise RecipeBuildAdmissionBusy
                     return service._view(active)
                 service._release(session, "recipe-build", build.id, now)
                 job = service._start_build_in_session(

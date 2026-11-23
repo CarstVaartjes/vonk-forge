@@ -1548,7 +1548,7 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
     def compile_again(**kwargs):
         calls.append(True)
         if len(calls) <= (3 if exhaust else 1):
-            raise UnknownOutcomeError()
+            raise UnknownOutcomeError
         return compile_owner(**kwargs)
 
     monkeypatch.setattr(admission, "_compiled_plan_provider", compile_again)

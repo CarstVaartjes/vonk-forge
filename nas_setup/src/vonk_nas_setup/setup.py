@@ -149,7 +149,7 @@ def upgrade_credentials(
         real_directory(gateway)
     environment = recover_environment(payload, bundle)
     if payload.install_modes and SELECTION_ENV not in environment:
-        raise ObservationUnavailable()
+        raise ObservationUnavailable
     lab = (
         payload.install_modes is not None
         and payload.install_modes.secure_remote_value
@@ -164,7 +164,7 @@ def upgrade_credentials(
         value = required_default(required, environment)
         if value is None:
             if not publication.newly_requested(bundle, required.env, environment=True):
-                raise ObservationUnavailable()
+                raise ObservationUnavailable
             value = prompt.required(required)
         environment[required.env] = value
     dropped = retain_known(payload, environment)
@@ -181,13 +181,13 @@ def upgrade_credentials(
         elif publication.newly_requested(bundle, item.file):
             members[item.file] = secret_content(prompt.secret(item))
         else:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
     requests = generated(payload)
     for request in (*requests.random_text, *requests.ed25519_pkcs8_pem):
         if request.file not in members and not publication.newly_requested(
             bundle, request.file
         ):
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
     generate_missing(payload, members)
     for request in requests.ed25519_pkcs8_pem:
         validate_ed25519(members[request.file], request.file)
@@ -208,7 +208,7 @@ def upgrade_credentials(
         if validated.controller_needs_renewal:
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):
-        raise ObservationUnavailable()
+        raise ObservationUnavailable
     # The Compose file follows the same selection as .env: no profile flags.
     # It is resolved before the commit point so that a refusal changes nothing.
     compose = resolve_compose(payload.docker_compose_yaml, environment)

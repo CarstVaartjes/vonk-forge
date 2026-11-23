@@ -217,17 +217,17 @@ def replay(bundle: Path) -> None:
             sync_directory(bundle)
             payload = previous_template(bundle)
             if payload is None:
-                raise ObservationUnavailable() from None
+                raise ObservationUnavailable from None
             retained = load_members(bundle / VERIFIED, payload)
             environment = parse_environment(bundle / VERIFIED / ".env")
             if set(retained) != set(secret_paths(payload)):
-                raise ObservationUnavailable() from None
+                raise ObservationUnavailable from None
             validate_members(payload, environment, retained)
             staging = stage_intent(payload, bundle, retained, environment)
             os.replace(staging, intent)
             sync_directory(bundle)
             complete_replay(bundle)
-        raise ObservationUnavailable() from None
+        raise ObservationUnavailable from None
 
 
 def publish(

@@ -257,7 +257,7 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
     )
 
     def closed(_snapshot):
-        raise BrokenPipeError()
+        raise BrokenPipeError
 
     args._watch_callback = closed
     initial = {"id": "0", "request_key": "original-request", "state": "running"}

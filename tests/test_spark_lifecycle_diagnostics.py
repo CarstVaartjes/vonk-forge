@@ -75,7 +75,7 @@ def test_failure_report_survives_every_failure_boundary(
                 run._await_inference_ready(inference)
             elif fault == "cleanup":
                 return {}
-            raise AssertionError()
+            raise AssertionError
 
         def __exit__(self, *_error):
             if fault != "cleanup":
@@ -112,7 +112,7 @@ def test_same_line_diagnostics_preserve_type_phase_request_and_chain(monkeypatch
     monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", "secret-value")
     try:
         try:
-            raise TimeoutError()
+            raise TimeoutError
         except TimeoutError as cause:
             raise module.SliceError(
                 "POST /v1/chat/completions returned HTTP 502\nsecret-value"
@@ -188,7 +188,7 @@ def test_startup_failure_reports_before_cleanup_and_allows_a_fresh_run(
     observed: list[dict] = []
 
     def start():
-        raise TimeoutError()
+        raise TimeoutError
 
     run._start_controller = start
     run._cleanup = lambda: observed.append(json.loads(arguments.output.read_text()))

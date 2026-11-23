@@ -195,7 +195,7 @@ def download_ranges(
         response = open_range(offset, end)
         try:
             if response.status_code == 200:
-                raise _RangeIgnored()
+                raise _RangeIgnored
             response.raise_for_status()
             match = re.fullmatch(
                 r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("content-range", "")

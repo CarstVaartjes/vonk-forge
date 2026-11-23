@@ -227,7 +227,7 @@ class BrowserAuthService:
     def login(self, subject: str, password: str) -> IssuedBrowserSession:
         attempt = self._rate_limiter.reserve(subject)
         if attempt is None:
-            raise BrowserAuthenticationThrottledError()
+            raise BrowserAuthenticationThrottledError
         now = self._now()
         issued: IssuedBrowserSession | None = None
         authenticated = False
@@ -270,7 +270,7 @@ class BrowserAuthService:
             raise
         if not authenticated:
             self._rate_limiter.fail(attempt)
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         self._rate_limiter.succeed(attempt)
         if issued is None:
             raise RuntimeError("authenticated login did not issue a session")
@@ -304,7 +304,7 @@ class BrowserAuthService:
             .where(LoginSession.digest == digest)
         ).one_or_none()
         if result is None:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         row, user = result
         if (
             row.revoked_at is not None
@@ -313,7 +313,7 @@ class BrowserAuthService:
             or user.subject != _ADMIN_SUBJECT
             or user.role != _ADMIN_ROLE
         ):
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return row, user
 
     def _cleanup_expired(self, db: Session, now: datetime) -> None:
@@ -334,7 +334,7 @@ class BrowserAuthService:
 
     def _submitted_digest(self, token: str) -> str:
         if not isinstance(token, str) or _OPAQUE_TOKEN.fullmatch(token) is None:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return _digest(token)
 
     def _now(self) -> datetime:
@@ -389,7 +389,7 @@ def bootstrap_administrator(
             )
             return BootstrapResult("created")
         if len(users) != 1:
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         user = users[0]
         if (
             user.subject != _ADMIN_SUBJECT
@@ -397,5 +397,5 @@ def bootstrap_administrator(
             or user.password_verifier is None
             or not verify_password(user.password_verifier, password).valid
         ):
-            raise BrowserAuthenticationError()
+            raise BrowserAuthenticationError
         return BootstrapResult("unchanged")

@@ -228,7 +228,7 @@ def _run(
         if model_child is not None:
             child_state = model_child.state
             if not self._update_model_progress(claim, model_child):
-                raise _AvailabilityClaimLost()
+                raise _AvailabilityClaimLost
             if child_state in model_cache_states.ACTIVE:
                 model_pending = True
             elif child_state != "succeeded":
@@ -523,10 +523,10 @@ def _update_model_progress(
             or not isinstance(operation.payload, Mapping)
             or payload.claim_owner != claim.claim_owner
         ):
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         cancelling = operation.state in job_states.words(LifecycleState.OBSERVING)
         if not cancelling and operation.state != LifecycleState.RUNNING:
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         if (
             not cancelling
             and model_operation is not None

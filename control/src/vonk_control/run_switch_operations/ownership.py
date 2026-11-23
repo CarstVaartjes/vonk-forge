@@ -147,11 +147,11 @@ def _lock_current_build_parent(
         )["build-scope-nodes"]
         job = _lock_phase_owner(session, request_key, phase_index, item_index)
     except AdmissionLockBusy as error:
-        raise RecipeBuildAdmissionBusy() from error
+        raise RecipeBuildAdmissionBusy from error
     except DBAPIError as error:
         if getattr(error.orig, "sqlstate", None) != "55P03":
             raise
-        raise RecipeBuildAdmissionBusy() from error
+        raise RecipeBuildAdmissionBusy from error
     if (
         job is None
         or job.kind != ProfileChildJobKind.RUN_SWITCH.value

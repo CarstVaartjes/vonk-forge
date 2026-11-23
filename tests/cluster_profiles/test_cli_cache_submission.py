@@ -533,7 +533,7 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
                 f"vonkctl model progress --request-key {KEY} --follow"
                 in output.getvalue()
             )
-            raise KeyboardInterrupt()
+            raise KeyboardInterrupt
 
     assert (
         cli.main(

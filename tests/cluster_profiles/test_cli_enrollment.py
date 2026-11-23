@@ -191,7 +191,7 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
 
     def fail_secret_write(self, document):
         if "token" in document and failure_point == "interrupt":
-            raise KeyboardInterrupt()
+            raise KeyboardInterrupt
         return original(self, document)
 
     monkeypatch.setattr(PrivateOutput, "write", fail_secret_write)

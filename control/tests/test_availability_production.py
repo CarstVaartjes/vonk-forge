@@ -715,7 +715,7 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
             if capacity_busy:
                 from vonk_control.recipe_builds.common import RecipeBuildAdmissionBusy
 
-                raise RecipeBuildAdmissionBusy()
+                raise RecipeBuildAdmissionBusy
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",

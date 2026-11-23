@@ -210,7 +210,7 @@ def _persist_receipt(
             return
         reference = self._image_reference_intent_for_claim(operation_payload, claim)
         if operation_payload.image_reference_intent is not None and reference is None:
-            raise _AvailabilityClaimLost()
+            raise _AvailabilityClaimLost
         require_reference_open(
             session,
             (ArtifactIdentity("runtime-image", receipt.oci_archive_sha256),),

@@ -102,7 +102,7 @@ def generate_missing(payload: NasInstallTemplate, members: dict[str, bytes]) -> 
             )
     for request in requests.postgres_urls:
         if request.password_file not in members:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
         # URLs are generated projections of the actual password, so repair them.
         members[request.file] = postgres_url(request, members[request.password_file])
 
@@ -160,7 +160,7 @@ def repair_stored_members(
                 damaged.add(paths.provisioner_public_jwk)
     for name in damaged:
         if name not in retained:
-            raise ObservationUnavailable()
+            raise ObservationUnavailable
         members[name] = retained[name]
     if payload.step_ca_controller:
         from .pki import normalize_intermediate_key
@@ -196,7 +196,7 @@ def repair_stored_members(
                 ):
                     raise ValueError("different signer")
             except (KeyError, ValueError, TypeError):
-                raise ObservationUnavailable() from None
+                raise ObservationUnavailable from None
             members[paths.intermediate_private_key] = encrypted
             members[paths.password] = retained[paths.password]
 

@@ -103,7 +103,7 @@ def persist_plan_in_session(
             )
             node = next(iter(locked["build-builder-node"]), None)
         except AdmissionLockBusy as error:
-            raise RecipeBuildAdmissionBusy() from error
+            raise RecipeBuildAdmissionBusy from error
         if node is None:
             raise RecipeBuildUnknown(
                 RecipeBuildCode.NODE_UNKNOWN,
@@ -336,7 +336,7 @@ def reserve_in_session(
         )
         self._reserve_in_session(session, plan, now=now, request_id=request_id)
     except AdmissionLockBusy as error:
-        raise RecipeBuildAdmissionBusy() from error
+        raise RecipeBuildAdmissionBusy from error
     except RecipeBuildUnknown:
         raise
     except RecipeBuildRefused:
@@ -350,7 +350,7 @@ def reserve_in_session(
             error.orig, "pgcode", None
         )
         if code in {"55P03", "40P01", "40001", "57014"}:
-            raise RecipeBuildAdmissionBusy() from error
+            raise RecipeBuildAdmissionBusy from error
         raise RecipeBuildUnknown(
             RecipeBuildCode.CAPACITY_CONTRACT_INVALID,
             "build admission observation is unavailable",
