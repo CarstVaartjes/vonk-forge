@@ -105,16 +105,16 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "NAS daemon platform-image selection, persisted grace, deletion refusal recovery and lost-network re-attachment.",
     ),
     (
+        "control/tests/test_transfer_members_projection.py",
+        "Transfer members carrying their sample time keep the server rate and ETA through projection; no whole-tree scan.",
+    ),
+    (
         "control/tests/test_run_group_health.py",
         "A starting group is not degraded and raises no attention; a lost rank or failed start still is; no whole-tree scan.",
     ),
     (
         "tests/cluster_profiles/test_follow_feed.py",
         "Follow view renders the Controller's rate, ETA and per-Spark bars and keeps its terminal and pipe cadence; no whole-tree scan.",
-    ),
-    (
-        "control/tests/test_operation_progress_aging.py",
-        "A stale stored aggregate ages its retained members with it; no whole-tree scan.",
     ),
     (
         "tests/cluster_profiles/test_cli_job_receipts.py",

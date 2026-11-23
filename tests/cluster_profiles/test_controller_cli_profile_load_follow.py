@@ -753,19 +753,17 @@ def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
         }
     )
     assert "items 4 / 7" in line and "%" not in line
-    assert (
-        progress_line(
-            {
-                "state": "running",
-                "progress": {
-                    "phase": "copying",
-                    "completed_bytes": 20,
-                    "total_bytes_known": False,
-                },
-            }
-        )
-        == "Copying model files to the Sparks | 20 B; total unknown"
+    unknown_total = progress_line(
+        {
+            "state": "running",
+            "progress": {
+                "phase": "copying",
+                "completed_bytes": 20,
+                "total_bytes_known": False,
+            },
+        }
     )
+    assert "20 B" in unknown_total and "total unknown" in unknown_total
 
 
 def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:

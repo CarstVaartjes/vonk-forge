@@ -277,13 +277,11 @@ def _loaded_presence(
                         rank_state=read_state(RunState, node.state),
                         rank_age_seconds=rank_age,
                         rank_fresh=rank_fresh,
-                        group_state=health,
-                        healthy=None
-                        if health in {GroupHealth.UNAVAILABLE, GroupHealth.STARTING}
-                        else health is GroupHealth.HEALTHY,
+                        group_state=health.state,
+                        healthy=health.healthy,
                         projection_issue=projection_issue,
                         degraded_reason=None
-                        if health is GroupHealth.STARTING
+                        if health.state is GroupHealth.STARTING
                         else reason,
                         route_reason=(
                             run.route_error

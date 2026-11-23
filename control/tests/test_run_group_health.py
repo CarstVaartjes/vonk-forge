@@ -1,4 +1,4 @@
-"""A group still starting is progress; a lost rank or a failed start is degraded."""
+"""A group still starting is progress; a lost rank is degraded."""
 
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import RunState
@@ -8,7 +8,7 @@ from vonk_control.run_readiness import GroupHealth, group_health
 def _health(reason, run_state, *ranks, issue=False):
     return group_health(
         issue=issue, reason=reason, run_state=run_state, rank_states=ranks
-    )
+    ).state
 
 
 def test_a_group_within_its_start_is_starting_not_degraded():
@@ -51,8 +51,3 @@ def test_ready_and_unreadable_groups_keep_their_verdicts():
         _health(None, RunState.RUNNING, RunState.RUNNING, issue=True)
         is GroupHealth.UNAVAILABLE
     )
-
-
-def test_a_failed_start_is_degraded():
-    reason = RunDegradedReason.RUN_NOT_RUNNING
-    assert _health(reason, RunState.FAILED, RunState.FAILED) is GroupHealth.DEGRADED

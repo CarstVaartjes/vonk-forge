@@ -49,7 +49,10 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView
-from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_contract.operations import (
+    RunSwitchOperation,
+    RunSwitchOperationResult,
+)
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
@@ -576,7 +579,12 @@ class AdvanceMixin:
                                 update={
                                     "operation": BlockingOperation(
                                         id=child_id,
-                                        kind=AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                                        kind=child.kind
+                                        if isinstance(
+                                            child,
+                                            RecipeOperationView | RunSwitchOperation,
+                                        )
+                                        else AgentOperation.ARTIFACT_DISTRIBUTION.value,
                                     )
                                 }
                             )

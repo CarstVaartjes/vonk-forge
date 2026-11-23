@@ -185,12 +185,7 @@ def project_progress(
         )
     ):
         activity = "possibly_stalled"
-    projected = value.model_copy(
-        update={
-            "activity": activity,
-            "members": [_age_member(member, now) for member in value.members],
-        }
-    )
+    projected = value.model_copy(update={"activity": activity})
     if stale or not is_transfer_phase(value.phase):
         projected = projected.model_copy(
             update={
@@ -200,42 +195,6 @@ def project_progress(
             }
         )
     return projected
-
-
-def _age_member(
-    member: OperationMemberProgress, now: datetime
-) -> OperationMemberProgress:
-    """Age a retained member sample by the same freshness rule as its aggregate.
-
-    A stored aggregate holds its members' snapshots; reading it later must not
-    leave members "active" with live-looking rates while the aggregate itself
-    reads "waiting" because the sample is old.
-    """
-    if member.activity is None:
-        return member
-    aged = project_progress(
-        OperationProgress(
-            phase=member.phase,
-            completed_bytes=member.completed_bytes,
-            total_bytes=member.total_bytes,
-            total_bytes_known=member.total_bytes is not None,
-            bytes_per_second=member.bytes_per_second,
-            smoothed_bytes_per_second=member.smoothed_bytes_per_second,
-            eta_seconds=member.eta_seconds,
-            observed_at=member.observed_at,
-            last_progress_at=member.last_progress_at,
-            activity=member.activity,
-        ),
-        now,
-    )
-    return member.model_copy(
-        update={
-            "activity": aged.activity,
-            "bytes_per_second": aged.bytes_per_second,
-            "smoothed_bytes_per_second": aged.smoothed_bytes_per_second,
-            "eta_seconds": aged.eta_seconds,
-        }
-    )
 
 
 def project_progress_for_state(

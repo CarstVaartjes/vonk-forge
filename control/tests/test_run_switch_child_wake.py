@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast, get_args
 
 import pytest
@@ -14,6 +15,7 @@ from sqlalchemy.pool import QueuePool
 from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.jobs.documents import (
     RecipeJobActivateParent,
     RecipeStartParent,
@@ -22,6 +24,7 @@ from vonk_control.jobs.documents import (
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
+from vonk_control.recipe_operations.interfaces import RecipeOperationView
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 from vonk_control.run_switch_contract.vocabulary import RunSwitchPhaseKind
 from vonk_control.run_switch_operations.awaited_children import start_request_key
@@ -333,3 +336,20 @@ def test_a_row_inserted_already_ended_is_staged_by_its_own_id(tmp_path) -> None:
     assert born.id is not None
     assert woken == [frozenset({born.id})]
     engine.dispose()
+
+
+def test_a_run_switch_waiting_on_its_transfer_persists_the_dependency_reason(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches a dependency wait stored as the generic observation fallback."""
+    service, _executor, operation_id, child_id = _waiting_on_transfer(tmp_path)
+    child = service._get_child_operation(child_id)
+    assert isinstance(child, RecipeOperationView | _ChildView)
+    retrying = dataclasses.replace(child, retry_due_at=NOW + timedelta(seconds=30))
+    monkeypatch.setattr(service, "_get_child_operation", lambda _id: retrying)
+    service.redrive(operation_id)
+    with service._sessions() as session:
+        wait = read_wait(_get(session, Job, operation_id))
+    assert wait is not None
+    assert wait.reason is WaitReason.DEPENDENCY_PENDING
+    assert [item.operation.id for item in wait.blockers if item.operation] == [child_id]

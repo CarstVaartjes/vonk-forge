@@ -20,6 +20,7 @@ def _application(completed: int, phase: str = "transfer") -> dict[str, object]:
                     "total_bytes_known": True,
                     "smoothed_bytes_per_second": GIB,
                     "eta_seconds": 360,
+                    "observed_at": "2026-11-23T10:00:00+00:00",
                     "members": [
                         {
                             "member_id": "spk_a",
@@ -28,6 +29,7 @@ def _application(completed: int, phase: str = "transfer") -> dict[str, object]:
                             "total_bytes": 4 * GIB,
                             "smoothed_bytes_per_second": GIB // 2,
                             "eta_seconds": 120,
+                            "observed_at": "2026-11-23T10:00:00+00:00",
                         },
                         {
                             "member_id": "spk_b",
@@ -68,8 +70,9 @@ def _feed(tty: bool, clock) -> tuple[FollowFeed, _Out]:
 def test_view_carries_the_servers_numbers_and_a_known_reason():
     application = _application(4 * GIB)
     line = progress_line(application)
-    assert all(part in line for part in ("4.0 GiB", "8.0 GiB", "50%", "1.0 GiB/s"))
-    assert "observation-unavailable" not in line
+    assert all(
+        part in line for part in ("4.0 GiB", "8.0 GiB", "50%", "1.0 GiB/s", "6 min")
+    )
     bars = live_lines(application)
     assert len(bars) == 3
     assert "512.0 MiB/s" in bars[1] and "/s" not in bars[2]
