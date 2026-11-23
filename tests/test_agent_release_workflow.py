@@ -623,12 +623,12 @@ def test_stable_sigstore_identity_names_the_workflow_that_builds_the_stable_pack
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         jobs = yaml.safe_load(path.read_text()).get("jobs", {})
         for definition in jobs.values():
-            for step in definition.get("steps", []):
-                if (
-                    str(step.get("uses", "")).endswith("/agent-package-build")
-                    and step.get("with", {}).get("channel") == "stable"
-                ):
-                    holders.append(path.name)
+            holders.extend(
+                path.name
+                for step in definition.get("steps", [])
+                if str(step.get("uses", "")).endswith("/agent-package-build")
+                and step.get("with", {}).get("channel") == "stable"
+            )
     assert len(holders) == 1, holders
     identity = stable_identity_regexp()
     uri = f"https://github.com/example/vonk/.github/workflows/{holders[0]}"

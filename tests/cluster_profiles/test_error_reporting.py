@@ -78,9 +78,10 @@ class _FleetReply(io.BytesIO):
         response = observation_response(snapshot, resource="fleet")
 
         async def collect() -> bytes:
-            parts: list[bytes] = []
-            async for part in response.body_iterator:
-                parts.append(part.encode() if isinstance(part, str) else bytes(part))
+            parts: list[bytes] = [
+                part.encode() if isinstance(part, str) else bytes(part)
+                async for part in response.body_iterator
+            ]
             return b"".join(parts)
 
         super().__init__(asyncio.run(collect()))

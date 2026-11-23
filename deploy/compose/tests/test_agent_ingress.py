@@ -156,17 +156,15 @@ def _request_body_routes(value: object) -> list[dict]:
         if isinstance(item, dict):
             handlers = item.get("handle")
             if isinstance(handlers, list):
-                for handler in handlers:
-                    if (
-                        isinstance(handler, dict)
-                        and handler.get("handler") == "request_body"
-                    ):
-                        routes.append(
-                            {
-                                "match": item.get("match"),
-                                "max_size": handler.get("max_size"),
-                            }
-                        )
+                routes.extend(
+                    {
+                        "match": item.get("match"),
+                        "max_size": handler.get("max_size"),
+                    }
+                    for handler in handlers
+                    if isinstance(handler, dict)
+                    and handler.get("handler") == "request_body"
+                )
             for child in item.values():
                 visit(child)
         elif isinstance(item, list):

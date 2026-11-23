@@ -380,10 +380,10 @@ def node_fact_violations(
     for name in ("agent_nodes", "agent_node_contacts", "agent_node_profiles"):
         table = metadata.tables.get(name)
         if table is not None:
-            for field in claimed_fields.intersection(table.columns.keys()):
-                problems.append(
-                    f"{name}.{field}: agent report belongs in typed inventory"
-                )
+            problems.extend(
+                f"{name}.{field}: agent report belongs in typed inventory"
+                for field in claimed_fields.intersection(table.columns.keys())
+            )
     # Contact facts have one owner row; agent_nodes is the identity/intent row
     # admission locks, so a contact column there brings the lock back.
     nodes = metadata.tables.get("agent_nodes")
@@ -396,12 +396,12 @@ def node_fact_violations(
         )
     telemetry = metadata.tables.get("node_telemetry_samples")
     if telemetry is not None:
-        for field in set(HostResourceSample.model_fields).intersection(
-            telemetry.columns.keys()
-        ):
-            problems.append(
-                f"node_telemetry_samples.{field}: measurement belongs in typed inventory"
+        problems.extend(
+            f"node_telemetry_samples.{field}: measurement belongs in typed inventory"
+            for field in set(HostResourceSample.model_fields).intersection(
+                telemetry.columns.keys()
             )
+        )
     return sorted(problems)
 
 

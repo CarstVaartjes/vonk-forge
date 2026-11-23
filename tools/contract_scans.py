@@ -223,8 +223,10 @@ def python_registry_problems(
                 "move it to agent_protocol or a registered contract module"
             )
     present = {file for file, _ in models}
-    for module in sorted(modules - present):
-        problems.append(f"registry module {module} defines no model (stale entry)")
+    problems.extend(
+        f"registry module {module} defines no model (stale entry)"
+        for module in sorted(modules - present)
+    )
     allowed = {
         tuple(sorted(item["models"])) for item in document.get("allowed_duplicates", [])
     }
@@ -243,6 +245,8 @@ def python_registry_problems(
             seen.add(key)
             if key not in allowed:
                 problems.append(f"duplicate model definitions: {', '.join(key)}")
-    for key in sorted(allowed - seen):
-        problems.append(f"allowed duplicate {', '.join(key)} no longer occurs (stale)")
+    problems.extend(
+        f"allowed duplicate {', '.join(key)} no longer occurs (stale)"
+        for key in sorted(allowed - seen)
+    )
     return problems

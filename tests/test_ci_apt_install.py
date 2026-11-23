@@ -17,13 +17,13 @@ def direct_apt_calls(root: Path) -> list[str]:
     # Include shell entry points invoked by workflows/actions, and their callees.
     # Scanning all shell scripts prevents a new indirection from evading the guard.
     for directory in ("scripts", "tests", "tools", "install", "packaging", "deploy"):
-        for path in (root / directory).rglob("*"):
-            if (
-                path.is_file()
-                and (path.suffix == ".sh" or not path.suffix)
-                and path.read_bytes().startswith(b"#!/")
-            ):
-                paths.append(path)
+        paths.extend(
+            path
+            for path in (root / directory).rglob("*")
+            if path.is_file()
+            and (path.suffix == ".sh" or not path.suffix)
+            and path.read_bytes().startswith(b"#!/")
+        )
     for path in paths:
         if path == root / "scripts/ci-apt-install":
             continue

@@ -56,12 +56,12 @@ def _violations(
             node, ast.Assign | ast.AnnAssign | ast.AugAssign
         ):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Attribute) and target.attr in {
-                    "next_action_at",
-                    "wait_evidence",
-                }:
-                    errors.append(f"{path}:{node.lineno}: direct wait writer")
+            errors.extend(
+                f"{path}:{node.lineno}: direct wait writer"
+                for target in targets
+                if isinstance(target, ast.Attribute)
+                and target.attr in {"next_action_at", "wait_evidence"}
+            )
         if isinstance(node, ast.Dict) and any(
             isinstance(key, ast.Constant) and key.value in retired_clocks
             for key in node.keys

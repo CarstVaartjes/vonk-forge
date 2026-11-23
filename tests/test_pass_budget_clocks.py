@@ -159,11 +159,12 @@ def test_budgeted_callers_inherit_the_autouse_clock_fixture() -> None:
     )
     failures = []
     for directory in (ROOT / "control/tests", ROOT / "tests"):
-        for path in sorted(directory.rglob("*.py")):
-            if budget_imports(parse_file(path).tree, modules) and (
-                not active or not path.is_relative_to(ROOT / "control/tests")
-            ):
-                failures.append(str(path.relative_to(ROOT)))
+        failures.extend(
+            str(path.relative_to(ROOT))
+            for path in sorted(directory.rglob("*.py"))
+            if budget_imports(parse_file(path).tree, modules)
+            and (not active or not path.is_relative_to(ROOT / "control/tests"))
+        )
     assert not failures, f"Budgeted callers need the autouse pass clock: {failures}"
     assert active, "The shared pass clock must freeze every registered lookup owner"
 

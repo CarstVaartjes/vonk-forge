@@ -117,8 +117,10 @@ def test_workflows_never_pin_executed_case_counts() -> None:
         for block in _PYTHON_HEREDOC.finditer(content):
             source = textwrap.dedent(block.group(2))
             offset = content[: block.start(2)].count("\n")
-            for line in _pinned_case_counts(source):
-                problems.append(f"{path.name}:{offset + line}: pinned execution count")
+            problems.extend(
+                f"{path.name}:{offset + line}: pinned execution count"
+                for line in _pinned_case_counts(source)
+            )
     assert not problems, "Use nonempty coverage and named subsets:\n" + "\n".join(
         problems
     )

@@ -830,12 +830,12 @@ def test_the_raw_profile_preview_request_lives_only_in_the_admitted_preview() ->
         for function in ast.walk(tree):
             if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            for node in ast.walk(function):
-                if (
-                    isinstance(node, ast.Constant)
-                    and node.value == "/api/profile/1/preview"
-                ):
-                    found.append((path.name, function.name))
+            found.extend(
+                (path.name, function.name)
+                for node in ast.walk(function)
+                if isinstance(node, ast.Constant)
+                and node.value == "/api/profile/1/preview"
+            )
         module_level = [
             node
             for node in ast.walk(tree)

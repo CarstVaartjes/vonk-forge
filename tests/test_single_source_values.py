@@ -553,11 +553,12 @@ def isolated_wheel_build_violations(root: Path, files: list[str]) -> list[str]:
         if Path(file).name != "Dockerfile":
             continue
         logical = re.sub(r"\\\r?\n\s*", " ", (root / file).read_text())
-        for command in re.split(r"&&|;|\n", logical):
-            if re.search(r"\bpip\s+wheel\b", command) and (
-                "--no-build-isolation" not in command
-            ):
-                errors.append(f"{file}: pip wheel resolves its build backend")
+        errors.extend(
+            f"{file}: pip wheel resolves its build backend"
+            for command in re.split(r"&&|;|\n", logical)
+            if re.search(r"\bpip\s+wheel\b", command)
+            and "--no-build-isolation" not in command
+        )
     return errors
 
 

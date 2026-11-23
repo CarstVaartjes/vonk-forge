@@ -689,9 +689,10 @@ def _fleet_transfer_peer(payload: dict[str, object]) -> ObservationHTTPPeer:
     )
 
     async def collect() -> bytes:
-        parts: list[bytes] = []
-        async for part in response.body_iterator:
-            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        parts: list[bytes] = [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
         return b"".join(parts)
 
     body = asyncio.run(collect())

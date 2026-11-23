@@ -182,13 +182,16 @@ def test_joins_on_restartable_services_are_explicitly_allowed() -> None:
     for selection in (True, False):
         services = _rendered(secure_remote=selection)["services"]
         for name, service in services.items():
-            joins: list[str] = []
             mode = str(service.get("network_mode", ""))
-            for prefix in ("service:", "container:"):
-                if mode.startswith(prefix):
-                    joins.append(mode.removeprefix(prefix))
-            for entry in service.get("volumes_from", []):
-                joins.append(str(entry).split(":")[0].removeprefix("container:"))
+            joins: list[str] = [
+                mode.removeprefix(prefix)
+                for prefix in ("service:", "container:")
+                if mode.startswith(prefix)
+            ]
+            joins.extend(
+                str(entry).split(":")[0].removeprefix("container:")
+                for entry in service.get("volumes_from", [])
+            )
             for target in joins:
                 restartable = (
                     target not in services

@@ -111,24 +111,24 @@ def render(summary: Summary, *, markdown: bool) -> str:
         lines.append("")
         lines.append("| End | Start | Queue | Duration | Result | Job |")
         lines.append("| --- | --- | --- | --- | --- | --- |")
-        for row in summary.jobs:
-            lines.append(
-                f"| +{row.end_offset:.1f} | +{row.start_offset:.1f} | "
-                f"{row.queue_minutes:.1f} | {row.minutes:.1f} | "
-                f"{row.conclusion} | {row.name} |"
-            )
+        lines.extend(
+            f"| +{row.end_offset:.1f} | +{row.start_offset:.1f} | "
+            f"{row.queue_minutes:.1f} | {row.minutes:.1f} | "
+            f"{row.conclusion} | {row.name} |"
+            for row in summary.jobs
+        )
     else:
         lines.append(
             f"wall={summary.wall_minutes:.1f}min runner-min={summary.runner_minutes:.0f} "
             f"arm-min={summary.arm_minutes:.0f} queue-min={summary.queue_minutes:.0f} "
             f"jobs={len(summary.jobs)}"
         )
-        for row in summary.jobs:
-            lines.append(
-                f"end+{row.end_offset:5.1f} start+{row.start_offset:5.1f} "
-                f"queue {row.queue_minutes:4.1f} dur {row.minutes:5.1f} "
-                f"{row.conclusion!s:9s} {row.name}"
-            )
+        lines.extend(
+            f"end+{row.end_offset:5.1f} start+{row.start_offset:5.1f} "
+            f"queue {row.queue_minutes:4.1f} dur {row.minutes:5.1f} "
+            f"{row.conclusion!s:9s} {row.name}"
+            for row in summary.jobs
+        )
     waits = sorted(summary.jobs, key=lambda row: -row.queue_minutes)[:5]
     if waits and waits[0].queue_minutes >= 2:
         lines.append("")

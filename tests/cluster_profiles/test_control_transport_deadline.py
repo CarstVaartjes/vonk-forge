@@ -654,9 +654,10 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     response = observation_response(snapshot, resource="fleet")
 
     async def collect() -> bytes:
-        parts: list[bytes] = []
-        async for part in response.body_iterator:
-            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        parts: list[bytes] = [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
         return b"".join(parts)
 
     original = asyncio.run(collect()).splitlines()
