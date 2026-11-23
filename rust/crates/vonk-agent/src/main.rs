@@ -270,11 +270,10 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
     let stops = PostStopInventory::default();
-    vonk_agent::fabric_rails::open(&config.data_dir);
     let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
         Path::new("/"),
         &config.data_dir,
-        rustix::param::page_size() as u64,
+        rustix::param::page_size() as u32,
     ));
     let control = run_control_lane(
         config,
@@ -322,6 +321,7 @@ struct CustodyExecutor<'a, E> {
     available: bool,
     stops: PostStopInventory,
     memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
+    gpu_memory: fn() -> Option<u64>,
 }
 
 /// Seconds after a completed `recipe.stop` at which an inventory is collected.
@@ -402,59 +402,28 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
                 ),
             );
         }
-        let run = memory_run(claim);
-        match (claim.operation, run) {
-            (vonk_agent_protocol::generated::AgentOperation::RecipeStart, Some(run)) => {
-                vonk_agent::fabric_rails::forget(run);
-                self.memory.load_begins(run);
-            }
-            (vonk_agent_protocol::generated::AgentOperation::RecipeStop, _) => {
-                self.memory.stop_begins();
-            }
-            (vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1, _) => {
-                self.memory.job_begins();
-            }
-            _ => {}
-        }
         let result = self
             .executor
             .execute(claim, lease_deadline, cancellation)
             .await;
-        match (claim.operation, run, &result) {
-            (
-                vonk_agent_protocol::generated::AgentOperation::RecipeStart,
-                _,
-                vonk_agent::outcome::ExecutionResult::Done(_),
-            ) => self.memory.load_ends(),
-            (
-                vonk_agent_protocol::generated::AgentOperation::RecipeStop,
-                Some(run),
-                vonk_agent::outcome::ExecutionResult::Done(_),
-            ) => {
-                vonk_agent::fabric_rails::forget(run);
-                self.memory.stop_ends(run);
-            }
-            (vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1, _, _) => {
-                self.memory.job_ends();
-            }
-            _ => {}
-        }
         if claim.operation == vonk_agent_protocol::generated::AgentOperation::RecipeStop
             && matches!(result, vonk_agent::outcome::ExecutionResult::Done(_))
         {
             self.stops.stopped();
+            // Observed, not tracked: a stop is a reading only when no GPU
+            // compute process runs after it. A stop that never completed
+            // leaves nothing to forget.
+            let gpu_memory = self.gpu_memory;
+            let idle = tokio::task::spawn_blocking(gpu_memory).await.ok().flatten() == Some(0);
+            self.memory.stop_ended(idle);
         }
         result
     }
 }
 
-/// The run a start or stop order is for; `None` for any other order.
-fn memory_run(claim: &vonk_agent_protocol::AgentClaim) -> Option<uuid::Uuid> {
-    match vonk_agent_protocol::RecipeOperationRequest::parse(claim).ok()? {
-        vonk_agent_protocol::RecipeOperationRequest::Start(request) => Some(request.run_id),
-        vonk_agent_protocol::RecipeOperationRequest::Stop(request) => Some(request.run_id),
-        _ => None,
-    }
+/// The GPU compute processes' memory, read as telemetry reads it.
+fn system_gpu_process_memory() -> Option<u64> {
+    vonk_agent::telemetry::gpu_process_memory(&SystemProcessRunner)
 }
 
 /// The typed refusal remains visible until an authenticated control pass succeeds.
@@ -673,6 +642,7 @@ async fn claim_lane<'a>(
             .is_ok(),
             stops: inventory.stops.clone(),
             memory: inventory.memory.clone(),
+            gpu_memory: system_gpu_process_memory,
         };
         let operation = async {
             run_once_with_claim_hook(
@@ -719,6 +689,7 @@ async fn claim_lane<'a>(
                                     available,
                                     stops,
                                     memory,
+                                    gpu_memory: system_gpu_process_memory,
                                 };
                                 claim.execute(client, store, &executor).await
                             });
@@ -816,6 +787,9 @@ async fn run_inventory_lane(
     stops: PostStopInventory,
     memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 ) {
+    // In memory only: a restart loses the previous reading and the first
+    // report after it carries no traffic.
+    let traffic = std::sync::Arc::new(vonk_agent::fabric_traffic::Meter::default());
     inventory_lane(
         || {
             let config = config.clone();
@@ -840,13 +814,15 @@ async fn run_inventory_lane(
             let client = client.clone();
             let verdict = verdict.clone();
             let memory = memory.clone();
+            let traffic = traffic.clone();
             async move {
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 if let Some(host) = inventory.host_settings.as_mut() {
                     host.memory_fragmentation = memory.snapshot();
-                    host.fabric_rails = vonk_agent::fabric_rails::snapshot();
+                    host.fabric_devices = traffic
+                        .observe(Path::new("/sys/class/infiniband"));
                 }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();

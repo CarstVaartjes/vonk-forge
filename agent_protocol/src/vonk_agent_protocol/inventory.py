@@ -12,7 +12,7 @@ from .contracts import canonical_message
 from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
-from .host_tuning import FabricRails, HostTuning, MemoryFragmentation
+from .host_tuning import FabricDevice, HostTuning, MemoryFragmentation
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -127,9 +127,9 @@ class HostSettings(WireModel):
     # Readings around workload loads and stops since boot; None before the
     # first one and when the agent could not take any.
     memory_fragmentation: MemoryFragmentation | None = None
-    # The rails each multi-node run was seen to use, one entry per run whose
-    # log showed NCCL's interface selection; dropped when the run stops.
-    fabric_rails: list[FabricRails] = Field(default=[], max_length=16)
+    # Traffic per RDMA device over the window since the last report; empty
+    # before the agent has a previous reading.
+    fabric_devices: list[FabricDevice] = Field(default=[], max_length=16)
 
 
 class ModelStoreObject(WireModel):

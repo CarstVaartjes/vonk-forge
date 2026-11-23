@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, text, update
@@ -13,6 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.host_tuning import LARGE_BLOCK_BYTES, MemoryFragmentation
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.reason_codes.admission import InstallDegradedReason
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
@@ -23,7 +25,7 @@ from vonk_control.fleet_projection.common import (
     RecipePresence,
     _install_partial_warnings,
 )
-from vonk_control.fleet_projection.memory_fragmentation import at_risk_bytes
+from vonk_control.fleet_projection.memory_fragmentation import assess
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -1320,16 +1322,17 @@ def test_system_memory_is_everything_in_use_outside_gpu_processes(
     assert telemetry_point(view).system_memory_bytes == expected
 
 
-def _fragmentation_cases() -> list[dict[str, object]]:
-    vector = json.loads(
+def _fragmentation_vector() -> dict[str, Any]:
+    return json.loads(
         files("vonk_agent_protocol")
         .joinpath("vectors/memory-fragmentation-v1.json")
         .read_text(encoding="utf-8")
     )
-    return vector["cases"]
 
 
-@pytest.mark.parametrize("case", _fragmentation_cases(), ids=lambda case: case["name"])
+@pytest.mark.parametrize(
+    "case", _fragmentation_vector()["cases"], ids=lambda case: case["name"]
+)
 def test_memory_fragmentation_readings_decide_the_reboot_advice(
     case: dict[str, object],
 ) -> None:
@@ -1339,34 +1342,59 @@ def test_memory_fragmentation_readings_decide_the_reboot_advice(
     }
     if case["readings"] is not None:
         host["memory_fragmentation"] = case["readings"]
+        readings = MemoryFragmentation.model_validate(case["readings"])
+        assert assess(readings).grown_bytes == case["grown_bytes"]
     advised = "host.memory-fragmented" in _host_codes(host)
     assert advised is case["fragmented"]
 
 
 def test_page_table_growth_is_judged_by_the_large_blocks_it_can_pin() -> None:
-    # One 4 KiB page-table page can pin one whole 2 MiB block; at a 64 KiB page
-    # the same bytes are fewer pages.
-    assert at_risk_bytes(4096, 4096) == 2 * 1024 * 1024
-    assert at_risk_bytes(65536, 65536) == 2 * 1024 * 1024
-    assert at_risk_bytes(2 * 1024 * 1024, 4096) == 1024**3
+    assert _fragmentation_vector()["large_block_bytes"] == LARGE_BLOCK_BYTES
+    # One page-table page can pin one whole large block: 2 MiB of leftover
+    # tables at a 4 KiB page, 32 MiB at 64 KiB.
+    for page_size, tables in ((4096, 2 * 1024**2), (65536, 32 * 1024**2)):
+        readings = MemoryFragmentation.model_validate(
+            {
+                "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+                "page_size_bytes": page_size,
+                "idle_stop_first": {
+                    "at": "2026-11-20T10:05:00Z",
+                    "sec_page_tables_bytes": 0,
+                },
+                "idle_stop_latest": {
+                    "at": "2026-11-20T10:20:00Z",
+                    "sec_page_tables_bytes": tables,
+                },
+            }
+        )
+        assert assess(readings).at_risk_bytes == 1024**3
+        assert not assess(readings).reboot_advised
+        readings = readings.model_copy(
+            update={
+                "idle_stop_latest": readings.idle_stop_latest.model_copy(
+                    update={"sec_page_tables_bytes": tables + page_size}
+                )
+            }
+        )
+        assert assess(readings).reboot_advised
 
 
 def _rail_vector() -> dict[str, list[dict[str, object]]]:
     return json.loads(
         files("vonk_agent_protocol")
-        .joinpath("vectors/fabric-rails-v1.json")
+        .joinpath("vectors/fabric-devices-v1.json")
         .read_text(encoding="utf-8")
     )
 
 
 @pytest.mark.parametrize("case", _rail_vector()["cases"], ids=lambda case: case["name"])
-def test_underused_rails_reach_the_node_as_attention(
+def test_one_flat_rail_beside_a_busy_sibling_reaches_the_node_as_attention(
     case: dict[str, object],
 ) -> None:
     host: dict[str, object] = {
         "display_manager_active": False,
         "graphical_default_target": False,
-        "fabric_rails": case["fabric_rails"],
+        "fabric_devices": case["fabric_devices"],
     }
     node = _host_node(host)
     reasons = [w for w in node.warnings if w.code == "network.rails-underused"]

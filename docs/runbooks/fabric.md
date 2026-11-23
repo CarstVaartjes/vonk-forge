@@ -288,18 +288,29 @@ for the 200 Gb/s negotiated state and 184 Gb/s lower speed-test bound.
 
 The helper launches NCCL with every same-port device (`NCCL_IB_HCA`, "fabric
 rails" in its journal). A port that NCCL uses through one of its two RDMA
-devices gives about 112 of 200 Gb/s. While a Start loads, the agent already
-reads the container's bounded log tail every 10 seconds (the readiness guard);
-it scans that tail for NCCL's echo of the launched value (`NCCL_IB_HCA set by
-environment to ...`) and for its selection (`NET/IB : Using [0]... [1]...`, a
-`+`-joined name counts each device). Both lines seen with fewer devices used
-than launched report `HostSettings.fabric_rails` (`FabricRails`, shared vector
-`fabric-rails-v1.json`) and the Controller raises the `network.rails-underused`
-attention item, "Network using N of M rails". The run's own state per log is
-`Unseen`, `Provided` or `Observed`.
+devices gives about 112 of 200 Gb/s. NCCL's log cannot show this (recipes pin
+`NCCL_DEBUG=WARN`), so the agent reports the traffic of each RDMA device
+instead: in every inventory it sends, per device in `/sys/class/infiniband`, the
+received plus transmitted bytes since its previous report (`HostSettings.fabric_devices`,
+`FabricDevice`, from the port counters the telemetry already reads, which are in
+4-byte words) with the window in seconds and the `bus:slot.function` shared by
+the two devices of one cabled port. The previous reading is in memory only: the
+first report after an agent restart carries nothing, and a counter that went
+backwards is skipped.
 
-It stays silent, never guessing, when the lines never appear: `NCCL_DEBUG` is
-not `INFO` (recipes opt in), the run is single-node (NCCL prints no `NET/IB`),
-the lines scrolled out of the bounded tail between two reads, or the
-launched value is an exclusion list (`^`). Observations are kept across agent
-restarts, dropped when the run stops or starts again, and never act on the run.
+The Controller (`fleet_projection/fabric_rails.py`) raises `network.rails-underused`
+("Network using 1 of 2 rails") when, for an ACTIVE port pair, one device stays
+flat while its sibling is busy over the same window:
+
+- busy: at least 8 MiB/s (1 GiB over a two-minute window). Tensor-parallel
+  decode moves the activations of every layer per token, tens of MB/s; an idle
+  fabric moves kilobytes per second of keepalives;
+- flat: under 1% of the busy sibling. NCCL splits traffic across the rails it
+  uses, so a rail under 1% is not in use;
+- window: at least 30 s, so an inventory a few seconds after the last one is
+  not judged on a handful of packets;
+- a device that is not ACTIVE was never launched and does not count.
+
+No traffic, no previous reading, or only one active device give no advice.
+Nothing is restarted. Shared vector: `fabric-devices-v1.json` (agent counter
+sample and Controller cases).

@@ -3163,33 +3163,44 @@
       "title": "EnumParameter",
       "type": "object"
     },
-    "FabricRails": {
-      "description": "The RDMA rails one multi-node run uses, from NCCL's own log.\n\n``provided`` is the number of devices of the ``NCCL_IB_HCA`` NCCL echoed\n(what the helper launched); ``used`` the devices on its ``NET/IB : Using``\nline. A run whose log shows neither line (no ``NCCL_DEBUG``, one node, lines\nscrolled out of the bounded tail) is not reported at all: unknown is never\nguessed. Informative only; the Controller derives the attention item.",
+    "FabricDevice": {
+      "description": "One RDMA device's traffic over the window since the agent's last report.\n\nA DGX Spark reaches one cabled port through two RDMA devices; ``port`` is\ntheir shared PCI bus:slot.function (the PCI domain differs), which pairs\nthe siblings. ``bytes`` is received plus transmitted bytes in the window.\nThe Controller compares siblings; nothing here is a verdict.",
       "properties": {
-        "provided": {
-          "maximum": 64,
-          "minimum": 1,
-          "title": "Provided",
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Bytes",
           "type": "integer"
         },
-        "run_id": {
-          "format": "uuid",
-          "title": "Run Id",
+        "name": {
+          "pattern": "^[A-Za-z0-9_.-]{1,32}$",
+          "title": "Name",
           "type": "string"
         },
-        "used": {
-          "maximum": 64,
+        "port": {
+          "pattern": "^[0-9a-f]{2}:[0-9a-f]{2}\\.[0-7]$",
+          "title": "Port",
+          "type": "string"
+        },
+        "window_seconds": {
+          "maximum": 86400,
           "minimum": 1,
-          "title": "Used",
+          "title": "Window Seconds",
           "type": "integer"
         }
       },
       "required": [
-        "run_id",
-        "provided",
-        "used"
+        "name",
+        "port",
+        "active",
+        "bytes",
+        "window_seconds"
       ],
-      "title": "FabricRails",
+      "title": "FabricDevice",
       "type": "object"
     },
     "FailureCode": {
@@ -8284,13 +8295,13 @@
           ],
           "default": null
         },
-        "fabric_rails": {
+        "fabric_devices": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/FabricRails"
+            "$ref": "#/$defs/FabricDevice"
           },
           "maxItems": 16,
-          "title": "Fabric Rails",
+          "title": "Fabric Devices",
           "type": "array"
         },
         "gpu_clock_support": {
@@ -8399,20 +8410,6 @@
           ],
           "default": null,
           "title": "Kernel Splash"
-        },
-        "sec_page_tables_bytes": {
-          "anyOf": [
-            {
-              "maximum": 17592186044416,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sec Page Tables Bytes"
         },
         "snaps": {
           "anyOf": [
@@ -10167,7 +10164,7 @@
       "type": "object"
     },
     "MemoryFragmentation": {
-      "description": "What the agent read around workload loads and stops since this boot.\n\nInformative only: the Controller derives a reboot recommendation, and\nnothing acts on it. Page-table pages that a process leaves behind (PyTorch\n``expandable_segments`` maps many IOMMU pages) are not freed when it exits,\nfragment memory, and only a reboot returns them, so the readings are keyed\nby ``boot_id`` and the agent starts them afresh when the boot changes.\nEvery reading is optional evidence: one that could not be taken is absent.",
+      "description": "``SecPageTables`` after workload stops that left the Spark idle.\n\nInformative only: the Controller derives a reboot recommendation, and\nnothing acts on it. Page-table pages that a process leaves behind (PyTorch\n``expandable_segments`` maps many IOMMU pages) are not freed when it exits,\ncan each pin a large free block, and only a reboot returns them. A stop is\nidle when no GPU compute process runs after it (observed, not tracked), so\nthe reading holds no workload's own tables. The readings are keyed by\n``boot_id``; the agent starts them afresh when the boot changes.",
       "properties": {
         "boot_id": {
           "pattern": "^[0-9a-f-]{36}$",
@@ -10175,121 +10172,45 @@
           "type": "string"
         },
         "idle_stop_first": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/MemoryPoint"
         },
         "idle_stop_latest": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "load_after": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "load_before": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "$ref": "#/$defs/MemoryPoint"
         },
         "page_size_bytes": {
           "maximum": 1073741824,
           "minimum": 1,
           "title": "Page Size Bytes",
           "type": "integer"
-        },
-        "stop_after": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "stop_before": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/MemoryPoint"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         }
       },
       "required": [
         "boot_id",
-        "page_size_bytes"
+        "page_size_bytes",
+        "idle_stop_first",
+        "idle_stop_latest"
       ],
       "title": "MemoryFragmentation",
       "type": "object"
     },
     "MemoryPoint": {
-      "description": "The memory fragmentation readings at one lifecycle point: the kernel's\nsecondary page tables (``SecPageTables``) and free memory by block size.",
+      "description": "``SecPageTables`` (/proc/meminfo: the IOMMU and secondary-MMU page\ntables) at one moment.",
       "properties": {
         "at": {
           "format": "date-time",
           "title": "At",
           "type": "string"
         },
-        "free_memory": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FreeMemory"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "sec_page_tables_bytes": {
-          "anyOf": [
-            {
-              "maximum": 17592186044416,
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sec Page Tables Bytes"
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Sec Page Tables Bytes",
+          "type": "integer"
         }
       },
       "required": [
-        "at"
+        "at",
+        "sec_page_tables_bytes"
       ],
       "title": "MemoryPoint",
       "type": "object"

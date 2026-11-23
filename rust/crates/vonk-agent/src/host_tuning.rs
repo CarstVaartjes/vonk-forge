@@ -77,8 +77,6 @@ pub fn observe<R: ProcessRunner>(runner: &R, root: &Path, page_size: u64) -> Hos
             .map(|text| text.split_ascii_whitespace().any(|word| word == "splash")),
         free_memory: read("proc/buddyinfo")
             .and_then(|text| vonk_agent_protocol::buddyinfo::free_memory(&text, page_size)),
-        sec_page_tables_bytes: read("proc/meminfo")
-            .and_then(|text| crate::memory_readings::sec_page_tables_bytes(&text)),
     }
 }
 

@@ -252,6 +252,7 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
                 data.path(),
                 4096,
             )),
+            gpu_memory: || Some(0),
         };
         let mut claim = template.clone();
         claim.operation = operation;
@@ -260,6 +261,46 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
             .await;
         let first = tokio::time::Instant::now() + Duration::from_secs(31);
         assert_eq!(stops.due(first), armed, "{:?}", claim.operation);
+    }
+
+    // A stop that never completed freezes nothing: the next completed stop
+    // with no GPU process is a reading, and one with a GPU process is not.
+    let host = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let proc = host.path().join("proc");
+    std::fs::create_dir_all(proc.join("sys/kernel/random")).unwrap();
+    std::fs::write(
+        proc.join("sys/kernel/random/boot_id"),
+        "6f1c1d8e-0000-4000-8000-000000000001\n",
+    )
+    .unwrap();
+    std::fs::write(proc.join("meminfo"), "SecPageTables: 100 kB\n").unwrap();
+    let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+        host.path(),
+        data.path(),
+        4096,
+    ));
+    let mut stop = template.clone();
+    stop.operation = AgentOperation::RecipeStop;
+    for (result, gpu_memory, recorded) in [
+        (
+            ExecutionResult::failed("no"),
+            (|| Some(0)) as fn() -> Option<u64>,
+            false,
+        ),
+        (done(), || Some(1 << 30), false),
+        (done(), || None, false),
+        (done(), || Some(0), true),
+    ] {
+        let executor = super::CustodyExecutor {
+            executor: &Fake(result),
+            available: true,
+            stops: PostStopInventory::default(),
+            memory: memory.clone(),
+            gpu_memory,
+        };
+        executor.execute(&stop, lease.clone(), cancel.clone()).await;
+        assert_eq!(memory.snapshot().is_some(), recorded);
     }
 }
 

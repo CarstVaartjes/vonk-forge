@@ -90,34 +90,29 @@ otherwise). Page-table pages a workload maps through the IOMMU (PyTorch
 `expandable_segments` makes many) can stay in `SecPageTables` after it exits.
 They are unmovable, so each can pin a whole 2 MiB block of free memory that the
 GPU driver wants, and only a reboot returns them (about 1 to 1.5% decode speed
-reported). Nothing acts on the advice.
+reported). Nothing acts on the advice. Free-block counts are not used: the
+helper's compaction heals movable scatter, so a shortage of 2 MiB blocks is no
+reason to reboot.
 
-The agent reads `SecPageTables` (`/proc/meminfo`) and free memory by block size
-(`/proc/buddyinfo`, the 2 MiB notion of the check above) before and after every
-workload start and stop and reports them as `HostSettings.memory_fragmentation`
-(`MemoryFragmentation`, shared vector `memory-fragmentation-v1.json`). They are
-keyed by `/proc/sys/kernel/random/boot_id`, kept in the agent's data directory
-across agent restarts, and begin again after a reboot. The Controller
-(`fleet_projection/memory_fragmentation.py`) advises a reboot when either holds:
-
-- **Page tables grew:** `SecPageTables` after the latest idle stop is higher than
-  after the first idle stop of this boot by more than the margin. An idle stop
-  is one after which no other workload or job was resident, since a co-resident
-  workload holds its own tables. Growth is monotonic, so the advice holds until
-  the boot changes (the "previous stop" pair would clear on the next quiet stop
-  although only a reboot heals).
-- **Large blocks short:** what the latest idle stop freed (free memory after
-  minus before) did not come back as 2 MiB blocks by more than the margin. The
-  need is measured, not a formula: it is what reloading the stopped workload
-  takes. The helper's compaction at the next load can heal scatter of movable
-  pages, so this signal can clear without a reboot.
+After every completed workload stop the agent reads `SecPageTables`
+(`/proc/meminfo`). The reading counts only when the stop left the Spark idle,
+observed: no GPU compute process runs (the `nvidia-smi --query-compute-apps`
+reading telemetry takes), because a workload still up holds its own tables. A
+stop that never completes, or one with a GPU process still up, is simply no
+reading and blocks nothing. The agent keeps the first idle-stop reading of the
+boot and the latest and reports them as `HostSettings.memory_fragmentation`
+(`MemoryFragmentation`, keyed by `/proc/sys/kernel/random/boot_id`, kept in the
+agent's data directory across agent restarts and begun again after a reboot).
+The Controller (`fleet_projection/memory_fragmentation.py`) advises a reboot
+when `SecPageTables` at the latest idle stop exceeds the first idle stop of this
+boot by more than the margin. Growth is monotonic, so the advice holds until the
+boot changes.
 
 The margin is 1 GiB of large blocks at risk. One unmovable page can pin one
-block, so `n` leftover page-table bytes put `n / page_size * 2 MiB` at risk: at
-a 4 KiB page, 2 MiB of leftover tables. 1 GiB is under 1% of 128 GiB, the order
-of the reported cost. Readings the agent could not take, or too few of them,
-give no advice. After an agent restart the readings continue; after an upgrade
-the Controller must be new first (strict readers).
+block, so `n` leftover page-table bytes put `n / page_size * 2 MiB` at risk: at a
+4 KiB page, 2 MiB of leftover tables. 1 GiB is under 1% of 128 GiB, the order of
+the reported cost. Fewer than two readings give no advice. The Controller
+deploys before the agents (strict readers).
 
 ## Related choices that are not host checks
 

@@ -9,7 +9,6 @@ a reading the agent could not take is ``None`` (unknown), never a default.
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -17,6 +16,11 @@ from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
 
 # Memory in bytes, at most telemetry's capacity bound (16 TiB).
 MemoryBytes = Annotated[int, Field(strict=True, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)]
+
+#: The physically contiguous block size the GPU driver takes. The agent's
+#: ``buddyinfo::LARGE_BLOCK_BYTES`` is the same value (the shared vector
+#: ``memory-fragmentation-v1.json`` pins both).
+LARGE_BLOCK_BYTES = 2 * 1024 * 1024
 
 
 class HostUnit(WireEnum):
@@ -80,8 +84,6 @@ class HostTuning(WireModel):
     # The kernel command line has the word ``splash``.
     kernel_splash: bool | None = None
     free_memory: FreeMemory | None = None
-    # /proc/meminfo SecPageTables: the IOMMU and secondary-MMU page tables.
-    sec_page_tables_bytes: MemoryBytes | None = None
 
     @model_validator(mode="after")
     def _distinct(self) -> HostTuning:
@@ -94,51 +96,45 @@ class HostTuning(WireModel):
 
 
 class MemoryPoint(WireModel):
-    """The memory fragmentation readings at one lifecycle point: the kernel's
-    secondary page tables (``SecPageTables``) and free memory by block size."""
+    """``SecPageTables`` (/proc/meminfo: the IOMMU and secondary-MMU page
+    tables) at one moment."""
 
     at: AwareDatetime
-    sec_page_tables_bytes: MemoryBytes | None = None
-    free_memory: FreeMemory | None = None
+    sec_page_tables_bytes: MemoryBytes
 
 
 class MemoryFragmentation(WireModel):
-    """What the agent read around workload loads and stops since this boot.
+    """``SecPageTables`` after workload stops that left the Spark idle.
 
     Informative only: the Controller derives a reboot recommendation, and
     nothing acts on it. Page-table pages that a process leaves behind (PyTorch
     ``expandable_segments`` maps many IOMMU pages) are not freed when it exits,
-    fragment memory, and only a reboot returns them, so the readings are keyed
-    by ``boot_id`` and the agent starts them afresh when the boot changes.
-    Every reading is optional evidence: one that could not be taken is absent.
+    can each pin a large free block, and only a reboot returns them. A stop is
+    idle when no GPU compute process runs after it (observed, not tracked), so
+    the reading holds no workload's own tables. The readings are keyed by
+    ``boot_id``; the agent starts them afresh when the boot changes.
     """
 
     # /proc/sys/kernel/random/boot_id.
     boot_id: Annotated[str, Field(pattern=r"^[0-9a-f-]{36}$")]
     # The running kernel's page size, which turns pages into blocks.
     page_size_bytes: Annotated[int, Field(strict=True, ge=1, le=2**30)]
-    # Around the latest workload start and the latest workload stop.
-    load_before: MemoryPoint | None = None
-    load_after: MemoryPoint | None = None
-    stop_before: MemoryPoint | None = None
-    stop_after: MemoryPoint | None = None
-    # The after-stop readings taken while no other workload was resident on the
-    # Spark (a co-resident workload holds its own page tables), the first of
-    # this boot and the latest.
-    idle_stop_first: MemoryPoint | None = None
-    idle_stop_latest: MemoryPoint | None = None
+    # The first idle stop of this boot and the latest.
+    idle_stop_first: MemoryPoint
+    idle_stop_latest: MemoryPoint
 
 
-class FabricRails(WireModel):
-    """The RDMA rails one multi-node run uses, from NCCL's own log.
+class FabricDevice(WireModel):
+    """One RDMA device's traffic over the window since the agent's last report.
 
-    ``provided`` is the number of devices of the ``NCCL_IB_HCA`` NCCL echoed
-    (what the helper launched); ``used`` the devices on its ``NET/IB : Using``
-    line. A run whose log shows neither line (no ``NCCL_DEBUG``, one node, lines
-    scrolled out of the bounded tail) is not reported at all: unknown is never
-    guessed. Informative only; the Controller derives the attention item.
+    A DGX Spark reaches one cabled port through two RDMA devices; ``port`` is
+    their shared PCI bus:slot.function (the PCI domain differs), which pairs
+    the siblings. ``bytes`` is received plus transmitted bytes in the window.
+    The Controller compares siblings; nothing here is a verdict.
     """
 
-    run_id: UUID
-    provided: Annotated[int, Field(strict=True, ge=1, le=64)]
-    used: Annotated[int, Field(strict=True, ge=1, le=64)]
+    name: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,32}$")]
+    port: Annotated[str, Field(pattern=r"^[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$")]
+    active: bool
+    bytes: MemoryBytes
+    window_seconds: Annotated[int, Field(strict=True, ge=1, le=86_400)]
