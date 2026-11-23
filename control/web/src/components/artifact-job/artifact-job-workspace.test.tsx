@@ -14,6 +14,13 @@ import { formatWire, isWireNumber, stringifyContractJson } from "../../api/contr
 import { ArtifactJobWorkspace } from "./artifact-job-workspace";
 import { hashArtifactBlob } from "./artifact-hash";
 
+/** The arguments of a mock's first call; a test that reads them has already seen the call. */
+function firstCall<Args extends unknown[]>(mock: { mock: { calls: Args[] } }): Args {
+  const call = mock.mock.calls[0];
+  if (!call) throw new Error("the mock was not called");
+  return call;
+}
+
 vi.mock("./artifact-hash", () => ({
   hashArtifactBlob: vi.fn(
     async (
@@ -418,8 +425,8 @@ test("derives prompt, parameter, and input constraints from the running recipe a
   await user.click(submit);
 
   await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
-  expect(client.submitArtifactJob.mock.calls[0][0]).toBe("00000000-0000-4000-8000-000000000020");
-  const create = client.createArtifactJob.mock.calls[0];
+  expect(firstCall(client.submitArtifactJob)[0]).toBe("00000000-0000-4000-8000-000000000020");
+  const create = firstCall(client.createArtifactJob);
   expect(create[0]).toBe(run.run_id);
   expect(create[1]).toMatchObject({
     interface: "image-job",
@@ -455,7 +462,7 @@ test("derives prompt, parameter, and input constraints from the running recipe a
     expect.any(AbortSignal),
     expect.any(Function),
   );
-  expect(client.finalizeArtifactJob.mock.calls[0][0]).toBe("00000000-0000-4000-8000-000000000020");
+  expect(firstCall(client.finalizeArtifactJob)[0]).toBe("00000000-0000-4000-8000-000000000020");
   expect(await screen.findByText("Succeeded")).toBeInTheDocument();
 });
 
@@ -1000,13 +1007,13 @@ test("sends no media type and uploads with the one the Controller derived", asyn
   await user.click(submit);
 
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalledOnce());
-  expect(client.createArtifactJob.mock.calls[0][1].inputs).toEqual([
+  expect(firstCall(client.createArtifactJob)[1].inputs).toEqual([
     expect.objectContaining({ slot: "obj", name: "shape.obj" }),
     expect.objectContaining({ slot: "ply", name: "shape.ply" }),
     expect.objectContaining({ slot: "mov", name: "source.mov" }),
     expect.objectContaining({ slot: "mkv", name: "source.mkv" }),
   ]);
-  for (const item of client.createArtifactJob.mock.calls[0][1].inputs) {
+  for (const item of firstCall(client.createArtifactJob)[1].inputs) {
     expect(item).not.toHaveProperty("media_type");
   }
   expect(client.uploadArtifactJobInput.mock.calls.map((call) => call[1].media_type)).toEqual([
@@ -1351,7 +1358,7 @@ test("keeps a wide integer recipe setting exact through editing and durable requ
   await user.type(screen.getByRole("textbox", { name: "Prompt" }), "Keep the exact integer");
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalled());
-  const body = client.createArtifactJob.mock.calls[0][1];
+  const body = firstCall(client.createArtifactJob)[1];
   const steps = body.parameters.steps;
   if (!isWireNumber(steps)) throw new Error("numeric setting was lost");
   expect(formatWire(steps)).toBe("9007199254740995");
@@ -1400,7 +1407,7 @@ test("checks browser input bytes against the Controller's exact declared transpo
   await user.type(prompt, "a");
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
   await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
-  const inputs = client.createArtifactJob.mock.calls[0][1].inputs;
+  const inputs = firstCall(client.createArtifactJob)[1].inputs;
   if (!inputs?.[0]) throw new Error("accepted input declaration required");
   expect(inputs[0].size_bytes).toBe(1);
 });
@@ -1440,7 +1447,7 @@ test("renders an enum as a select and a bounded float input", async () => {
   );
   await user.click(screen.getByRole("button", { name: "Submit artifact job" }));
   await waitFor(() => expect(client.createArtifactJob).toHaveBeenCalled());
-  expect(client.createArtifactJob.mock.calls[0][1].parameters).toEqual({
+  expect(firstCall(client.createArtifactJob)[1].parameters).toEqual({
     "num-frames": 97,
     scale: 2.5,
   });

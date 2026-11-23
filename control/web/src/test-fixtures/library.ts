@@ -305,7 +305,6 @@ const projectionResources = {
   memory_bytes: null,
   runtime_memory_bytes: null,
 };
-const projectionLocal = { controller: "cached" as const, preparation: null, running_on: [] };
 const facetValues = { family: [], line: [], quantization: [], usage: [], version: [] };
 export const modelLibrary: ModelLibrary = {
   generated_at: libraryViewSnapshot.generated_at,
@@ -335,7 +334,7 @@ export const modelLibrary: ModelLibrary = {
       resources: projectionResources,
       local: entry.local,
       actions: entry.actions,
-      alignment: entry.alignment,
+      alignment: entry.alignment ?? null,
       updated_at: libraryViewSnapshot.generated_at,
     };
   }),
@@ -380,7 +379,7 @@ export const recipeLibrary: RecipeLibrary = {
     resources: projectionResources,
     local: entry.local,
     actions: entry.actions,
-    alignment: entry.recipe_display?.alignment,
+    alignment: entry.recipe_display?.alignment ?? null,
     node_count: entry.recipe_document.topology.node_count,
     engine: entry.recipe_document.runtime.engine,
     creator: entry.recipe_document.provenance.source_reference?.split("/")[3] ?? null,
@@ -437,9 +436,9 @@ export const currentRecipeDetail: RecipeDetail = {
   resources: projectionResources,
   local: recipeLibrary.recipes[0]!.local,
   actions: recipeLibrary.recipes[0]!.actions,
-  alignment: recipeLibrary.recipes[0]!.alignment,
+  alignment: recipeLibrary.recipes[0]!.alignment ?? null,
   node_count: recipeLibrary.recipes[0]!.node_count,
   engine: recipeLibrary.recipes[0]!.engine,
-  creator: recipeLibrary.recipes[0]!.creator,
+  creator: recipeLibrary.recipes[0]!.creator ?? null,
   updated_at: libraryViewSnapshot.generated_at,
 };

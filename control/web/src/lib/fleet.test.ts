@@ -217,7 +217,7 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
   });
   expect(nodeMemory(observed)).toMatchObject({ usedPercent: 50, totalBytes: total });
   expect(formatBytes(total)).toBe("16777216.0 TiB");
-  expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
+  expect(formatBytes(wireInteger(`1${"0".repeat(400)}`))).toBe(`1${"0".repeat(400)} B`);
 });
 
 test("GPU reset warnings retain the operator fix while a Spark remains online", () => {

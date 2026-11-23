@@ -507,6 +507,41 @@ async fn content_addressed_distribution_handoff_reuses_objects_across_plan_diges
 }
 
 #[tokio::test]
+async fn only_bytes_received_over_the_network_count_as_fetched() {
+    let model = b"model payload".to_vec();
+    let assignment = distribution_assignment_fixture(&model);
+    let mut objects = HashMap::new();
+    objects.insert(hex_sha256(&model), model.clone());
+    let root = tempfile::tempdir().unwrap();
+    let distribution_root = root.path().join("distribution");
+    std::fs::create_dir_all(&distribution_root).unwrap();
+
+    let mut last = None;
+    for (plan_digest, requests) in [("a".repeat(64), 2), ("f".repeat(64), 1)] {
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects.clone(),
+            requests,
+            DistributionFixtureMode::Good,
+        );
+        let mut fetched = None;
+        let evidence = client
+            .download_distribution_with_progress(&plan_digest, &distribution_root, |item| {
+                fetched = Some(item.fetched.0);
+            })
+            .await
+            .unwrap();
+        server.finish().unwrap();
+        assert_eq!(evidence.downloaded_bytes, model.len() as u64);
+        last = fetched;
+        if requests == 2 {
+            assert_eq!(last, Some(model.len() as u64));
+        }
+    }
+    assert_eq!(last, Some(0), "an object already present is not fetched");
+}
+
+#[tokio::test]
 async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption() {
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);

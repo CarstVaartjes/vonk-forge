@@ -30,7 +30,11 @@ export type CatalogSyncStatus = components["schemas"]["ManagedCatalogSyncRespons
 export type LibraryVocabulary = components["schemas"]["CatalogVocabulary"];
 export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionView"];
 export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
-export type ActivityFilters = { state?: string; target?: string; requestId?: string };
+export type ActivityFilters = {
+  state?: string | undefined;
+  target?: string | undefined;
+  requestId?: string | undefined;
+};
 export type OperationsResponse = components["schemas"]["OperationsResponse"];
 export type SwapShortfallEvidence = components["schemas"]["SwapShortfallEvidence"];
 export type OperationBlocker = components["schemas"]["OperationBlocker"];
@@ -86,13 +90,13 @@ export type LibraryViewRecipe = {
   topology_name: string;
   // Projected by the Controller; the same names as vonkctl --engine/--creator.
   engine?: string;
-  creator?: string | null;
+  creator?: string | null | undefined;
   model_selectors?: string[];
   // The Controller's read-only assessment of this exact recipe against the
   // live fleet (fleet_fit is what `vonkctl recipe library --fits-fleet` tests).
-  assessment?: components["schemas"]["RecipeReadiness"] | null;
+  assessment?: components["schemas"]["RecipeReadiness"] | null | undefined;
   // Informative only: null means not yet verified, and nothing gates on it.
-  qualification?: RecipeQualification | null;
+  qualification?: RecipeQualification | null | undefined;
   // The recipe's own cache state and what the Controller says can be done with it.
   local: components["schemas"]["LibraryLocalState"];
   actions: components["schemas"]["LibraryRecipeProjection"]["actions"];
@@ -119,7 +123,7 @@ export type LibraryViewModel = {
   model_document: Pick<ModelDefinition, "identity" | "format">;
   model_file_count: WireNumber;
   model_bytes: WireNumber | null;
-  cache_usage?: components["schemas"]["ModelCacheUsage"] | null;
+  cache_usage?: components["schemas"]["ModelCacheUsage"] | null | undefined;
   local: components["schemas"]["LibraryLocalState"];
   actions: components["schemas"]["LibraryModelProjection"]["actions"];
   // Projected facets, named exactly as the CLI filter flags and the
@@ -134,14 +138,16 @@ export type LibraryViewModel = {
   recipes: LibraryViewRecipe[];
 };
 export type LibraryViewSnapshot = {
-  storage_observation?: Pick<
-    ModelLibrary,
-    | "storage_observed_at"
-    | "storage_reason"
-    | "storage_error_type"
-    | "storage_refresh_seconds"
-    | "storage_deadline_at"
-  >;
+  storage_observation?:
+    | {
+        [Key in
+          | "storage_observed_at"
+          | "storage_reason"
+          | "storage_error_type"
+          | "storage_refresh_seconds"
+          | "storage_deadline_at"]?: ModelLibrary[Key] | undefined;
+      }
+    | undefined;
   generated_at: string;
   freshness_policy: components["schemas"]["FreshnessPolicy"];
   library?: components["schemas"]["LibraryRelease"] | null;
@@ -167,7 +173,7 @@ export type LibraryViewRecipeDetail = {
   reasons: { code: string; severity: string; detail: string }[];
   topology: RecipeDefinition["topology"];
   // Other recipes for the same model, excluding this one.
-  alternatives?: RecipeAlternative[];
+  alternatives?: RecipeAlternative[] | undefined;
 };
 export type LibraryViewPlacementGroup = {
   eligible: boolean;

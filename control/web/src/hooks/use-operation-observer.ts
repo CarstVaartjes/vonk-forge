@@ -29,7 +29,7 @@ export function backoffDelay(
 type Options<T> = {
   isTerminal(value: T): boolean;
   /** Runs once when the remote state is terminal: invalidate and refetch dependent data here. */
-  onTerminal?(value: T): void;
+  onTerminal?: ((value: T) => void) | undefined;
   intervalMs?: number;
   deadlineMs?: number;
 };

@@ -9,8 +9,8 @@ import { spark } from "../test-fixtures/fleet-spark";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
-let attentionUnavailable = false;
-let fleetNow = new Date("2026-09-27T10:00:00Z");
+const attentionUnavailable = false;
+const fleetNow = new Date("2026-09-27T10:00:00Z");
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
     snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },
@@ -20,13 +20,6 @@ vi.mock("../hooks/use-fleet-stream", () => ({
     retry: vi.fn(),
   }),
 }));
-
-function order(): string[] {
-  return screen
-    .getAllByRole("row")
-    .slice(1)
-    .map((row) => within(row).getAllByRole("link")[0]!.textContent ?? "");
-}
 
 const originalClipboard = navigator.clipboard;
 afterEach(() => {

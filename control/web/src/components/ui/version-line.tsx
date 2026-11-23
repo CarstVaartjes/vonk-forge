@@ -39,6 +39,7 @@ export function VersionLine({
   const syncedAt = sync && lastSyncAt(sync);
   const stamp = syncedAt ? utcTime(syncedAt) : null;
   return (
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: the footer is outside <main>, so it is the page contentinfo and takes a name
     <footer className="version-line" aria-label="Versions">
       <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED_TEXT}</span>
       <span>Library version: {sync?.library_version ?? NOT_REPORTED_TEXT}</span>

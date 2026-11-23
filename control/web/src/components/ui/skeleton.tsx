@@ -22,8 +22,10 @@ export function SkeletonRows({
         <table aria-hidden="true">
           <tbody>
             {Array.from({ length: rows }, (_, row) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows have no identity
               <tr key={row}>
                 {Array.from({ length: columns }, (_, column) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells have no identity
                   <td key={column}>
                     <Skeleton width={column === 0 ? "70%" : "50%"} />
                   </td>
@@ -45,6 +47,7 @@ export function SkeletonBlock({ lines = 4, label }: { lines?: number; label: str
         {label}
       </p>
       {Array.from({ length: lines }, (_, line) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: placeholder rows have no identity
         <Skeleton key={line} width={line === 0 ? "45%" : line % 2 ? "90%" : "70%"} />
       ))}
     </div>

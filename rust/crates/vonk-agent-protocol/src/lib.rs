@@ -46,7 +46,7 @@ pub use generated::{
 
 pub mod operation_progress;
 pub use operation_progress::{
-    OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
+    NetworkFetch, OperationCheckpoint, OperationMemberProgress, OperationProgress, ProgressActivity,
 };
 
 pub mod buddyinfo;

@@ -19,7 +19,7 @@ test("every class a stylesheet selects is named by production source", () => {
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   const prefixes = [...production.matchAll(/className=\{`([^`]*)`\}/g)].flatMap((match) =>
-    match[1]
+    (match[1] ?? "")
       .split(/\s+/)
       .filter((token) => token.indexOf("${") > 0)
       .map((token) => token.slice(0, token.indexOf("${"))),
@@ -42,7 +42,9 @@ test("every class a stylesheet selects is named by production source", () => {
             .replace(/:(?:not|is|where|has)\((?:[^()]|\([^()]*\))*\)/g, ""),
         );
       return selectors
-        .flatMap((selector) => [...selector.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]))
+        .flatMap((selector) =>
+          [...selector.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].flatMap((m) => (m[1] ? [m[1]] : [])),
+        )
         .filter((name) => !named(name))
         .map((name) => `${path.slice(src.length + 1)}: .${name}`);
     });

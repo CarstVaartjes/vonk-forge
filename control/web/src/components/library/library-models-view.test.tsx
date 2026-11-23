@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { vi } from "vitest";
 import { CacheOperationKind } from "../../api/vocabulary.generated";
 import type { ControlApi } from "../../api/types";
-import { cacheRemovalReview } from "../../test-fixtures/cache-removal";
 import { libraryViewSnapshot } from "../../test-fixtures/library";
 import { buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS } from "./library-workcell";
 import { LibraryModelsView } from "./library-models-view";

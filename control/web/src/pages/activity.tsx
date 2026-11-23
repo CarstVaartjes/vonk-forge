@@ -52,13 +52,13 @@ type ActivityStatus =
   | "unknown";
 type ActivitySummary = { request_id: string; actor: string; action: string; targets: string[] };
 type ActivityRecord = ActivitySummary & {
-  occurred_at?: string | null;
+  occurred_at?: string | null | undefined;
   source: "job" | "operation";
   target_names?: string[];
   operation?: OperationDetail;
   /** The Controller's plain phrase for the event, and the workload it acts on. */
   summary?: string;
-  subject?: string | null;
+  subject?: string | null | undefined;
 };
 type ActivityApi = Pick<
   ControlApi,
@@ -249,7 +249,7 @@ function EventTime({ event, now }: { event: ActivityRecord; now: Date }) {
   );
 }
 
-function CopyableValue({ label, value }: { label: string; value?: string | null }) {
+function CopyableValue({ label, value }: { label: string; value?: string | null | undefined }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const statusId = useId();
   if (!value)
@@ -328,6 +328,7 @@ function TechnicalDetails({ event }: { event: ActivityRecord }) {
         ) : (
           event.targets.map((target, index) => (
             <CopyableValue
+              // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
               key={`${target}:${index}`}
               label={event.targets.length === 1 ? "Target" : `Target ${index + 1}`}
               value={target}
@@ -709,6 +710,7 @@ function JobProgressDetails({
                 <h3>Affected targets</h3>
                 <ul>
                   {visibleTargets.map((target, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
                     <li key={`${detail.targets[index]}:${index}`}>{target}</li>
                   ))}
                 </ul>
@@ -822,6 +824,7 @@ function JobProgressDetails({
                 <CopyableValue label="Authority revision" value={detail.authority_revision} />{" "}
                 {detail.targets.map((target, index) => (
                   <CopyableValue
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the same target can repeat; the position tells the copies apart
                     key={`${target}:${index}`}
                     label={detail.targets.length === 1 ? "Target ID" : `Target ID ${index + 1}`}
                     value={target}
@@ -865,6 +868,7 @@ function ActivityTimeline({
         const status = activityStatus(event);
         return (
           <li
+            // biome-ignore lint/suspicious/noArrayIndexKey: one request can appear in several events; the position tells them apart
             key={`${event.source}:${event.request_id}:${index}`}
             className={`activity-event is-${status}`}
           >
@@ -941,6 +945,7 @@ function ActivityTable({
           {events.map((event, index) => {
             const status = activityStatus(event);
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: one request can appear in several events; the position tells them apart
               <tr key={`${event.source}:${event.request_id}:${index}`}>
                 <td data-label="Event">
                   <strong>{activityTitle(event)}</strong>
@@ -1518,7 +1523,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
         description="Meaningful control-plane changes, without technical identifiers by default."
         actions={
           <>
-            <div className="segmented" role="group" aria-label="Activity view">
+            <fieldset className="segmented group-reset" aria-label="Activity view">
               <button
                 type="button"
                 aria-pressed={view === "timeline"}
@@ -1533,7 +1538,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               >
                 Table
               </button>
-            </div>
+            </fieldset>
             <button
               type="button"
               className="button secondary"

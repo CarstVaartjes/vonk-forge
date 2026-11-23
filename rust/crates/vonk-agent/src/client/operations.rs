@@ -91,6 +91,12 @@ impl AgentHttpClient {
                 measured.total_bytes = counters.total_bytes.map(Into::into);
                 measured.total_bytes_known = counters.total_bytes.is_some();
             }
+            if let Some((bytes, span)) = counters.fetched {
+                measured.fetched = Some(vonk_agent_protocol::NetworkFetch {
+                    bytes: bytes.into(),
+                    seconds: span.as_secs_f64(),
+                });
+            }
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_json(&progress).map_err(|_| ClientError::Protocol)?;

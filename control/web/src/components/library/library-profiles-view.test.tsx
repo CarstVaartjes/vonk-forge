@@ -739,7 +739,7 @@ test("editing a maximum canonical profile preserves its identity and revision", 
     revision,
     definition: {
       ...profile.definition,
-      assignments: profile.definition.assignments?.map((assignment) => ({
+      assignments: (profile.definition.assignments ?? []).map((assignment) => ({
         ...assignment,
         gpu_clock,
       })),

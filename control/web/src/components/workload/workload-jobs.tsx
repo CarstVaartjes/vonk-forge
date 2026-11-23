@@ -56,7 +56,7 @@ export function WorkloadJobs({
 }
 
 /** A workload whose recipe has not been read yet: nothing is claimed about it. */
-export function WorkloadChecking({ error }: { error?: string }) {
+export function WorkloadChecking({ error }: { error?: string | undefined }) {
   return (
     <p className="hero-caption" role="status">
       {error ? `Recipe unavailable: ${error}. Retrying.` : "Reading what this recipe serves…"}

@@ -1,5 +1,5 @@
 import { CacheOperationKind, LibraryCacheState } from "../../api/vocabulary.generated";
-import { addWire, compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
+import { compareWire, formatWire } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
 import type {
@@ -29,12 +29,12 @@ import {
 type LibraryModelsViewProps = {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   modelInventory?: LibraryViewSnapshot["models"];
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
   onQueryChange(value: string): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   path: string;
@@ -123,7 +123,7 @@ export function LibraryModelsView({
         onFiltersChange={(next) => updateFilters(next)}
         onQueryChange={onQueryChange}
       />
-      <div className="library-model-list" aria-label="Model library">
+      <section className="library-model-list" aria-label="Model library">
         {[...groups].slice(0, limit).map(([key, revisions]) => (
           <ModelRevisionsRow
             key={key}
@@ -145,7 +145,7 @@ export function LibraryModelsView({
             }}
           />
         )}
-      </div>
+      </section>
     </section>
   );
 }

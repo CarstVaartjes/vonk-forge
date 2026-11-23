@@ -1,5 +1,5 @@
 import type { HistoryPoint } from "../hooks/use-telemetry-history";
-import { liveSample } from "./fleet";
+import type { liveSample } from "./fleet";
 
 export type Sample = NonNullable<ReturnType<typeof liveSample>>;
 export const num = (value: unknown) =>

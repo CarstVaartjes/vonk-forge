@@ -18,10 +18,10 @@ function Tile({
 }: {
   label: string;
   figure?: ReactNode;
-  unit?: string;
-  caption?: string;
+  unit?: string | undefined;
+  caption?: string | undefined;
   /** Why there is no figure; shown instead of the figure and caption. */
-  unavailable?: string;
+  unavailable?: string | undefined;
   children?: ReactNode;
 }) {
   return (

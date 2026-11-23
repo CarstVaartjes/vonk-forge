@@ -198,8 +198,10 @@ test("host checks copy a command, and none hides the section", () => {
     host_checks_note: vectors.note,
   });
   const section = screen.getByRole("region", { name: "Host checks" });
-  fireEvent.click(within(section).getAllByRole("button", { name: "Copy command" })[0]);
-  expect(write).toHaveBeenCalledWith(vectors.cases[0].lines[1]);
+  const [copy] = within(section).getAllByRole("button", { name: "Copy command" });
+  if (!copy) throw new Error("no copy button");
+  fireEvent.click(copy);
+  expect(write).toHaveBeenCalledWith(vectors.cases[0]?.lines[1]);
   expect(screen.queryByText("needs attention")).toBeNull();
   first.unmount();
   show({ ...node, host_checks: [] });

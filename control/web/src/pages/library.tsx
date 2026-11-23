@@ -15,7 +15,6 @@ import type {
 } from "../api/types";
 import { CatalogSyncStatusLine } from "../components/ui/catalog-sync-status";
 import { Time } from "../components/ui/time";
-import { formatDate } from "../lib/time";
 import { PageHeader } from "../components/ui/page-header";
 import { SkeletonRows } from "../components/ui/skeleton";
 import { LibraryBrowser } from "../components/library/library-browser";
@@ -28,7 +27,7 @@ import {
 } from "../components/library/library-workcell";
 import { nodeDisplayName } from "../lib/fleet";
 import { libraryRoute, modelKey } from "../lib/library-route";
-import { LibraryPath, type LibraryRoute } from "../lib/library-route";
+import { LibraryPath } from "../lib/library-route";
 import "./library.css";
 
 function subview(path: string): LibrarySubview {
@@ -104,19 +103,18 @@ function viewModel(
 async function loadAll<T extends { next_cursor: string | null }>(
   load: (cursor: string | undefined) => Promise<T>,
   signal: AbortSignal,
-): Promise<T[]> {
-  const pages: T[] = [];
-  let cursor: string | undefined;
+): Promise<[T, ...T[]]> {
+  const first = await load(undefined);
+  const pages: [T, ...T[]] = [first];
+  let cursor = first.next_cursor ?? undefined;
   const seen = new Set<string>();
-  do {
+  while (cursor && !signal.aborted) {
+    if (seen.has(cursor)) throw new Error("Library pagination cursor repeated");
+    seen.add(cursor);
     const page = await load(cursor);
     pages.push(page);
     cursor = page.next_cursor ?? undefined;
-    if (cursor) {
-      if (seen.has(cursor)) throw new Error("Library pagination cursor repeated");
-      seen.add(cursor);
-    }
-  } while (cursor && !signal.aborted);
+  }
   return pages;
 }
 
@@ -150,17 +148,16 @@ export async function loadLibraryView(
     viewModels.flatMap((model) => model.recipes.map((recipe) => recipe.recipe_revision_id)),
   );
   return {
-    generated_at:
-      modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
-    storage_observation: modelPages[0] && {
+    generated_at: modelPages[0].generated_at,
+    storage_observation: {
       storage_observed_at: modelPages[0].storage_observed_at,
       storage_reason: modelPages[0].storage_reason,
       storage_error_type: modelPages[0].storage_error_type,
       storage_refresh_seconds: modelPages[0].storage_refresh_seconds,
       storage_deadline_at: modelPages[0].storage_deadline_at,
     },
-    freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
-    library: recipePages[0]?.library ?? modelPages[0]?.library ?? null,
+    freshness_policy: modelPages[0].freshness_policy,
+    library: recipePages[0].library ?? modelPages[0].library ?? null,
     models: viewModels,
     unlinked_recipes: recipes.filter((recipe) => !matched.has(recipe.recipe_revision_id)),
   };
@@ -238,9 +235,9 @@ export function LibraryPage({
 }: {
   api: ControlApi;
   path: string;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
 }) {
   const [snapshot, setSnapshot] = useState<LibraryViewSnapshot>();
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();

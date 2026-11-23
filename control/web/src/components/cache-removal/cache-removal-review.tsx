@@ -20,7 +20,7 @@ function dispositionText(disposition: string): string {
 /** Render the Controller decision without deriving a second removal policy. */
 export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalReview }) {
   return (
-    <div aria-label="Cache removal review">
+    <section aria-label="Cache removal review">
       {review.fleet && (
         <section aria-label="Fleet removal effects">
           <h3>Controller cache</h3>
@@ -92,18 +92,21 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
         </ul>
       )}
       {review.references.map((reference, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a read-only list the Controller returns without ids
         <p key={`reference:${index}`}>
           Reference: {reference.owner_kind} {reference.owner_id} ({reference.state}) for{" "}
           {reference.asset_kind} {reference.asset_sha256} — {reference.detail}
         </p>
       ))}
       {review.active_work.map((work, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a read-only list the Controller returns without ids
         <p key={`work:${index}`}>
           Active work: {work.owner_kind} {work.owner_id} ({work.state}) for {work.asset_kind}{" "}
           {work.asset_sha256} — {work.detail}
         </p>
       ))}
       {review.blockers.map((blocker, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a read-only list the Controller returns without ids
         <p role="alert" key={`blocker:${index}`}>
           {blocker.code}: {blocker.detail}
           {(blocker.recovery_actions?.length ?? 0) > 0 && (
@@ -111,6 +114,6 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
           )}
         </p>
       ))}
-    </div>
+    </section>
   );
 }

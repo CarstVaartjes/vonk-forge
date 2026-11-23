@@ -11170,6 +11170,27 @@
       "title": "ModelTerritorialRestrictions",
       "type": "object"
     },
+    "NetworkFetch": {
+      "description": "What an attempt received over the network: never present or resumed bytes.",
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "seconds": {
+          "minimum": 0,
+          "title": "Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "bytes",
+        "seconds"
+      ],
+      "title": "NetworkFetch",
+      "type": "object"
+    },
     "NetworkInterface": {
       "description": "One NIC from sysfs, with best-effort nl80211 NAS-route link evidence.",
       "properties": {
@@ -12577,6 +12598,17 @@
           ],
           "default": null,
           "title": "Eta Seconds"
+        },
+        "fetched": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkFetch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "kind": {
           "anyOf": [
