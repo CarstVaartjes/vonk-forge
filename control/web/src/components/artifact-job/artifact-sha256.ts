@@ -13,6 +13,9 @@ const K = new Uint32Array([
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
+/** Every index below is inside a fixed-size table or schedule, so the fallback is never read. */
+const at = (table: Uint32Array, index: number): number => table[index] ?? 0;
+
 const rotateRight = (value: number, count: number) => (value >>> count) | (value << (32 - count));
 
 export class IncrementalSha256 {
@@ -61,17 +64,17 @@ export class IncrementalSha256 {
     const view = new DataView(block.buffer, block.byteOffset, 64);
     for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(index * 4);
     for (let index = 16; index < 64; index += 1) {
-      const a = words[index - 15];
-      const b = words[index - 2];
+      const a = at(words, index - 15);
+      const b = at(words, index - 2);
       const s0 = rotateRight(a, 7) ^ rotateRight(a, 18) ^ (a >>> 3);
       const s1 = rotateRight(b, 17) ^ rotateRight(b, 19) ^ (b >>> 10);
-      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+      words[index] = (at(words, index - 16) + s0 + at(words, index - 7) + s1) >>> 0;
     }
-    let [a, b, c, d, e, f, g, h] = this.#state;
+    let [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0] = this.#state;
     for (let index = 0; index < 64; index += 1) {
       const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
       const choice = (e & f) ^ (~e & g);
-      const t1 = (h + sum1 + choice + K[index] + words[index]) >>> 0;
+      const t1 = (h + sum1 + choice + at(K, index) + at(words, index)) >>> 0;
       const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
       const majority = (a & b) ^ (a & c) ^ (b & c);
       const t2 = (sum0 + majority) >>> 0;
@@ -84,13 +87,13 @@ export class IncrementalSha256 {
       b = a;
       a = (t1 + t2) >>> 0;
     }
-    this.#state[0] = (this.#state[0] + a) >>> 0;
-    this.#state[1] = (this.#state[1] + b) >>> 0;
-    this.#state[2] = (this.#state[2] + c) >>> 0;
-    this.#state[3] = (this.#state[3] + d) >>> 0;
-    this.#state[4] = (this.#state[4] + e) >>> 0;
-    this.#state[5] = (this.#state[5] + f) >>> 0;
-    this.#state[6] = (this.#state[6] + g) >>> 0;
-    this.#state[7] = (this.#state[7] + h) >>> 0;
+    this.#state[0] = (at(this.#state, 0) + a) >>> 0;
+    this.#state[1] = (at(this.#state, 1) + b) >>> 0;
+    this.#state[2] = (at(this.#state, 2) + c) >>> 0;
+    this.#state[3] = (at(this.#state, 3) + d) >>> 0;
+    this.#state[4] = (at(this.#state, 4) + e) >>> 0;
+    this.#state[5] = (at(this.#state, 5) + f) >>> 0;
+    this.#state[6] = (at(this.#state, 6) + g) >>> 0;
+    this.#state[7] = (at(this.#state, 7) + h) >>> 0;
   }
 }

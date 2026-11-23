@@ -139,9 +139,10 @@ test("Chromium recipe setting editor sends the exact wide integer through the re
   await expect(seed).toHaveValue("9007199254740995");
   await page.getByRole("button", { name: "Submit artifact job" }).click();
   await expect.poll(() => requests.length).toBeGreaterThan(0);
-  expect(requests[0]).toContain('"seed":9007199254740995');
-  expect(requests[0]).not.toContain('"seed":9007199254740996');
-  writeFileSync(corpusFile!.replace(/[^/]+$/, "artifact-workspace-request.json"), requests[0]);
+  const [request = ""] = requests;
+  expect(request).toContain('"seed":9007199254740995');
+  expect(request).not.toContain('"seed":9007199254740996');
+  writeFileSync(corpusFile!.replace(/[^/]+$/, "artifact-workspace-request.json"), request);
   // The job form passes the same accessibility check and is reachable by keyboard.
   await expectNoSeriousAccessibilityViolations(page);
   await page.locator("body").click({ position: { x: 0, y: 0 } });

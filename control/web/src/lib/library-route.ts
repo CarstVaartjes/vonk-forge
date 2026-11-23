@@ -20,13 +20,13 @@ export function libraryRoute(path: string): LibraryRoute {
   if (path === "/library" || path === "/library/") return { kind: LibraryPath.ROOT };
   const model = /^\/library\/models\/([^/]+)$/.exec(path);
   if (model) {
-    const modelKey = decode(model[1]);
+    const modelKey = decode(model[1] ?? "");
     if (modelKey !== undefined && modelKey !== "~unlinked")
       return { kind: LibraryPath.MODELS, modelKey };
   }
   const recipe = /^\/library\/recipes\/([^/]+)$/.exec(path);
   if (recipe) {
-    const selector = decode(recipe[1]);
+    const selector = decode(recipe[1] ?? "");
     if (selector !== undefined) return { kind: LibraryPath.RECIPES, selector };
   }
   return { kind: LibraryPath.ROOT };

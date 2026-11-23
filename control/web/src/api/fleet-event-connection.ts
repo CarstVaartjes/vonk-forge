@@ -189,7 +189,7 @@ export class FleetEventConnection extends EventTarget {
       }
       if (
         response.status !== 200 ||
-        response.headers.get("Content-Type")?.split(";")[0].trim() !== "text/event-stream"
+        response.headers.get("Content-Type")?.split(";")[0]?.trim() !== "text/event-stream"
       ) {
         const retryAfter = retryAfterMilliseconds(response.headers.get("Retry-After"));
         if (retryAfter !== undefined && retryAfter > this.retryMilliseconds)

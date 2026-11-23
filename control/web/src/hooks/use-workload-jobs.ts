@@ -55,12 +55,13 @@ export function useJobWorkload(
         if (!job) {
           const detail = await reads.recipeDetail(recipeRevisionId, controller.signal);
           const jobs = jobInterfacesOf(detail.document);
-          if (jobs.length === 0 || jobs.length < detail.document.interfaces.length) {
+          const [firstJob] = jobs;
+          if (!firstJob || jobs.length < detail.document.interfaces.length) {
             window.clearInterval(timer);
             if (!controller.signal.aborted) setState({ kind: WorkloadKind.CHAT });
             return;
           }
-          job = { interface: jobs[0].adapter };
+          job = { interface: firstJob.adapter };
         }
         let jobs: ArtifactJob[] | string;
         try {

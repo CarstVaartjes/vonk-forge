@@ -123,7 +123,7 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
     for (const [width, height] of [
       [400, 800],
       [1440, 900],
-    ]) {
+    ] as const) {
       await page.setViewportSize({ width, height });
       await expectNoDocumentOverflow(page);
       await expectNoSeriousAccessibilityViolations(page);
@@ -149,7 +149,7 @@ test("Workloads fits a phone and a desktop, opened or not, and passes the access
       for (const [width, height] of [
         [400, 800],
         [1440, 900],
-      ]) {
+      ] as const) {
         await page.setViewportSize({ width, height });
         await expectNoDocumentOverflow(page);
         await expectNoSeriousAccessibilityViolations(page);
@@ -171,7 +171,7 @@ test("a Spark page fits a phone and a desktop and passes the accessibility check
     for (const [width, height] of [
       [400, 800],
       [1440, 900],
-    ]) {
+    ] as const) {
       await page.setViewportSize({ width, height });
       await expectNoDocumentOverflow(page);
       await expectNoSeriousAccessibilityViolations(page);

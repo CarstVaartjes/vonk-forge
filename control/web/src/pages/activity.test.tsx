@@ -1119,7 +1119,7 @@ test("reloads the first page when Load more is refused for an invalid cursor", a
   await user.click(screen.getByRole("button", { name: "Load older operations" }));
 
   await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(3));
-  expect(loadOperations.mock.calls[2][0]).toBeUndefined();
+  expect(loadOperations.mock.calls[2]?.[0]).toBeUndefined();
   expect(await screen.findByRole("button", { name: "Load older operations" })).toBeEnabled();
 });
 

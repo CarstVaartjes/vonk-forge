@@ -26,7 +26,7 @@ export async function readObservationTransfer(response: Response, path: string):
   const invalid = () => new ContractViolation("GET", path, response.status);
   if (
     response.status !== 200 ||
-    response.headers.get("content-type")?.split(";")[0].trim() !== MEDIA ||
+    response.headers.get("content-type")?.split(";")[0]?.trim() !== MEDIA ||
     !limit ||
     !payload ||
     !response.body

@@ -35,7 +35,7 @@ export function validateControlBody(
     route?.responses[`${Math.floor(status / 100)}XX`] ??
     route?.responses.default;
   if (responses && Object.keys(responses).length === 0 && text === "") return undefined;
-  const validator = responses?.[media.split(";")[0].trim().toLowerCase()];
+  const validator = responses?.[(media.split(";")[0] ?? "").trim().toLowerCase()];
   if (!validator) throw new ContractViolation(method, path, status);
   let value: unknown;
   try {

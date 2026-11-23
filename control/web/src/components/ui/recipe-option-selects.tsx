@@ -9,10 +9,11 @@ export function effectiveChoices(
   stored: OptionChoices = {},
 ): OptionChoices {
   return Object.fromEntries(
-    options.map((option) => {
+    options.flatMap((option) => {
       const kept = option.choices.find((choice) => choice.value === stored[option.name]);
       const fallback = option.choices.find((choice) => choice.default) ?? option.choices[0];
-      return [option.name, (kept ?? fallback).value];
+      const choice = kept ?? fallback;
+      return choice ? [[option.name, choice.value] as const] : [];
     }),
   );
 }

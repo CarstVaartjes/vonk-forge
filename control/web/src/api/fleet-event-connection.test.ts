@@ -114,8 +114,8 @@ test("reconnects one request at a time using only the applied cursor and server 
   await flush();
   expect(received).toHaveBeenCalledTimes(1);
   expect(fetcher).toHaveBeenCalledTimes(1);
-  expect(requests[0].credentials).toBe("same-origin");
-  expect(requests[0].cache).toBe("no-store");
+  expect(requests[0]?.credentials).toBe("same-origin");
+  expect(requests[0]?.cache).toBe("no-store");
   applied = "6";
   vi.advanceTimersByTime(2499);
   await flush();
@@ -123,7 +123,7 @@ test("reconnects one request at a time using only the applied cursor and server 
   vi.advanceTimersByTime(1);
   await flush();
   expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("6");
+  expect(new Headers(requests[1]?.headers).get("Last-Event-ID")).toBe("6");
   connection.close();
   expect(secondSignal?.aborted).toBe(true);
   vi.advanceTimersByTime(10000);
@@ -218,7 +218,7 @@ test("rejects canonical payload/header mismatch before dispatch and reconnects f
   expect(unavailable).toHaveBeenCalledTimes(1);
   vi.advanceTimersByTime(3000);
   await flush();
-  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
+  expect(new Headers(requests[1]?.headers).get("Last-Event-ID")).toBe("5");
   connection.close();
 });
 
@@ -281,10 +281,10 @@ test("502 repair resumes the same connection from applied cursor without adoptin
   await flush();
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(received).toHaveBeenCalledTimes(1);
-  expect(new Headers(requests[1].headers).get("Last-Event-ID")).toBe("5");
-  expect(requests[1].credentials).toBe("same-origin");
+  expect(new Headers(requests[1]?.headers).get("Last-Event-ID")).toBe("5");
+  expect(requests[1]?.credentials).toBe("same-origin");
   connection.close();
-  expect(requests[1].signal?.aborted).toBe(true);
+  expect(requests[1]?.signal?.aborted).toBe(true);
 });
 
 test.each([403, 404])("explicit HTTP%s refusal stops rather than retrying", async (status) => {

@@ -57,9 +57,9 @@ export function countFleetFit(
     const current = best.get(key);
     if (current === undefined || rank > current) best.set(key, rank);
   }
-  const byRank = [0, 0, 0];
+  const byRank: [number, number, number] = [0, 0, 0];
   for (const rank of best.values()) byRank[rank] += 1;
-  return { ...NO_VERDICTS, fits: byRank[2]!, unknown: byRank[1]!, nonFit: byRank[0]! };
+  return { ...NO_VERDICTS, fits: byRank[2], unknown: byRank[1], nonFit: byRank[0] };
 }
 type FacetOption = { value: string; label: string; count: number };
 
