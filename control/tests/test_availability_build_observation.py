@@ -42,11 +42,11 @@ from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImag
 from vonk_control.stored.json_values import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
+from .recipe_builds_support import _write_controller_build_receipt
 from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
 from .test_build_consumer_ownership import _availability
-from .test_recipe_builds import _write_controller_build_receipt
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -42,8 +42,8 @@ from vonk_control.runtime_image_preparation.preparation import prepare_runtime_i
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
 from .preflight_fixtures import record_passing_preflight
+from .recipe_builds_support import setup as build_setup
 from .test_oci_image_store import _docker_archive, _layer
-from .test_recipe_builds import setup as build_setup
 
 pytestmark = pytest.mark.needs_skopeo
 
