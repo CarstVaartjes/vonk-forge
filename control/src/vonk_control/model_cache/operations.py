@@ -326,7 +326,7 @@ class OperationsMixin:
             plan_digest=operation.plan_digest,
             review_digest=None if removal is None else removal.review_digest,
             fleet=None if removal is None else removal.fleet,
-            progress=serialize_json_value(progress),  # type: ignore[arg-type]
+            progress=serialize_json_value(progress),
             result=result,
             last_error=operation.last_error,
             created_at=_iso(operation.created_at) or "",

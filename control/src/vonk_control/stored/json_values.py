@@ -508,7 +508,7 @@ def _walk(tp: Any, path: str, seen: set[Any], out: list[_Violation]) -> None:
         out.append((path, f"bare {tp.__name__}"))
         return
     if isinstance(tp, TypeAdapter):
-        _walk(tp._type, path, seen, out)  # type: ignore[attr-defined]
+        _walk(tp._type, path, seen, out)
         return
     if isinstance(tp, type) and issubclass(tp, BaseModel):
         if tp.__module__.split(".")[0] == "vonk_forge_contracts":

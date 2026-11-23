@@ -56,7 +56,7 @@ def admit_transfer(
         artifact_set_sha256=artifact_set_sha256,
         created_at=now,
         updated_at=now,
-        **fields,  # type: ignore[arg-type]
+        **fields,
     )
 
 

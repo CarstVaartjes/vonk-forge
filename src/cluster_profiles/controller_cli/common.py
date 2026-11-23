@@ -131,7 +131,7 @@ class _ValueList(argparse.Action):
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
 
     @override
-    def __call__(self, parser, namespace, values, option_string=None):  # type: ignore[no-untyped-def]
+    def __call__(self, parser, namespace, values, option_string=None):
         current = list(getattr(namespace, self.dest, None) or [])
         for raw in str(values).split(","):
             text = raw.strip()

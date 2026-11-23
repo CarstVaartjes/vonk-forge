@@ -675,7 +675,7 @@ def _presence_policy_endpoint(
     # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
     functools.update_wrapper(policy_endpoint, endpoint, updated=("__dict__",))
     del policy_endpoint.__wrapped__
-    policy_endpoint.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+    policy_endpoint.__signature__ = signature.replace(parameters=parameters)
     policy_endpoint.__vonk_endpoint__ = endpoint  # type: ignore[attr-defined]
     return policy_endpoint
 

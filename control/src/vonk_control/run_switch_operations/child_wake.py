@@ -87,12 +87,12 @@ class ChildEndWake:
         # new/dirty sets and attribute history still describe this flush.
         for row in (*session.new, *session.dirty):
             live = CHILD_ROWS.get(type(row))
-            if live is None or row.state in live:  # type: ignore[attr-defined]
+            if live is None or row.state in live:
                 continue
-            if row.id is None:  # type: ignore[attr-defined]
+            if row.id is None:
                 continue
             if row in session.new or inspect(row).attrs.state.history.added:
-                session.info.setdefault(_STAGED, set()).add(row.id)  # type: ignore[attr-defined]
+                session.info.setdefault(_STAGED, set()).add(row.id)
 
     @staticmethod
     def _committed(session: Session) -> None:

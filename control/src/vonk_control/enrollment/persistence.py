@@ -203,8 +203,8 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
         raise RuntimeError("issued certificate projection is inconsistent")
     return IssuedCertificate(
         node_id=enrollment.node_id,
-        certificate_pem=enrollment.certificate_pem.encode("ascii"),  # type: ignore[union-attr]
-        chain_pem=enrollment.chain_pem.encode("ascii"),  # type: ignore[union-attr]
+        certificate_pem=enrollment.certificate_pem.encode("ascii"),
+        chain_pem=enrollment.chain_pem.encode("ascii"),
         serial=enrollment.certificate_serial,  # type: ignore[arg-type]
         fingerprint=enrollment.certificate_fingerprint,  # type: ignore[arg-type]
         not_before=_stored_utc(enrollment.certificate_not_before),  # type: ignore[arg-type]
