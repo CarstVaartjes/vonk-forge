@@ -4304,7 +4304,7 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.recipe_image_availability.api import (
+        from vonk_control.recipe_image_availability.response_contract import (
             RecipeImageAvailabilityResponse,
         )
 

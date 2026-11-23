@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import copy
-import functools
-import inspect
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, overload
+from typing import Any, overload
 
 from fastapi import Response
-from fastapi.concurrency import run_in_threadpool
-from fastapi.datastructures import DefaultPlaceholder
-from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 
 from vonk_agent_protocol.outcome import UnknownOutcomeError
@@ -21,14 +16,7 @@ from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSON
 
 from .http_errors import MAX_RETRY_AFTER_SECONDS
 from .logging import redact_text
-from .observation.platform_errors import (
-    ObservationCaptureUnavailable,
-    observation_capture_unavailable_response,
-)
 from .warn_once import warn_once
-
-if TYPE_CHECKING:
-    from .operator_acceptance import OperatorReceiptResolver
 
 
 def _serialized_field_name(field_name: str, field: Any, *, by_alias: bool) -> str:
@@ -135,7 +123,6 @@ def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
     return value
 
 
-_CONTROLLER_RESPONSE = "_controller_response"
 _DEFAULT_RETRY_AFTER_SECONDS = 5
 _MAX_RETRY_AFTER_SECONDS = MAX_RETRY_AFTER_SECONDS
 
@@ -173,136 +160,6 @@ def _retry_later_response(error: UnknownOutcomeError) -> Response:
     return response
 
 
-def _presence_policy_endpoint(
-    endpoint: Callable[..., Any], route: Callable[[], APIRoute]
-) -> Callable[..., Any]:
-    """Wrap an endpoint so its validated result is encoded with the presence policy.
-
-    The wrapper carries the endpoint's own resolved signature, plus an injected
-    ``Response`` when the endpoint does not declare one, so FastAPI analyses it
-    exactly like the endpoint however the route is later included or mounted.
-    """
-
-    signature = inspect.signature(endpoint, eval_str=True)
-    response_param_name = next(
-        (
-            name
-            for name, parameter in signature.parameters.items()
-            if isinstance(parameter.annotation, type)
-            and issubclass(parameter.annotation, Response)
-        ),
-        None,
-    )
-    parameters = list(signature.parameters.values())
-    if response_param_name is None:
-        injected = inspect.Parameter(
-            _CONTROLLER_RESPONSE, inspect.Parameter.KEYWORD_ONLY, annotation=Response
-        )
-        position = next(
-            (
-                index
-                for index, parameter in enumerate(parameters)
-                if parameter.kind is inspect.Parameter.VAR_KEYWORD
-            ),
-            len(parameters),
-        )
-        parameters.insert(position, injected)
-
-    async def policy_endpoint(**values: Any) -> Any:
-        injected_response = values.get(response_param_name or _CONTROLLER_RESPONSE)
-        if response_param_name is None:
-            values.pop(_CONTROLLER_RESPONSE, None)
-        try:
-            if inspect.iscoroutinefunction(endpoint):
-                result = await endpoint(**values)
-            else:
-                result = await run_in_threadpool(endpoint, **values)
-        except ObservationCaptureUnavailable as error:
-            current = route()
-            return observation_capture_unavailable_response(
-                error,
-                operation=current.operation_id or current.name,
-                endpoint=current.path,
-            )
-        except UnknownOutcomeError as error:
-            # An unknown outcome that no route handled is not a server fault and
-            # not a refusal: the caller is told to ask again.
-            return _retry_later_response(error)
-        current = route()
-        response_field = current.response_field
-        if isinstance(result, Response) or response_field is None:
-            from .operator_acceptance import (
-                acceptance_arguments,
-                apply_receipt,
-                receipt_policy,
-            )
-
-            response = result if isinstance(result, Response) else injected_response
-            if not isinstance(response, Response):
-                response = Response(status_code=current.status_code or 200)
-            if response.status_code is None:
-                response.status_code = current.status_code or 200
-            checked = await run_in_threadpool(
-                apply_receipt,
-                receipt_policy(endpoint),
-                getattr(current, "operator_receipts", None),
-                result,
-                response,
-                acceptance_arguments(receipt_policy(endpoint), **values),
-            )
-            return checked if isinstance(result, Response) else result
-        value, errors = response_field.validate(result, {}, loc=("response",))
-        if errors:
-            return result
-        status_code = current.status_code or 200
-        if isinstance(injected_response, Response) and injected_response.status_code:
-            status_code = injected_response.status_code
-        response_class = current.response_class
-        if isinstance(response_class, DefaultPlaceholder):
-            response_class = response_class.value
-        response = response_class(
-            content=serialize_json_value(
-                value, by_alias=current.response_model_by_alias
-            ),
-            status_code=status_code,
-        )
-        if isinstance(injected_response, Response):
-            response.headers.raw.extend(injected_response.headers.raw)
-        from .operator_acceptance import (
-            acceptance_arguments,
-            apply_receipt,
-            receipt_policy,
-        )
-
-        return await run_in_threadpool(
-            apply_receipt,
-            receipt_policy(endpoint),
-            getattr(current, "operator_receipts", None),
-            value,
-            response,
-            acceptance_arguments(receipt_policy(endpoint), **values),
-        )
-
-    # Copy the identity FastAPI derives names, operation ids and descriptions
-    # from, but no ``__wrapped__``: FastAPI must see an async endpoint.
-    functools.update_wrapper(policy_endpoint, endpoint, updated=("__dict__",))
-    del policy_endpoint.__wrapped__
-    policy_endpoint.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
-    policy_endpoint.__vonk_endpoint__ = endpoint  # type: ignore[attr-defined]
-    return policy_endpoint
-
-
-class ControllerAPIRoute(APIRoute):
-    """Apply the presence policy after response validation for every JSON route."""
-
-    operator_receipts: OperatorReceiptResolver | None = None
-
-    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
-        if not hasattr(endpoint, "__vonk_endpoint__"):
-            endpoint = _presence_policy_endpoint(endpoint, lambda: self)
-        super().__init__(path, endpoint, **kwargs)
-
-
 def route_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
     """Return the handwritten endpoint behind a Controller route."""
 
@@ -310,7 +167,6 @@ def route_endpoint(endpoint: Callable[..., Any]) -> Callable[..., Any]:
 
 
 __all__ = [
-    "ControllerAPIRoute",
     "StrictJSONModel",
     "StrictModel",
     "apply_optional_none_policy",

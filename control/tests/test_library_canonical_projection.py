@@ -57,8 +57,9 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
+from vonk_control.strict_json import serialize_json_value
 
 from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword
 from .runtime_image_fixtures import place_test_image

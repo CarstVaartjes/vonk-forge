@@ -202,9 +202,9 @@ module defines its own.
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
-| `control/src/vonk_control/gateway/keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
+| `control/src/vonk_control/gateway/keys.py` | declared | 18 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
-| `control/src/vonk_control/jobs/documents.py` | controller-contract | 42 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
+| `control/src/vonk_control/jobs/documents.py` | controller-contract | 45 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library/contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
 | `control/src/vonk_control/lifecycle_preflight_contract.py` | controller-contract | 1 | The durable checkpoint of a recipe-bound lifecycle admission probe round. |
 | `control/src/vonk_control/gateway/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
@@ -222,12 +222,13 @@ module defines its own.
 | `control/src/vonk_control/fleet_profiles/stop_contract.py` | controller-contract | 8 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_operations/availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
 | `control/src/vonk_control/recipe_operations/execution_contract.py` | controller-contract | 10 | Strict persisted contracts for recipe execution and source builds. |
-| `control/src/vonk_control/recipe_image_availability/api.py` | declared | 9 | Authenticated, typed HTTP routes for Recipe Make available. |
+| `control/src/vonk_control/recipe_image_availability/api.py` | declared | 3 | Authenticated, typed HTTP routes for Recipe Make available. |
 | `control/src/vonk_control/recipe_image_availability/availability_contract.py` | controller-contract | 2 | Shared recipe-image state, artifact and builder receipt identity. |
 | `control/src/vonk_control/recipe_image_availability/clocks_contract.py` | controller-contract | 5 | Tolerant typed lifecycle clock projection independent of job-document imports. |
 | `control/src/vonk_control/recipe_image_availability/reader_contract.py` | controller-contract | 4 | Typed adoption and exact-catalog recovery of damaged availability bookkeeping. |
 | `control/src/vonk_control/recipe_image_availability/view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
 | `control/src/vonk_control/recipe_image_availability/removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
+| `control/src/vonk_control/recipe_image_availability/response_contract.py` | controller-contract | 5 | Wire documents of recipe image availability requests and their operator answers. |
 | `control/src/vonk_control/recipe_operations/lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
 | `control/src/vonk_control/recipe_operations/contracts.py` | controller-contract | 2 | Typed recipe operation context and installation disposal receipt. |
 | `control/src/vonk_control/recipe_packages/contracts.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
@@ -235,6 +236,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_update_batches/notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/gateway/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
+| `control/src/vonk_control/gateway/keys_contract.py` | controller-contract | 3 | Wire documents of gateway client keys. |
 | `control/src/vonk_control/run_switch_contract/requests.py` | controller-contract | 15 | Run switch contract: requests. |
 | `control/src/vonk_control/run_switch_contract/evidence.py` | controller-contract | 16 | Run switch contract: evidence. |
 | `control/src/vonk_control/run_switch_contract/plans.py` | controller-contract | 2 | Run switch contract: plans. |
