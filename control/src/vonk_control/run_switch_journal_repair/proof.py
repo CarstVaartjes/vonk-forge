@@ -13,6 +13,8 @@ from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..content_identity import same_image
+from ..fleet_profiles.persistence import _stored_progress
+from ..fleet_profiles.service import FleetProfileService
 from ..jobs.documents import RecipeInstallParent
 from ..lifecycle.evidence import Residue
 from ..models.fleet import AgentCertificate, FleetProfileApplication
@@ -32,6 +34,15 @@ from ..run_switch_contract.phase_results import (
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
 )
+from ..run_switch_operations.artifact_validation import _validate_artifact_execution
+from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from ..run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_parts,
+)
+from ..run_switch_operations.observation_helpers import _phase_request_key
+from ..run_switch_operations.planning_helpers import _digest, _run_switch_payload
+from ..run_switch_operations.service import RunSwitchOperationService
 from ..stored.json_values import read_row_column
 
 
@@ -43,17 +54,6 @@ def _prove(
     purpose: JournalRepairPurpose,
 ) -> list[NativeProgressWitness] | None:
     # Import the sole owner predicates, not a second plan/authority interpreter.
-    from ..fleet_profiles.persistence import _stored_progress
-    from ..fleet_profiles.service import FleetProfileService
-    from ..run_switch_operations.artifact_validation import _validate_artifact_execution
-    from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_parts,
-    )
-    from ..run_switch_operations.observation_helpers import _phase_request_key
-    from ..run_switch_operations.planning_helpers import _digest, _run_switch_payload
-    from ..run_switch_operations.service import RunSwitchOperationService
 
     parent = _run_switch_payload(job)
     plan = parent.plan if parent is not None else None

@@ -18,6 +18,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
 
+from ..agent_jobs.endings import end_unobserved_order
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..agent_jobs.retry import abandon_idempotent_job_in_session
 from ..agent_operation_facts import aware
 from ..failure_classification import is_security_failure
@@ -209,8 +211,6 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         """
         if operation_id is None:
             return
-        from ..agent_jobs.endings import end_unobserved_order
-        from ..agent_jobs.retirement import release_owned_reservations_in_session
 
         child = session.get(Job, operation_id)
         if child is not None and child.kind != FailureStage.ARTIFACT_DISTRIBUTION:

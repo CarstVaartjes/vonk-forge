@@ -21,6 +21,7 @@ from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import ArtifactDistributionAssignment
+from ..recipe_image_availability.contracts import OPERATION_KIND
 from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
@@ -267,8 +268,6 @@ def runtime_image_reference_findings(
                     + ("" if readable else " (installation plan unreadable)"),
                 )
             )
-
-    from ..recipe_image_availability.contracts import OPERATION_KIND
 
     operations_active = (
         Job.kind == OPERATION_KIND,

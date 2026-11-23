@@ -36,7 +36,14 @@ from vonk_forge_contracts import RecipeDefinition
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.state_machines import InstallationState
 
+from .catalog.revision_contract import shared_catalog_document
 from .lifecycle.evidence import Residue, read_or_rebuild
+from .models.catalog import (
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from .models.execution import RecipeInstallation
 
 if TYPE_CHECKING:
     from .model_cache.contract import CacheResolution
@@ -219,9 +226,6 @@ def _chosen_runtime(execution: RecipeExecution) -> object | None:
     """The parts of a recipe outside its execution key that change what runs;
     ``None`` when its stored document is damaged (retired as unknown)."""
 
-    from .catalog.revision_contract import shared_catalog_document
-    from .models.catalog import CatalogDocumentRevision
-
     recipe = read_or_rebuild(
         kind=CatalogDocumentRevision.__tablename__,
         subject=execution.digest,
@@ -311,8 +315,6 @@ def recipe_content_membership(column, digests: Collection[str]):
     rather than editorial provenance, decides which rows belong to the read.
     """
 
-    from .models.catalog import CatalogDocumentRevision
-
     return column.in_(
         select(CatalogDocumentRevision.id).where(
             CatalogDocumentRevision.content_digest.in_(digests)
@@ -357,8 +359,6 @@ def recipe_model_digests(
     content. A revision without rows is absent.
     """
 
-    from .models.catalog import CatalogRecipeModelReference
-
     found: dict[str, set[str]] = {}
     if revision_ids:
         for revision_id, model in session.execute(
@@ -380,9 +380,6 @@ def installations_using_models(session, contents: Collection[str]) -> frozenset[
     filter is in SQL on indexed columns. An installation running on a reused
     set may name it only in its plan, so callers also read plans.
     """
-
-    from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
-    from .models.execution import RecipeInstallation
 
     lineage = select(CatalogDocumentRevision.id).where(
         CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
@@ -409,8 +406,6 @@ def recipes_bound_to(session, contents: Collection[str]) -> frozenset[tuple[str,
 
     By the relational binding rows, keyed by the model contents (indexed).
     """
-
-    from .models.catalog import CatalogDocumentRevision, CatalogRecipeModelReference
 
     if not contents:
         return frozenset()
@@ -439,8 +434,6 @@ def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
     Heads without an active revision, or whose revision is gone, are absent:
     the caller recovers those from the selector's own records.
     """
-
-    from .models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 
     return {
         (head.publisher, head.slug): revision

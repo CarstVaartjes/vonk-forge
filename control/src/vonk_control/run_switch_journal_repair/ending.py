@@ -14,10 +14,15 @@ from vonk_agent_protocol.state_machines import ReservationState
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..jobs.documents import RecipeInstallParent
 from ..journal_models import RunSwitchJournalRepair
+from ..lifecycle.agent_operation import AgentOperationAdapter
+from ..lifecycle.recipe_operation import RecipeOperationAdapter
+from ..lifecycle.run_switch import RunSwitchAdapter
 from ..lifecycle.types import Outcome
 from ..machine_states import reservation_live
+from ..models.execution import RecipeInstallation, ResourceReservation
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
@@ -26,6 +31,7 @@ from ..run_switch_contract.journal import (
     RunSwitchJournalRepairEndEvidence,
 )
 from ..run_switch_contract.phase_results import RunSwitchRuntimePlanResult
+from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..stored.json_values import read_row_column
 from .discovery import _candidate, _discover, _fingerprint, journal_document
 from .pending import _pending
@@ -35,12 +41,6 @@ def _end_unproven_journal(
     sessions: sessionmaker[Session], operation_id: str, now: datetime
 ) -> JournalRepairDisposition:
     """End bookkeeping, fence only its exact install orders, preserve all bytes."""
-    from ..agent_jobs.retirement import release_owned_reservations_in_session
-    from ..lifecycle.agent_operation import AgentOperationAdapter
-    from ..lifecycle.recipe_operation import RecipeOperationAdapter
-    from ..lifecycle.run_switch import RunSwitchAdapter
-    from ..models.execution import RecipeInstallation, ResourceReservation
-    from ..run_switch_operations.planning_helpers import _run_switch_payload
 
     # Discover the complete write set without holding any row. Acquire it in
     # the shared order and NOWAIT; never take resource locks under a Job lock.

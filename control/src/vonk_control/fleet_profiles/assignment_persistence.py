@@ -20,6 +20,7 @@ from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..lifecycle.evidence import Residue
+from ..model_cache.fleet_removal import _model_objects
 from ..model_cache.persistence import _operation_removal
 from ..models.cache import ModelCacheOperation
 from .contracts import (
@@ -102,7 +103,6 @@ class FleetProfileService:
         # Finish catalog/option validation before taking any gates. Each new
         # immutable object is admitted once, in global order; retained pins do
         # no reference work. Shared admissions exclude deletion, not readers.
-        from ..model_cache.fleet_removal import _model_objects
 
         try:
             objects: set[str] = set()

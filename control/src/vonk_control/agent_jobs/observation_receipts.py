@@ -29,7 +29,11 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from .. import agent_operation_states as aos
 from ..agent_operation_facts import aware, job_output_retention_expiry
 from ..agent_outcome import agent_outcome
+from ..agent_upgrades.dispatch import DispatchMixin
+from ..agent_upgrades.stored import _stored_package
+from ..cancelled_runtime import cancellation_stop_current
 from ..inventory.items import runtime_value
+from ..jobs.documents import DistributionJobPayload
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
@@ -123,8 +127,6 @@ def adopt_observation_receipt(
     state: AgentResultState = AgentResultState.SUCCEEDED,
 ) -> bool:
     """One decision for live ingress and worker replay under the queue's locks."""
-    from ..cancelled_runtime import cancellation_stop_current
-    from ..jobs.documents import DistributionJobPayload
 
     if (
         state != AgentResultState.SUCCEEDED
@@ -254,8 +256,6 @@ def _upgrade_receipt_current(
 ) -> bool:
     # Use the upgrade owner's exact contact decision, not a second success
     # classifier. Observation itself never records contact or renews the fence.
-    from ..agent_upgrades.dispatch import DispatchMixin
-    from ..agent_upgrades.stored import _stored_package
 
     if isinstance(receipt, AgentUpgradeResult):
         package = _stored_package(parent)

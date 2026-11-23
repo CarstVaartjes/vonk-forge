@@ -24,6 +24,8 @@ from vonk_agent_protocol.recipe_operations import (
 )
 from vonk_agent_protocol.state_machines import DistributionAssignmentState
 
+from ..agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
+from ..agent_jobs.stored import column_field, column_value
 from ..distribution_assignment import NodeDistributionAssignment
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
@@ -57,8 +59,6 @@ class DeliveryMixin:
         Storage verification happens after releasing the database session.
         """
         service = cast("DistributionService", self)
-        from ..agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
-        from ..agent_jobs.stored import column_field, column_value
 
         if service.sessions is None:
             return

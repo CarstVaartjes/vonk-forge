@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from types import MappingProxyType
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -60,9 +60,7 @@ from .revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-
-if TYPE_CHECKING:
-    from .sync_contract import ManagedCatalogSyncProblem
+from .sync_contract import ManagedCatalogSyncProblem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -161,7 +159,6 @@ class CatalogEntityService:
         transaction.  A row another transaction holds is skipped and the next
         sync observes it again, so this never blocks admission.
         """
-        from .sync_contract import ManagedCatalogSyncProblem
 
         problems: list[ManagedCatalogSyncProblem] = []
         with self._read() as session:
@@ -952,7 +949,6 @@ def _rederive_projection(
 def _build_policy_problem(
     revision: CatalogDocumentRevision, error: Exception
 ) -> ManagedCatalogSyncProblem:
-    from .sync_contract import ManagedCatalogSyncProblem
 
     return ManagedCatalogSyncProblem(
         recipe_uri=(

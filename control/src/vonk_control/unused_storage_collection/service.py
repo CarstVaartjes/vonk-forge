@@ -15,6 +15,7 @@ from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models.execution import InstallationNode, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
+from ..persisted_waits import read_wait
 from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from ..settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
@@ -51,7 +52,15 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import _CollectorEvidence, _Evidence, _Item, _Outcome, _Round
+from .evidence import (
+    StorageItemKind,
+    _CollectorEvidence,
+    _DueRemovalTarget,
+    _Evidence,
+    _Item,
+    _Outcome,
+    _Round,
+)
 from .pressure import (
     _check_round,
     _nas_filesystems,
@@ -176,8 +185,6 @@ class UnusedStorageCollector:
         return bool(result.installations or result.images or result.models)
 
     def redrive_installation(self, installation_id: str) -> bool:
-        from ..persisted_waits import read_wait
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         with self._sessions() as session:
             row = session.get(RecipeInstallation, installation_id)
@@ -193,7 +200,6 @@ class UnusedStorageCollector:
         )
 
     def redrive_artifact(self, artifact_kind: str, digest: str) -> bool:
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         kinds = {
             "runtime-image": StorageItemKind.IMAGE,

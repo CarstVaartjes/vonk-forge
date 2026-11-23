@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 
 from .models.jobs import Job
 from .models.operations import AgentOperation
+from .strict_json import read_stored_model
 
 
 def deferred_stop_nodes(job: Job) -> frozenset[str]:
     # Imported here because the canonical job contracts reach the queue adapters.
     from .fleet_profiles.stop_authority import ProfileJobRunStopJob
     from .jobs.documents import RecipeStopParent
-    from .strict_json import read_stored_model
 
     if job.kind != "recipe.stop":
         return frozenset()
@@ -39,7 +39,6 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
     """
     from .fleet_profiles.stop_authority import ProfileJobRunStopJob
     from .jobs.documents import RecipeStopParent
-    from .strict_json import read_stored_model
 
     if (
         job is None

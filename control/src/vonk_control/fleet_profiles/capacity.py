@@ -58,6 +58,7 @@ from .capacity_repair import (
 from .capacity_repair import (
     memory_claim_id as _memory_claim_id,
 )
+from .contracts import FleetProfileConflict
 from .port_promises import clear_port_promises
 
 
@@ -901,7 +902,6 @@ def accepted_profile_runtime_image(
     """
     # Keep intent/reference validation with its existing owner. Import at the
     # call boundary because profile orchestration also consumes capacity helpers.
-    from .contracts import FleetProfileConflict
     from .service import FleetProfileService
 
     application = session.get(FleetProfileApplication, application_id)

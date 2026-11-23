@@ -30,6 +30,10 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from .. import agent_operation_states
+from ..agent_operation_facts import (
+    aware,
+)
+from ..cancelled_runtime import cancellation_stop_current
 from ..disk_reservations import outstanding_disk_charges
 from ..gpu.health import gpu_health_reason
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
@@ -43,8 +47,10 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
+from ..operations.blockers import make_blocker
 from ..own_cleanup import CLEANUP_KINDS
 from ..package_activation import matches_receipt
+from ..persisted_waits import schedule_wait
 from ..recipe_builds.common import (
     BUILD_ARTIFACT_FORMAT,
     _build_disk_envelope,
@@ -54,6 +60,7 @@ from ..recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_policy,
 )
+from ..recipe_operations.observation_helpers import reinstall_in_flight
 from ..recovery_policy import WAIT_STEP
 from ..spark_disk import spark_free_bytes
 from .contracts import (
@@ -63,6 +70,7 @@ from .contracts import (
 )
 from .endings import end_unobserved_order
 from .evidence import _failure_result
+from .predicates import _claim_refusal_reason
 from .retry import _retry_authorized_for_current_attempt, schedule_agent_upgrade_retry
 from .stored import column_field, column_is_document, column_value
 
@@ -378,7 +386,6 @@ def _claim_has_authority(
             kind=current_operation.kind,
         )
         return False
-    from ..cancelled_runtime import cancellation_stop_current
 
     if not cancellation_stop_current(session, job, current_operation):
         self._record_claim_refusal(
@@ -446,14 +453,6 @@ def dispatch_wait(
     behind it (the reinstall, queued before the job), and the wait is bounded
     like any agent order.
     """
-
-    from ..agent_operation_facts import (
-        aware,
-    )
-    from ..operations.blockers import make_blocker
-    from ..persisted_waits import schedule_wait
-    from ..recipe_operations.observation_helpers import reinstall_in_flight
-    from .predicates import _claim_refusal_reason
 
     if operation.kind not in {
         AgentOperation.RECIPE_START,

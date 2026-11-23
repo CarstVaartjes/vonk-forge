@@ -14,6 +14,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle.evidence import Residue
+from ..lifecycle.model_cache import ModelCacheStore
 from ..lifecycle.reconciler import Reconciler
 from ..lifecycle.types import CancelRequested, State, Tick
 from ..models.cache import ModelCacheOperation
@@ -164,7 +165,6 @@ class CancellationMixin:
                 settled += int(cache._try_settle_cancellation(operation_id))
         if requested_id is None:
             return settled + cache._reconciler.reconcile().changed
-        from ..lifecycle.model_cache import ModelCacheStore
 
         reconciler = Reconciler(
             ModelCacheStore(cache._session, cache._lifecycle, cache, requested_id),

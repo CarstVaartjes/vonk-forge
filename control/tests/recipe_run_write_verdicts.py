@@ -28,7 +28,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "agent_jobs/observation_receipts.py": {
         "adopt_observation_receipt": (
-            "f57e0f77ab25d966222fc927817d886720f9c143d7ae3ba782e67299f752694b",
+            "805d701b7bb98de86029b668eae41e06a565a3a2bbee581dabbe26770edc3e2a",
             "HTTP/background wait: middleware or per-candidate order sweep classifies conflicts; rollback retains receipt for next pass",
         ),
     },

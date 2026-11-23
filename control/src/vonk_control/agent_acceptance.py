@@ -31,6 +31,7 @@ from .models.execution import RunNode
 from .models.fleet import AgentCertificate, AgentNode
 from .models.operations import AgentOperation, AgentOperationAttempt
 from .models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
+from .operator_acceptance import _available, _identity, _refused, _require
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
 from .telemetry.samples import _same_sample
 
@@ -73,7 +74,6 @@ def resolve_agent_receipt(
     result: Response,
     arguments: AcceptanceArguments,
 ) -> AcceptanceReceipt:
-    from .operator_acceptance import _available, _identity, _refused, _require
 
     request = _available(arguments.request)
     body = arguments.body

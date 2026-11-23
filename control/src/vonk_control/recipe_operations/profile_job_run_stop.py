@@ -33,6 +33,7 @@ from ..artifact_jobs.evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
+from ..fleet_profiles.persistence import _persisted_profile_progress
 from ..fleet_profiles.stop_authority import (
     ProfileJobRunStopAuthorization,
     ProfileJobRunStopJob,
@@ -276,7 +277,6 @@ class ProfileJobRunStopMixin:
         the run is refused as a security edge, never stopped.
         """
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles.persistence import _persisted_profile_progress
 
         application = session.get(FleetProfileApplication, profile_application_id)
         try:

@@ -18,6 +18,9 @@ from ..content_identity import recipe_model_digests, recipes_bound_to
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
 from ..model_cache import states as model_cache_states
 from ..model_cache.contract import ModelCacheSetState
+from ..model_cache.errors import ModelCacheError
+from ..model_cache.lineage import lineage_contents, model_sets, stored_set_bindings
+from ..model_cache.resolution import resolve_recipe_set
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfile, FleetProfileApplication
@@ -44,10 +47,6 @@ def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
-
-    from ..model_cache.errors import ModelCacheError
-    from ..model_cache.lineage import lineage_contents, model_sets
-    from ..model_cache.resolution import resolve_recipe_set
 
     selected = set(set_digests)
     if not selected:
@@ -317,8 +316,6 @@ def model_set_reference_reasons(
 
 def _served_contents(session: Session, sets: Iterable[ModelCacheSet]) -> frozenset[str]:
     """Every catalog model content these sets serve, with the lineage of each."""
-
-    from ..model_cache.lineage import lineage_contents, stored_set_bindings
 
     served: set[str] = set()
     for row in sets:

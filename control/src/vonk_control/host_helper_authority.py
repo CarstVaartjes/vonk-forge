@@ -56,6 +56,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdent
 
 from . import agent_operation_states
 from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
+from .gpu.clock import selected_gpu_clock
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -74,6 +75,7 @@ from .own_cleanup import CLEANUP_ACTIONS
 from .owner_liveness import run_has_live_operation
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
+from .swap import selected_swap
 from .untracked_installations import run_wanted_here
 
 _LOGGER = logging.getLogger("vonk_control.host_helper_authority")
@@ -368,7 +370,6 @@ class HostRuntimeAuthorityService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .gpu.clock import selected_gpu_clock
 
         with self._sessions() as session:
             desired = selected_gpu_clock(session, node_id)
@@ -379,7 +380,6 @@ class HostRuntimeAuthorityService:
         )
 
     def swap_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .swap import selected_swap
 
         with self._sessions() as session:
             desired = selected_swap(session, node_id)

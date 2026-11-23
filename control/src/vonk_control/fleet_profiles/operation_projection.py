@@ -36,6 +36,12 @@ from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
 from ..models.fleet import FleetProfile, FleetProfileApplication, User
+from ..operation_api.contracts import (
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+)
+from ..operation_api.providers import _activity_keyset_filter
 from ..operations.contract import OperationFailureEvidence
 from ..operations.item_contract import (
     OperationItem,
@@ -80,12 +86,6 @@ class FleetProfileService:
 
         # Keep this import local so the profile domain remains usable by the
         # profile routes when the optional Activity projection is unavailable.
-        from ..operation_api.contracts import (
-            OperationListPage,
-            OperationProvider,
-            OperationQuery,
-        )
-        from ..operation_api.providers import _activity_keyset_filter
 
         def list_operations(query: OperationQuery) -> OperationListPage:
             after = query.after

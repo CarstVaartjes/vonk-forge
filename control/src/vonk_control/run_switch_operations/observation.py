@@ -17,6 +17,7 @@ from vonk_control.run_switch_operations.results import _persisted_result
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite
 from ..jobs import states as job_states
+from ..journal_models import RunSwitchJournalRepairPending
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -25,16 +26,17 @@ from ..logging import log_event, redact_text
 from ..model_cache.service import ModelCacheService
 from ..models.jobs import Job
 from ..operations.blockers import bound_blockers
+from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
 from ..stored.json_values import read_row_column
+from .child_wake import ChildEndWake
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
 from .evidence_waits import wake_evidence_waits
 from .planning_helpers import _now
-from .provider import _ADAPTER
+from .provider import _ADAPTER, RunSwitchOperationProvider
 from .result_helpers import _progress_damaged, _read_progress, _wait_blockers
 
 if TYPE_CHECKING:
-    from .provider import RunSwitchOperationProvider
     from .service import RunSwitchOperationService
 
 
@@ -60,8 +62,6 @@ class ObservationMixin:
         high-level job payload directly).
         """
         service = typing_cast("RunSwitchOperationService", self)
-
-        from .provider import RunSwitchOperationProvider
 
         return RunSwitchOperationProvider(service)
 
@@ -104,7 +104,6 @@ class ObservationMixin:
         recovery_deadline_at = func.replace(
             Job.result["recovery_deadline_at"].as_string(), "Z", "+00:00"
         )
-        from ..journal_models import RunSwitchJournalRepairPending
 
         with service._sessions() as session:
             active = (
@@ -180,7 +179,6 @@ class ObservationMixin:
         wake only falls back to the ``recipes`` turn.
         """
         service = typing_cast("RunSwitchOperationService", self)
-        from .child_wake import ChildEndWake
 
         ChildEndWake.install(service._sessions, lambda: _now(service._clock))
 
@@ -285,8 +283,6 @@ class ObservationMixin:
         replaced at each check and empty once the operation runs on or settles.
         """
         service = typing_cast("RunSwitchOperationService", self)
-
-        from ..run_switch_journal_repair.discovery import is_zero_transfer_journal_fault
 
         with service._sessions() as session:
             snapshot = session.get(Job, operation_id)

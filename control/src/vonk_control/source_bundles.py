@@ -34,6 +34,8 @@ from vonk_agent_protocol.source_bundles import (
     SourceBundleManifest,
 )
 
+from .identity_insert import insert_identity
+from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 from .source_bundle_contract import SourceBundleVerification
 
 if TYPE_CHECKING:
@@ -350,8 +352,6 @@ class DatabaseSourceBundleStore:
         manifest = _inspect_archive(archive, self._limits)
         if manifest.sha256 != expected_sha256:
             raise SourceBundleIntegrityRefused("source bundle digest does not match")
-        from .identity_insert import insert_identity
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions.begin() as session:
             metadata, _ = insert_identity(
@@ -401,7 +401,6 @@ class DatabaseSourceBundleStore:
         self, sha256: str, *, include_archive: bool
     ) -> tuple[SourceBundleManifest, bytes]:
         _validate_digest(sha256, SourceBundleCode.DIGEST_INVALID)
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             row = session.execute(
@@ -433,7 +432,6 @@ class DatabaseSourceBundleStore:
         wanted = set(digests)
         if not wanted:
             return set()
-        from .models.catalog import RecipeSourceBundle, SourceBundleArchive
 
         with self._sessions() as session:
             rows = session.execute(
