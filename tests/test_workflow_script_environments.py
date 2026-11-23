@@ -59,6 +59,10 @@ def _python_script_needing_project(path: Path) -> str | None:
     shebang = text.splitlines()[0] if text.startswith("#!") else ""
     if "python" not in shebang or "uv run" in shebang:
         return None  # not Python, or it brings its own project environment
+    if "run_in_control(ROOT)" in text or "run_in_protocol(ROOT)" in text:
+        # It re-executes in the project environment before its imports
+        # (test_contract_generators_prepare_before_project_imports).
+        return None
     found = _NEEDS_PROJECT.search(text)
     return found.group(1) if found else None
 

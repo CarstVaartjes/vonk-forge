@@ -17,8 +17,6 @@ from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 import vonk_control
 from vonk_agent_protocol.capability_reply import ControllerCapability
 from vonk_agent_protocol.outcome import UnknownError, UnknownOutcomeError
-from vonk_control.availability_production import production
-from vonk_control.gateway import route_runtime
 
 from ..agent_jobs.contracts import controller_result_consumer
 from ..agent_services import build_agent_services
@@ -26,6 +24,7 @@ from ..agent_upgrades.service import AgentUpgradeService
 from ..artifact_jobs.blob_store import ArtifactBlobStore
 from ..artifact_jobs.service import ArtifactJobService
 from ..auth import CursorCodec, TokenCodec
+from ..availability_production.production import build_recipe_image_availability
 from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
@@ -43,6 +42,10 @@ from ..fleet_projection.service import FleetProjection
 from ..fleet_stream import FleetStream
 from ..gateway.keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway.route_grants import recipe_key_routes
+from ..gateway.route_runtime import (
+    AtomicRouteBundlePublisher,
+    FileSupervisorAcknowledger,
+)
 from ..install_admission.service import InstallAdmissionService
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..jobs.queue import JobService
@@ -358,10 +361,10 @@ def production_app(settings: Settings | None = None) -> FastAPI:
 
     recipe_route_runtime = capabilities.guard(
         ControllerCapability.ROUTE_PUBLISHER,
-        route_runtime.AtomicRouteBundlePublisher,
-        lambda: route_runtime.AtomicRouteBundlePublisher(
+        AtomicRouteBundlePublisher,
+        lambda: AtomicRouteBundlePublisher(
             Path("/routes"),
-            await_supervisor_ack=route_runtime.FileSupervisorAcknowledger(
+            await_supervisor_ack=FileSupervisorAcknowledger(
                 Path("/supervisor/ack.json"), clock=clock
             ),
         ),
@@ -566,7 +569,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         catalog=catalog_service,
         clock=clock,
     )
-    recipe_image_production = production.build_recipe_image_availability(
+    recipe_image_production = build_recipe_image_availability(
         sessions,
         settings=settings,
         recipe_builds=recipe_builds,

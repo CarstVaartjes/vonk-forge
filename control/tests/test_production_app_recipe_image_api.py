@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from vonk_control.api import production as api_production
 from vonk_control.api.production import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import production as availability_production
@@ -155,9 +156,11 @@ def test_production_app_recipe_download_auth_and_status(
         def __init__(self, _path, **kwargs):
             super().__init__(tmp_path / "supervisor-ack.json", **kwargs)
 
-    monkeypatch.setattr(route_runtime, "AtomicRouteBundlePublisher", TemporaryPublisher)
     monkeypatch.setattr(
-        route_runtime, "FileSupervisorAcknowledger", TemporaryAcknowledger
+        api_production, "AtomicRouteBundlePublisher", TemporaryPublisher
+    )
+    monkeypatch.setattr(
+        api_production, "FileSupervisorAcknowledger", TemporaryAcknowledger
     )
 
     # The auth/status route proof uses the existing synthetic image fixture;
@@ -170,7 +173,7 @@ def test_production_app_recipe_download_auth_and_status(
         return original_builder(*args, **kwargs)
 
     monkeypatch.setattr(
-        availability_production, "build_recipe_image_availability", image_only_builder
+        api_production, "build_recipe_image_availability", image_only_builder
     )
 
     app = production_app(settings)

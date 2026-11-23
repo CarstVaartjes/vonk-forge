@@ -12,7 +12,7 @@ from .optimistic_boundaries import scan_unwrapped_recipe_run_writes
 RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     "agent_jobs/claim_authority.py": {
         "_reconcile_agent_upgrade": (
-            "d6c8ab046beaf89745b11957b46e98f7511c203669ffd22d90b535ea34734067",
+            "c3c07a4a2e8c4d851a72182f34deac04ba4f7a9cfa80434681f1fce129fea595",
             "HTTP wait: result consumer can lose a run fence; middleware disposition owns 503",
         ),
         "_reject_recipe_build_claim": (
@@ -144,13 +144,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_activation.py": {
         "_activate_job_run_once": (
-            "85eb03f5adb9f08e10f282aaaf0100dd601f6f3c2cd70995a6e842a401c57a88",
+            "ad48f12b95111d18757930b1479c09d5c1c433afb6233ccf5e72ac2302350907",
             "retain: activation admission binds accepted run intent",
         ),
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "47b9dec23186d0206a96641ab4c0c760115cc5b34336611e240fa42c7fefae3f",
+            "8588af6bf36265e05d0d7f167bc219f8c9259919da7efba407924eba526cb30a",
             "retain: Start admission binds run and capacity",
         ),
     },

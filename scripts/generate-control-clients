@@ -12,7 +12,6 @@ runtime validators are generated together from this same canonical document.
 from __future__ import annotations
 
 import argparse
-import enum
 import inspect
 import json
 import os
@@ -22,6 +21,14 @@ import tempfile
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
+import enum
 
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleVocabulary
 from vonk_agent_protocol.reason_codes.vocabulary import ReasonCodeVocabulary
@@ -40,12 +47,6 @@ from vonk_control.model_cache.contract import (
 )
 from vonk_control.operation_api.openapi import admin_openapi_schema
 
-ROOT = Path(__file__).resolve().parents[1]
-
-if __name__ == "__main__":
-    from check_environment import run_in_control
-
-    run_in_control(ROOT)
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_OUTPUT = ROOT / "control/web/src/api/generated.d.ts"
