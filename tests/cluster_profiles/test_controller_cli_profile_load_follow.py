@@ -746,19 +746,13 @@ def test_lost_load_response_retries_only_with_original_request_key() -> None:
 
 
 def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
-    assert (
-        progress_line(
-            {
-                "state": "running",
-                "progress": {
-                    "phase": "building",
-                    "completed_items": 4,
-                    "total_items": 7,
-                },
-            }
-        )
-        == "building | items 4 / 7"
+    line = progress_line(
+        {
+            "state": "running",
+            "progress": {"phase": "building", "completed_items": 4, "total_items": 7},
+        }
     )
+    assert "items 4 / 7" in line and "%" not in line
     assert (
         progress_line(
             {
@@ -770,7 +764,7 @@ def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
                 },
             }
         )
-        == "copying | 20 B; total unknown"
+        == "Copying model files to the Sparks | 20 B; total unknown"
     )
 
 

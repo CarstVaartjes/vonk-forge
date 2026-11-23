@@ -173,6 +173,16 @@ vonkctl fleet locks
 vonkctl fleet resume OPERATION_ID --yes
 ```
 
+`--follow` is a live status view. On a terminal it redraws one block per phase:
+an overall bar, then one bar per Spark, with the Controller's own bytes, rate
+and ETA. With `--no-input` or a pipe it prints one plain line per phase change
+and at most every 30 seconds. The wait reason is the step being waited on
+("copying model files to the Sparks"), never the generic
+`observation-unavailable` fallback. A fleet group that is still starting shows
+`starting` and raises no attention item; only a group that lost a rank or
+missed its start deadline is `degraded`.
+
+
 Friendly Spark names and exact stable selectors are accepted. Mutations are
 single-step Controller operations. Asynchronous Model/Recipe mutations and
 Profile loads follow to a terminal response by default. Use `fleet progress`

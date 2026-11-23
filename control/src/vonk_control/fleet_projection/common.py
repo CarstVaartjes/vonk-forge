@@ -48,6 +48,7 @@ from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
 from ..models.mapping import ClusterMapping
 from ..recipe_update_batches.notice import RecipeUpdateNotice
+from ..run_readiness import GroupHealth
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel
 from ..telemetry.samples import TelemetrySampleView
@@ -401,7 +402,7 @@ class RunPresence(StrictModel):
     rank_state: RunStateField
     rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
-    group_state: Literal["healthy", "degraded", "unavailable"]
+    group_state: GroupHealth
     healthy: bool | None
     projection_issue: str | None = Field(default=None, max_length=256)
     degraded_reason: RunDegradedReason | None = None

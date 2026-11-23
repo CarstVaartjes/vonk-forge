@@ -12,6 +12,7 @@ from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from ..cli_telemetry_render import size as _size
 from ..control_client.errors import ControlMalformedResponse
 from ..generated_control.models.swap_shortfall_evidence import SwapShortfallEvidence
+from .phase_words import GENERIC_WAIT_CODE, wait_words
 
 
 def terminal_text(value: str) -> str:
@@ -297,10 +298,14 @@ def _waiting(payload: Mapping[str, object]) -> None:
                 continue
             nodes = item.get("node_ids")
             where = f" [{_words(nodes)}]" if isinstance(nodes, list) and nodes else ""
-            _field(
-                "Waiting for",
-                f"{_text(item.get('code'))}: {_text(item.get('detail'))}{where}",
-            )
+            if item.get("code") == GENERIC_WAIT_CODE:
+                # The generic fallback is not a reason; the known step is.
+                _field("Waiting for", f"{wait_words(payload, item)}{where}")
+            else:
+                _field(
+                    "Waiting for",
+                    f"{_text(item.get('code'))}: {_text(item.get('detail'))}{where}",
+                )
             if (evidence := _swap_of(item.get("swap"))) is not None:
                 print(_swap_shortfall(evidence))
     if payload.get("next_attempt_at") is not None:

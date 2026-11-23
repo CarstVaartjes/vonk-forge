@@ -19,6 +19,7 @@ from collections.abc import Iterable
 
 from vonk_agent_protocol.reason_codes.evidence import RunDegradedReason
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import WireEnum
 
 
 def run_not_ready_for_profile(
@@ -52,3 +53,44 @@ def run_not_ready_for_profile(
     if route_state != RouteState.PUBLISHED:
         return RunDegradedReason.ROUTE_NOT_PUBLISHED
     return None
+
+
+class GroupHealth(WireEnum):
+    """What the fleet says about a loaded recipe group; one transition function."""
+
+    HEALTHY = "healthy"
+    #: Within its start: its owning Start operation fails the run past the
+    #: start deadline, which is degraded; a group still starting is progress.
+    STARTING = "starting"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+
+
+_STARTING_RUN_STATES = frozenset({RunState.PLANNED, RunState.STARTING})
+_STARTING_RANK_STATES = _STARTING_RUN_STATES | {RunState.RUNNING}
+
+
+def group_health(
+    *,
+    issue: bool,
+    reason: RunDegradedReason | None,
+    run_state: str,
+    rank_states: Iterable[str],
+) -> GroupHealth:
+    """The one verdict: unreadable evidence, then ready, then still starting.
+
+    A group is starting while its run is planned or starting and no rank is
+    failed, lost or stopping; a lost rank, a failed run or a missing rank is
+    degraded.
+    """
+    if issue:
+        return GroupHealth.UNAVAILABLE
+    if reason is None:
+        return GroupHealth.HEALTHY
+    if (
+        reason == RunDegradedReason.RUN_NOT_RUNNING
+        and run_state in _STARTING_RUN_STATES
+        and all(state in _STARTING_RANK_STATES for state in rank_states)
+    ):
+        return GroupHealth.STARTING
+    return GroupHealth.DEGRADED

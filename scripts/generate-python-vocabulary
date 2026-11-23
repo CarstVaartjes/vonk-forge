@@ -32,27 +32,37 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 def cli_words() -> str:
     from typing import get_args
 
-    from vonk_agent_protocol.agent_words import Disposition
-    from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
-    from vonk_agent_protocol.state_machines import (
-        AssetAvailability,
-        EndpointState,
-        EnrollmentGrantState,
+    from vonk_agent_protocol.agent_words import (
+        Disposition,
+        ProfileChildJobKind,
+        ProfileChildPhase,
+        ProfileEffectState,
+        ProfileReportedPhase,
+        ProgressPhase,
     )
+    from vonk_agent_protocol.disposition import HTTP_STATUS_DISPOSITIONS
+    from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import (
         LIVE_LIFECYCLE_STATES,
         TERMINAL_LIFECYCLE_STATES,
         UNSUCCESSFUL_LIFECYCLE_STATES,
+        ArtifactPreparation,
         LifecycleState,
         OutcomeKind,
         StopOutcome,
+        WaitReason,
     )
-    from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
-    from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileEffectState
-    from vonk_agent_protocol.gpu_clock import GpuClockMetric
-    from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
-    from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
-    from vonk_agent_protocol.state_machines import RouteState, RunState
+    from vonk_agent_protocol.reason_codes.profiles import (
+        PROFILE_REFUSAL_CODES,
+        ProfileReasonCode,
+    )
+    from vonk_agent_protocol.state_machines import (
+        AssetAvailability,
+        EndpointState,
+        EnrollmentGrantState,
+        RouteState,
+        RunState,
+    )
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
     from vonk_control.fleet_profile_contract.review import ProfileLoadAction
@@ -64,6 +74,8 @@ def cli_words() -> str:
 
     words = {
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
+        "WAIT_GENERIC_OBSERVATION": WaitReason.OBSERVATION_UNAVAILABLE,
+        "WAIT_SPARK_BUSY": WaitReason.SPARK_BUSY,
         "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,
         "ENROLLMENT_PENDING": EnrollmentGrantState.PENDING,
         "UNKNOWN": OutcomeKind.UNKNOWN,
@@ -127,6 +139,9 @@ def cli_words() -> str:
         GpuClockMetric,
         RouteState,
         JobContractState,
+        ProgressPhase,
+        ProfileChildPhase,
+        ProfileReportedPhase,
         QualificationStatus,
         QualificationOutcome,
     ):

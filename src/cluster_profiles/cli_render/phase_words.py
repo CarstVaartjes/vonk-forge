@@ -1,0 +1,180 @@
+"""The one place that turns a phase or a wait into plain words for a person.
+
+The follow view, the one-shot view and every progress line use these; nothing
+else spells a phase.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from ..cli_states_generated import (
+    WAIT_GENERIC_OBSERVATION,
+    WAIT_SPARK_BUSY,
+    ProfileChildPhase,
+    ProfileReportedPhase,
+    ProgressPhase,
+)
+
+#: The Controller's generic wait code: "a durable wait whose cause was not typed".
+#: It is a fallback, never a reason, so a known dependency always wins over it.
+GENERIC_WAIT_CODE = WAIT_GENERIC_OBSERVATION
+
+_COPYING = "Copying model files to the Sparks"
+_DOWNLOADING = "Downloading the model"
+_IMAGE = "Downloading the container image"
+_BUILDING = "Building the container image"
+_INSTALLING = "Installing the runtime"
+_STARTING = "Starting on the Sparks"
+_VERIFYING = "Checking the result"
+_PREPARING = "Preparing the load"
+_STOPPING = "Stopping the running workload"
+_CLEANING = "Cleaning up"
+_QUEUED = "Waiting in the queue"
+_REMOVING = "Removing the old install"
+
+#: One word table for every client view; keyed by the contract's phase words.
+PHASE_WORDS: dict[str, str] = {
+    ProgressPhase.TRANSFER: _COPYING,
+    ProgressPhase.COPYING: _COPYING,
+    ProfileChildPhase.TARGET_COPY: _COPYING,
+    ProgressPhase.UPLOADING: "Uploading files",
+    ProgressPhase.DOWNLOADING: _DOWNLOADING,
+    ProgressPhase.MODEL_DOWNLOAD: _DOWNLOADING,
+    ProfileChildPhase.CONTAINER_DOWNLOAD: _IMAGE,
+    ProgressPhase.PULLING: _IMAGE,
+    ProfileChildPhase.CONTAINER_BUILD: _BUILDING,
+    ProgressPhase.BUILDING: _BUILDING,
+    ProfileChildPhase.RUNTIME_INSTALL: _INSTALLING,
+    ProgressPhase.INSTALLING: _INSTALLING,
+    ProgressPhase.RECONCILING_INSTALLATION: "Checking the installation",
+    ProfileChildPhase.START: _STARTING,
+    ProgressPhase.STARTING: _STARTING,
+    ProfileChildPhase.FINAL_VERIFY: _VERIFYING,
+    ProfileReportedPhase.FINAL_VERIFY: _VERIFYING,
+    ProfileChildPhase.VERIFY: _VERIFYING,
+    ProgressPhase.VERIFYING: _VERIFYING,
+    ProfileChildPhase.PREPARE: _PREPARING,
+    ProgressPhase.PREPARING: _PREPARING,
+    ProgressPhase.FINALIZING: "Finishing up",
+    ProfileChildPhase.STOP: _STOPPING,
+    ProgressPhase.STOPPING: _STOPPING,
+    ProfileChildPhase.UNINSTALL: _REMOVING,
+    ProgressPhase.UNINSTALLING: _REMOVING,
+    ProfileChildPhase.CLEANUP: _CLEANING,
+    ProgressPhase.RECLAIMING: _CLEANING,
+    ProgressPhase.QUEUED: _QUEUED,
+    ProgressPhase.PENDING: _QUEUED,
+    ProgressPhase.WAITING: _QUEUED,
+    ProgressPhase.UPDATING: "Updating",
+    ProgressPhase.EXECUTING: "Working",
+    ProgressPhase.COMPLETED: "Finished",
+    ProgressPhase.FAILED: "Failed",
+}
+
+
+def phase_words(phase: str) -> str:
+    """A phase in plain words; a phase this table does not know shows as sent."""
+    return PHASE_WORDS.get(phase, phase)
+
+
+@dataclass(frozen=True)
+class Meter:
+    """One measured byte meter exactly as the Controller reports it."""
+
+    phase: str
+    completed: int | None
+    total: int | None
+    rate: float | None
+    eta_seconds: float | None
+    label: str | None = None
+    member_id: str | None = None
+    activity: str | None = None
+    items: tuple[object, object] | None = None
+
+
+@dataclass(frozen=True)
+class Measured:
+    """What an observation says: the overall meter and one meter per Spark."""
+
+    overall: Meter
+    members: tuple[Meter, ...]
+
+    @property
+    def phase(self) -> str:
+        return self.overall.phase
+
+
+def measured(observed: object) -> Measured:
+    """Read phase, bytes, rate, ETA and members as the Controller serves them.
+
+    An application carries its running child's meter under
+    ``progress.child_progress.operation``; an operation carries it under
+    ``progress`` or ``progress.operation``.  Rate and ETA are the Controller's
+    own (``smoothed_bytes_per_second``, ``eta_seconds``); nothing is derived here.
+    """
+    root = _mapping(observed)
+    outer = _mapping(root.get("progress"))
+    progress = outer
+    nested = outer.get("operation")
+    if not isinstance(nested, Mapping):
+        child = _mapping(outer.get("child_progress"))
+        nested = child.get("operation", child) if child else None
+    if isinstance(nested, Mapping) and nested:
+        progress = nested
+    phase = progress.get(
+        "phase", outer.get("phase", root.get("phase", root.get("state")))
+    )
+    label = progress.get("current_label", outer.get("current_label"))
+    members = progress.get("members")
+    return Measured(
+        _meter(progress, "working" if phase is None else str(phase), label),
+        tuple(
+            _meter(item, str(item.get("phase", phase)), None)
+            for item in (members if isinstance(members, list) else [])
+            if isinstance(item, Mapping)
+        ),
+    )
+
+
+def _meter(source: object, phase: str, label: object) -> Meter:
+    source = _mapping(source)
+    completed = source.get("completed_bytes")
+    total = source.get("total_bytes")
+    rate = source.get("smoothed_bytes_per_second")
+    eta = source.get("eta_seconds")
+    member = source.get("member_id")
+    return Meter(
+        phase,
+        completed if type(completed) is int else None,
+        total
+        if type(total) is int and source.get("total_bytes_known") is not False
+        else None,
+        float(rate) if isinstance(rate, int | float) and rate > 0 else None,
+        float(eta) if isinstance(eta, int | float) and eta >= 0 else None,
+        None if label is None else str(label),
+        member if isinstance(member, str) else None,
+        source.get("activity") if isinstance(source.get("activity"), str) else None,
+        (source["completed_items"], source.get("total_items"))
+        if source.get("completed_items") is not None
+        else None,
+    )
+
+
+def wait_words(observed: object, blocker: object) -> str:
+    """Why work waits, in plain words; the generic wait code never is the reason."""
+    code = _mapping(blocker).get("code")
+    if code == GENERIC_WAIT_CODE:
+        phase = measured(observed).phase
+        text = PHASE_WORDS.get(phase)
+        if text is not None:
+            return text[0].lower() + text[1:]
+        return "the Controller to confirm the next step"
+    if code == WAIT_SPARK_BUSY:
+        return "the Spark's current operation to finish"
+    return str(code)
+
+
+def _mapping(value: object):
+    return value if isinstance(value, Mapping) else {}
