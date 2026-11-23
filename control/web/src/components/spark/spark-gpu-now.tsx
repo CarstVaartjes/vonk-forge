@@ -1,5 +1,7 @@
 import { useId } from "react";
-import type { VisualFleetNode } from "../../api/types";
+import type { MetricsSeriesResponse, VisualFleetNode } from "../../api/types";
+import { fleetFigure, formatValue } from "../../lib/metric-units";
+import { Estimate } from "../ui/estimate";
 import { HISTORY_SECONDS, type HistoryPoint } from "../../hooks/use-telemetry-history";
 import { NOT_REPORTED_TEXT, halfUp, liveSample } from "../../lib/fleet";
 import { GPU_READINGS, num } from "../../lib/gpu-readings";
@@ -18,20 +20,24 @@ function workloads(node: VisualFleetNode): string {
 /**
  * The GPU's present state: utilisation, temperature and clock as gauges, then power with its trace. Every
  * figure is the live sample as reported; a Spark that is not reporting live shows Not reported and no
- * arc. Energy has no source yet and says so.
+ * arc. Energy is the Controller's 24-hour total for this Spark.
  */
 export function SparkGpuNow({
   node,
   points,
   now,
   color,
+  energy,
 }: {
   node: VisualFleetNode;
   points: readonly HistoryPoint[];
   now: Date;
   color: string;
+  /** This Spark's gpu_energy series over 24 hours: undefined while it is out, null when it failed. */
+  energy: MetricsSeriesResponse | null | undefined;
 }) {
   const id = useId();
+  const total = fleetFigure(energy, "total");
   const sample = liveSample(node);
   const read = (reading: typeof UTILISATION | typeof TEMPERATURE | typeof CLOCK) => {
     const value = sample ? reading.now(sample) : null;
@@ -101,7 +107,13 @@ export function SparkGpuNow({
         </div>
         <div>
           <span>GPU energy, 24 h</span>
-          <strong>{NOT_REPORTED_TEXT}</strong>
+          <strong>
+            {total ? (
+              <Estimate basis={total.basis}>{formatValue(total.value, total.symbol)}</Estimate>
+            ) : energy === undefined ? null : (
+              NOT_REPORTED_TEXT
+            )}
+          </strong>
         </div>
       </div>
     </section>

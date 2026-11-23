@@ -15,6 +15,7 @@ import {
 import type { HistoryPoint } from "../../hooks/use-telemetry-history";
 import { nodeHealth } from "../../lib/node-health";
 import { HealthList } from "../ui/health-list";
+import { useMetricRead } from "../../hooks/use-metric-series";
 import { SparkCharts } from "./spark-charts";
 import { SparkGpuNow } from "./spark-gpu-now";
 import { SparkHostChecks } from "./spark-host-checks";
@@ -51,16 +52,25 @@ export function SparkOverview({
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const cpu = nodeCpuClock(node);
+  // The same Controller reads Overview and Workloads show, scoped to this Spark.
+  const energy = useMetricRead(api, "gpu_energy", "24h", node.id);
+  const tokens = useMetricRead(api, "output_token_rate", "1h");
+  const requests = useMetricRead(api, "request_rate", "1h");
   return (
     <>
       <div className="spark-panels">
         <SparkMemory node={node} points={points} now={now} />
-        <SparkGpuNow node={node} points={points} now={now} color={color} />
+        <SparkGpuNow node={node} points={points} now={now} color={color} energy={energy} />
       </div>
       <SparkCharts api={api} nodeId={node.id} range={range} color={color} />
       <SensorStrip node={node} points={points} now={now} color={color} />
       <div className="spark-cards">
-        <SparkServing node={node} nodes={nodes} onNavigate={onNavigate} />
+        <SparkServing
+          node={node}
+          nodes={nodes}
+          reads={{ tokens, requests }}
+          onNavigate={onNavigate}
+        />
         <SparkStorage node={node} />
         <section className="card spark-panel-card" aria-labelledby={`health-${node.id}`}>
           <header>
