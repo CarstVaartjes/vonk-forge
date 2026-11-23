@@ -498,3 +498,26 @@ def test_local_state_read_work_is_linear_in_history_sets_and_digests(
     rows = history + 2 * len(digests)
     # A product shape does >= 64 x 640 = 40,960 evaluations on its own.
     assert work < 12 * rows, work
+
+
+def test_model_actions_follow_cache_state_and_held_bytes():
+    from vonk_agent_protocol.lifecycle_vocabulary import OperatorActionName as Action
+    from vonk_control.library.contract import (
+        LibraryLocalState,
+        model_actions,
+    )
+    from vonk_control.model_cache.contract import ModelCacheUsage
+
+    held = ModelCacheUsage(disk_bytes=5, unique_bytes=5, shared_bytes=0)
+    none = ModelCacheUsage(disk_bytes=0, unique_bytes=0, shared_bytes=0)
+
+    def actions(controller, usage=None, running_on=()):
+        local = LibraryLocalState(controller=controller, running_on=list(running_on))
+        return model_actions(local, usage)
+
+    assert actions("not_cached", none) == [Action.DOWNLOAD]
+    assert actions("cached", held) == [Action.REMOVE]
+    assert actions("not_cached", held) == [Action.DOWNLOAD, Action.REMOVE]
+    assert actions("failed", held) == [Action.DOWNLOAD, Action.REMOVE]
+    assert actions("preparing", held) == []
+    assert actions("unknown") == []

@@ -1,3 +1,4 @@
+import { OperatorActionName } from "../../api/vocabulary.generated";
 import { addWire, compareWire, formatWire, type WireNumber } from "../../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
@@ -189,6 +190,8 @@ function ModelRevisionsRow({
   const capabilities = model.usage;
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
+  // One rule, decided by the Controller: download or remove, never a button that cannot apply.
+  const actions = model.actions ?? [];
   // A recipe may reference the same model in more than one selection with
   // different roles, so list each recipe once per model.
   const recipes = [
@@ -245,23 +248,29 @@ function ModelRevisionsRow({
             </select>
           </label>
         )}
-        <LibraryCacheAction
-          key={key}
-          api={api}
-          onPrepared={onPrepared}
-          selector={`${model.model.publisher}/${model.model.slug}`}
-          modelContentSha256={model.model.content_sha256}
-          state={model.local.controller}
-        />
-        <LibraryCacheAction
-          fleetOnly
-          key={`${key}-fleet`}
-          api={api}
-          onPrepared={onPrepared}
-          selector={`${model.model.publisher}/${model.model.slug}`}
-          modelContentSha256={model.model.content_sha256}
-          state={model.local.controller}
-        />
+        <div className="library-model-actions">
+          {(actions.includes(OperatorActionName.DOWNLOAD) || preparation) && (
+            <LibraryCacheAction
+              key={key}
+              api={api}
+              onPrepared={onPrepared}
+              selector={`${model.model.publisher}/${model.model.slug}`}
+              modelContentSha256={model.model.content_sha256}
+              state={model.local.controller}
+            />
+          )}
+          {actions.includes(OperatorActionName.REMOVE) && (
+            <LibraryCacheAction
+              fleetOnly
+              key={`${key}-fleet`}
+              api={api}
+              onPrepared={onPrepared}
+              selector={`${model.model.publisher}/${model.model.slug}`}
+              modelContentSha256={model.model.content_sha256}
+              state={model.local.controller}
+            />
+          )}
+        </div>
         {model.local.controller === "preparing" && preparation && (
           <span role="status">{preparation.phase ?? preparation.state}</span>
         )}
