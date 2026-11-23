@@ -16,7 +16,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base, CatalogDocument, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
 from vonk_control.recipe_image_availability_view_contract import (
@@ -25,9 +25,9 @@ from vonk_control.recipe_image_availability_view_contract import (
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
+from .recipe_image_availability_support import _add_revision, _recipe, _runtime
 from .test_fleet_profile_api import _headers
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
-from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
 pytest_plugins = ["tests.test_profile_load_installed_cli"]
 

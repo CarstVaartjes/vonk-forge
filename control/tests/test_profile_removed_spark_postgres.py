@@ -13,8 +13,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileInput,
 )
-from vonk_control.inventory_items import runtime_value
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -34,12 +34,9 @@ from vonk_control.models import (
 )
 
 from .profile_due_fixtures import next_profile_due
+from .recipe_operations_support import installed_recipe, started_recipe
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_profile_capacity_admission import _capacity_profile
-from .test_recipe_operations import (
-    installed_recipe,
-    started_recipe,
-)
 
 
 def test_preview_reviews_partial_cleanup_when_a_dual_model_spark_is_revoked(

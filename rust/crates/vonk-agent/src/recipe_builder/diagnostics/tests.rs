@@ -1,0 +1,614 @@
+use super::*;
+use crate::process::ProcessOutput;
+
+#[test]
+fn absent_or_unretainable_output_is_never_reported_as_unclassified() {
+    for bytes in [
+        b"".as_slice(),
+        b"\r\n\t\0".as_slice(),
+        "\u{200b}".as_bytes(),
+    ] {
+        let output = ProcessOutput {
+            exit_code: Some(125),
+            success: false,
+            stdout: bytes.to_vec(),
+            stderr: bytes.to_vec(),
+        };
+        assert_eq!(
+            podman_import_diagnostic(&output),
+            PodmanImportDiagnostic::NonzeroWithoutOutput
+        );
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::NonzeroWithoutOutput
+        );
+    }
+}
+
+#[test]
+fn unclassified_commands_keep_exit_status_and_bounded_stderr_in_wire_evidence() {
+    let output = ProcessOutput {
+        exit_code: Some(125),
+        success: false,
+        stdout: vec![],
+        stderr: format!("{}\nopaque podman failure", "progress\r".repeat(5000)).into_bytes(),
+    };
+    assert_eq!(
+        podman_import_diagnostic(&output),
+        PodmanImportDiagnostic::Unknown
+    );
+    assert_eq!(
+        podman_build_diagnostic(&output),
+        PodmanBuildDiagnostic::Unknown
+    );
+    let errors = [
+        RecipeBuildError::BaseImageImport {
+            diagnostic: podman_import_diagnostic(&output),
+            logs: Box::new(sanitized_process_logs(&output)),
+        },
+        RecipeBuildError::ImageBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Box::new(sanitized_process_logs(&output)),
+        },
+        RecipeBuildError::AdapterBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Box::new(sanitized_process_logs(&output)),
+        },
+        command_failure(FailureStage::ImageVerification, &output),
+        super::network_boundary_error(FailureStage::EgressImageImport, &output),
+    ];
+    for error in errors {
+        let body = error.failure_evidence();
+        let evidence = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+            &body,
+        );
+        assert_eq!(evidence.process_exit_code, Some(125));
+        assert!(evidence.stderr.text.contains("opaque podman failure"));
+        assert!(evidence.stderr.text.len() <= 2048);
+        evidence.validate().unwrap();
+    }
+}
+
+#[test]
+fn podman_failure_retains_sanitized_final_ring_output() {
+    let output = crate::process::ProcessOutput {
+        exit_code: None,
+        success: false,
+        stdout: Vec::new(),
+        stderr: format!(
+            "{}\nAuthorization: Bearer never-persist\npermission denied mounting proc\n",
+            "noise\n".repeat(5000)
+        )
+        .into_bytes(),
+    };
+    let errors = [
+        RecipeBuildError::ImageBuild {
+            diagnostic: podman_build_diagnostic(&output),
+            logs: Box::new(super::sanitized_process_logs(&output)),
+        },
+        super::network_boundary_error(FailureStage::EgressNetworkCreate, &output),
+    ];
+    for error in errors {
+        let body = error.failure_evidence();
+        let diagnostics = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+            &body,
+        );
+        assert!(diagnostics.stderr.truncated);
+        assert!(diagnostics.stderr.text.contains("permission denied"));
+        assert!(!format!("{body:?}").contains("never-persist"));
+    }
+}
+
+#[test]
+fn a_long_echoed_step_keeps_the_error_lines_printed_above_it() {
+    // Podman closes a failed build with the whole RUN command echoed; a long
+    // one used to fill the retained stderr tail by itself.
+    let command = format!(
+        "RUN apt-get update && {} && python3 -m pip install flash-attn==2.8.3.post1",
+        "curl --fail --location https://example.org/archive.tar.gz --output /tmp/a.tgz && "
+            .repeat(40)
+    );
+    let output = ProcessOutput {
+        exit_code: Some(1),
+        success: false,
+        stdout: b"Building wheel for flash-attn (setup.py): finished with status 'error'\n"
+            .to_vec(),
+        stderr: format!(
+            "error: subprocess-exited-with-error\nERROR: Failed to build flash-attn\n\
+                 Error: building at STEP \"{command}\": while running runtime: exit status 1\n"
+        )
+        .into_bytes(),
+    };
+    assert!(output.stderr.len() > 3 * 1024);
+    let error = RecipeBuildError::ImageBuild {
+        diagnostic: podman_build_diagnostic(&output),
+        logs: Box::new(sanitized_process_logs(&output)),
+    };
+    let evidence = crate::failure_evidence::from_failure(
+        &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+        &error.failure_evidence(),
+    );
+    assert!(
+        evidence
+            .stderr
+            .text
+            .contains("ERROR: Failed to build flash-attn")
+    );
+    assert!(
+        evidence
+            .stderr
+            .text
+            .contains("error: subprocess-exited-with-error")
+    );
+    assert!(evidence.stderr.text.len() < 1024);
+    // The cut echo is reported as dropped, not hidden.
+    assert!(evidence.stderr.truncated);
+    assert!(evidence.stderr.dropped_bytes.unwrap() > 2 * 1024);
+    let property = |name: &str| {
+        evidence
+            .preflight
+            .iter()
+            .find(|property| property.name == name)
+            .map(|property| property.value.clone())
+    };
+    assert_eq!(property("exit_code").as_deref(), Some("1"));
+    assert!(
+        property("build_step")
+            .unwrap()
+            .starts_with("RUN apt-get update && curl")
+    );
+    evidence.validate().unwrap();
+}
+
+/// The retained stderr and properties of a failed Podman build.
+fn build_evidence(stderr: String) -> vonk_agent_protocol::failure_evidence::FailureDiagnostics {
+    let output = ProcessOutput {
+        exit_code: Some(125),
+        success: false,
+        stdout: Vec::new(),
+        stderr: stderr.into_bytes(),
+    };
+    let error = RecipeBuildError::ImageBuild {
+        diagnostic: podman_build_diagnostic(&output),
+        logs: Box::new(sanitized_process_logs(&output)),
+    };
+    let evidence = crate::failure_evidence::from_failure(
+        &vonk_agent_protocol::generated::AgentOperation::RecipeBuildV1,
+        &error.failure_evidence(),
+    );
+    evidence.validate().unwrap();
+    evidence
+}
+
+#[test]
+fn a_long_copy_step_keeps_the_missing_source_its_cause_names() {
+    // Buildah names the missing source after the echoed step: the cause
+    // runs past further `": ` separators and must survive whole.
+    let sources = (0..20)
+        .map(|index| format!("patches/fix-{index:02}-attention-backend.patch"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let evidence = build_evidence(format!(
+        "Error: building at STEP \"COPY {sources} /patches/\": checking on sources under \
+             \"/var/lib/vonk-forge-agent/builds/context\": copier: stat: \
+             \"/patches/fix-07-attention-backend.patch\": no such file or directory\n"
+    ));
+    assert!(
+        evidence.stderr.text.contains(
+            "copier: stat: \"/patches/fix-07-attention-backend.patch\": no such file or directory"
+        ),
+        "{}",
+        evidence.stderr.text
+    );
+    let step = evidence
+        .preflight
+        .iter()
+        .find(|property| property.name == "build_step")
+        .unwrap();
+    assert!(
+        step.value.starts_with("COPY patches/fix-00"),
+        "{}",
+        step.value
+    );
+    assert!(!step.value.contains("copier"), "{}", step.value);
+}
+
+#[test]
+fn a_long_heredoc_step_keeps_the_error_above_it_on_one_line() {
+    let script = (0..120)
+        .map(|index| format!("echo configuring stage {index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let evidence = build_evidence(format!(
+        "make: *** [Makefile:35: pkg.debian.build] Error 2\n\
+             Error: building at STEP \"RUN <<EOF\n{script}\nEOF\": while running runtime: exit status 2\n"
+    ));
+    let text = &evidence.stderr.text;
+    assert!(
+        text.contains("make: *** [Makefile:35: pkg.debian.build] Error 2"),
+        "{text}"
+    );
+    assert!(
+        text.contains("while running runtime: exit status 2"),
+        "{text}"
+    );
+    assert!(!text.contains("configuring stage 119"), "{text}");
+    // The echo is one line: the heredoc's lines are not the tail's lines.
+    assert_eq!(
+        text.lines()
+            .filter(|line| line.contains("configuring"))
+            .count(),
+        1
+    );
+    assert!(evidence.stderr.truncated);
+}
+
+#[test]
+fn a_heredoc_whose_script_has_its_own_separator_still_ends_at_the_run_close() {
+    // Catalog heredocs write JSON: `"key": value` inside the script must
+    // not end the echoed step there and leave the script as the "cause".
+    let script = (0..60)
+        .map(|index| format!("echo '{{\"option_{index}\": true}}' >> /etc/vonk/config.json"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let evidence = build_evidence(format!(
+        "jq: error: Could not open file /etc/vonk/base.json\n\
+             Error: building at STEP \"RUN <<EOF\n{script}\nEOF\": while running runtime: exit status 2\n"
+    ));
+    let text = &evidence.stderr.text;
+    assert!(text.contains("jq: error: Could not open file"), "{text}");
+    assert!(!text.contains("option_59"), "{text}");
+    assert!(evidence.stderr.dropped_bytes.unwrap() > 2048);
+    let property = |name: &str| {
+        evidence
+            .preflight
+            .iter()
+            .find(|property| property.name == name)
+            .map(|property| property.value.clone())
+            .unwrap()
+    };
+    assert_eq!(property("exit_code"), "2");
+    assert!(property("build_step").starts_with("RUN <<EOF"));
+    assert!(property("build_step").len() <= 170);
+}
+
+#[test]
+fn package_output_and_echoed_steps_cannot_invent_a_host_denial() {
+    // Wrong implementation: search the whole build transcript for unrelated
+    // AppArmor/permission words instead of Podman's actual failure cause.
+    for (stdout, stderr) in [
+        (
+            "Setting up apparmor ...\nW: download permission denied; continuing\n",
+            "curl: (22) The requested URL returned error: 403\nError: building at STEP \"RUN echo newuidmap apparmor permission denied && curl --fail https://example.org/source\": while running runtime: exit status 22",
+        ),
+        (
+            "",
+            "Error: building at STEP \"RUN cat <<EOF\nnewuidmap apparmor permission denied\nEOF\": while running runtime: exit status 22",
+        ),
+        (
+            "",
+            "application: open /app/data: permission denied\nError: building at STEP \"RUN application\": while running runtime: exit status 1",
+        ),
+        (
+            "Setting up apparmor ...\nIllegal instruction (core dumped)\ndh_install: error: debian/libnccl2.install (executable config) returned exit code 132\n",
+            "unrelated optional check denied\nError: building at STEP \"RUN make pkg.debian.build\": while running runtime: exit status 2",
+        ),
+    ] {
+        let output = ProcessOutput {
+            exit_code: Some(1),
+            success: false,
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert_eq!(
+            podman_build_diagnostic(&output),
+            PodmanBuildDiagnostic::BuildStepFailed
+        );
+    }
+}
+
+#[test]
+fn a_real_runtime_denial_is_not_hidden_by_an_echoed_step_or_recipe_output() {
+    for (stderr, expected) in [
+        (
+            "Error: building at STEP \"RUN echo hello\": cannot clone: Operation not permitted",
+            PodmanBuildDiagnostic::UserNamespaceDenied,
+        ),
+        (
+            "crun: open /run/crun/fixture: permission denied\nError: building at STEP \"RUN echo hello\": while running runtime: exit status 1",
+            PodmanBuildDiagnostic::PermissionDenied,
+        ),
+    ] {
+        let output = ProcessOutput {
+            exit_code: Some(125),
+            success: false,
+            stdout: b"STEP 1/1: RUN echo apparmor permission denied\n".to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert_eq!(podman_build_diagnostic(&output), expected);
+    }
+}
+
+/// The stderr of a Podman that crashed in its own Go runtime during a RUN:
+/// the step's output (`run_output`) first, then the crash and its frames.
+fn podman_crash_output(run_output: &str, crash_header: &str) -> ProcessOutput {
+    ProcessOutput {
+            exit_code: Some(2),
+            success: false,
+            stdout: b"[2/2] STEP 11/28: RUN uv pip install torch\n".to_vec(),
+            stderr: format!(
+                "{run_output}\n{crash_header}\n\ngoroutine 61 [running]:\n\
+                 github.com/containers/common/libnetwork/netavark.(*netavarkNetwork).Teardown(...)\n\
+                 \t/go/src/netavark/run.go:93 +0x1d4\n"
+            )
+            .into_bytes(),
+        }
+}
+
+#[test]
+fn a_podman_crash_is_not_a_platform_denial_whatever_the_run_output_says() {
+    // Wrong implementation: classify by denial words anywhere in stderr, so
+    // a crash after a RUN that printed them reports a blocked platform.
+    for run_output in [
+        "error: failed to hardlink: permission denied (os error 13)",
+        "lchown /root/.cache/uv: operation not permitted",
+        "newuidmap: subuid range unavailable for user",
+        "cannot clone: Operation not permitted",
+        "mount `proc` to `proc`: permission denied",
+    ] {
+        for header in [
+            "panic: runtime error: invalid memory address or nil pointer dereference",
+            "fatal error: all goroutines are asleep - deadlock!",
+        ] {
+            let output = podman_crash_output(run_output, header);
+            assert_eq!(
+                podman_build_diagnostic(&output),
+                PodmanBuildDiagnostic::Unknown,
+                "{run_output} / {header}"
+            );
+        }
+    }
+    // A goroutine dump alone is a crash too, whatever its header looked like.
+    let output = ProcessOutput {
+        exit_code: Some(2),
+        success: false,
+        stdout: Vec::new(),
+        stderr: b"lchown denied: permission denied\ngoroutine 1 [running]:\nmain.main()\n".to_vec(),
+    };
+    assert_eq!(
+        podman_build_diagnostic(&output),
+        PodmanBuildDiagnostic::Unknown
+    );
+}
+
+#[test]
+fn every_platform_block_vector_yields_to_a_crash_and_to_a_steps_own_exit() {
+    // Wrong implementation: a denial gate that reads words a RUN printed, or
+    // lines left by a crashed Podman, as a host denial in either classifier.
+    let crash = "\npanic: runtime error: nil pointer dereference\n\ngoroutine 61 [running]:\n";
+    let step_exit =
+        "\nError: building at STEP \"RUN uv pip install\": while running runtime: exit status 1";
+    for (vector, build, import) in [
+        (
+            "lchown /root/.cache/uv: operation not permitted",
+            PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+            PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+        ),
+        (
+            "newuidmap: write to uid_map failed",
+            PodmanBuildDiagnostic::SubordinateIdMappingUnavailable,
+            PodmanImportDiagnostic::SubordinateIdMappingUnavailable,
+        ),
+        (
+            "cannot clone: Operation not permitted",
+            PodmanBuildDiagnostic::UserNamespaceDenied,
+            PodmanImportDiagnostic::PermissionDenied,
+        ),
+        (
+            "mount `proc` to `proc`: Operation not permitted",
+            PodmanBuildDiagnostic::ProcMountDenied,
+            PodmanImportDiagnostic::PermissionDenied,
+        ),
+        (
+            "open /private/data: permission denied",
+            PodmanBuildDiagnostic::PermissionDenied,
+            PodmanImportDiagnostic::PermissionDenied,
+        ),
+    ] {
+        let run = |stderr: String| ProcessOutput {
+            exit_code: Some(1),
+            success: false,
+            stdout: Vec::new(),
+            stderr: stderr.into_bytes(),
+        };
+        assert_eq!(podman_build_diagnostic(&run(vector.to_owned())), build);
+        assert_eq!(podman_import_diagnostic(&run(vector.to_owned())), import);
+        let crashed = run(format!("{vector}{crash}"));
+        assert_eq!(
+            podman_build_diagnostic(&crashed),
+            PodmanBuildDiagnostic::Unknown,
+            "{vector}"
+        );
+        assert_eq!(
+            podman_import_diagnostic(&crashed),
+            PodmanImportDiagnostic::Unknown,
+            "{vector}"
+        );
+        // The step's own exit: the words are the RUN's, not the host's.
+        assert_eq!(
+            podman_build_diagnostic(&run(format!("{vector}{step_exit}"))),
+            PodmanBuildDiagnostic::BuildStepFailed,
+            "{vector}"
+        );
+    }
+}
+
+#[test]
+fn an_out_of_memory_build_is_not_hidden_behind_denial_words_or_a_crash() {
+    let output = podman_crash_output(
+        "lchown /root: permission denied\nKilled\nout of memory",
+        "panic: runtime error: invalid memory address or nil pointer dereference",
+    );
+    assert_eq!(
+        podman_build_diagnostic(&output),
+        PodmanBuildDiagnostic::MemoryLimitExceeded
+    );
+}
+
+#[test]
+fn a_run_steps_own_go_panic_stays_a_failed_step() {
+    // The crash lines belong to the recipe's program when Podman reports the
+    // step's exit status: that is a failed step, not a Podman fault.
+    let output = ProcessOutput {
+            exit_code: Some(1),
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"panic: bad input\n\ngoroutine 1 [running]:\nError: building at STEP \"RUN ./tool\": while running runtime: exit status 2"
+                .to_vec(),
+        };
+    assert_eq!(
+        podman_build_diagnostic(&output),
+        PodmanBuildDiagnostic::BuildStepFailed
+    );
+}
+
+#[test]
+fn podman_build_failures_have_stable_secret_free_diagnostics() {
+    for (stdout, stderr, expected) in [
+            (b"".as_slice(), b"".as_slice(), PodmanBuildDiagnostic::NonzeroWithoutOutput),
+            (
+                b"".as_slice(),
+                b"write /private/secret: no space left on device".as_slice(),
+                PodmanBuildDiagnostic::TemporaryStorageExhausted,
+            ),
+            (
+                b"".as_slice(),
+                b"fuse-overlayfs: operation failed for /private/secret".as_slice(),
+                PodmanBuildDiagnostic::StorageDriverFailure,
+            ),
+            (
+                b"".as_slice(),
+                b"Failed to start transient scope unit".as_slice(),
+                PodmanBuildDiagnostic::SystemdScopeFailure,
+            ),
+            (
+                b"".as_slice(),
+                b"apparmor=\"DENIED\" operation=\"userns_create\" profile=\"podman\"".as_slice(),
+                PodmanBuildDiagnostic::UserNamespaceDenied,
+            ),
+            (
+                b"".as_slice(),
+                b"mount `proc` to `proc`: Operation not permitted".as_slice(),
+                PodmanBuildDiagnostic::ProcMountDenied,
+            ),
+            (
+                b"".as_slice(),
+                b"open /private/secret: permission denied".as_slice(),
+                PodmanBuildDiagnostic::PermissionDenied,
+            ),
+            (
+                b"patching file a.py\nHunk #1 FAILED at 628.\n1 out of 1 hunk FAILED -- saving rejects to file a.py.rej\n"
+                    .as_slice(),
+                b"Error: building at STEP \"RUN patch -p1\": while running runtime: exit status 1"
+                    .as_slice(),
+                PodmanBuildDiagnostic::PatchRejected,
+            ),
+            (
+                b"Reversed (or previously applied) patch detected!  Assume -R? [n]\nSkipping patch.\n"
+                    .as_slice(),
+                b"".as_slice(),
+                PodmanBuildDiagnostic::PatchRejected,
+            ),
+            (
+                b"".as_slice(),
+                b"Error: building at STEP \"RUN make\": while running runtime: exit status 2"
+                    .as_slice(),
+                PodmanBuildDiagnostic::BuildStepFailed,
+            ),
+            (
+                b"opaque /private/secret".as_slice(),
+                b"".as_slice(),
+                PodmanBuildDiagnostic::Unknown,
+            ),
+        ] {
+            let classified = podman_build_diagnostic(&ProcessOutput {
+                exit_code: None,
+                success: false,
+                stdout: stdout.to_vec(),
+                stderr: stderr.to_vec(),
+            });
+            assert_eq!(classified, expected);
+            // Classification is bounded; the actual command's separately
+            // sanitized tails remain mandatory in the error type.
+            assert!(!classified.to_string().contains("private"));
+            assert!(!classified.to_string().contains("secret"));
+        }
+}
+
+#[test]
+fn podman_import_process_failures_have_stable_secret_free_evidence() {
+    for error in [
+        ProcessError::StorageLimit,
+        ProcessError::Timeout,
+        ProcessError::OutputLimit,
+        ProcessError::Io(std::io::Error::other("/private/secret")),
+    ] {
+        let error = podman_import_process_error(error);
+        assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
+        assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
+    }
+}
+
+#[test]
+fn import_host_disk_pressure_is_retryable_storage_not_a_plan_violation() {
+    use crate::process::{ProcessDiskReserve, ProcessRunner, Program, SystemProcessRunner};
+
+    let root = tempfile::tempdir().unwrap();
+    let archive = std::fs::File::create(root.path().join("base-image.tar")).unwrap();
+    // Exercise the import's real free-space guard before Podman starts.
+    // This is host pressure, not an oversized recipe working directory.
+    let error = SystemProcessRunner
+        .run_with_input_disk_reserve_cancellable(
+            Program::Podman,
+            &["load".to_owned()],
+            std::time::Duration::from_secs(1),
+            &archive,
+            ProcessDiskReserve::new(root.path(), u64::MAX),
+            &|| false,
+        )
+        .unwrap_err();
+    assert!(matches!(error, ProcessError::StorageLimit));
+    assert!(matches!(
+        podman_import_process_error(error),
+        RecipeBuildError::BaseImageImportProcess {
+            diagnostic: PodmanImportDiagnostic::TemporaryStorageExhausted,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn bounded_build_process_failures_have_stable_secret_free_evidence() {
+    for (error, _diagnostic) in [
+        (
+            ProcessError::StorageLimit,
+            "declared-storage-limit-exceeded",
+        ),
+        (ProcessError::Timeout, "deadline-exceeded"),
+        (
+            ProcessError::OutputLimit,
+            "diagnostic-output-limit-exceeded",
+        ),
+        (
+            ProcessError::Io(std::io::Error::other("/private/secret")),
+            "subprocess-unavailable",
+        ),
+        (ProcessError::Cancelled, "controller-cancelled"),
+    ] {
+        let evidence = RecipeBuildError::Process(error).failure_evidence();
+        assert!(!format!("{evidence:?}").contains("private"));
+        assert!(!format!("{evidence:?}").contains("secret"));
+    }
+}

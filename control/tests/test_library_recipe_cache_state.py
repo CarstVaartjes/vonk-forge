@@ -23,11 +23,11 @@ from sqlalchemy import event, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
-from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
+from vonk_control.library.contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.model_cache import model_artifact_cache
@@ -43,14 +43,16 @@ from vonk_control.models import (
     RecipeInstallation,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .test_library_local_state_history import _cache_set, _operation
-from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
+from .model_cache_support import (  # noqa: F401  (cache is a pytest fixture)
     _canonical_model,
-    _canonical_recipe,
     cache,
+)
+from .test_library_local_state_history import _cache_set, _operation
+from .test_model_cache_part1 import (
+    _canonical_recipe,
 )
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)

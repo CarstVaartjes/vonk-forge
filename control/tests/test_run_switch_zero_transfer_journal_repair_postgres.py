@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import run_switch_operations as owner
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.job_documents import RunSwitchRunIntent
+from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentOperation,
@@ -29,7 +29,7 @@ from vonk_control.models import (
     RunSwitchJournalRepair,
     RunSwitchJournalRepairPending,
 )
-from vonk_control.operation_contract import OperationRecoveryAction
+from vonk_control.operations.contract import OperationRecoveryAction
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,
@@ -40,9 +40,10 @@ from vonk_control.run_switch_journal_repair import (
     try_repair_zero_transfer_journal,
 )
 from vonk_control.run_switch_operations import advance as advance_owner
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .recipe_operations_support import setup_services
 from .runtime_identity_support import claim_agent
 from .runtime_image_fixtures import hold_image_through_another_recipe
 from .test_fleet_profile_api import _client, _headers
@@ -56,7 +57,6 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
 )
-from .test_recipe_operations import setup_services
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
@@ -1231,7 +1231,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
     from psycopg.errors import LockNotAvailable
     from sqlalchemy import event
     from sqlalchemy.engine import ExceptionContext
-    from vonk_control.job_documents import RunSwitchRunIntent
+    from vonk_control.jobs.documents import RunSwitchRunIntent
     from vonk_control.run_switch_journal_contract import (
         RunSwitchJournalRepairPendingState,
     )

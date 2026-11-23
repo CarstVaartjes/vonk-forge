@@ -18,7 +18,7 @@ from dataclasses import dataclass
 import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol.route_activation import SupervisorPhase
-from vonk_control.litellm import ServedModelInfo
+from vonk_control.gateway.litellm import ServedModelInfo
 from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_progress import _parent_identity
@@ -26,7 +26,7 @@ from vonk_control.recipe_routes import RecipeRouteNotReady
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
-from .test_recipe_operations import ConcurrentPublisher
+from .recipe_operations_support import ConcurrentPublisher
 
 _BLOCKERS = {
     "run.port_occupied",

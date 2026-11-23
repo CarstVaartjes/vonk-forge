@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.catalog_revision_collection import operation_tokens
+from vonk_control.catalog.revision_collection import operation_tokens
 from vonk_control.models import Base, Job
 
 NOW = datetime(2026, 10, 5, 12, tzinfo=UTC)

@@ -38,7 +38,7 @@ from vonk_control.admission_locking import (
 from vonk_control.agent_contacts import record_observation_delivery
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.inventory_items import inventory_items
+from vonk_control.inventory.items import inventory_items
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -49,15 +49,15 @@ from vonk_control.models import (
 )
 
 from .agent_fences import fenced_operation
-from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_recipe_operations import NOW as RECIPE_NOW
-from .test_recipe_operations import (
+from .recipe_operations_support import NOW as RECIPE_NOW
+from .recipe_operations_support import (
     installed_recipe,
     setup_services,
     start_evidence,
     started_recipe,
 )
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
 # Sparks 0 and 1 keep one order running (heartbeat, re-claim, delivery);

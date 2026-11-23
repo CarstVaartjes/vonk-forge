@@ -20,11 +20,11 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
+from .canonical_recipe_fixtures import canonical_example
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_fleet_model_removal_postgres import inventory, submit_model_download
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_operator_acceptance_postgres import _api
-from .test_recipe_operations import canonical_example
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -163,7 +163,7 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     from vonk_control.lifecycle.evidence import BookkeepingReason
     from vonk_control.models import RecipeInstallation
 
-    from .test_recipe_operations import NOW, installed_recipe, setup_services
+    from .recipe_operations_support import NOW, installed_recipe, setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine, nodes=2, mapping_node_count=1

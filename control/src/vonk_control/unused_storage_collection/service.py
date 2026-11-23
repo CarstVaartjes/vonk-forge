@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..inventory_repository import INVENTORY_MAX_AGE
+from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models import InstallationNode, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
@@ -34,7 +34,7 @@ from ..storage_demands import (
     StorageRelief,
     spark_scope,
 )
-from ..worker_memory_contract import WorkerMemoryComponent
+from ..worker.memory_contract import WorkerMemoryComponent
 from .common import (
     _COLLECTABLE_STATES,
     _HOLDING_STATES,

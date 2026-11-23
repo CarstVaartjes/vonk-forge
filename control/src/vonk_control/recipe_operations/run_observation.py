@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState
 
-from .. import job_states
 from ..categorized_errors import (
     MissingRecord,
 )
+from ..jobs import states as job_states
 from ..lifecycle.evidence import (
     Residue,
 )

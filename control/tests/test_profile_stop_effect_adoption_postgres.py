@@ -26,7 +26,7 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_plan,
     _persisted_profile_progress,
 )
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -40,26 +40,22 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .fleet_profiles_support import NOW, _node_id, _uuid
 from .node_contacts import contact_row
 from .profile_stop_readmission_support import start_on_released_gang
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
+from .run_switch_operations_support import RecordingArtifactExecutor, _service
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import NOW, _node_id, _uuid
 from .test_profile_adapter_continuity import _running_child
 from .test_profile_adapter_parallel_postgres import _stored
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
-from .test_recipe_operations import (
-    _issue_exact_stop_grant,
-    installed_recipe,
-    setup_services,
-    started_recipe,
-)
-from .test_run_switch_operations import RecordingArtifactExecutor, _service
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 
 
 def _claims(sessions, node_id):
@@ -425,7 +421,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         _persisted_result,
         _read_progress,
     )
-    from vonk_control.stored_json import read_row_column
+    from vonk_control.stored.json_values import read_row_column
 
     # A transient receipt fault leaves a retry checkpoint on the reusable Stop.
     # The generic parent observer must not retire its accepted effect merely

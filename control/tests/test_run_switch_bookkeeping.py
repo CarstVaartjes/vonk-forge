@@ -21,13 +21,8 @@ from vonk_control.run_switch_operations import (
     _stored_result,
 )
 
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
-    NOW,
-    RecordingArtifactExecutor,
-    _request,
-    _service,
-)
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 
 
 def _accepted(tmp_path: Path):

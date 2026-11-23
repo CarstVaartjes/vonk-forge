@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from control.tests.added_line_guards import check_source
+from control.tests.added_line_guards.check import check_source
 from control.tests.optimistic_boundaries import scan_source as _locks
 from control.tests.recipe_run_write_verdicts import (
     RECIPE_RUN_WRITE_VERDICTS,

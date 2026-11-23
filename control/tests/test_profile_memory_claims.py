@@ -24,9 +24,9 @@ from vonk_control.models import (
 from vonk_control.resource_planning import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
 
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
 from .test_profile_installed_execution import _drive_to_job
 from .test_profile_port_claims import _load, _ready_profile
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 
 
 @pytest.mark.parametrize("node_count", [1, 2])
@@ -381,7 +381,7 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     tmp_path, postgres_engine, changed_field: str | None
 ):
     from vonk_agent_protocol import InvalidRequestReason
-    from vonk_control.job_documents import RecipeStopParent
+    from vonk_control.jobs.documents import RecipeStopParent
     from vonk_control.recipe_operations import RecipeRequestInvalid
     from vonk_control.run_switch_contract import RunSwitchOperationResult
     from vonk_control.run_switch_operations import (

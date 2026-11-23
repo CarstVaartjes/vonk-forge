@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import select
 from vonk_control.lifecycle.evidence import Residue
 
+from .fleet_profiles_support import _uuid
 from .test_fleet_profile_recovery_current import _failed_profile
-from .test_fleet_profiles import _uuid
 
 
 def test_profile_edit_does_not_replace_accepted_retry_snapshot(
@@ -56,7 +56,7 @@ def test_profile_edit_does_not_replace_accepted_retry_snapshot(
 def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     from vonk_control.models import ClusterMapping, RecipeBuild
 
-    from .test_recipe_operations import installed_recipe, started_recipe
+    from .recipe_operations_support import installed_recipe, started_recipe
 
     sessions, lifecycle, service, _profile, _desired, original, _child, nodes = (
         _failed_profile(tmp_path)

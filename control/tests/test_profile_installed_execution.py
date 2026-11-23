@@ -71,15 +71,15 @@ from vonk_control.unused_storage_collection import (
 
 from cluster_profiles.control_client import validate_control_document
 
-from .runtime_image_fixtures import copy_as_another_recipe
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services, started_recipe
+from .run_switch_operations_support import (
     MODEL_ARTIFACT,
     CompleteArtifactInspector,
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,
 )
+from .runtime_image_fixtures import copy_as_another_recipe
 
 
 def _profile_service(sessions, lifecycle):
@@ -1412,7 +1412,7 @@ def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicte
         release_inactive_run_claims_in_session,
     )
 
-    from .test_unused_storage_collection import _agents_succeed
+    from .test_unused_storage_collection_part1 import _agents_succeed
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=sparks
@@ -1517,7 +1517,7 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
         FleetProfilePreview,
     )
 
-    from .test_unused_storage_collection import _agents_succeed
+    from .test_unused_storage_collection_part1 import _agents_succeed
 
     sessions, lifecycle, _, mapping, build, nodes = setup_services(
         tmp_path, nodes=2, mapping_node_count=1, engine=postgres_engine
@@ -1606,8 +1606,8 @@ def test_prepared_installation_is_referenced_before_its_child_is_issued(
 ) -> None:
     """Catches replacing the node hold while ignoring the prepared result."""
     from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-    from vonk_control.catalog_revision_collection import operation_tokens
-    from vonk_control.job_documents import RunSwitchJobPayload
+    from vonk_control.catalog.revision_collection import operation_tokens
+    from vonk_control.jobs.documents import RunSwitchJobPayload
     from vonk_control.run_switch_contract import (
         RunSwitchOperationResult,
         RunSwitchRuntimeInstallResult,

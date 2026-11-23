@@ -17,7 +17,7 @@ from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from ..categorized_errors import (
     MissingRecord,
 )
-from ..job_documents import (
+from ..jobs.documents import (
     RunSwitchCleanupIntent,
     RunSwitchProfileStopIntent,
     RunSwitchRunIntent,

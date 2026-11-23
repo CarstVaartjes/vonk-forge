@@ -13,15 +13,15 @@ from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
@@ -497,7 +497,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert detail_payload["document"]["topology"] == serialize_json_value(
         expected_recipe.topology
     )
-    from vonk_control.library_contract import RecipeDetailResponse
+    from vonk_control.library.contract import RecipeDetailResponse
 
     consumed_detail = RecipeDetailResponse.model_validate_json(
         json.dumps(detail_payload)
@@ -1536,9 +1536,9 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.auth import TokenCodec
-    from vonk_control.catalog_api import _managed_sync
-    from vonk_control.catalog_service import CatalogService
-    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog.api import _managed_sync
+    from vonk_control.catalog.service import CatalogService
+    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
     from vonk_control.library_projection import LibraryProjection
     from vonk_control.models import Base
     from vonk_control.source_bundles import SourceBundleStore
@@ -1550,7 +1550,7 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     repository = Path(__file__).resolve().parents[2]
     monkeypatch.setattr(tests, "__path__", [*tests.__path__, str(repository / "tests")])
     monkeypatch.setattr(sys, "path", list(sys.path))
-    lifecycle = import_module("tests.test_spark_lifecycle_runner")._module()
+    lifecycle = import_module("tests.spark_lifecycle_runner_support")._module()
     fixture = lifecycle._artifact_job_fixture(lifecycle._canonical_canary_fixture(ROOT))
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
@@ -1651,7 +1651,7 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
 
 def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents():
     """The transport must carry pins and selectors without executable documents."""
-    from vonk_control.library_contract import RecipeLibraryResponse
+    from vonk_control.library.contract import RecipeLibraryResponse
 
     vector = Path(__file__).resolve().parents[2] / "tests/fixtures/library-list.json"
     raw = json.loads(vector.read_text())

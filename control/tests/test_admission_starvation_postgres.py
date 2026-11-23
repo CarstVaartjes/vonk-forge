@@ -10,7 +10,6 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_control import telemetry_maintenance
 from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -20,7 +19,8 @@ from vonk_control.admission_locking import (
     patient_admission,
 )
 from vonk_control.models import AgentNode, AgentNodeContact, Base, NodeTelemetrySample
-from vonk_control.observation_delivery import ObservationDeliveryMiddleware
+from vonk_control.observation.delivery import ObservationDeliveryMiddleware
+from vonk_control.telemetry import maintenance as telemetry_maintenance
 
 from .node_contacts import contact_row
 

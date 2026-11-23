@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
 from .model_primitives import Base
-from .stored_json import validate_row_write
+from .stored.json_values import validate_row_write
 
 
 def insert_identity[Row: Base](

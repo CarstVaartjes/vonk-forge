@@ -39,12 +39,12 @@ from .admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from .catalog_revision_contract import published_steady_peaks
+from .catalog.revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
-from .gpu_health import gpu_health_reason
+from .gpu.health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .install_admission.contracts import reason_documents
-from .inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
+from .inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from .legal_admission import stored_model_display, territorial_admission
 from .load_swap import swap_capacity
 from .machine_states import rank_installed, reservation_live
@@ -88,7 +88,7 @@ from .resource_planning import (
     memory_reservation_kind,
     plan_capacity,
 )
-from .stored_states import CatalogRevisionState, ClusterMappingState
+from .stored.states import CatalogRevisionState, ClusterMappingState
 from .topology import Placement, TopologyError, validate_topology
 
 _PORT_CONFLICTS = {

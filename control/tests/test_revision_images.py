@@ -31,7 +31,7 @@ from vonk_control.revision_images import (
     revision_images,
 )
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE,
     ARCHIVE_SHA,
     IMAGE_DIGEST,
@@ -389,7 +389,7 @@ def test_saved_profile_selector_remains_editable_during_image_removal(sessions) 
     )
     from vonk_control.fleet_profiles import FleetProfileService
 
-    from .test_fleet_profiles import _seed
+    from .fleet_profiles_support import _seed
 
     with sessions.begin() as session:
         recipe_id, revision_id = _seed(sessions)

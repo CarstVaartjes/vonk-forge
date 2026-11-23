@@ -37,7 +37,7 @@ from ..model_primitives import (
     _state_in,
 )
 from ..repeated_evidence_contract import RepeatedEvidence
-from ..stored_json import ContractJSON
+from ..stored.json_values import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 

@@ -24,16 +24,16 @@ from vonk_agent_protocol.contracts import canonical_payload
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
 from .. import agent_operation_states
-from ..agent_job_contract import ClaimFacts
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
+from ..jobs.agent_contract import ClaimFacts
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,
@@ -393,7 +393,7 @@ def _anchor_start_budget(
     """
 
     # job_documents reaches this module through the build contracts.
-    from ..job_documents import RecipeStartParent
+    from ..jobs.documents import RecipeStartParent
 
     job = session.get(Job, operation.parent_job_id, with_for_update=True)
     if job is None:

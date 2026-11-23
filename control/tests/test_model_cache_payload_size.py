@@ -17,8 +17,8 @@ from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.models import Base, ModelCacheOperation
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .test_model_cache import _artifact, cache  # noqa: F401
-from .test_recipe_image_availability import (
+from .model_cache_support import _artifact, cache  # noqa: F401
+from .recipe_image_availability_support import (
     Transport,
     _add_revision,
     _download_preview,

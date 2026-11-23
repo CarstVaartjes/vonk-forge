@@ -72,14 +72,12 @@ class RenewalConflictRevocationUncertain(UnknownOutcomeError, RuntimeError):
         super().__init__(message, reason=WaitReason.OBSERVATION_UNAVAILABLE)
 
 
-from ..enrollment_contract import (
+from .contract import (
     EnrollmentGrant as EnrollmentGrant,  # noqa: PLC0414 -- shared export
 )
-from ..enrollment_contract import EnrollmentIssuanceClaim as _IssuanceClaim
-from ..enrollment_contract import EnrollmentRotationClaim as _RotationClaim
-from ..enrollment_contract import (
-    EnrollmentRotationRecoveryClaim as _RotationRecoveryClaim,
-)
+from .contract import EnrollmentIssuanceClaim as _IssuanceClaim
+from .contract import EnrollmentRotationClaim as _RotationClaim
+from .contract import EnrollmentRotationRecoveryClaim as _RotationRecoveryClaim
 
 __all__ = [
     "EnrollmentGrant",

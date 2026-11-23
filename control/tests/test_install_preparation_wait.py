@@ -15,9 +15,10 @@ from vonk_control.recipe_image_availability import (
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_forge_contracts import read_recipe
 
-from .test_recipe_operations import _CanonicalImageTransport, read_recipe
-from .test_run_switch_operations import _cold_compile_switch
+from .recipe_operations_support import _CanonicalImageTransport
+from .run_switch_operations_support import _cold_compile_switch
 
 
 def _install_waits(switch, monkeypatch: pytest.MonkeyPatch, *, times: int) -> list:

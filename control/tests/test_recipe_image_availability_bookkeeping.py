@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     RecipeImageCode,
 )
-from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.recipe_image_availability import (
@@ -30,10 +30,10 @@ from vonk_control.recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-from vonk_control.stored_json import Residue, read_row_column
+from vonk_control.stored.json_values import Residue, read_row_column
 from vonk_forge_contracts import RecipeDefinition
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     _add_revision,
     _recipe,
     _runtime,
@@ -484,7 +484,7 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     tmp_path: Path,
 ) -> None:
     """A vanished exact child must not keep its parent's execution claim retrying."""
-    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.jobs.documents import AvailabilityModelChild
     from vonk_control.model_cache import ModelCacheNotFound
     from vonk_control.strict_json import serialize_json_value
 
@@ -552,14 +552,14 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     from vonk_control.recovery_policy import RecoveryPolicy
 
     from .non_blocking import assert_ended_without_blocking
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
         _reference_receipt,
     )
+    from .recipe_removal_review_support import remove_after_review
+    from .runtime_image_fixtures import place_test_image
 
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite:///{tmp_path / 'terminal-removal.sqlite'}")
@@ -684,7 +684,7 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
 ) -> None:
     """A read fault must not turn verified image availability into a refusal."""
     from sqlalchemy.exc import SQLAlchemyError
-    from vonk_control.job_documents import AvailabilityModelChild
+    from vonk_control.jobs.documents import AvailabilityModelChild
     from vonk_control.model_cache import ModelCacheError
     from vonk_control.strict_json import serialize_json_value
 

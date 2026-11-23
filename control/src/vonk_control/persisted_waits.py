@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 
 from .agent_operation_facts import aware
 from .models.waits import ScheduledWaitOwner
-from .operation_blockers import BlockingOperation, OperationBlocker, make_blocker
+from .operations.blockers import BlockingOperation, OperationBlocker, make_blocker
 from .strict_json import warn_unreadable_once
 from .wait_contract import QueueWait, WaitEvidence
 
@@ -208,7 +208,7 @@ if TYPE_CHECKING:
 
 def _job_owns_contract(owner: Job, contract: type[BaseModel]) -> bool:
     # Opaque engine content is never interpreted as Controller scheduling data.
-    from .stored_json import binding_for
+    from .stored.json_values import binding_for
 
     schema = binding_for("jobs", "payload").contract_for(owner.kind)
     return schema is contract or contract in get_args(schema)
@@ -241,7 +241,7 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     paths: tuple[tuple[str, ...], ...] = ()
     document: object = None
     if isinstance(owner, Job):
-        from .job_documents import AvailabilityJobPayload, RunSwitchJobPayload
+        from .jobs.documents import AvailabilityJobPayload, RunSwitchJobPayload
         from .recipe_image_removal_contract import RecipeCacheRemovalOwner
         from .recipe_update_contract import RecipeUpdateDocument
 
@@ -311,7 +311,7 @@ def owner_identity(
         kind = previous.owner_kind if previous else WaitOwnerKind.JOB
         if previous is None:
             from .agent_upgrade_contract import AgentUpgradeRolloutPayload
-            from .job_documents import (
+            from .jobs.documents import (
                 AvailabilityJobPayload,
                 RecipeBuildCleanupParent,
                 RecipeBuildParent,
@@ -432,7 +432,7 @@ def initialize_wait[T: ScheduledWaitOwner](owner: T, kind: WaitOwnerKind) -> T:
     """Give a new queued owner its initial wait, before it is flushed."""
     from uuid import uuid4
 
-    from . import job_states
+    from .jobs import states as job_states
     from .models import (
         AgentOperation,
         FleetProfileApplication,

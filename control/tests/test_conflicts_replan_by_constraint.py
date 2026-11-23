@@ -21,14 +21,14 @@ from vonk_control.admission_locking import (
     admitting,
 )
 from vonk_control.fleet_profiles import FleetProfileConflict
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.model_primitives import Base
 from vonk_control.models import FleetProfileApplication, Job, ResourceReservation
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .recipe_operations_support import NOW
 from .test_profile_colocated_ports import _admitted, _promises, _two_on_one_spark
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import NOW
 
 
 def _unique_keys() -> dict[str, tuple[str, tuple[str, ...]]]:

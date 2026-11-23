@@ -186,12 +186,12 @@ def test_wrong_successor_is_discarded_and_original_continuation_recovers(
 
 @pytest.mark.parametrize("code", ["cache.identity_mismatch", "cache.revoked_record"])
 def test_bookkeeping_blockers_do_not_veto_new_removal(code):
-    from tests.cluster_profiles.test_controller_cli import (
+    from tests.cluster_profiles.controller_cli_support import (
         FakeClient,
-        _recipe_removal_receipt,
         _removal_review,
         run,
     )
+    from tests.cluster_profiles.test_controller_cli_part1 import _recipe_removal_receipt
 
     selector = "vision"
     key = "11111111-1111-4111-8111-111111111111"
@@ -217,12 +217,12 @@ def test_bookkeeping_blockers_do_not_veto_new_removal(code):
 
 def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitted():
     from cluster_profiles.control_client import ControlForbidden
-    from tests.cluster_profiles.test_controller_cli import (
+    from tests.cluster_profiles.controller_cli_support import (
         FakeClient,
-        _recipe_removal_receipt,
         _removal_review,
         run,
     )
+    from tests.cluster_profiles.test_controller_cli_part1 import _recipe_removal_receipt
 
     selector = "vision"
     key = "11111111-1111-4111-8111-111111111111"
@@ -286,7 +286,7 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
 
 def test_peer_broken_submission_response_reconciles_the_original_without_replay():
     from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     key = "11111111-1111-4111-8111-111111111111"
     application = "22222222-2222-4222-8222-222222222222"
@@ -335,7 +335,7 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
 
     from cluster_profiles.cli_states_generated import SUCCEEDED
     from cluster_profiles.control_client import ControlObservationUnavailable
-    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     key = "11111111-1111-4111-8111-111111111111"
     application = "33333333-3333-4333-8333-333333333333"
@@ -398,7 +398,7 @@ def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_wor
     monkeypatch, fault
 ):
     from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     clock = _Clock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)
@@ -521,7 +521,7 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
     monkeypatch,
 ):
     from cluster_profiles.cli_states_generated import SUCCEEDED
-    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     identity = "33333333-3333-4333-8333-333333333333"
     path = f"/api/profile/applications/{identity}"
@@ -566,7 +566,7 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
 def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
     monkeypatch, argv, method, path, ready, attempts, persistent
 ):
-    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+    from tests.cluster_profiles.controller_cli_support import FakeClient, run
 
     clock = _Clock()
     monkeypatch.setattr("time.monotonic", clock.monotonic)

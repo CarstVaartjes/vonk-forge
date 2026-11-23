@@ -20,9 +20,10 @@ from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import WaitReason
-from vonk_control import artifact_blob_store, route_runtime, runtime_image_preparation
+from vonk_control import artifact_blob_store, runtime_image_preparation
 from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
-from vonk_control.route_runtime import AtomicRouteBundlePublisher
+from vonk_control.gateway import route_runtime
+from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
 
 pytestmark = pytest.mark.lane
 

@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
@@ -19,9 +19,9 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
 
+from .recipe_operations_support import started_recipe
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import started_recipe
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
 
 
 @pytest.mark.parametrize("node_count", [1, 2])

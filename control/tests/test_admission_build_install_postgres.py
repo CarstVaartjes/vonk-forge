@@ -9,8 +9,8 @@ from vonk_control.install_admission import InstallAdmissionBusy
 from vonk_control.models import AgentNode, Job, RecipeBuild, RecipeInstallation
 from vonk_control.recipe_builds import RecipeBuildService
 
-from .test_recipe_builds import setup as setup_build
-from .test_recipe_operations import setup_services
+from .recipe_builds_support import setup as setup_build
+from .recipe_operations_support import setup_services
 
 
 def test_source_build_plan_writer_and_install_retry_share_builder_admission(

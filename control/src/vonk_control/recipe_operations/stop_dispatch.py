@@ -36,7 +36,8 @@ from ..distributed_recovery import (
     run_node_reports_absent,
     settle_absent_run_in_session,
 )
-from ..job_documents import (
+from ..gateway.litellm import ServedModelInfo
+from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     RecipeStopParent,
@@ -48,7 +49,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..litellm import ServedModelInfo
 from ..models import (
     Job,
     RecipeRun,
@@ -71,7 +71,7 @@ from ..recipe_stop_payloads import (
     durable_run_stop_payloads,
 )
 from ..run_admission import RunAdmissionBusy
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import RecipeOperationContext
 from .errors import (

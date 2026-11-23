@@ -17,7 +17,7 @@ from vonk_agent_protocol import AgentOperation as WireOperation
 from vonk_agent_protocol import ReservationState, canonical_message
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import outstanding_disk_reservation_bytes
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -26,8 +26,8 @@ from vonk_control.models import Job, ResourceReservation
 from vonk_control.owner_liveness import OwnerKind
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE, reservation_owner
 
+from .recipe_builds_support import setup
 from .test_build_cancellation_recovery import _issue, _services
-from .test_recipe_builds import setup
 
 
 def _counted(sessions, node_id):

@@ -33,7 +33,7 @@ from vonk_forge_contracts import (
     RecipeDefinition,
 )
 
-from ..catalog_revision_contract import read_catalog_document
+from ..catalog.revision_contract import read_catalog_document
 from ..installation_transitions import IN_FLIGHT
 from ..machine_states import (
     CertificateStateField,
@@ -41,7 +41,7 @@ from ..machine_states import (
     RouteStateField,
     RunStateField,
 )
-from ..metrics_contract import PrometheusAttention
+from ..metrics.contract import PrometheusAttention
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,
@@ -52,9 +52,9 @@ from ..models import (
     RunNode,
 )
 from ..recipe_update_notice import RecipeUpdateNotice
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel
-from ..telemetry import TelemetrySampleView
+from ..telemetry.samples import TelemetrySampleView
 from .host_checks import HostCheck, HostCheckAdvice, Text1024
 
 """Bounded typed projection of PostgreSQL-authoritative Fleet state."""

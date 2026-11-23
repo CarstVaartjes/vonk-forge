@@ -35,13 +35,13 @@ from ..agent_jobs import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
 from ..http_errors import temporary_http_answer
-from ..inventory_repository import (
+from ..inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
     _validated_inventory,
 )
-from ..library_contract import UuidId
+from ..library.contract import UuidId
 from ..logging import log_event
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
@@ -59,7 +59,7 @@ from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..run_switch_operations.evidence_waits import wake_evidence_waits
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
-from ..telemetry import TelemetryRepository
+from ..telemetry.samples import TelemetryRepository
 from ..untracked_installations import (
     run_wanted_here,
     untracked_installations,

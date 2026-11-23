@@ -29,7 +29,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response, _not_adopted
-from vonk_control.observation_transfer import (
+from vonk_control.observation.transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
     ObservationTransferComplete,

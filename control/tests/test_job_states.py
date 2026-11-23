@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from vonk_agent_protocol import LifecycleState
-from vonk_control import job_states
+from vonk_control.jobs import states as job_states
 
 
 def test_a_selection_names_only_the_core_word_of_a_state() -> None:

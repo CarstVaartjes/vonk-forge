@@ -40,7 +40,7 @@ from vonk_control.enrollment import (
     EnrollmentGrant,
     EnrollmentService,
 )
-from vonk_control.enrollment_contract import (
+from vonk_control.enrollment.contract import (
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
 )

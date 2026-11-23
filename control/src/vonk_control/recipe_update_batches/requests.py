@@ -21,7 +21,7 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..auth import MUTATION_ROLES
-from ..catalog_queries import active_head_revision
+from ..catalog.queries import active_head_revision
 from ..models import CatalogDocumentRevision, Job, User
 from ..recipe_image_availability import (
     RecipeImageAvailabilityInvalid,
@@ -42,7 +42,7 @@ from ..revision_images import revision_images
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:

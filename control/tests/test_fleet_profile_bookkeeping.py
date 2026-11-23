@@ -38,8 +38,7 @@ from vonk_control.models import (
     FleetProfileApplication,
 )
 
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     NOW,
     _database,
     _exact_preparation,
@@ -49,6 +48,7 @@ from .test_fleet_profiles import (
     _SwitchAdapter,
     _uuid,
 )
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 
 def _service(sessions, **options):
@@ -501,7 +501,7 @@ def test_planner_observation_damage_admits_load_and_reobserves(damage):
     from vonk_agent_protocol import LifecycleState
     from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
-    from .test_fleet_profiles import _assessment
+    from .fleet_profiles_support import _assessment
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -563,7 +563,7 @@ def test_permanent_planner_unknown_waits_past_the_old_cap_until_a_fresh_request(
     from vonk_agent_protocol import LifecycleState
     from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
 
-    from .test_fleet_profiles import _assessment
+    from .fleet_profiles_support import _assessment
 
     sessions = _database()
     _, revision_id = _seed(sessions)
@@ -673,7 +673,7 @@ def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
 
     from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_control.stored_json import write_guard_mode
+    from vonk_control.stored.json_values import write_guard_mode
 
     sessions = _database()
     _, revision_id = _seed(sessions)

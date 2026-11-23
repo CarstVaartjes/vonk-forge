@@ -37,7 +37,7 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCacheSet
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.contract import AvailabilityOperationFailure
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS, REMOVAL_BATCH_SECONDS

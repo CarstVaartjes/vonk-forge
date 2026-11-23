@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import JsonValue
 from vonk_forge_contracts.recipe import Scalar
 
-from .stored_json import ExternalPassthrough
+from .stored.json_values import ExternalPassthrough
 
 EngineArgumentValue = Annotated[
     JsonValue,

@@ -13,7 +13,7 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.db import initialize_database
 from vonk_control.db import startup as startup_owner
 from vonk_control.models import NodeInventorySnapshot
-from vonk_control.stored_json import ContractJSON
+from vonk_control.stored.json_values import ContractJSON
 
 
 def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None:
@@ -214,7 +214,7 @@ def test_runtime_items_migration_is_atomic_and_does_not_invent_capacity(
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_control.db import node_facts
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
     from vonk_control.models import (
         AgentNode,
         AgentNodeProfile,
@@ -323,7 +323,7 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
     from sqlalchemy import insert, inspect
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.inventory_items import inventory_items, record_runtime
+    from vonk_control.inventory.items import inventory_items, record_runtime
     from vonk_control.models import AgentNode, Base
 
     Base.metadata.create_all(postgres_engine)
@@ -391,10 +391,10 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
     """Catches a moved JSON owner permanently refusing every subsequent report."""
     from sqlalchemy import update
     from vonk_agent_protocol import UnknownOutcomeError
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
     from vonk_control.models import AgentNode, NodeInventoryItemsSnapshot
 
-    from .test_agent_api import NODE_A, agent_headers, make_agent_system
+    from .agent_api_support import NODE_A, agent_headers, make_agent_system
 
     client, services, _, _ = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
@@ -444,10 +444,10 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
 
     from sqlalchemy import text
     from vonk_agent_protocol.inventory import InventoryRequest
-    from vonk_control.inventory_repository import InventoryRepository
+    from vonk_control.inventory.repository import InventoryRepository
 
+    from .agent_api_support import NODE_A, agent_headers, make_agent_system
     from .test_agent_acceptance_postgres import _inventory
-    from .test_agent_api import NODE_A, agent_headers, make_agent_system
 
     # Every injected field is optional evidence declared by the single wire
     # contract; no parser or admission fallback is used for the damaged bytes.

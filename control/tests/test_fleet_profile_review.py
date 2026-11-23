@@ -37,20 +37,20 @@ from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 from cluster_profiles.cli_render import render_payload
 
-from .non_blocking import assert_ended_without_blocking
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import (
+from .fleet_profiles_support import (
     NOW,
     _assessment,
     _database,
-    _exact_cleanup_profile,
     _exact_preparation,
     _input,
     _node_id,
     _seed,
     _SwitchAdapter,
 )
-from .test_recipe_operations import started_recipe
+from .non_blocking import assert_ended_without_blocking
+from .recipe_operations_support import started_recipe
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
+from .test_fleet_profiles_part3 import _exact_cleanup_profile
 
 
 def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
@@ -58,8 +58,8 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
 ):
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .recipe_operations_support import setup_services
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
@@ -682,8 +682,8 @@ def _recheck_world(tmp_path, postgres_engine):
     """A real planner and profile service over PostgreSQL, with a movable clock."""
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
+    from .recipe_operations_support import setup_services
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )

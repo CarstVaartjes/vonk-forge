@@ -19,15 +19,16 @@ from sqlalchemy import event, text
 from sqlalchemy.orm import sessionmaker
 from starlette.types import Message, Scope
 from vonk_agent_protocol import canonical_message
-from vonk_control import db, observation_transfer
+from vonk_control import db
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.db import connections as connection_owner
 from vonk_control.fleet_projection import FleetNode, FleetProjection, FleetSnapshot
 from vonk_control.models import AgentNode, AgentNodeContact, AgentNodeProfile, Base
-from vonk_control.observation_transfer import ObservationTransferRecord
-from vonk_control.platform_observation import PlatformObservation, PlatformObserver
+from vonk_control.observation import transfer as observation_transfer
+from vonk_control.observation.platform import PlatformObservation, PlatformObserver
+from vonk_control.observation.transfer import ObservationTransferRecord
 from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.observation_transfer_reader import receive_observation

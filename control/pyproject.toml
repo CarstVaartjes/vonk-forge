@@ -16,7 +16,6 @@ dependencies = [
   "sigstore==4.5.1",
   "certifi==2026.10.19",
   "sqlalchemy>=2.1.1",
-  "tomli-w>=1.2.0",
   "uvicorn>=0.54.0",
 ]
 

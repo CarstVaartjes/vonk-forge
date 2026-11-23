@@ -19,6 +19,10 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProjectionCode, RouteState, RunState
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.gateway.route_runtime import (
+    ActivationMarker,
+    AtomicRouteBundlePublisher,
+)
 from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 from vonk_control.offline_stops import deferred_stop_nodes
 from vonk_control.presence import ManagementAddressPolicy
@@ -30,14 +34,10 @@ from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteService,
 )
-from vonk_control.route_runtime import (
-    ActivationMarker,
-    AtomicRouteBundlePublisher,
-)
 
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     _required,
     installed_recipe,

@@ -56,16 +56,16 @@ ENTRY_POINTS: dict[str, frozenset[str]] = {
     ),
     "vonk_control.api": frozenset({"production_app"}),
     "vonk_control.auth": frozenset({"TokenCodec"}),
-    "vonk_control.catalog_service": frozenset({"CatalogService"}),
-    "vonk_control.catalog_sync": frozenset(
+    "vonk_control.catalog.service": frozenset({"CatalogService"}),
+    "vonk_control.catalog.sync": frozenset(
         {"CatalogSyncError", "CatalogSyncView", "ManagedRecipeCatalogSyncService"}
     ),
-    "vonk_control.catalog_sync_contract": frozenset(
+    "vonk_control.catalog.sync_contract": frozenset(
         {"CatalogSyncTrigger", "ManagedCatalogSyncRequest", "reviewed_catalog_content"}
     ),
     "vonk_control.db": frozenset({"build_engine", "session_factory"}),
     # The release reader's own index parser and package decoder.
-    "vonk_control.recipe_packages": frozenset(
+    "vonk_control.recipe_packages.client": frozenset(
         {"RecipePackageClient", "load_recipe_package"}
     ),
     "vonk_control.settings": frozenset({"Settings"}),
@@ -285,17 +285,17 @@ def test_installed_controller_programs_use_only_the_stable_surface() -> None:
 def test_building_a_controller_data_type_is_refused() -> None:
     program = (
         "from vonk_control.recipe_library_types import CatalogModel\n"
-        "from vonk_control.recipe_packages import RecipePackageClient\n"
+        "from vonk_control.recipe_packages.client import RecipePackageClient\n"
         "import vonk_forge_contracts\n"
         "def f():\n"
-        "    from vonk_control.catalog_sync import _private\n"
+        "    from vonk_control.catalog.sync import _private\n"
         "    return __import__('vonk_control.models')\n"
     )
 
     assert set(surface_violations(program)) == {
         "vonk_control.recipe_library_types.CatalogModel",
         "vonk_forge_contracts",
-        "vonk_control.catalog_sync._private",
+        "vonk_control.catalog.sync._private",
         "__import__",
     }
 

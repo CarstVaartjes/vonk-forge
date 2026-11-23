@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.reason_codes import ProjectionCode
 from vonk_agent_protocol.telemetry import HostResourceSample
-from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
@@ -25,7 +24,8 @@ from vonk_control.models import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from vonk_control.telemetry import (
+from vonk_control.telemetry import maintenance as telemetry_maintenance
+from vonk_control.telemetry.samples import (
     TelemetryRepository,
 )
 
@@ -339,7 +339,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
 def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     sessions,
 ) -> None:
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )
@@ -373,7 +373,7 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
             )
         )
 
-    from vonk_control.inventory_items import inventory_items
+    from vonk_control.inventory.items import inventory_items
 
     from .runtime_identity_support import inventory_items_fixture
 

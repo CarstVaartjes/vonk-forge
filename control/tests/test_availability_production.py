@@ -24,14 +24,19 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
-    RecipeImageAvailabilityScheduler,
+    build_observation as availability_production_obs,
+)
+from vonk_control.availability_production import production as availability_production
+from vonk_control.availability_production.production import (
     build_recipe_image_availability,
 )
+from vonk_control.availability_production.scheduler import (
+    RecipeImageAvailabilityScheduler,
+)
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -70,12 +75,12 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .recipe_builds_support import setup as _build_setup
+from .recipe_image_availability_support import _typed_availability_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image
 from .test_model_cache_availability_regressions import _drain
-from .test_recipe_builds import _write_controller_build_receipt
-from .test_recipe_builds import setup as _build_setup
-from .test_recipe_image_availability import _typed_availability_payload
+from .test_recipe_builds_part1 import _write_controller_build_receipt
 
 
 class _Service(RecipeImageAvailabilityService):
@@ -1685,7 +1690,7 @@ def test_a_noisy_stream_cannot_crowd_out_the_others_cause() -> None:
     )
     assert len(noise) > 1024
     for limit in (256, 1024):
-        tail = availability_production._step_output_tail(diagnostics, limit)
+        tail = availability_production_obs._step_output_tail(diagnostics, limit)
         assert len(tail) <= limit
         assert "Failed to build flash-attn" in tail
         assert tail.endswith("while running runtime: exit status 1")
@@ -1733,7 +1738,7 @@ def test_podman_echo_of_the_step_never_stands_in_for_its_cause(
     stderr: str, truncated: bool, cause: str | None
 ) -> None:
     diagnostics = _build_diagnostics("", stderr, stderr_truncated=truncated)
-    tail = availability_production._step_output_tail(diagnostics, 1024)
+    tail = availability_production_obs._step_output_tail(diagnostics, 1024)
     for fragment in ("curl --fail", "configuring stage", "building at STEP"):
         assert fragment not in tail, tail
     if cause is not None:
@@ -2540,7 +2545,7 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
                 )
             )
     with sessions() as session:
-        progress = availability_production._build_progress(
+        progress = availability_production_obs._build_progress(
             session, "build-job", "builder"
         )
         assert progress is not None
@@ -2548,7 +2553,7 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
         assert progress.completed_bytes == 128
         assert progress.total_bytes == 256
         assert (
-            availability_production._build_progress(session, "build-job", "other")
+            availability_production_obs._build_progress(session, "build-job", "other")
             is None
         )
         current = session.get(AgentOperationAttempt, "attempt-2")
@@ -2557,7 +2562,7 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
         current.progress = stale_progress
         session.flush()
         with pytest.raises(Exception) as _ending:
-            availability_production._build_progress(session, "build-job", "builder")
+            availability_production_obs._build_progress(session, "build-job", "builder")
 
 
 def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> None:

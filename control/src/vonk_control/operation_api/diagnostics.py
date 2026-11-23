@@ -18,7 +18,7 @@ from ..agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from ..bounded_json import mapping
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..lifecycle.agent_operation import retry_scheduled
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job

@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import canonical_message
-from vonk_control.job_documents import RunSwitchRunIntent
+from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.models import RunSwitchJournalRepairPending
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,

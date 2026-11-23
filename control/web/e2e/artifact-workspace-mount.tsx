@@ -4,7 +4,7 @@ import {ApiClient} from "../src/api/client";
 import {validateComponent} from "../src/api/contract-json";
 import type {LibraryViewRecipeDetail, RecipeDefinition} from "../src/api/types";
 import {withObservedRuns} from "../src/pages/library";
-import {ArtifactJobWorkspace} from "../src/components/artifact-job-workspace";
+import {ArtifactJobWorkspace} from "../src/components/artifact-job/artifact-job-workspace";
 
 /** Mount the real component using schema-validated native producer documents. */
 export async function mountArtifactWorkspace(definitionJson: string, revisionId: string, digest: string): Promise<void> {

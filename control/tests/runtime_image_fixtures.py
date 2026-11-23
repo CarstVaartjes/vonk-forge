@@ -71,7 +71,7 @@ def refresh_inventory(sessions, now) -> None:
     """Publish current physical fixture evidence after advancing an injected clock."""
 
     from sqlalchemy import select
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )

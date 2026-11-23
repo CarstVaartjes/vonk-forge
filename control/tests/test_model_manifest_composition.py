@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.artifact_reference_scan import model_set_objects
 from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
@@ -29,7 +29,7 @@ from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
-from .test_recipe_image_availability import _runtime, _service
+from .recipe_image_availability_support import _runtime, _service
 
 
 @pytest.mark.parametrize("same_source", [False, True])

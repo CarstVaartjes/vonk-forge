@@ -91,8 +91,8 @@ def test_run_switch_warns_above_default_without_requiring_supported_levels() -> 
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import RunSwitchCode
     from vonk_agent_protocol.inventory import HostSettings
-    from vonk_control.gpu_clock_validation import assess_gpu_clock
-    from vonk_control.inventory_repository import (
+    from vonk_control.gpu.clock_validation import assess_gpu_clock
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )
@@ -178,7 +178,7 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     from vonk_agent_protocol.gpu_clock import GpuClockObservation
     from vonk_control.fleet_projection import FleetProjection
     from vonk_control.models import AgentNode, Base
-    from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+    from vonk_control.telemetry.samples import TelemetryRepository, TelemetrySample
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -242,7 +242,7 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
     """Catches dropping clock intent on GB10 and relying on another boot writer."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
-    from vonk_control.gpu_clock import gpu_clock_start_intent
+    from vonk_control.gpu.clock import gpu_clock_start_intent
     from vonk_control.models import Base
 
     engine = create_engine("sqlite://")
@@ -252,13 +252,14 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
             generation=1, range=GpuClockRange(min_mhz=300, max_mhz=maximum)
         )
         monkeypatch.setattr(
-            "vonk_control.gpu_clock.selected_gpu_clock", lambda *_: desired
+            "vonk_control.gpu.clock.selected_gpu_clock", lambda *_: desired
         )
         assert gpu_clock_start_intent(session, NODE) == desired
 
 
-from .test_agent_api import NODE_A, agent_headers, make_agent_system, telemetry_payload
-from .test_agent_api import agent_system as _agent_system
+from .agent_api_support import NODE_A, agent_headers, make_agent_system
+from .agent_api_support import agent_system as _agent_system
+from .test_agent_api_part1 import telemetry_payload
 
 agent_system = _agent_system
 

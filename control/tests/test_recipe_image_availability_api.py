@@ -18,7 +18,7 @@ from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
     seal_cache_removal_review,
 )
-from vonk_control.job_documents import AvailabilityJobResult, AvailabilityModelChild
+from vonk_control.jobs.documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
@@ -640,7 +640,7 @@ def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_
     from vonk_control.models import Base
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE_SHA,
         Transport,
         _add_head,

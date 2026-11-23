@@ -30,7 +30,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_jobs import ArtifactJobInvalid, ArtifactJobUnavailableError
 from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.failure_evidence import FailureEvidenceService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -47,17 +47,17 @@ from vonk_control.recipe_operations import RecipeRetryLater
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
 from .agent_fences import fenced_operation
-from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
-from .runtime_identity_support import claim_agent
-from .test_artifact_job_lifecycle import _issued_job
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     artifact_create_request,
     create_artifact_job,
     finalized_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
-from .test_recipe_operations import _issue_exact_stop_grant
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
+from .runtime_identity_support import claim_agent
+from .test_artifact_job_lifecycle import _issued_job
+from .test_recipe_operations_part5 import _issue_exact_stop_grant
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -487,8 +487,8 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     exact cleanup and the artifact job's full terminal retention grace.
     """
 
-    from .test_artifact_jobs import MutableClock
-    from .test_recipe_operations import NOW
+    from .artifact_jobs_support import MutableClock
+    from .recipe_operations_support import NOW
 
     sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine

@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCANNED = ("src", "scripts", "control/src", "tests/acceptance")
 #: Every reader of a recipe's declared serving checks, and why it needs no fitting.
 CONSUMERS = {
-    "control/src/vonk_control/recipe_packages/__init__.py": "checks package file closure; sends nothing",
+    "control/src/vonk_control/recipe_packages/archive.py": "checks package file closure; sends nothing",
     "scripts/validate-recipe-library": "checks package file closure; sends nothing",
     "scripts/qualify-recipe": "sends through execute_http_check with the recipe's chat facts",
     "tests/acceptance/test_spark_lifecycle.py": "synthetic fixture canary; its recipe publishes no reasoning",

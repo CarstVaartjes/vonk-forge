@@ -28,8 +28,8 @@ from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
-from .operation_blockers import OperationBlocker
-from .operation_contract import (
+from .operations.blockers import OperationBlocker
+from .operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
     OperationProgress,
@@ -54,7 +54,7 @@ from .recipe_image_availability_view_contract import RecipeCacheRemovalStatus
 from .recipe_image_removal_contract import RecipeRemovalUnavailableView
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
-from .stored_json import Residue
+from .stored.json_values import Residue
 from .strict_json import StrictJSONModel, read_stored_model
 
 # One named type per closed set, shared by the contract field and every

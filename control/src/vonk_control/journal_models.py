@@ -24,7 +24,7 @@ from .run_switch_journal_contract import (
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
-from .stored_json import ContractJSON
+from .stored.json_values import ContractJSON
 
 
 class RunSwitchJournalRepairPending(Base):

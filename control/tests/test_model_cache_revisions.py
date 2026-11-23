@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_collection import CatalogRevisionCollector
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_collection import CatalogRevisionCollector
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.errors import ModelCacheConflictUnknown
@@ -27,8 +27,8 @@ from vonk_control.models import (
 from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
+from .model_cache_support import _artifact, _canonical_model, _download
 from .removal_settle import advance_until_ended
-from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model, _removal_service
 
 

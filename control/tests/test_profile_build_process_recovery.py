@@ -25,7 +25,7 @@ from vonk_control.distribution_executor import CompositeDistributionPhaseExecuto
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -57,20 +57,20 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_control.source_bundles import SourceBundleStore
 
-from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_lifecycle_preflight import _finish as complete_preflight
-from .test_profile_build_memory import _accepted_build_profile
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     ConcurrentPublisher,
     RecordingQueue,
     _CanonicalModelCache,
     complete_started_recipe,
 )
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _target_copy_evidence,
 )
+from .runtime_image_fixtures import place_test_image, remove_test_image
+from .test_lifecycle_preflight import _finish as complete_preflight
+from .test_profile_build_memory import _accepted_build_profile
 
 
 class _PreparedArtifactExecutor(RecordingArtifactExecutor):
@@ -370,7 +370,7 @@ def _worker_process(config: dict, crash: str) -> None:
                 )
                 return
             from vonk_control.run_switch_contract import RunSwitchOperationResult
-            from vonk_control.stored_json import read_row_column
+            from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before
             # the accepted observation budget. No real-time sleep or new

@@ -28,7 +28,7 @@ from vonk_control.models import (
 )
 from vonk_control.operator_receipt_contract import AcceptanceReceipt, ReceiptCode
 
-from .test_agent_api import (
+from .agent_api_support import (
     NODE_A,
     NODE_C,
     PACKAGED_RUNTIME_IDENTITY,
@@ -38,9 +38,9 @@ from .test_agent_api import (
     enrollment_grant,
     make_agent_system,
     parent,
-    telemetry_payload,
     valid_enrollment_body,
 )
+from .test_agent_api_part1 import telemetry_payload
 from .test_operator_acceptance_postgres import DropFirstResponse
 
 
@@ -574,8 +574,8 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
     from vonk_control.source_bundles import SourceBundleStore
 
-    from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
-    from .test_recipe_operations import NOW
+    from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
+    from .recipe_operations_support import NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine

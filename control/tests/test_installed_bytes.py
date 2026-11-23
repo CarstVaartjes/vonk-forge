@@ -82,7 +82,7 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
         MAX_REPORTED_INSTALLATIONS,
         InventoryRequest,
     )
-    from vonk_control.inventory_repository import (
+    from vonk_control.inventory.repository import (
         InventoryRepository,
         NodeInventoryReport,
     )

@@ -63,72 +63,72 @@
       "reason": "method-signature interface over the generated schema types (client seam for tests); declares no data fields"
     },
     {
-      "file": "control/web/src/components/admin-menu.tsx",
+      "file": "control/web/src/components/ui/admin-menu.tsx",
       "type": "AdminMenuProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/app-shell.tsx",
+      "file": "control/web/src/components/ui/app-shell.tsx",
       "type": "AppShellProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/app-shell.tsx",
+      "file": "control/web/src/components/ui/app-shell.tsx",
       "type": "Operator",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "ArtifactHashProgress",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "HashWorker",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.ts",
       "type": "WorkerMessage",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.worker.ts",
       "type": "HashRequest",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "file": "control/web/src/components/artifact-job/artifact-hash.worker.ts",
       "type": "WorkerScope",
       "reason": "browser-local upload hashing progress and worker messages; not API data"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "ActiveRun",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "CancelRecovery",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "ContractState",
       "reason": "UI-only discriminated union for one screen or hook; not an API document"
     },
     {
-      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "file": "control/web/src/components/artifact-job/artifact-job-workspace.tsx",
       "type": "InputPayload",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/cache-removal-operations.ts",
+      "file": "control/web/src/components/cache-removal/cache-removal-operations.ts",
       "type": "CacheRemovalIntent",
       "reason": "UI-only request bookkeeping shared by the cache-removal components; never sent as a body (calls go through typed client methods)"
     },
     {
-      "file": "control/web/src/components/cache-removal-operations.ts",
+      "file": "control/web/src/components/cache-removal/cache-removal-operations.ts",
       "type": "CacheRemovalReviewTarget",
       "reason": "UI-only discriminated union for one screen or hook; not an API document"
     },
@@ -143,97 +143,97 @@
       "reason": "Chart geometry point (time, value or gap) used only to draw SVG paths; built from generated series values, never sent or received."
     },
     {
-      "file": "control/web/src/components/confirm-dialog.tsx",
+      "file": "control/web/src/components/ui/confirm-dialog.tsx",
       "type": "ConfirmDialogProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/empty-state.tsx",
+      "file": "control/web/src/components/ui/empty-state.tsx",
       "type": "EmptyStateProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/library-availability-feedback.tsx",
+      "file": "control/web/src/components/library/library-availability-feedback.tsx",
       "type": "AvailabilityFailure",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-availability-progress.tsx",
+      "file": "control/web/src/components/library/library-availability-progress.tsx",
       "type": "AvailabilityProgress",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-models-view.tsx",
+      "file": "control/web/src/components/library/library-models-view.tsx",
       "type": "LibraryModelsViewProps",
       "reason": "component props: UI-only, not API data"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "AssignmentDraft",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "FleetEntry",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "PendingProfileLoad",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-profiles-view.tsx",
+      "file": "control/web/src/components/library/library-profiles-view.tsx",
       "type": "ProfileDraft",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/library-recipe-files.ts",
+      "file": "control/web/src/components/library/library-recipe-files.ts",
       "type": "SelectedRecipeFiles",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-setup.tsx",
+      "file": "control/web/src/components/library/library-setup.tsx",
       "type": "FacetOption",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-setup.tsx",
+      "file": "control/web/src/components/library/library-setup.tsx",
       "type": "Option",
       "reason": "UI-only select option (value, label, disabled) built from generated library types; not an API document"
     },
     {
-      "file": "control/web/src/components/library-technical-details.tsx",
+      "file": "control/web/src/components/library/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
     },
     {
-      "file": "control/web/src/components/library-workcell.tsx",
+      "file": "control/web/src/components/library/library-workcell.tsx",
       "type": "LibraryRecipeRecord",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-workcell.tsx",
+      "file": "control/web/src/components/library/library-workcell.tsx",
       "type": "LibraryWorkcellFilters",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/sort-header.tsx",
+      "file": "control/web/src/components/ui/sort-header.tsx",
       "type": "Sort",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "ToastItem",
       "reason": "UI-only state or form draft; never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "ToastLink",
       "reason": "UI-only follow-up link inside a notice (label, href, click handler); never serialized to the API"
     },
     {
-      "file": "control/web/src/components/toast.tsx",
+      "file": "control/web/src/components/ui/toast.tsx",
       "type": "Toasts",
       "reason": "UI-only state or form draft; never serialized to the API"
     },

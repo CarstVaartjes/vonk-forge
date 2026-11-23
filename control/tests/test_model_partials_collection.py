@@ -19,8 +19,9 @@ from vonk_control.model_cache.partials_collection import ModelPartialsCollector
 from vonk_control.model_cache.split_transfer import REPAIR_PARTIALS_PREFIX
 from vonk_control.models import ModelCacheOperation
 
+from .model_cache_support import _artifact, _download, cache
 from .removal_settle import advance_until_ended
-from .test_model_cache import _artifact, _download, _remove_model, cache
+from .test_model_cache_part3 import _remove_model
 
 __all__ = ["cache"]
 

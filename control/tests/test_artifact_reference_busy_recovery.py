@@ -20,10 +20,10 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnsettled
 from vonk_control.failure_classification import disposition
-from vonk_control.job_documents import AvailabilityJobPayload
+from vonk_control.jobs.documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline
 from vonk_control.models import Base, Job
-from vonk_control.operation_contract import (
+from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
@@ -37,7 +37,7 @@ from vonk_control.strict_json import serialize_json_value
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_control.unused_storage_collection.common import InstallationRemoval, _Kept
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     ARCHIVE_SHA,
     _add_head,
     _add_revision,
@@ -46,7 +46,7 @@ from .test_recipe_image_availability import (
     _runtime,
     _service,
 )
-from .test_unused_storage_collection import FakeLifecycle
+from .unused_storage_collection_support import FakeLifecycle
 
 
 def _download(tmp_path: Path, engine: Engine):

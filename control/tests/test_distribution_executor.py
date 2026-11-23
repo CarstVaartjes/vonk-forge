@@ -47,7 +47,7 @@ from vonk_control.distribution_executor import (
 )
 from vonk_control.distribution_executor import children as executor_module
 from vonk_control.distribution_executor import durable as durable_executor_module
-from vonk_control.job_documents import (
+from vonk_control.jobs.documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
 )
@@ -69,7 +69,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
-from vonk_control.operation_item_contract import OperationRow, operation_item
+from vonk_control.operations.item_contract import OperationRow, operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchDistributionChildResult,
@@ -98,11 +98,11 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .agent_api_support import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
+from .agent_jobs_support import distribution_payload
+from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import _runtime_receipt
 from .runtime_image_fixtures import place_test_image
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
-from .test_agent_jobs import distribution_payload
-from .test_recipe_operations import NOW, setup_services
-from .test_run_switch_operations import _runtime_receipt
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:

@@ -11,8 +11,8 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
 )
 
-from ..enrollment_contract import EnrollmentObservationOutcome
 from ..pki import IssuedCertificate
+from .contract import EnrollmentObservationOutcome
 from .types import EnrollmentIssuanceUncertain, RenewalIssuanceUncertain
 
 

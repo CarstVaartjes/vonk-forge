@@ -7,10 +7,10 @@ from fastapi.testclient import TestClient
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 
-from .test_agent_api import Jobs
+from .agent_api_support import Jobs
+from .artifact_jobs_support import artifact_create_request
+from .recipe_operations_support import NOW
 from .test_artifact_job_installed_cli import _artifact_api
-from .test_artifact_jobs import artifact_create_request
-from .test_recipe_operations import NOW
 
 
 def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(

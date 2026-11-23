@@ -32,8 +32,8 @@ from typing import Any
 
 from vonk_agent_protocol import Disposition, LifecycleState, WaitOwnerKind
 
-from .. import job_states
 from ..agent_operation_facts import aware
+from ..jobs import states as job_states
 from ..models import Job, JobAttempt
 from ..persisted_waits import lifecycle_wait, wait_due
 from .adapter import Dispatch

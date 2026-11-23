@@ -30,7 +30,7 @@ from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 from .strict_json import read_stored_model
 
 

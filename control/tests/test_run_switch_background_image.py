@@ -26,7 +26,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState, canonical_message
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -48,7 +48,7 @@ from vonk_control.run_switch_operations import (
     _phase_request_key,
     _phase_result,
 )
-from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.runtime.adapters import resolve_runtime_adapter
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -58,15 +58,15 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 
-from .runtime_image_fixtures import place_test_image
-from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import NOW, _CanonicalModelCache, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import NOW, _CanonicalModelCache, setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     _AdvancingClock,
     _request,
     _target_copy_evidence,
 )
+from .runtime_image_fixtures import place_test_image
+from .test_lifecycle_preflight import _finish
 
 
 class _ColdInspector(CompleteArtifactInspector):

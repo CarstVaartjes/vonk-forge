@@ -26,8 +26,9 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
+from .recipe_builds_support import RecordingQueue, setup
 from .recipe_removal_review_support import remove_after_review
-from .test_recipe_builds import RecordingQueue, _write_controller_build_receipt, setup
+from .test_recipe_builds_part1 import _write_controller_build_receipt
 
 
 def _services(tmp_path, engine):
@@ -461,7 +462,7 @@ def test_cancellation_observes_consumer_uncertainty_then_releases_for_fresh_buil
 ):
     """A transient consumer read cannot convert authorized cancellation to bad input."""
     from vonk_agent_protocol import LifecycleState, RecipeBuildCode
-    from vonk_control.recipe_build_cancellation import BuildConsumerError
+    from vonk_control.recipe_builds.cancellation import BuildConsumerError
     from vonk_control.recipe_operations import build_cancellation as owner
 
     sessions, _, operations, _, _, _, _, plan = _services(tmp_path, postgres_engine)

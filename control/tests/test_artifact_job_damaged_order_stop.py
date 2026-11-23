@@ -20,7 +20,7 @@ from vonk_control import artifact_job_states as ajs
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import AgentOperation, ArtifactJob, Job, RecipeRun
 
-from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
+from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
 
 
 @pytest.mark.parametrize("damage", ["order-kind", "order-owner", "order-targets"])

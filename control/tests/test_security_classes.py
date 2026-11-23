@@ -16,7 +16,7 @@ from vonk_agent_protocol import SecurityRefusalReason
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.security_edges import SECURITY_REFUSAL_EDGES, SecurityEdge
 
-from .added_line_guards import check_source
+from .added_line_guards.check import check_source
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "control/src"
@@ -66,7 +66,7 @@ SECURITY_CLASSES: dict[str, frozenset[SecurityEdge]] = {
     "vonk_control.host_runtime_plan_authority:RuntimePlanAuthorityRefused": frozenset(
         {_SIGNED}
     ),
-    "vonk_control.jobs:StaleAttempt": frozenset({_FENCE}),
+    "vonk_control.jobs.queue:StaleAttempt": frozenset({_FENCE}),
     "vonk_control.model_cache.errors:ModelCacheCredentialPathUnsafe": frozenset(
         {_AUTHN, _AUTHZ}
     ),

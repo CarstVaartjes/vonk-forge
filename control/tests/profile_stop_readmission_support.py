@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.inventory_items import inventory_items, runtime_value
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.items import inventory_items, runtime_value
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -17,9 +17,9 @@ from vonk_control.models import AgentNode, RecipeRun, ResourceReservation, RunNo
 from vonk_control.recipe_operations import RecipeOperationService
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import start_evidence
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_fleet_profile_cancel import _agent_result
-from .test_recipe_operations import start_evidence
 
 
 def start_on_released_gang(

@@ -20,7 +20,7 @@ from ..model_cache_contract import (
     ModelCacheRemovalPayload,
 )
 from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
-from ..operation_contract import AvailabilityOperationFailure
+from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import read_wait
 from ..strict_json import read_stored_model, serialize_json_value
 from .catalog_helpers import _datetime, _iso, _parse_iso

@@ -25,11 +25,11 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.job_documents import RecipeStartParent
+from vonk_control.jobs.documents import RecipeStartParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentCertificate,
@@ -42,7 +42,7 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
 )
-from vonk_control.operation_progress import aggregate_progress, member_progress
+from vonk_control.operations.progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
 from vonk_control.recipe_runtime_specs import (
     compile_runtime_spec,
@@ -62,12 +62,18 @@ from vonk_control.run_switch_operations import (
     _stored_job_plan,
     _stored_result,
 )
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 
 from cluster_profiles.control_client import validate_control_document
 
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+    _fixture_execution,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
@@ -78,12 +84,6 @@ from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
     _installed_profile,
-)
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
-    _fixture_execution,
 )
 
 
@@ -882,7 +882,7 @@ def test_profile_renders_typed_recovery_wait_and_its_clock(capsys):
 
     from vonk_agent_protocol import WaitOwnerKind, WaitReason, WaitResumeCondition
     from vonk_agent_protocol.agent_words import ProfileDocumentState
-    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.wait_contract import QueueWait
 
     from cluster_profiles.cli_render import render_payload

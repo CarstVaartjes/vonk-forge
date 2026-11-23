@@ -20,9 +20,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from . import job_states
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, error_detail, wait_reason
+from .jobs import states as job_states
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .logging import log_event, redact_text
 from .models import Job, RecipeRun, RunNode

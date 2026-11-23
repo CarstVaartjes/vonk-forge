@@ -24,14 +24,14 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
     lock_reference_gates,
 )
-from ..job_documents import (
+from ..jobs import states as job_states
+from ..jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityRetry,
     AvailabilityRuntime,
@@ -42,16 +42,12 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
 )
-from ..operation_blockers import (
-    IdentityConflict,
-    OperationBlocker,
-    make_blocker,
-)
+from ..operations.blockers import IdentityConflict, OperationBlocker, make_blocker
 from ..recipe_availability_intent import (
     RecipeRevisionIntent,
     RecipeSelectorIntent,
 )
-from ..recipe_build_cancellation import (
+from ..recipe_builds.cancellation import (
     BuildConsumerError,
     lock_availability_build_dependency,
 )
@@ -59,8 +55,8 @@ from ..recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
 from ..revision_images import revision_archives
-from ..stored_json import read_row_column
-from ..stored_states import CatalogRevisionState
+from ..stored.json_values import read_row_column
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .contracts import (
     _PREPARATION_RECHECK_QUIET,

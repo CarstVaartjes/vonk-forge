@@ -33,7 +33,7 @@ from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.inventory_items import inventory_items, runtime_value
+from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -56,18 +56,18 @@ from vonk_control.run_switch_operations import (
 from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
 
+from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
 from .lifecycle_simulation.sparks import Spark, Sparks
 from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
-from .test_recipe_operations import installed_recipe, setup_services, start_evidence
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services, start_evidence
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _request,
 )
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
 _ACTIVATION = "recipe.job.activate.v1"
 

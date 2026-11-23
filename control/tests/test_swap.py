@@ -28,8 +28,8 @@ from vonk_agent_protocol.swap import (
 )
 from vonk_control.fleet_projection.nodes import _swap_warning
 
-from .test_agent_api import NODE_A, Clock, agent_headers
-from .test_agent_api import agent_system as _agent_system
+from .agent_api_support import NODE_A, Clock, agent_headers
+from .agent_api_support import agent_system as _agent_system
 
 agent_system = _agent_system
 OS_SWAP_BYTES = 16 * GIB - 4096

@@ -35,11 +35,12 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import job_states, operation_api
+from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.jobs import states as job_states
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
     AgentNode,
@@ -51,8 +52,8 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
-from vonk_control.operation_contract import OperationFailureEvidence
-from vonk_control.operation_item_contract import agent_receipt_for
+from vonk_control.operations.contract import OperationFailureEvidence
+from vonk_control.operations.item_contract import agent_receipt_for
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
@@ -60,14 +61,14 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.workload_intent import allocate_workload_intent
 
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     MutableClock,
     finalized_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
-from .test_recipe_operations import NOW
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 _REASON = "job output delivery remains unobserved"
 _CAUSE = "artifact output upload was refused: HTTP 409"

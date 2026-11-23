@@ -16,8 +16,15 @@ from vonk_control.models import (
 )
 
 from .display_fixtures import reword
+from .fleet_profiles_support import (
+    NOW,
+    _database,
+    _node_id,
+    _seed,
+    _SwitchAdapter,
+    _uuid,
+)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-from .test_fleet_profiles import NOW, _database, _node_id, _seed, _SwitchAdapter, _uuid
 
 
 def _world():
@@ -290,7 +297,7 @@ def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
 
 def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes():
     """A projection refresh must not replace the exact recipe already accepted."""
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
     from vonk_control.fleet_profiles.persistence import _stored_recipe
     from vonk_control.models import CatalogDocumentRevision
     from vonk_forge_contracts import RecipeDefinition
@@ -313,7 +320,7 @@ def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes(
         stored = session.get(CatalogDocumentRevision, pinned)
         assert stored is not None
         assert _stored_recipe(stored) == old_definition
-    from .test_fleet_profiles import _follow_profile_retry
+    from .fleet_profiles_support import _follow_profile_retry
 
     now = [NOW + timedelta(seconds=1)]
     service._clock = lambda: now[0]

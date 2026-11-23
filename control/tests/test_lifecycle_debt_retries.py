@@ -251,7 +251,7 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     from vonk_control.recipe_builds import RecipeBuildPlan
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
-    from .test_recipe_image_availability import _recipe, _recipe_projection
+    from .recipe_image_availability_support import _recipe, _recipe_projection
 
     service: Any = object.__new__(RunSwitchOperationService)
     calls = []
@@ -317,9 +317,8 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     from vonk_control.models import Job
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
-    from .test_recipe_operations import setup_services
-    from .test_run_switch_operations import (
-        NOW,
+    from .recipe_operations_support import NOW, setup_services
+    from .run_switch_operations_support import (
         RecordingArtifactExecutor,
         _request,
         _service,
@@ -409,8 +408,8 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
         ResourceReservation,
     )
 
-    from .test_artifact_jobs import _configure_artifact_recipe
-    from .test_recipe_operations import installed_recipe, setup_services
+    from .artifact_jobs_support import _configure_artifact_recipe
+    from .recipe_operations_support import installed_recipe, setup_services
 
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path,
@@ -504,8 +503,8 @@ def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
         cancellation_retry,
     )
 
+    from .run_switch_operations_support import RecordingArtifactExecutor, _request
     from .test_run_switch_lifecycle import _Harness
-    from .test_run_switch_operations import RecordingArtifactExecutor, _request
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     service = harness.service

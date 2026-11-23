@@ -10,7 +10,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD_FILES = (
-    "control/tests/added_line_guards.py",
+    "control/tests/added_line_guards/__main__.py",
+    "control/tests/added_line_guards/check.py",
+    "control/tests/added_line_guards/cli.py",
+    "control/tests/added_line_guards/context.py",
+    "control/tests/added_line_guards/modes/cli_tests.py",
+    "control/tests/added_line_guards/modes/control.py",
+    "control/tests/added_line_guards/modes/general.py",
+    "control/tests/added_line_guards/modes/rust.py",
+    "control/tests/added_line_guards/patch.py",
+    "control/tests/added_line_guards/registry.py",
+    "control/tests/added_line_guards/scans.py",
     "control/tests/principle_guards.py",
     "tests/repository_guards.py",
     "scripts/select-ci-areas",

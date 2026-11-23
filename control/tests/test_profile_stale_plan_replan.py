@@ -17,12 +17,12 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.fleet_profiles.projection_support import _digest
 from vonk_control.models import CatalogDocumentRevision, FleetProfileApplication
-from vonk_control.operation_blockers import make_blocker
+from vonk_control.operations.blockers import make_blocker
 from vonk_control.recovery_policy import RECOVERY
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

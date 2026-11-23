@@ -16,15 +16,15 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 
-from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
+from ..jobs import states as job_states
 from ..lifecycle.run_switch import end_unclaimed_children
 from ..models import (
     Job,
     RecipeRun,
 )
-from ..operation_blockers import OperationBlocker, bound_blockers
+from ..operations.blockers import OperationBlocker, bound_blockers
 from ..persisted_waits import schedule_wait
 from ..recipe_operations import (
     RecipeOperationView,
@@ -41,7 +41,7 @@ from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stall_window import Verdict, stall_deadline
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .awaited_children import start_request_key
 from .errors import RunSwitchOperationConflict
 from .observation_window import checkpoint_deadline, checkpoint_verdict

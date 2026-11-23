@@ -34,10 +34,7 @@ from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
-from ..job_documents import (
-    RunSwitchJobPayload,
-    controller_recipe_document,
-)
+from ..jobs.documents import RunSwitchJobPayload, controller_recipe_document
 from ..lifecycle import CancelRequested, Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -71,7 +68,7 @@ from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
 from ..run_switch_contract import RunSwitchOperationResult
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from .errors import (
     RecipeArtifactJobCancellationPending,

@@ -19,7 +19,7 @@ from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.recipe import Scalar
 
 from ..mapping_parameters import MappingParameters
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
 from .requests import MemoryUsageUncertainty, SparkGroupNode

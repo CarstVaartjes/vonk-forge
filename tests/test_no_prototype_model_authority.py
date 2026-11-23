@@ -17,7 +17,9 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         # The ORM mapping guard inspects the owning Controller graph; it never
         # defines a client-owned model or imports it in production code.
         ROOT / "tests/test_orm_mapping_guard.py",
-        ROOT / "tests/test_spark_lifecycle_runner.py",
+        ROOT / "tests/test_spark_lifecycle_runner_part1.py",
+        ROOT / "tests/test_spark_lifecycle_runner_part2.py",
+        ROOT / "tests/spark_lifecycle_runner_support.py",
         # Upgrade-carry receipts and Fleet projections use the owning schemas.
         ROOT / "tests/test_spark_upgrade_carry.py",
         ROOT / "tests/acceptance/test_spark_lifecycle.py",

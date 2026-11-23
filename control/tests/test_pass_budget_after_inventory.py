@@ -15,15 +15,15 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy.orm import Session
-from vonk_control.catalog_revision_collection import (
+from vonk_control.catalog.revision_collection import (
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
 from vonk_control.model_cache import partials_collection
 
+from .model_cache_support import cache  # noqa: F401
 from .pass_budget_clocks import PASS_BUDGET_MODULES, PassClock
 from .test_catalog_revision_collection import _refresh, catalog  # noqa: F401
-from .test_model_cache import cache  # noqa: F401
 from .test_model_partials_collection import (  # noqa: F401
     _age,
     _orphan,
@@ -68,7 +68,7 @@ def _model_partials(
 
 
 PROBES: dict[str, Probe] = {
-    "vonk_control.catalog_revision_collection": _catalog_revisions,
+    "vonk_control.catalog.revision_collection": _catalog_revisions,
     "vonk_control.model_cache.partials_collection": _model_partials,
 }
 
@@ -87,8 +87,8 @@ CLASSIFIED = {
     "vonk_control.model_cache.removal_reconcile": "step deadline set before the removals",
     "vonk_control.library_projection.views": "request budget, not a collector",
     "vonk_control.library_projection.local_state": "request budget, not a collector",
-    "vonk_control.library_assessment": "probe budget, not a collector",
-    "vonk_control.library_image_presence": "probe budget, not a collector",
+    "vonk_control.library.assessment": "probe budget, not a collector",
+    "vonk_control.library.image_presence": "probe budget, not a collector",
     "vonk_control.profile_read_observation": "read budget, not a collector",
     "vonk_control.model_cache.observation": "checkpoint cadence, not a deadline",
 }

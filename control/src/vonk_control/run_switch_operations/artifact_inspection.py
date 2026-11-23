@@ -23,10 +23,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_repository import (
-    INVENTORY_MAX_AGE,
-    spark_model_objects,
-)
+from ..inventory.repository import INVENTORY_MAX_AGE, spark_model_objects
 from ..lifecycle.evidence import Residue
 from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
@@ -35,7 +32,7 @@ from ..models import Job
 from ..run_switch_contract import (
     RunSwitchReason,
 )
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .interfaces import ArtifactInspection
 from .planning_helpers import (
     _as_reason,

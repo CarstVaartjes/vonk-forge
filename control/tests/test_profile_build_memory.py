@@ -13,8 +13,8 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.inventory_items import runtime_value
-from vonk_control.inventory_repository import InventoryRepository
+from vonk_control.inventory.items import runtime_value
+from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
     AgentNode,
@@ -42,12 +42,12 @@ from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .preflight_fixtures import record_passing_preflight
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .runtime_identity_support import set_inventory_identity
 from .runtime_image_fixtures import install_image_of_replaced_source
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_profile_port_claims import _load, _ready_profile
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 def _accepted_build_profile(

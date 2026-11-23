@@ -21,15 +21,15 @@ from vonk_control.models import (
     ArtifactJobFile,
 )
 
-from .non_blocking import assert_no_orphaned_holds
-from .runtime_identity_support import claim_agent
-from .test_artifact_jobs import (
+from .artifact_jobs_support import (
     MutableClock,
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
 )
-from .test_recipe_operations import NOW
+from .non_blocking import assert_no_orphaned_holds
+from .recipe_operations_support import NOW
+from .runtime_identity_support import claim_agent
 
 
 def test_reference_safe_cas_retention_restart_reuploads_and_claims_identical_input(

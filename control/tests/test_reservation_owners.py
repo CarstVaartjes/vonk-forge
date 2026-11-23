@@ -21,7 +21,7 @@ from vonk_control.disk_reservations import (
     describe_disk_charges,
     outstanding_disk_charges,
 )
-from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from vonk_control.models import (
     FleetProfileApplication,
     Job,
@@ -35,15 +35,15 @@ from vonk_control.reservation_owners import (
     reservation_owner,
 )
 
-from .test_attempt_residues import _load, _loop
-from .test_disk_reservations import _record_disk
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     installed_recipe,
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
+from .test_attempt_residues import _load, _loop
+from .test_disk_reservations import _record_disk
 
 
 def _claims(sessions, **where) -> list[ResourceReservation]:

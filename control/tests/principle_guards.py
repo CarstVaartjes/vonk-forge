@@ -526,7 +526,7 @@ _CLAIM_CALL = re.compile(r"^_?claim|^submit$")
 #: pool is full cannot starve work that needs no pool slot.
 CAPACITY_GATE_VERDICTS: dict[tuple[str, str], str] = {
     (
-        "control/src/vonk_control/availability_production.py",
+        "control/src/vonk_control/availability_production/scheduler.py",
         "tick",
     ): "FIFO, one job per worker: every claim needs a worker, and a full pool "
     "records the typed WAITING_FOR_WORKER blocker on queued work",

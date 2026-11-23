@@ -124,7 +124,7 @@ def build_engine(database_url: str, *, component: str = "control") -> Engine:
     budgets = DATABASE_WAIT_BUDGETS
     # Every JSON column write is checked against its contract (stored_columns);
     # a document no contract describes is reported once, never refused.
-    from ..stored_json import install_write_guard
+    from ..stored.json_values import install_write_guard
 
     install_write_guard()
     if "postgres" in database_url:

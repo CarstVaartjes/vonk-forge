@@ -54,10 +54,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
-from .recipe_stop_fixtures import recipe_stop_payload
-from .runtime_identity_support import claim_agent
-from .runtime_image_fixtures import refresh_inventory
-from .test_agent_jobs import (
+from .agent_jobs_support import (  # noqa: F401 -- pytest fixture
     COMMIT,
     NODE_A,
     NODE_B,
@@ -65,21 +62,24 @@ from .test_agent_jobs import (
     STOP_RESULT,
     canonical_start_payload,
     parent,
-    service,  # noqa: F401 -- pytest fixture
+    service,
 )
+from .recipe_operations_support import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
+from .recipe_stop_fixtures import recipe_stop_payload
+from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
 from .test_host_helper_authority import (
     NOW,
     RUNTIME_INSTALLATION_ID,
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
-)
-from .test_recipe_operations import (
-    ConcurrentPublisher,
-    bind_route_publications,
-    installed_recipe,
-    setup_services,
-    started_recipe,
 )
 
 NODE = "spk_" + "1" * 32
@@ -651,12 +651,12 @@ def _lost_job_run(tmp_path):
     operator: its container may remain, so the run's Stop must remove it."""
     from vonk_control import artifact_job_states as ajs
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         MutableClock,
         running_artifact_service,
         submitted_artifact_job,
     )
-    from .test_recipe_operations import NOW as RECIPE_NOW
+    from .recipe_operations_support import NOW as RECIPE_NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path

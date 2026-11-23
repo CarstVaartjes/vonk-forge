@@ -9,7 +9,7 @@ from vonk_agent_protocol import LifecycleState, RecipeImageCode
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.install_admission import InstallAdmissionBusy
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
-from vonk_control.operation_blockers import IdentityConflict
+from vonk_control.operations.blockers import IdentityConflict
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityService,
@@ -17,9 +17,10 @@ from vonk_control.recipe_image_availability import (
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.run_switch_progress import RECOVERY_STALL_WINDOW
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_forge_contracts import read_recipe
 
-from .test_recipe_operations import _CanonicalImageTransport, read_recipe
-from .test_run_switch_operations import _cold_compile_switch
+from .recipe_operations_support import _CanonicalImageTransport
+from .run_switch_operations_support import _cold_compile_switch
 
 
 def test_identity_conflict_names_both_build_inputs_through_the_evidence_download(

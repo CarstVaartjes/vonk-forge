@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
 from ..model_cache_contract import ModelCacheOperationResult
-from ..operation_blockers import OperationBlocker
+from ..operations.blockers import OperationBlocker
 from ..wait_contract import QueueWait
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .constants import SCHEMA_VERSION

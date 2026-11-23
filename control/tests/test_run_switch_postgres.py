@@ -40,8 +40,7 @@ from vonk_control.run_switch_operations import _stored_job_plan
 
 from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking
-from .test_lifecycle_preflight import _finish
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -51,13 +50,14 @@ from .test_recipe_operations import (
     start_evidence,
     started_recipe,
 )
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _replace_child,
     _request,
     _service,
 )
+from .test_lifecycle_preflight import _finish
 
 
 @pytest.fixture
@@ -621,7 +621,7 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
     from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
     from vonk_control.agent_jobs import AgentJobService
     from vonk_control.run_switch_operations import RunSwitchOperationService
-    from vonk_control.runtime_preflight import latest_result, request_digest
+    from vonk_control.runtime.preflight import latest_result, request_digest
 
     from .runtime_identity_support import claim_agent
     from .test_lifecycle_preflight import _clear
@@ -719,8 +719,8 @@ def test_production_result_handler_only_schedules_worker(
     from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
     from vonk_control.settings import Settings
 
+    from .agent_api_support import agent_headers
     from .runtime_identity_support import claim_agent
-    from .test_agent_api import agent_headers
     from .test_lifecycle_preflight import _clear
     from .test_runtime_preflight import result as passing_result
 

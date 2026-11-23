@@ -11,7 +11,7 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, WaitReason
-from vonk_control.jobs import JobService, StaleAttempt
+from vonk_control.jobs.queue import JobService, StaleAttempt
 from vonk_control.models import Base, Job, JobAttempt
 from vonk_control.optimistic import Applied, Stale, transition
 

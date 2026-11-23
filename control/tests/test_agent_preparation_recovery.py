@@ -11,8 +11,7 @@ from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.lifecycle import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET, State
 
 from .agent_fences import fenced_attempt
-from .runtime_identity_support import claim_agent
-from .test_agent_jobs import (
+from .agent_jobs_support import (
     COMMIT,
     NODE_A,
     STOP_PAYLOAD,
@@ -20,7 +19,8 @@ from .test_agent_jobs import (
     job_state,
     parent,
 )
-from .test_agent_jobs import service as _service_fixture
+from .agent_jobs_support import service as _service_fixture
+from .runtime_identity_support import claim_agent
 
 agent_service = _service_fixture
 from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored

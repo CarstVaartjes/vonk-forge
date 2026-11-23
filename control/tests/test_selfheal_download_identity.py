@@ -5,9 +5,9 @@ from uuid import uuid4
 from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import ModelCacheService
 
+from .model_cache_support import _artifact
+from .model_cache_support import cache as cache  # noqa: PLC0414 -- pytest fixture
 from .non_blocking import assert_ended_without_blocking
-from .test_model_cache import _artifact
-from .test_model_cache import cache as cache  # noqa: PLC0414 -- pytest fixture
 
 
 def test_cancelled_selector_replays_only_original_key_after_restart(

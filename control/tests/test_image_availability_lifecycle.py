@@ -21,8 +21,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
-from vonk_control import job_states
-from vonk_control.job_documents import (
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.documents import (
     AvailabilityJobPayload,
     AvailabilityRetry,
     AvailabilityRuntime,
@@ -53,7 +53,7 @@ from vonk_control.recipe_update_contract import UPDATE_KIND
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     Transport,
     _add_revision,
     _recipe,

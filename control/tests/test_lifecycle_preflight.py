@@ -19,7 +19,7 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.agent_jobs.waits import refresh_queue_waits
-from vonk_control.inventory_items import inventory_items, record_preflight
+from vonk_control.inventory.items import inventory_items, record_preflight
 from vonk_control.lifecycle_preflight import (
     LifecyclePreflight,
     LifecyclePreflightCheckpoint,
@@ -31,17 +31,17 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     Job,
 )
-from vonk_control.operation_blockers import (
+from vonk_control.operations.blockers import (
     BlockingOperation,
     ProgressAlarmCode,
     make_blocker,
 )
 from vonk_control.persisted_waits import read_wait
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
+from .recipe_operations_support import NOW, setup_services
 from .runtime_identity_support import set_inventory_fingerprint
-from .test_recipe_operations import NOW, setup_services
 
 
 def _pending(checkpoint):
@@ -160,7 +160,7 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
         )
         assert child is not None and operation is not None
         child.state = "failed"
-        child.status_reason = "runtime_preflight.execution_failed"
+        child.status_reason = "runtime.preflight.execution_failed"
         operation.state = "failed"
 
     waiting, blocked = service.ensure(previous=checkpoint, **arguments)
@@ -664,8 +664,8 @@ def test_high_level_gate_finishes_probe_before_dispatching_expensive_transfer(
 ):
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
 
-    from .test_recipe_operations import installed_recipe
-    from .test_run_switch_operations import (
+    from .recipe_operations_support import installed_recipe
+    from .run_switch_operations_support import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
         _request,

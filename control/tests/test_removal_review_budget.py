@@ -34,7 +34,7 @@ import pytest
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
-from vonk_control import catalog_revision_collection
+from vonk_control.catalog import revision_collection as catalog_revision_collection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.model_cache_contract import CacheManifest
@@ -57,9 +57,9 @@ from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .recipe_image_availability_support import _availability_payload
+from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .test_fleet_model_removal_postgres import inventory
-from .test_recipe_image_availability import _availability_payload
-from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 
 @dataclass(frozen=True)

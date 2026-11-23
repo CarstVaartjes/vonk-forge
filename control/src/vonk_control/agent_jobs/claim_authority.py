@@ -23,10 +23,11 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..disk_reservations import outstanding_disk_charges
-from ..gpu_health import gpu_health_reason
-from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
+from ..gpu.health import gpu_health_reason
+from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
+from ..jobs import states as job_states
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -442,7 +443,7 @@ def dispatch_wait(
     from ..agent_operation_facts import (
         aware,
     )
-    from ..operation_blockers import make_blocker
+    from ..operations.blockers import make_blocker
     from ..persisted_waits import schedule_wait
     from ..recipe_operations.observation_helpers import reinstall_in_flight
     from ..recovery_policy import WAIT_STEP

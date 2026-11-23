@@ -1,0 +1,1478 @@
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import logging
+import os
+import re
+import shutil
+import tarfile
+import tempfile
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from datetime import datetime
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
+
+import httpx2
+from pydantic import ValidationError
+from vonk_agent_protocol import RecipePackageCode
+from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
+    PACKAGE_SCHEMA_VERSION,
+    CatalogIndexRefused,
+    CatalogModelEntry,
+    ModelDefinition,
+    RecipeDefinition,
+    RecipeDisplay,
+    document_sha256,
+    read_catalog,
+    read_model,
+    read_recipe,
+)
+from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
+from vonk_forge_contracts.resolver import validate_recipe_models
+
+from ..catalog.sync_contract import ManagedCatalogSyncProblem
+from ..recipe_library_types import (
+    CatalogModel,
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibraryRelease,
+    RecipeLibrarySnapshot,
+    RecipePackageEntry,
+)
+from ..recipe_release import (
+    MAX_BUNDLE_BYTES,
+    MAX_CHECKSUMS_BYTES,
+    RELEASE_BUNDLE,
+    RELEASE_CHECKSUMS,
+    RELEASE_INDEX,
+    RELEASE_LIBRARY,
+    parse_release_checksums,
+    verify_release_checksums,
+)
+from ..source_bundles import SourceBundleError, generate_source_bundle
+from . import catalog_read
+from .archive import (
+    _BoundedTarInfo,
+    _json,
+    _safe_path,
+    _sha256,
+    _validate_package_paths,
+)
+from .contracts import (
+    _RELEASE_LIST,
+    _RELEASE_TAG,
+    RecipePackageError,
+    RecipePackageRequestInvalid,
+    RecipePackageUnsettled,
+    _newer_major_note,
+    _newest_major,
+    _ReleaseResponse,
+    _select_release,
+    _snapshot_content,
+    _VerifiedRelease,
+)
+
+PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
+
+
+PACKAGE_API_ORIGIN = "https://api.github.com"
+
+
+# Release assets download from github.com (not the rate-limited REST API),
+# which redirects to this origin with a short-lived signed query. A deployment
+# may route both through one fixed internal relay.
+RELEASE_DOWNLOAD_ORIGIN = "https://github.com"
+
+
+RELEASE_ASSET_HOST = "release-assets.githubusercontent.com"
+
+
+RELEASE_ASSET_ORIGIN = f"https://{RELEASE_ASSET_HOST}"
+
+
+MAX_RELEASE_BYTES = 2 * 1024 * 1024
+
+
+MAX_RELEASE_LIST_BYTES = 16 * 1024 * 1024
+
+
+MAX_INDEX_BYTES = 12 * 1024 * 1024
+
+
+MAX_PACKAGE_BYTES = 256 * 1024 * 1024
+
+
+MAX_PACKAGE_FILES = 2048
+
+
+MAX_PACKAGE_FILE_BYTES = 128 * 1024 * 1024
+
+
+MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
+
+
+# The library bundle holds every package; it streams to disk, never to memory.
+MAX_LIBRARY_BYTES = 4 * 1024 * 1024 * 1024
+
+
+MAX_LIBRARY_MEMBERS = 8192
+
+
+_COPY_CHUNK = 1024 * 1024
+
+
+# A private temporary file this old belongs to a process that was killed while
+# writing it; a live download or commit touches its file far more often.
+_ORPHAN_AGE_SECONDS = 24 * 60 * 60
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+_REDIRECTS = {301, 302, 303, 307, 308}
+
+
+_ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+# How a refused index is reported: another schema or major is incompatible.
+_REFUSAL_CODES = {
+    RefusalReason.SCHEMA_UNSUPPORTED: RecipePackageCode.SCHEMA_INCOMPATIBLE,
+    RefusalReason.DIGEST_MISMATCH: RecipePackageCode.DIGEST_MISMATCH,
+    RefusalReason.ENVELOPE_INVALID: RecipePackageCode.RESPONSE_INVALID,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class RecipePackageHandle:
+    """Immutable package identity plus durable local archive/closure paths."""
+
+    publication_commit: str
+    source_commit: str
+    package_sha256: str
+    package_size: int
+    package_path: str
+    recipe_content_sha256: str
+    archive_path: Path
+    closure_path: Path
+    recipe: RecipeDefinition
+    # Model snapshots keyed by the document digest recipes reference.
+    models: Mapping[str, ModelDefinition]
+
+    @property
+    def recipe_identity(self) -> tuple[str, str, str]:
+        identity = self.recipe.identity
+        return identity.publisher, identity.slug, self.recipe_content_sha256
+
+    @property
+    def model_identities(self) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            (model.identity.publisher, model.identity.slug, digest)
+            for digest, model in self.models.items()
+        )
+
+
+class RecipePackageClient:
+    """Fetch complete recipe packages and persist verified bytes by digest.
+
+    The reader consumes signed GitHub releases of the recipe repository. The
+    library's release version is its contract version, so ``latest`` follows
+    the newest published release whose major version is this Controller's
+    contract major (an exact tag pins one). A release is trusted only after its
+    ``SHA256SUMS`` verifies against the pinned Sigstore publisher identity, and
+    every index and package byte is then checked against the digest
+    ``SHA256SUMS`` lists.
+    """
+
+    def __init__(
+        self,
+        *,
+        cache_root: Path,
+        transport: httpx2.BaseTransport | None = None,
+        timeout_seconds: float = 8.0,
+        api_url: str = PACKAGE_API_ORIGIN,
+        asset_url: str | None = None,
+        release: str = "latest",
+    ) -> None:
+        origin = (asset_url or RELEASE_DOWNLOAD_ORIGIN).rstrip("/")
+        parsed = urlsplit(origin)
+        if not parsed.hostname or (
+            parsed.scheme != "https"
+            and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.URL_INSECURE, "recipe package URL must use HTTPS"
+            )
+        if (
+            parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.URL_INVALID,
+                "recipe package URL contains forbidden components",
+            )
+        api = urlsplit(api_url.rstrip("/"))
+        if (
+            not api.hostname
+            or (
+                api.scheme != "https"
+                and api.hostname not in {"localhost", "127.0.0.1", "::1"}
+            )
+            or api.username
+            or api.password
+            or api.query
+            or api.fragment
+            or api.path not in {"", "/"}
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.URL_INVALID, "recipe package API URL is invalid"
+            )
+        tag = _RELEASE_TAG.fullmatch(release)
+        if release != "latest" and (tag is None or int(tag[1]) != CONTRACT_MAJOR):
+            raise RecipePackageError(
+                RecipePackageCode.RELEASE_INVALID,
+                "recipe release must be latest or an exact "
+                f"v{CONTRACT_MAJOR}.MINOR.PATCH tag",
+            )
+        self._api_url = api_url.rstrip("/")
+        self._download_origin = origin
+        self._redirect_origin = origin if asset_url else RELEASE_ASSET_ORIGIN
+        self._release_selector = release
+        self._release: _VerifiedRelease | None = None
+        # The release listing's validator: a conditional GET answers "no new
+        # release" cheaply, so the library can be checked every minute.
+        self._listing_etag: str | None = None
+        self._listing: tuple[str, frozenset[str], str | None] | None = None
+        # The GitHub digest of the library bundle last ingested.
+        self._library_digest: str | None = None
+        # The asset digest of a bundle refused at ingress and why: while the
+        # listing still shows it, the refusal stands without a new download.
+        self._refused: tuple[str, RecipeLibraryError] | None = None
+        self._listing_unchanged = False
+        # The highest contract major the last release listing showed.
+        self._newest_major: int | None = None
+        self._cache_root = cache_root.resolve()
+        self._cache_root.mkdir(parents=True, exist_ok=True)
+        self._remove_orphans()
+        self._client = httpx2.Client(
+            base_url=self._download_origin,
+            timeout=httpx2.Timeout(timeout_seconds),
+            follow_redirects=False,
+            trust_env=False,
+            transport=transport,
+            headers={"Accept": "application/json, text/plain"},
+        )
+        self._snapshot: RecipeLibrarySnapshot | None = None
+        self._previous_snapshot: RecipeLibrarySnapshot | None = None
+        self._previous_packages: dict[str, RecipePackageEntry] = {}
+        self._packages: dict[str, RecipePackageEntry] = {}
+        self._prepared: dict[str, RecipeLibraryItem] = {}
+        self._snapshot_path = self._cache_root / "snapshot.json"
+        # The verified generation that ``prepare`` commits to ``snapshot.json``.
+        # It stays in this process: the API and the worker share the cache
+        # root, so a shared candidate file is one the other process can consume.
+        self._candidate: bytes | None = None
+
+    def close(self) -> None:
+        self._client.close()
+
+    def _remove_orphans(self) -> None:
+        """Remove private temporary files a killed process left behind."""
+        cutoff = time.time() - _ORPHAN_AGE_SECONDS
+        for pattern in (f".{RELEASE_LIBRARY}.*.part", ".snapshot.*.tmp", "??/.*.tmp"):
+            for path in self._cache_root.glob(pattern):
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                except OSError as error:
+                    # The next start tries again; nothing reads these files.
+                    _LOGGER.warning(
+                        "recipe package cache orphan %s was not removed: %s",
+                        path.name,
+                        error.strerror or error.errno,
+                    )
+
+    def list(self) -> RecipeLibrarySnapshot:
+        """The snapshot, with a visible note while a newer contract major exists.
+
+        The note follows the listing on every tick, so it is never stored in the
+        cached snapshot (an unchanged release returns that snapshot as is).
+        """
+        snapshot = self._list_snapshot()
+        published = self._newest_major
+        if published is None or published <= CONTRACT_MAJOR:
+            return snapshot
+        return replace(
+            snapshot,
+            display_notes=(_newer_major_note(published), *snapshot.display_notes),
+        )
+
+    def _list_snapshot(self) -> RecipeLibrarySnapshot:
+        resolved: tuple[str, frozenset[str], str | None] | None = None
+        try:
+            resolved = self._resolve_release()
+            refused = self._refused
+            if refused is not None:
+                if resolved[2] == refused[0]:
+                    raise type(refused[1])(refused[1].code, refused[1].detail)
+                self._refused = None
+            if (
+                (
+                    self._listing_unchanged
+                    or (resolved[2] is not None and resolved[2] == self._library_digest)
+                )
+                and self._snapshot is not None
+                and self._release is not None
+            ):
+                return self._snapshot  # the publisher says: nothing changed
+            if (
+                self._snapshot is None
+                and resolved[2] is not None
+                and resolved[2] == self._persisted_library_digest()
+            ):
+                # A restart with the same bundle re-verifies the persisted
+                # generation instead of downloading the library again.
+                persisted = self._read_persisted_snapshot()
+                if persisted is not None:
+                    self._library_digest = resolved[2]
+                    return persisted
+            raw, publication, release = self._fetch_release(resolved)
+            try:
+                snapshot, packages = self._parse_index(
+                    raw, publication_commit=publication
+                )
+                snapshot, packages = _bind_release(snapshot, packages, release)
+                self._refuse_replay(snapshot, release)
+            except RecipeLibraryError as error:
+                self._remember_refusal(resolved[2], error)
+                raise
+        except (httpx2.HTTPError, OSError) as error:
+            self._listing_etag = None  # list again next cycle and retry
+            persisted = self._offline_snapshot()
+            if persisted is not None:
+                return persisted
+            raise RecipePackageUnsettled(
+                RecipePackageCode.UNAVAILABLE, "recipe package index is unavailable"
+            ) from error
+        except RecipeLibraryError as error:
+            # Only an unreachable publication falls back to the previous
+            # verified generation; an integrity failure is always surfaced,
+            # and the generation held before it keeps serving afterwards.
+            if error.code == RecipePackageCode.UNAVAILABLE:
+                self._listing_etag = None  # an unreachable download is retried
+                persisted = self._offline_snapshot()
+                if persisted is not None:
+                    return persisted
+            elif self._snapshot is None:
+                # A refusal never leaves a restarted Controller without its
+                # library: the persisted generation serves meanwhile.
+                self._read_persisted_snapshot()
+            raise
+        self._candidate = _persisted_payload(
+            raw,
+            publication_commit=publication,
+            release=release,
+            library_digest=resolved[2],
+        )
+        self._library_digest = resolved[2]
+        self._release = release
+        self._packages = packages
+        self._snapshot = snapshot
+        self._prepared = {}
+        return snapshot
+
+    def _refuse_replay(
+        self, snapshot: RecipeLibrarySnapshot, release: _VerifiedRelease
+    ) -> None:
+        """Refuse a signed library that is not the release asked for or newer.
+
+        The signature covers the library, not the tag it is served under, so
+        an older signed bundle could otherwise stand in for the newest one.
+        An exact tag is the deliberate rollback route and only has to match.
+        """
+        if f"v{snapshot.version}" != release.tag:
+            raise RecipePackageError(
+                RecipePackageCode.RELEASE_INVALID,
+                f"signed library is contract {snapshot.version}, not {release.tag}",
+            )
+        if self._release_selector != "latest":
+            return
+        held = self._held_updated_at()
+        if (
+            held is not None
+            and snapshot.updated_at is not None
+            and snapshot.updated_at < held
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.RELEASE_INVALID,
+                f"signed library {snapshot.commit} at {snapshot.updated_at} "
+                f"is older than the held one at {held}",
+            )
+
+    def _held_updated_at(self) -> datetime | None:
+        """When the held library's recipes last changed.
+
+        After a restart this reads the persisted index envelope only: it was
+        verified when stored and is verified again before it is served.
+        """
+        if self._snapshot is not None:
+            return self._snapshot.updated_at
+        try:
+            payload = json.loads(self._snapshot_path.read_bytes())
+            envelope = json.loads(payload["index"])
+            if str(envelope["contract_version"]).split(".")[0] != str(CONTRACT_MAJOR):
+                return None
+            return datetime.fromisoformat(envelope["updated_at"])
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+            # An unreadable envelope: the full verified read decides.
+            persisted = self._read_persisted_snapshot()
+            return persisted.updated_at if persisted is not None else None
+
+    def _remember_refusal(self, digest: str | None, error: RecipeLibraryError) -> None:
+        """Keep a content refusal standing while the listing shows that asset."""
+        if error.code == RecipePackageCode.UNAVAILABLE:
+            return
+        if digest is not None:
+            self._refused = (digest, error)
+        else:
+            # Nothing names the asset: ask the listing again in full.
+            self._listing_etag = None
+
+    def _fetch_release(
+        self, resolved: tuple[str, frozenset[str], str | None]
+    ) -> tuple[bytes, str, _VerifiedRelease]:
+        """Download the one library bundle and verify it once, at ingress."""
+        tag, assets, digest = resolved
+        if RELEASE_LIBRARY not in assets:
+            # A release mid-update (or before its first bundle) is a transient
+            # absence: the previous verified generation stays in use.
+            raise RecipePackageUnsettled(
+                RecipePackageCode.UNAVAILABLE,
+                f"recipe release {tag} does not contain {RELEASE_LIBRARY}",
+            )
+        # Each download owns its partial file; another process's download
+        # never truncates or removes it.
+        fd, name = tempfile.mkstemp(
+            prefix=f".{RELEASE_LIBRARY}.", suffix=".part", dir=self._cache_root
+        )
+        os.close(fd)
+        partial = Path(name)
+        try:
+            self._download_library(tag, partial)
+            try:
+                return self._ingest_library(tag, partial)
+            except RecipeLibraryError as error:
+                self._remember_refusal(digest, error)
+                raise
+        finally:
+            partial.unlink(missing_ok=True)
+
+    def _download_library(self, tag: str, target: Path) -> None:
+        url = (
+            f"{self._download_origin}/{PACKAGE_REPOSITORY}/releases/download/"
+            f"{tag}/{RELEASE_LIBRARY}"
+        )
+        headers = {"Accept": "application/octet-stream"}
+        for _hop in range(2):
+            with self._client.stream("GET", url, headers=headers) as response:
+                if response.status_code in _REDIRECTS:
+                    url = self._asset_redirect(response.headers.get("location", ""))
+                    continue
+                if response.status_code != 200:
+                    raise RecipePackageUnsettled(
+                        RecipePackageCode.UNAVAILABLE,
+                        f"recipe release asset {RELEASE_LIBRARY} is unavailable",
+                    )
+                written = 0
+                with target.open("wb") as stream:
+                    for chunk in response.iter_bytes(_COPY_CHUNK):
+                        written += len(chunk)
+                        if written > MAX_LIBRARY_BYTES:
+                            raise RecipePackageError(
+                                RecipePackageCode.RESPONSE_INVALID,
+                                f"recipe release asset {RELEASE_LIBRARY} exceeds "
+                                "its size bound",
+                            )
+                        stream.write(chunk)
+                return
+        raise RecipePackageError(
+            RecipePackageCode.RESPONSE_INVALID,
+            f"recipe release asset {RELEASE_LIBRARY} redirects more than once",
+        )
+
+    def _asset_redirect(self, location: str) -> str:
+        target = urlsplit(location)
+        if (
+            target.scheme != "https"
+            or target.hostname != RELEASE_ASSET_HOST
+            or target.port is not None
+            or target.username
+            or target.password
+            or target.fragment
+            or not target.path.startswith("/")
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID,
+                "recipe release asset redirect leaves the GitHub asset origin",
+            )
+        # The signed query is opaque; the relay forwards it unchanged.
+        query = f"?{target.query}" if target.query else ""
+        return f"{self._redirect_origin}{target.path}{query}"
+
+    def _ingest_library(
+        self, tag: str, path: Path
+    ) -> tuple[bytes, str, _VerifiedRelease]:
+        """Verify the bundle's signed SHA256SUMS, then each listed member once.
+
+        Only the signature, SHA256SUMS or the index reject the whole bundle.
+        A listed package that is absent or whose bytes differ is left out of
+        the verified set; the recipe that names it is skipped and reported.
+        Verified packages land in the content-addressed cache and are never
+        hashed again.
+        """
+        try:
+            with tarfile.open(path, mode="r:", tarinfo=_BoundedTarInfo) as tar:
+                members: dict[str, tarfile.TarInfo] = {}
+                for member in tar:
+                    if (
+                        len(members) >= MAX_LIBRARY_MEMBERS
+                        or not member.isfile()
+                        or not _ASSET_NAME.fullmatch(member.name)
+                        or member.name in members
+                    ):
+                        raise RecipePackageError(
+                            RecipePackageCode.RESPONSE_INVALID,
+                            f"{RELEASE_LIBRARY} member "
+                            f"{_asset_label(member.name)} is not a unique flat file",
+                        )
+                    members[member.name] = member
+
+                def read(name: str, maximum: int) -> bytes:
+                    member = members.get(name)
+                    stream = tar.extractfile(member) if member is not None else None
+                    if member is None or stream is None or member.size > maximum:
+                        raise RecipePackageError(
+                            RecipePackageCode.RESPONSE_INVALID,
+                            f"{RELEASE_LIBRARY} lacks a bounded {name}",
+                        )
+                    return stream.read(maximum + 1)
+
+                checksums_raw = read(RELEASE_CHECKSUMS, MAX_CHECKSUMS_BYTES)
+                bundle_raw = read(RELEASE_BUNDLE, MAX_BUNDLE_BYTES)
+                commit = verify_release_checksums(checksums_raw, bundle_raw)
+                checksums = parse_release_checksums(checksums_raw)
+                raw = read(RELEASE_INDEX, MAX_INDEX_BYTES)
+                if _sha256(raw) != checksums[RELEASE_INDEX]:
+                    raise RecipePackageError(
+                        RecipePackageCode.DIGEST_MISMATCH,
+                        f"{RELEASE_LIBRARY} {RELEASE_INDEX} does not match SHA256SUMS",
+                    )
+                verified = {RELEASE_INDEX}
+                for name, digest in checksums.items():
+                    member = members.get(name)
+                    if (
+                        not name.endswith(".tar.gz")
+                        or member is None
+                        or member.size > MAX_PACKAGE_BYTES
+                    ):
+                        continue
+                    if self._store_package(tar, member, digest):
+                        verified.add(name)
+        # A long chain of tiny extended headers recurses inside tarfile. A local
+        # disk fault (OSError) is not about the bytes: it propagates to the
+        # retry path and is never remembered.
+        except (tarfile.TarError, RecursionError) as error:
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID,
+                f"{RELEASE_LIBRARY} is not a readable tar archive",
+            ) from error
+        return (
+            raw,
+            commit,
+            _VerifiedRelease(
+                tag=tag,
+                commit=commit,
+                assets=frozenset(verified),
+                checksums=checksums,
+                checksums_raw=checksums_raw,
+                bundle_raw=bundle_raw,
+            ),
+        )
+
+    def _store_package(
+        self, tar: tarfile.TarFile, member: tarfile.TarInfo, digest: str
+    ) -> bool:
+        """Place one member in the cache by digest; False when it is not that."""
+        target = self._package_path(digest)
+        try:
+            if target.stat().st_size == member.size:
+                return True  # verified at an earlier ingress
+        except OSError:
+            pass
+        stream = tar.extractfile(member)
+        if stream is None:
+            return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{digest}.", suffix=".tmp", dir=target.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            hasher = hashlib.sha256()
+            with os.fdopen(fd, "wb") as output:
+                while chunk := stream.read(_COPY_CHUNK):
+                    hasher.update(chunk)
+                    output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            if hasher.hexdigest() != digest:
+                return False
+            os.replace(temporary, target)
+            return True
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _package_path(self, digest: str) -> Path:
+        return self._cache_root / digest[:2] / f"{digest}.tar.gz"
+
+    def _resolve_release(self) -> tuple[str, frozenset[str], str | None]:
+        if self._release_selector == "latest":
+            path, maximum = "releases?per_page=100", MAX_RELEASE_LIST_BYTES
+        else:
+            path = f"releases/tags/{self._release_selector}"
+            maximum = MAX_RELEASE_BYTES
+        headers = {"Accept": "application/vnd.github+json"}
+        if self._listing_etag is not None and self._listing is not None:
+            headers["If-None-Match"] = self._listing_etag
+        response = self._client.get(
+            f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/{path}", headers=headers
+        )
+        self._listing_unchanged = False
+        if response.status_code == 304 and self._listing is not None:
+            self._listing_unchanged = True
+            return self._listing
+        if response.status_code != 200 or response.is_redirect:
+            raise RecipePackageUnsettled(
+                RecipePackageCode.UNAVAILABLE, "recipe release is unavailable"
+            )
+        if len(response.content) > maximum:
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
+            )
+        try:
+            payload = _json(response.content)
+            releases = (
+                _RELEASE_LIST.validate_python(payload)
+                if self._release_selector == "latest"
+                else [_ReleaseResponse.model_validate(payload)]
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as error:
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
+            ) from error
+        self._newest_major = _newest_major(releases)
+        release = _select_release(releases, self._release_selector)
+        if release is None:
+            raise RecipePackageUnsettled(
+                RecipePackageCode.UNAVAILABLE,
+                f"no published recipe library release for contract v{CONTRACT_MAJOR}",
+            )
+        assets: set[str] = set()
+        library_digest: str | None = None
+        for asset in release.assets:
+            if asset.state != "uploaded":
+                continue
+            if asset.name in assets or not _ASSET_NAME.fullmatch(asset.name):
+                raise RecipePackageError(
+                    RecipePackageCode.RESPONSE_INVALID,
+                    f"recipe release asset {_asset_label(asset.name)} is duplicated "
+                    "or misnamed",
+                )
+            assets.add(asset.name)
+            if asset.name == RELEASE_LIBRARY:
+                library_digest = asset.digest
+        self._listing = (release.tag_name, frozenset(assets), library_digest)
+        self._listing_etag = response.headers.get("etag")
+        return self._listing
+
+    def _parse_index(
+        self, raw: bytes, *, publication_commit: str
+    ) -> tuple[RecipeLibrarySnapshot, dict[str, RecipePackageEntry]]:
+        try:
+            index = _json(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID,
+                "recipe package index is invalid JSON",
+            ) from error
+        if not isinstance(index, dict):
+            raise RecipePackageError(
+                RecipePackageCode.SCHEMA_INCOMPATIBLE,
+                "recipe package index schema is unsupported",
+            )
+        # The contract's one reader: it refuses only at an integrity edge and
+        # reports every entry or block it left out; the rest applies.
+        try:
+            read = read_catalog(index)
+        except CatalogIndexRefused as error:
+            raise RecipePackageError(
+                _REFUSAL_CODES[error.reason],
+                f"recipe package index is refused: {error.detail}",
+            ) from error
+        envelope = read.index
+        if envelope.repository != PACKAGE_REPOSITORY:
+            raise RecipePackageError(
+                RecipePackageCode.RESPONSE_INVALID,
+                "recipe package index identity is invalid",
+            )
+        commit = envelope.source_commit
+        documents = catalog_read.published_documents(
+            index,
+            {
+                entry.content_sha256
+                for entry in (*envelope.catalog_entities, *envelope.recipes)
+            },
+        )
+        reader = catalog_read.report(read.problems)
+        problems = list(reader.problems)
+        models, model_notes = catalog_read.known_entries(
+            CatalogSection.MODELS, envelope.catalog_entities, reader.unknown
+        )
+        recipes, recipe_notes = catalog_read.known_entries(
+            CatalogSection.RECIPES, envelope.recipes, reader.unknown
+        )
+        family_titles = {family.slug: family.title for family in envelope.families}
+        catalog_entities = tuple(
+            CatalogModel(
+                entry=_with_family_title(entry, family_titles),
+                published=documents[entry.content_sha256],
+            )
+            for entry in models
+        )
+        packages: dict[str, RecipePackageEntry] = {}
+        items: list[RecipeLibraryItem] = []
+        for entry in recipes:
+            identity = entry.document.identity
+            key = f"{identity.publisher}/{identity.slug}"
+            uri = _catalog_uri(identity.publisher, identity.slug, entry.content_sha256)
+            package = entry.package
+            if package.expected_bytes > MAX_PACKAGE_BYTES:
+                problems.append(
+                    ManagedCatalogSyncProblem(
+                        recipe_uri=uri,
+                        code=RecipePackageCode.RESPONSE_INVALID,
+                        detail=f"recipe package of {key} exceeds its size bound",
+                    )
+                )
+                continue
+            packages[key] = RecipePackageEntry(
+                publisher=identity.publisher,
+                slug=identity.slug,
+                source_path=entry.source_path,
+                recipe_content_sha256=entry.content_sha256,
+                package_sha256=package.sha256,
+                size=package.expected_bytes,
+                location=package.path,
+                publication_commit=publication_commit,
+            )
+            items.append(
+                RecipeLibraryItem(
+                    library_commit=commit,
+                    source_path=entry.source_path,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    display=entry.display,
+                    content_sha256=entry.content_sha256,
+                    uri=uri,
+                    document=dict(documents[entry.content_sha256]),
+                    package_sha256=package.sha256,
+                    source_bundle_sha256=entry.source_bundle_sha256,
+                    prebuilt_image=entry.prebuilt_image,
+                    qualification=entry.qualification,
+                    measured_memory=entry.measured_memory,
+                    api=entry.api,
+                )
+            )
+        return RecipeLibrarySnapshot(
+            commit=commit,
+            items=tuple(items),
+            repository=envelope.repository,
+            version=envelope.contract_version,
+            vocabulary=envelope.vocabulary,
+            updated_at=envelope.updated_at,
+            catalog_entities=catalog_entities,
+            problems=tuple(problems),
+            display_notes=(*reader.notes, *model_notes, *recipe_notes),
+        ), packages
+
+    def _promote_candidate(self) -> None:
+        candidate = self._candidate
+        if candidate is None:
+            return
+        # A private temporary file, then one atomic rename: concurrent
+        # readers on this cache root each commit a whole generation.
+        temporary: Path | None = None
+        try:
+            fd, name = tempfile.mkstemp(
+                prefix=".snapshot.", suffix=".tmp", dir=self._cache_root
+            )
+            temporary = Path(name)
+            with os.fdopen(fd, "wb") as output:
+                output.write(candidate)
+            os.replace(temporary, self._snapshot_path)
+            temporary = None
+        except OSError as error:
+            # The candidate stays in memory, so the next prepare writes it
+            # again once the cause clears.
+            raise RecipePackageUnsettled(
+                RecipePackageCode.CACHE_UNAVAILABLE,
+                "recipe package snapshot could not be committed: "
+                f"{type(error).__name__} {error.strerror or error.errno}",
+            ) from error
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        # The candidate becomes the only previous-good generation after every
+        # package has been fetched and decoded.  A second list() in the same
+        # process must still compare against this generation, rather than the
+        # unvalidated candidate it replaced.
+        self._previous_snapshot = self._snapshot
+        self._previous_packages = dict(self._packages)
+        self._candidate = None
+
+    def _persisted_library_digest(self) -> str | None:
+        """The GitHub digest of the bundle the persisted generation came from."""
+        try:
+            payload = _json(self._snapshot_path.read_bytes())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        value = payload.get("library_digest") if isinstance(payload, Mapping) else None
+        return value if isinstance(value, str) else None
+
+    def _offline_snapshot(self) -> RecipeLibrarySnapshot | None:
+        """The last verified generation while the publisher is unreachable.
+
+        The in-memory generation was verified when it was loaded; the persisted
+        index is parsed again only after a restart, when nothing is in memory.
+        """
+
+        if self._snapshot is not None and self._release is not None:
+            return self._snapshot
+        return self._read_persisted_snapshot()
+
+    def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
+        """Read the offline index cache, or ``None`` when it is unusable.
+
+        This file is only a re-fetchable cache of the remote authoritative
+        index. A missing or corrupt cache is deliberately discarded so the
+        caller fails closed with "index is unavailable"; it is never served as
+        fresh data, so this is not the corruption-becomes-absent case.
+        """
+
+        self._candidate = None
+        try:
+            payload = _json(self._snapshot_path.read_bytes())
+            if not isinstance(payload, Mapping) or not isinstance(
+                payload.get("index"), str
+            ):
+                return None
+            publication = payload.get("publication_commit")
+            raw = payload["index"].encode("utf-8")
+            release = _persisted_release(payload.get("release"), raw)
+            if (
+                release is None
+                or not isinstance(publication, str)
+                or release.commit != publication
+            ):
+                # A generation without verifiable release signatures (for
+                # example one cached by an older reader) is never served.
+                return None
+            snapshot, packages = self._parse_index(raw, publication_commit=publication)
+            snapshot, packages = _bind_release(snapshot, packages, release)
+        except (
+            OSError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            RecipeLibraryError,
+        ):
+            return None
+        self._release = release
+        self._packages = packages
+        self._snapshot = snapshot
+        self._previous_snapshot = snapshot
+        self._previous_packages = dict(packages)
+        return snapshot
+
+    def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
+        if self._snapshot is None or _snapshot_content(
+            self._snapshot
+        ) != _snapshot_content(snapshot):
+            raise RecipePackageRequestInvalid(
+                RecipePackageCode.SNAPSHOT_CHANGED,
+                "package index changed during preparation",
+            )
+        previous = (
+            {item.uri: item for item in self._previous_snapshot.items}
+            if self._previous_snapshot
+            else {}
+        )
+        prepared: dict[str, RecipeLibraryItem] = {}
+        for item in snapshot.items:
+            if (
+                item.uri in previous
+                and previous[item.uri].content_sha256 == item.content_sha256
+                and self._same_package(item)
+            ):
+                continue
+            try:
+                prepared[item.uri] = self.fetch(item.uri)
+            except RecipeLibraryError as error:
+                # Integrity and transport failures fail the whole candidate
+                # generation so the previous verified one stays active. A
+                # package whose documents this Controller's contract cannot
+                # read belongs to that recipe alone: the sync fetches it again
+                # and reports it as that recipe's problem.
+                if error.code != RecipePackageCode.DOCUMENT_INCOMPATIBLE:
+                    raise
+        self._prepared = prepared
+        self._promote_candidate()
+
+    def _same_package(self, item: RecipeLibraryItem) -> bool:
+        """Return whether the active generation points at the same bytes."""
+        current = self._packages.get(f"{item.publisher}/{item.slug}")
+        previous = self._previous_packages.get(f"{item.publisher}/{item.slug}")
+        if current is None or previous is None:
+            return False
+        return (
+            current.package_sha256,
+            current.size,
+            current.location,
+            current.recipe_content_sha256,
+        ) == (
+            previous.package_sha256,
+            previous.size,
+            previous.location,
+            previous.recipe_content_sha256,
+        )
+
+    def fetch(self, uri: str) -> RecipeLibraryItem:
+        match = re.fullmatch(
+            r"vonk://catalog/([a-z0-9][a-z0-9-]{1,62})/([a-z0-9][a-z0-9-]{1,62})@sha256:([0-9a-f]{64})",
+            uri,
+        )
+        if match is None:
+            raise RecipePackageError(
+                RecipePackageCode.URI_INVALID, "recipe URI is invalid"
+            )
+        snapshot = self._snapshot or self.list()
+        publisher, slug, digest = match.groups()
+        item = next(
+            (
+                candidate
+                for candidate in snapshot.items
+                if candidate.publisher == publisher and candidate.slug == slug
+            ),
+            None,
+        )
+        if item is None or item.content_sha256 != digest:
+            raise RecipePackageRequestInvalid(
+                RecipePackageCode.NOT_FOUND,
+                "recipe is not in the current package index",
+            )
+        if uri in self._prepared:
+            return self._prepared[uri]
+        package = self._packages[f"{publisher}/{slug}"]
+        package_digest = package.package_sha256
+        archive, archive_path = self._cached_package(package_digest, package.size)
+        return self._decode_package(
+            archive, item, package=package, archive_path=archive_path
+        )
+
+    def _cached_package(self, digest: str, expected_size: int) -> tuple[bytes, Path]:
+        """Read a package verified when its library bundle was ingested."""
+        target = self._package_path(digest)
+        release = self._release
+        try:
+            cached = target.read_bytes()
+        except OSError:
+            cached = None
+        if (
+            cached is None
+            or len(cached) != expected_size
+            or release is None
+            or digest not in release.checksums.values()
+        ):
+            # Local storage lost it: ingest the library bundle again next sync.
+            self._listing_etag = None
+            self._library_digest = None
+            raise RecipePackageUnsettled(
+                RecipePackageCode.UNAVAILABLE,
+                "recipe package is not in the verified local library",
+            )
+        return cached, target
+
+    def _decode_package(
+        self,
+        archive: bytes,
+        item: RecipeLibraryItem,
+        *,
+        package: RecipePackageEntry | None = None,
+        archive_path: Path | None = None,
+    ) -> RecipeLibraryItem:
+        files: dict[str, bytes] = {}
+        total = 0
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as tar:
+                members = tar.getmembers()
+                if len(members) > MAX_PACKAGE_FILES:
+                    raise ValueError("too many package files")
+                for member in members:
+                    if (
+                        not _safe_path(member.name)
+                        or not member.isfile()
+                        or member.name in files
+                        or member.size < 0
+                        or member.size > MAX_PACKAGE_FILE_BYTES
+                    ):
+                        raise ValueError("unsafe package member")
+                    stream = tar.extractfile(member)
+                    if stream is None:
+                        raise ValueError("package member is unreadable")
+                    content = stream.read(member.size + 1)
+                    if len(content) != member.size:
+                        raise ValueError("package member size mismatch")
+                    total += len(content)
+                    if total > MAX_PACKAGE_TOTAL_BYTES:
+                        raise ValueError("package is too large")
+                    files[member.name] = content
+        except (OSError, EOFError, tarfile.TarError, ValueError) as error:
+            raise RecipePackageError(
+                RecipePackageCode.EXTRACT_INVALID, "recipe package extraction failed"
+            ) from error
+        try:
+            manifest = _json(files["manifest.json"])
+            if (
+                not isinstance(manifest, Mapping)
+                or manifest.get("schema_version") != PACKAGE_SCHEMA_VERSION
+                or manifest.get("kind") != "recipe-package"
+                or manifest.get("package_type") != "recipe"
+                or manifest.get("recipe_content_sha256") != item.content_sha256
+            ):
+                raise ValueError("manifest identity is invalid")
+            entries = manifest.get("files")
+            if (
+                not isinstance(entries, list)
+                or len(entries) != len(files) - 1
+                or {
+                    entry.get("path") for entry in entries if isinstance(entry, Mapping)
+                }
+                != set(files) - {"manifest.json"}
+            ):
+                raise ValueError("manifest file inventory is invalid")
+            for entry in entries:
+                if (
+                    not isinstance(entry, Mapping)
+                    or not isinstance(entry.get("path"), str)
+                    or not _SHA256.fullmatch(str(entry.get("sha256")))
+                    or entry.get("size") != len(files[entry["path"]])
+                    or _sha256(files[entry["path"]]) != entry["sha256"]
+                ):
+                    raise ValueError("manifest file digest is invalid")
+            if [
+                path for path in files if PurePosixPath(path).name == "recipe.json"
+            ] != ["recipe.json"]:
+                raise ValueError(
+                    "package must contain exactly one recipe.json entrypoint"
+                )
+            recipe_document = _json(files["recipe.json"])
+            if not isinstance(recipe_document, dict):
+                raise TypeError("recipe.json is not a JSON object")
+            recipe = read_recipe(recipe_document)
+            if (
+                document_sha256(recipe_document) != item.content_sha256
+                or recipe.identity.publisher != item.publisher
+                or recipe.identity.slug != item.slug
+            ):
+                raise ValueError("recipe identity or digest is invalid")
+            model_paths = [
+                path
+                for path in files
+                if path.startswith("models/") and path.endswith(".json")
+            ]
+            if not model_paths or any(
+                path != f"models/{Path(path).stem}.json" for path in model_paths
+            ):
+                raise ValueError("model snapshot paths are invalid")
+            model_documents: list[dict[str, object]] = []
+            for path in model_paths:
+                model_document = _json(files[path])
+                if not isinstance(model_document, dict):
+                    raise TypeError("model snapshot is not a JSON object")
+                model_documents.append(model_document)
+            models = {
+                document_sha256(value): read_model(value) for value in model_documents
+            }
+            if {
+                f"models/{model.identity.slug}.json" for model in models.values()
+            } != set(model_paths):
+                raise ValueError("model snapshot identity does not match its path")
+            validate_recipe_models(recipe, models)
+            _validate_package_paths(
+                recipe, set(files) - {"manifest.json"}, manifest.get("build_inputs")
+            )
+        except ValidationError as error:
+            # The package bytes are the signed ones, but a document in it does
+            # not fit this Controller's contract: that recipe alone is skipped.
+            raise RecipePackageError(
+                RecipePackageCode.DOCUMENT_INCOMPATIBLE,
+                _incompatible_detail(
+                    f"recipe package document is incompatible {item.publisher}/"
+                    f"{item.slug}",
+                    error,
+                ),
+            ) from error
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as error:
+            raise RecipePackageError(
+                RecipePackageCode.PACKAGE_INVALID,
+                "recipe package identity or contents are invalid",
+            ) from error
+        package_digest = (
+            package.package_sha256 if package is not None else _sha256(archive)
+        )
+        package_size = package.size if package is not None else len(archive)
+        package_path = package.location if package is not None else ""
+        publication_commit = (
+            package.publication_commit if package is not None else item.library_commit
+        )
+        if archive_path is None:
+            archive_path = (
+                Path(getattr(self, "_archive_path", ""))
+                if getattr(self, "_archive_path", None)
+                else Path(".")
+            )
+        closure_path = self._materialize_closure(files, package_digest, archive_path)
+        source_bundle: bytes | None = None
+        source_bundle_sha256: str | None = None
+        context = recipe.execution.build.context.path.rstrip("/")
+        context_files = {
+            path.removeprefix(f"{context}/"): content
+            for path, content in files.items()
+            if path.startswith(f"{context}/")
+        }
+        try:
+            bundle = generate_source_bundle(context_files)
+        except (SourceBundleError, ValueError) as error:
+            raise RecipePackageError(
+                RecipePackageCode.PACKAGE_INVALID,
+                "recipe build source closure is invalid",
+            ) from error
+        if manifest.get("source_bundle_sha256") != bundle.sha256 or (
+            item.source_bundle_sha256 is not None
+            and item.source_bundle_sha256 != bundle.sha256
+        ):
+            raise RecipePackageError(
+                RecipePackageCode.PACKAGE_INVALID,
+                "recipe build source does not match its published content identity",
+            )
+        source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
+        handle = RecipePackageHandle(
+            publication_commit=publication_commit,
+            source_commit=item.library_commit,
+            package_sha256=package_digest,
+            package_size=package_size,
+            package_path=package_path,
+            recipe_content_sha256=item.content_sha256,
+            archive_path=archive_path,
+            closure_path=closure_path,
+            recipe=recipe,
+            models=models,
+        )
+        return replace(
+            item,
+            document=recipe_document,
+            release=RecipeLibraryRelease(
+                recipe.release.version, recipe.release.released_at
+            ),
+            dependencies=tuple(model_documents),
+            source_bundle=source_bundle,
+            package_handle=handle,
+            package_sha256=package_digest,
+            source_bundle_sha256=source_bundle_sha256,
+        )
+
+    def _materialize_closure(
+        self, files: Mapping[str, bytes], digest: str, archive_path: Path
+    ) -> Path:
+        root = getattr(self, "_cache_root", archive_path.parent)
+        # Keep the closure beside its digest-addressed package object.  The
+        # directory itself is the durable reference persisted in the import
+        # receipt (``<cache>/<digest>/closure``).
+        target = root / digest / "closure"
+        marker = target / ".complete"
+        if marker.is_file():
+            try:
+                if marker.read_text(encoding="ascii") == digest:
+                    return target
+            except (OSError, UnicodeDecodeError):
+                pass
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            # A process interrupted before publishing the completion marker.
+            # It is never exposed as a usable closure.
+            shutil.rmtree(target, ignore_errors=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{digest}.", dir=target.parent))
+        try:
+            for name, content in files.items():
+                destination = temporary / Path(*PurePosixPath(name).parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+            marker_path = temporary / ".complete"
+            marker_path.write_text(digest, encoding="ascii")
+            try:
+                os.replace(temporary, target)
+            except FileExistsError:
+                pass
+        finally:
+            if temporary.exists():
+                for path in sorted(temporary.rglob("*"), reverse=True):
+                    if path.is_file() or path.is_symlink():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+                temporary.rmdir()
+        return target
+
+
+def _with_family_title(
+    entry: CatalogModelEntry, family_titles: Mapping[str, str]
+) -> CatalogModelEntry:
+    """The Model's display titled by its Family from the release's ``families``.
+
+    One source for a Family's title: the index's Family display, never each
+    Model's own ``family_title``. A helper (no lineage) keeps its display.
+    """
+
+    display = entry.display
+    lineage = display.lineage if display is not None else None
+    title = family_titles.get(lineage.family) if lineage is not None else None
+    if display is None or title is None:
+        return entry
+    return entry.model_copy(
+        update={"display": display.model_copy(update={"family_title": title})}
+    )
+
+
+def _catalog_uri(publisher: str, slug: str, digest: str) -> str:
+    return f"vonk://catalog/{publisher}/{slug}@sha256:{digest}"
+
+
+def _incompatible_detail(detail: str, error: Exception | None) -> str:
+    """Name the document fields a contract mismatch concerns, bounded."""
+    if not isinstance(error, ValidationError):
+        return detail[:256]
+    locations = sorted(
+        {".".join(str(part) for part in item["loc"]) for item in error.errors()}
+    )
+    return f"{detail}: {', '.join(locations)}"[:256] if locations else detail[:256]
+
+
+def _bind_release(
+    snapshot: RecipeLibrarySnapshot,
+    packages: Mapping[str, RecipePackageEntry],
+    release: _VerifiedRelease,
+) -> tuple[RecipeLibrarySnapshot, dict[str, RecipePackageEntry]]:
+    """Keep only recipes whose package is the signed, verified one.
+
+    The index bytes are bound by signed checksums; source provenance is informational.
+    A recipe whose package path,
+    digest or bytes disagree with the signed SHA256SUMS is skipped and reported
+    by name; every other recipe still applies.
+    """
+    kept: dict[str, RecipePackageEntry] = {}
+    problems = list(snapshot.problems)
+    skipped: set[str] = set()
+    for key, package in packages.items():
+        location = package.location
+        name = PurePosixPath(location).name
+        if location != f"packages/{name}":
+            reason = "catalog-index.json package.path is not packages/<asset>"
+        elif release.checksums.get(name) != package.package_sha256:
+            reason = "catalog-index.json package.sha256 differs from SHA256SUMS"
+        elif name not in release.assets:
+            reason = (
+                f"{RELEASE_LIBRARY} lacks the signed package "
+                f"{_asset_label(name)} or its bytes differ"
+            )
+        else:
+            kept[key] = package
+            continue
+        skipped.add(key)
+        problems.append(
+            ManagedCatalogSyncProblem(
+                recipe_uri=_catalog_uri(
+                    package.publisher, package.slug, package.recipe_content_sha256
+                ),
+                code=RecipePackageCode.RELEASE_INCOMPLETE,
+                detail=f"{reason} for {key}"[:256],
+            )
+        )
+    if not skipped:
+        return snapshot, kept
+    return (
+        replace(
+            snapshot,
+            items=tuple(
+                item
+                for item in snapshot.items
+                if f"{item.publisher}/{item.slug}" not in skipped
+            ),
+            problems=tuple(problems),
+        ),
+        kept,
+    )
+
+
+def _asset_label(name: str) -> str:
+    """Return a release asset name that is safe to show, or a placeholder."""
+    return name if _ASSET_NAME.fullmatch(name) else "<invalid asset name>"
+
+
+def _persisted_payload(
+    raw: bytes,
+    *,
+    publication_commit: str,
+    release: _VerifiedRelease,
+    library_digest: str | None,
+) -> bytes:
+    """The offline cache record for one verified generation.
+
+    It keeps the signature material so a restart re-verifies the previous
+    generation instead of trusting local state.
+    """
+    payload: dict[str, object] = {
+        "index": raw.decode("utf-8"),
+        "publication_commit": publication_commit,
+        "library_digest": library_digest,
+        "release": {
+            "tag": release.tag,
+            "assets": sorted(release.assets),
+            "checksums": release.checksums_raw.decode("ascii"),
+            "bundle": release.bundle_raw.decode("utf-8"),
+        },
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def _persisted_release(value: object, index: bytes) -> _VerifiedRelease | None:
+    if not isinstance(value, Mapping):
+        return None
+    tag, assets = value.get("tag"), value.get("assets")
+    checksums_text, bundle_text = value.get("checksums"), value.get("bundle")
+    if (
+        not isinstance(tag, str)
+        or not _RELEASE_TAG.fullmatch(tag)
+        or not isinstance(assets, list)
+        or not all(
+            isinstance(name, str) and _ASSET_NAME.fullmatch(name) for name in assets
+        )
+        or not isinstance(checksums_text, str)
+        or not isinstance(bundle_text, str)
+    ):
+        return None
+    checksums_raw = checksums_text.encode("ascii")
+    bundle_raw = bundle_text.encode("utf-8")
+    commit = verify_release_checksums(checksums_raw, bundle_raw)
+    checksums = parse_release_checksums(checksums_raw)
+    if _sha256(index) != checksums[RELEASE_INDEX]:
+        return None
+    return _VerifiedRelease(
+        tag=tag,
+        commit=commit,
+        assets=frozenset(assets),
+        checksums=checksums,
+        checksums_raw=checksums_raw,
+        bundle_raw=bundle_raw,
+    )
+
+
+def load_recipe_package(
+    path: Path,
+    *,
+    package_sha256: str,
+    publisher: str,
+    slug: str,
+    recipe_content_sha256: str,
+    library_commit: str,
+    source_path: str,
+    display: RecipeDisplay | None,
+) -> RecipeLibraryItem:
+    try:
+        archive = path.read_bytes()
+    except OSError as error:
+        raise RecipePackageUnsettled(
+            RecipePackageCode.UNAVAILABLE, "offline recipe package is unavailable"
+        ) from error
+    if (
+        not _SHA256.fullmatch(package_sha256)
+        or len(archive) > MAX_PACKAGE_BYTES
+        or _sha256(archive) != package_sha256
+    ):
+        raise RecipePackageError(
+            RecipePackageCode.DIGEST_MISMATCH,
+            "offline recipe package digest does not match",
+        )
+    item = RecipeLibraryItem(
+        library_commit=library_commit,
+        source_path=source_path,
+        publisher=publisher,
+        slug=slug,
+        display=display,
+        content_sha256=recipe_content_sha256,
+        uri=_catalog_uri(publisher, slug, recipe_content_sha256),
+        document={},
+    )
+    decoder = RecipePackageClient.__new__(RecipePackageClient)
+    decoder._cache_root = path.parent / ".recipe-package-cache"
+    return decoder._decode_package(
+        archive,
+        item,
+        package=RecipePackageEntry(
+            publisher=publisher,
+            slug=slug,
+            source_path=source_path,
+            recipe_content_sha256=recipe_content_sha256,
+            package_sha256=package_sha256,
+            size=len(archive),
+            location=str(path),
+            publication_commit=library_commit,
+        ),
+        archive_path=path,
+    )
+
+
+__all__ = [
+    "PACKAGE_REPOSITORY",
+    "RecipePackageClient",
+    "RecipePackageHandle",
+    "load_recipe_package",
+]

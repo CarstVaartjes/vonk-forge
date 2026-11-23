@@ -56,14 +56,15 @@ from cluster_profiles.control_client import ControlClient
 
 from .consumer_outcomes import not_adopted
 from .display_fixtures import reworded
+from .fleet_profiles_support import _SwitchAdapter
 from .insert_collision_support import Rendezvous
 from .lock_wait_support import backend_pid, lock_waits_behind
+from .recipe_operations_support import started_recipe
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_review import _replace_run
-from .test_fleet_profiles import _exact_cleanup_profile, _SwitchAdapter
 from .test_fleet_profiles_canonical import NOW, _seed
-from .test_recipe_operations import started_recipe
+from .test_fleet_profiles_part3 import _exact_cleanup_profile
 
 
 def _profile_api(engine):

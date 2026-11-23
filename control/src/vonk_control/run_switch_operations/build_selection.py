@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,

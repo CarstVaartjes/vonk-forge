@@ -40,14 +40,14 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
-from vonk_control.stored_json import write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from tests.display_fixtures import reword
 
-from ..test_recipe_operations import ConcurrentPublisher, setup_services
-from ..test_run_switch_operations import (
+from ..recipe_operations_support import ConcurrentPublisher, setup_services
+from ..run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

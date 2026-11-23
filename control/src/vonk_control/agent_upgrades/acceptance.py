@@ -21,7 +21,7 @@ from ..agent_upgrade_contract import (
     AgentUpgradeRolloutResult,
 )
 from ..identity_insert import insert_identity
-from ..inventory_items import runtime_value
+from ..inventory.items import runtime_value
 from ..lifecycle.agent_upgrade import AgentUpgradeAdapter
 from ..models import AgentNode, Job
 

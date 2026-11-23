@@ -8,9 +8,10 @@ from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from vonk_control import availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.availability_production import production as availability_production
+from vonk_control.gateway import route_runtime
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -24,7 +25,7 @@ from vonk_control.source_bundles import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .test_recipe_image_availability import _recipe_projection
+from .recipe_image_availability_support import _recipe_projection
 
 
 def test_production_app_recipe_download_auth_and_status(

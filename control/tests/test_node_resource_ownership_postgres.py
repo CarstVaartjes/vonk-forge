@@ -14,7 +14,7 @@ from vonk_agent_protocol.telemetry import (
 )
 from vonk_control.db import initialize_database, node_facts
 from vonk_control.models import Base, NodeInventoryResourceSnapshot, NodeTelemetrySample
-from vonk_control.telemetry import TelemetryRepository
+from vonk_control.telemetry.samples import TelemetryRepository
 
 NODE = "spk_" + "c" * 32
 NOW = datetime(2026, 10, 22, 12, tzinfo=UTC)
@@ -127,7 +127,7 @@ def test_resource_reporting_rolls_back_partial_sample_and_retries(
     from datetime import timedelta
 
     from vonk_control.models import AgentNode, NodeTelemetryLatest
-    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+    from vonk_control.telemetry.maintenance import TelemetryMaintenance
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -178,8 +178,8 @@ def test_archived_measurement_lock_does_not_block_install_admission(
     """Catches locking telemetry history as if it were current admission evidence."""
     from vonk_control.models import RecipeInstallation
 
-    from .test_recipe_operations import NOW as now
-    from .test_recipe_operations import setup_services
+    from .recipe_operations_support import NOW as now
+    from .recipe_operations_support import setup_services
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine

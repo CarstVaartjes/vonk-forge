@@ -11,14 +11,16 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import CompiledExecutionPlan, LifecycleState, RunSwitchCode
 from vonk_control.agent_contacts import record_contact
-from vonk_control.availability_production import build_recipe_image_availability
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.availability_production.production import (
+    build_recipe_image_availability,
+)
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import (
     InstallAdmissionService,
 )
-from vonk_control.inventory_items import runtime_value
+from vonk_control.inventory.items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -44,16 +46,12 @@ from vonk_forge_contracts import read_model
 
 from .display_fixtures import reword
 from .preflight_fixtures import record_passing_preflight
+from .recipe_builds_support import RecordingQueue, _json_object, setup
+from .recipe_operations_support import complete_started_recipe
 from .runtime_identity_support import set_inventory_identity
 from .runtime_image_fixtures import place_test_image, remove_test_image
-from .test_recipe_builds import (
-    RecordingQueue,
-    _json_array,
-    _json_object,
-    _write_controller_build_receipt,
-    setup,
-)
-from .test_recipe_operations import complete_started_recipe
+from .test_recipe_builds_part1 import _write_controller_build_receipt
+from .test_recipe_builds_part2 import _json_array
 
 
 def _prepared_successor(tmp_path, *, change="runtime"):

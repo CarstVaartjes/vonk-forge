@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
 from vonk_control.install_admission import InstallPlanConflict
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
@@ -20,8 +20,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 
 
 def _record_disk(sessions, node_id, *, at, free, observed_at=None):

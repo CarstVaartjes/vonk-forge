@@ -497,7 +497,7 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control 
   control/tests/test_agent_job_lock_order_postgres.py \
   control/tests/test_run_switch_postgres.py \
   control/tests/test_telemetry_postgres.py \
-  control/tests/test_recipe_operations.py \
+  control/tests/test_recipe_operations_part*.py \
   control/tests/test_local_ca.py control/tests/security
 ```
 
@@ -772,7 +772,7 @@ local command `scripts/test guards` runs them in parallel (`-n auto`; they share
 prints its complement's pytest options. No test reads Git history for this decision.
 
 `tests/test_guard_paths_exist.py` fails when a plain repository path string literal names
-nothing. It reads `added_line_guards.py`, `principle_guards.py`, `repository_guards.py`,
+nothing. It reads the `added_line_guards/` package, `principle_guards.py`, `repository_guards.py`,
 `scripts/select-ci-areas`, the boundary and reader tables (`document_read_boundaries.py`,
 `untyped_mapping_boundaries.py`, `whole_collection_readers.py`,
 `deterministic_retries.py`, `lifecycle_writer_boundaries.py`) and `tools/*.json`. A prefix

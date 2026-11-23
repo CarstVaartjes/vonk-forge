@@ -10,10 +10,10 @@ from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_queries import active_head_revision
-from vonk_control.catalog_revision_contract import read_catalog_document
-from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog.queries import active_head_revision
+from vonk_control.catalog.revision_contract import read_catalog_document
+from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.lifecycle.evidence import Residue, read_or_rebuild
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.fleet_removal import _model_objects

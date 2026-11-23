@@ -29,7 +29,7 @@ from .repeated_evidence_contract import (
     is_contact_subject,
 )
 from .settings import PROFILE_STALL_WINDOW_SECONDS
-from .stored_json import read_row_column
+from .stored.json_values import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)

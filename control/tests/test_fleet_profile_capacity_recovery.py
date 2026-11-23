@@ -25,8 +25,8 @@ from vonk_control.profile_capacity import (
 )
 from vonk_control.strict_json import read_stored_model
 
+from .fleet_profiles_support import _uuid
 from .test_fleet_profile_lifecycle import _World
-from .test_fleet_profiles import _uuid
 from .test_profile_build_memory import _accepted_build_profile, _parent_build_request
 
 

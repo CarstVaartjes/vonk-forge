@@ -9,16 +9,16 @@ from importlib.resources import files
 from typing import Any, cast
 
 import pytest
-import vonk_control.catalog_entities as entities
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog import entities
+from vonk_control.catalog.revision_contract import (
     PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService, RecipeRevisionView
+from vonk_control.catalog.service import CatalogService, RecipeRevisionView
 from vonk_control.models import (
     Base,
     CatalogDocument,

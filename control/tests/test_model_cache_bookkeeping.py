@@ -30,13 +30,9 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
 )
 
+from .model_cache_support import _artifact, _download, cache  # noqa: F401 - the fixture
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_model_cache import (
-    _artifact,
-    _download,
-    cache,  # noqa: F401 - the fixture
-)
 from .test_model_cache_lifecycle import _edit, _queue
 from .test_model_cache_recovery_support import observe_unknown
 from .test_model_removal_reference_lifecycle import (

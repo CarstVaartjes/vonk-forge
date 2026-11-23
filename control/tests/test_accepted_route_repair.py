@@ -5,19 +5,19 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol import GatewayRouteState, UnknownError
-from vonk_control.litellm import LiteLlmPolicy, RouteState, render_config
-from vonk_control.presence import ManagementAddressPolicy
-from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
-from vonk_control.recipe_routes.shared import _RecipeCandidate, _RecipeEndpoint
-from vonk_control.route_bundle_contract import (
+from vonk_control.gateway.litellm import LiteLlmPolicy, RouteState, render_config
+from vonk_control.gateway.route_bundle_contract import (
     RouteAcceptedModelPolicy,
     RouteBundleDocument,
 )
-from vonk_control.route_runtime import (
+from vonk_control.gateway.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     verify_active_route_bundle,
 )
+from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
+from vonk_control.recipe_routes.shared import _RecipeCandidate, _RecipeEndpoint
 
 
 @pytest.mark.parametrize(
@@ -97,7 +97,7 @@ def test_latest_explicit_route_intent_wins_over_older_alias_owner(tmp_path):
     """Catches a persisted alias collision blocking the next authorized publication."""
     from vonk_agent_protocol import RouteState as RunRouteState
 
-    from .test_recipe_routes import (
+    from .recipe_routes_support import (
         NOW,
         MutableClock,
         add_running_run,

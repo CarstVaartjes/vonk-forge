@@ -21,7 +21,7 @@ from ..lifecycle import Outcome, Reported, State
 from ..model_cache_contract import ModelCacheSetState, ModelCacheTransferArtifact
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
-from ..operation_progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
+from ..operations.progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
 from ..profile_read_observation import observe_storage
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .catalog_helpers import _iso, _iso_now

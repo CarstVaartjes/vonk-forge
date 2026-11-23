@@ -38,7 +38,7 @@ from vonk_control.fleet_profiles import (
     build_production_fleet_profile_service,
 )
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import inventory_items, runtime_value
+from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -59,21 +59,21 @@ from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .agent_fences import fenced_operation
+from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
+from .fleet_profiles_support import _uuid
 from .profile_due_fixtures import next_profile_due
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
-from .test_artifact_jobs import running_artifact_service, submitted_artifact_job
-from .test_fleet_profile_api import _client, _headers
-from .test_fleet_profiles import _uuid
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     installed_recipe,
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import (
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_fleet_profile_api import _client, _headers
 
 
 class _IdleRoutes:

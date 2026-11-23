@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.admission_locking import AdmissionLockKey, node_admission_key
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.distribution import (
     DistributionIntegrityError,
     DistributionService,
@@ -47,10 +47,10 @@ from vonk_control.source_bundles import (
 )
 from vonk_forge_contracts import document_sha256
 
-from .test_artifact_jobs import _configure_artifact_recipe
+from .artifact_jobs_support import _configure_artifact_recipe
+from .recipe_operations_support import installed_recipe, setup_services
 from .test_catalog_entities import NOW, _model, _recipe
 from .test_distribution import _assignment
-from .test_recipe_operations import installed_recipe, setup_services
 
 
 @contextmanager

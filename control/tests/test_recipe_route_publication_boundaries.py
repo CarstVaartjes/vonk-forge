@@ -17,6 +17,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from vonk_control.gateway.route_runtime import (
+    ActivationMarker,
+    AtomicRouteBundlePublisher,
+)
 from vonk_control.models import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -24,13 +28,9 @@ from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
     RecipeRouteService,
 )
-from vonk_control.route_runtime import (
-    ActivationMarker,
-    AtomicRouteBundlePublisher,
-)
 
 from .observed_actions import observe_action
-from .test_recipe_routes import (
+from .recipe_routes_support import (
     NOW,
     MutableClock,
     _publication,
@@ -592,8 +592,8 @@ def test_postgres_stale_executor_is_fenced_before_first_activation(
 
 def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
     from vonk_agent_protocol import RoutePublicationState, RunState
+    from vonk_control.gateway.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
     from vonk_control.models import RecipeRun
-    from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 
     from .observed_actions import observe_action
 
@@ -759,7 +759,7 @@ def test_authenticated_observation_producer_repairs_between_passes(
     from sqlalchemy import select
     from vonk_control.models import AgentCertificate, RunNode
 
-    from .test_agent_api import agent_headers, make_agent_system
+    from .agent_api_support import agent_headers, make_agent_system
 
     base, _publisher, applied, run_id = setup(tmp_path, ranks=1)
     observer_root = tmp_path / "observer"

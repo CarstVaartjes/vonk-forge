@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from sqlalchemy import select
 
 from ..auth import cursor_key
-from ..catalog_queries import active_head_revision
-from ..library_contract import (
+from ..catalog.queries import active_head_revision
+from ..library.contract import (
     _MAX_PAGE_RECIPES,
     _UUID_PATTERN,
     LibraryFilterValues,
@@ -33,7 +33,7 @@ from ..model_cache.source_helpers import _model_selector
 from ..models import CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from .common import (
     _LIBRARY_ORDER,
     _canonical_model,

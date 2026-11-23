@@ -40,15 +40,15 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from vonk_control.operation_item_contract import OperationResultFacts, operation_item
+from vonk_control.operations.item_contract import OperationResultFacts, operation_item
 
 from .agent_fences import fenced_attempt
+from .agent_jobs_support import NODE_A, NODE_B, Clock, distribution_payload, parent
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     inventory_items_fixture,
 )
-from .test_agent_jobs import NODE_A, NODE_B, Clock, distribution_payload, parent
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -1369,7 +1369,7 @@ def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
 
 
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
-    from vonk_control.operation_contract import sanitize_failure_evidence
+    from vonk_control.operations.contract import sanitize_failure_evidence
 
     document = _child_diagnostics_document("segfault\n")
     document["versions"] = [{"name": f"v{i}", "value": "x" * 256} for i in range(8)]

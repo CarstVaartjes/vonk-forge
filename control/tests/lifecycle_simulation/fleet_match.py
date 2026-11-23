@@ -35,7 +35,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchStartResult,
 )
-from vonk_control.stored_json import read_row_column
+from vonk_control.stored.json_values import read_row_column
 
 from .world import World
 

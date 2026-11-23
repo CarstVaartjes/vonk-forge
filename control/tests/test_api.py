@@ -18,7 +18,7 @@ from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.catalog_api import CatalogProblem
+from vonk_control.catalog.api import CatalogProblem
 from vonk_control.models import Base, Job, User
 from vonk_control.passwords import hash_password
 

@@ -24,7 +24,7 @@ import httpx2
 import pytest
 from sqlalchemy import Engine, select
 from vonk_agent_protocol import LifecycleState
-from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import CatalogDocumentRevision, ModelCacheSet, RecipeBuild
@@ -40,7 +40,7 @@ from vonk_control.run_switch_operations.artifact_validation import (
 )
 from vonk_forge_contracts import document_sha256
 
-from .test_recipe_operations import setup_services
+from .recipe_operations_support import setup_services
 
 WEIGHTS = bytes(range(256)) * 4
 SELECTOR = "vonk-forge/synthetic-tiny-fp16"

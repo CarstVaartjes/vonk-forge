@@ -29,7 +29,7 @@ from ..lifecycle_preflight import (
 )
 from ..mapping_parameters import MappingParameters as MappingParameters
 from ..model_cache_contract import ModelCacheDownloadResult as ModelCacheDownloadResult
-from ..operation_blockers import OperationBlocker as OperationBlocker
+from ..operations.blockers import OperationBlocker as OperationBlocker
 from ..preparation_contract import RolloutPreparation as RolloutPreparation
 from ..run_switch_identity_contract import NodeId as NodeId
 from ..run_switch_identity_contract import (

@@ -12,7 +12,7 @@ from vonk_forge_contracts.recipe import (
     Scalar,
 )
 
-from ..operation_blockers import SwapShortfallEvidence
+from ..operations.blockers import SwapShortfallEvidence
 from ..run_switch_contract import (
     MemoryKind,
     RunSwitchChangeEffect,

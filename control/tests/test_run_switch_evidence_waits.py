@@ -18,13 +18,13 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
 )
 from vonk_control.models import RecipeRun, RunNode
-from vonk_control.operation_blockers import STALL_RETRY_ATTEMPT, ProgressStall
+from vonk_control.operations.blockers import STALL_RETRY_ATTEMPT, ProgressStall
 from vonk_control.progress_stall import is_stalled, next_stall
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import (
@@ -35,14 +35,14 @@ from vonk_control.run_switch_operations.evidence_waits import (
     RunSwitchPostStopInventoryPending,
 )
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
-from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
-from .test_run_switch_operations import (
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
     RecordingArtifactExecutor,
     _request,
     _result,
     _service,
 )
+from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
 
 _PHASES = (
     ProfileChildPhase.PREPARE,

@@ -1,0 +1,294 @@
+"""Append-only authenticated GPU node inventory evidence."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from pydantic import field_validator
+from sqlalchemy import Select, func, select
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import InvalidRequestReason, canonical_message
+from vonk_agent_protocol.inventory import (
+    InventoryRequest,
+)
+from vonk_agent_protocol.wire_model import strict_json_datetime
+
+from ..categorized_errors import InvalidValue
+from ..dialect_insert import dialect_insert
+from ..installed_bytes import reconcile_missing_installations, refresh_installed_bytes
+from ..logging import log_event
+from ..models import AgentNode, NodeInventorySnapshot, NodeSnapshot
+from .items_contract import InventorySnapshotKind
+
+_LOG = logging.getLogger(__name__)
+
+# Agent inventory may lead the Controller clock by this much. Consumers that
+# order it against Controller-owned events must retain the same uncertainty.
+MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
+# A report received longer ago than this no longer says what a Spark holds.
+INVENTORY_MAX_AGE = timedelta(minutes=5)
+INVENTORY_MAX_AGE_SECONDS = int(INVENTORY_MAX_AGE.total_seconds())
+
+
+class NodeInventoryReport(InventoryRequest):
+    """Authenticated node binding around the canonical agent report."""
+
+    node_id: str
+
+
+class InventorySnapshotView(NodeInventoryReport):
+    id: str
+    received_at: datetime
+    evidence_digest: str
+    stale: bool
+
+    _parse_received_at = field_validator("received_at", mode="before")(
+        strict_json_datetime
+    )
+
+
+def _validated_inventory(
+    value: NodeInventoryReport | NodeInventorySnapshot, *, observed_at: datetime
+) -> InventoryRequest:
+    document = {
+        name: getattr(value, name)
+        for name in InventoryRequest.model_fields
+        if name
+        not in {
+            "schema_version",
+            "observed_at",
+        }
+    }
+    document.update(schema_version=1, observed_at=observed_at.isoformat())
+    validated = InventoryRequest.model_validate_json(canonical_message(document))
+    for warning in validated.evidence_warnings:
+        log_event(
+            _LOG,
+            "agent.evidence_dropped",
+            service="control-api",
+            code=warning.value,
+            endpoint="inventory",
+            node_id=value.node_id,
+        )
+    return validated
+
+
+def newest_snapshot_ids(node_ids: Sequence[str]) -> Select[Any]:
+    """Id of each node's newest inventory report: one indexed probe per node.
+
+    The probe is a correlated ``ORDER BY observed_at DESC LIMIT 1`` on the
+    ``(node_id, observed_at)`` index, so rows read per node is one however many
+    reports are retained; a window or grouped max over ``node_id`` reads them
+    all. Use it as ``NodeInventorySnapshot.id.in_(newest_snapshot_ids(ids))``.
+    """
+
+    newest = (
+        select(NodeInventorySnapshot.id)
+        .where(NodeInventorySnapshot.node_id == AgentNode.node_id)
+        .order_by(NodeInventorySnapshot.observed_at.desc())
+        .limit(1)
+        .correlate(AgentNode)
+        .scalar_subquery()
+    )
+    return select(newest).where(AgentNode.node_id.in_(node_ids))
+
+
+def spark_model_objects(
+    session: Session,
+    node_id: str,
+    *,
+    now: datetime,
+    received_after: datetime | None = None,
+) -> Mapping[str, int] | None:
+    """The model objects (sha256 -> bytes) a Spark's store holds.
+
+    "Does this Spark hold model file X", from the agent's own store scan in
+    its newest inventory (install admission reads the same scan from the
+    snapshot it already loaded). ``None`` (unknown) when that report is
+    missing, older than :data:`INVENTORY_MAX_AGE` or ``received_after``, or
+    carries no readable scan. Copy planning and disk admission count unknown
+    as missing (the transfer that follows is idempotent: the agent reuses an
+    object it holds); removal confirmation waits for a fresh scan instead.
+    """
+
+    row = session.execute(
+        select(NodeInventorySnapshot.model_objects, NodeInventorySnapshot.received_at)
+        .where(NodeInventorySnapshot.node_id == node_id)
+        .order_by(NodeInventorySnapshot.observed_at.desc())
+        .limit(1)
+    ).first()
+    if row is None or not isinstance(row.model_objects, list):
+        return None
+    received = (
+        row.received_at
+        if row.received_at.tzinfo is not None
+        else row.received_at.replace(tzinfo=UTC)
+    )
+    if received < now - INVENTORY_MAX_AGE or (
+        received_after is not None and received <= received_after
+    ):
+        return None
+    return {item.sha256: item.bytes for item in row.model_objects}
+
+
+class InventoryRepository:
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._sessions, self._clock = sessions, clock
+
+    def record(self, value: NodeInventoryReport) -> NodeInventorySnapshot:
+        validated = _validated_inventory(value, observed_at=value.observed_at)
+        validated = validated.model_copy(
+            update={"capabilities": sorted(validated.capabilities)}
+        )
+        document = validated.model_dump(mode="json", exclude={"schema_version"})
+        document["node_id"] = value.node_id
+        document["capabilities"] = sorted(validated.capabilities)
+        digest = hashlib.sha256(
+            json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        columns = {
+            name: getattr(validated, name)
+            for name in InventoryRequest.model_fields
+            if name != "schema_version"
+        }
+        received_at = self._clock()
+        row = NodeInventorySnapshot(
+            node_id=value.node_id,
+            received_at=received_at,
+            evidence_digest=digest,
+            **columns,
+        )
+        with self._sessions.begin() as session:
+            # Agent traffic never locks the node row: admission and publication
+            # own it. A deleted node fails the insert's foreign key instead.
+            session.execute(
+                select(AgentNode.node_id).where(AgentNode.node_id == value.node_id)
+            ).one()
+            latest = session.scalar(
+                select(NodeInventorySnapshot.observed_at)
+                .where(NodeInventorySnapshot.node_id == value.node_id)
+                .order_by(NodeInventorySnapshot.observed_at.desc())
+                .limit(1)
+            )
+            inserted = session.execute(
+                dialect_insert(session, NodeSnapshot)
+                .values(
+                    node_id=value.node_id,
+                    received_at=received_at,
+                    evidence_digest=digest,
+                    kind=InventorySnapshotKind.REPORT,
+                    **columns,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[NodeSnapshot.node_id, NodeSnapshot.observed_at],
+                    index_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+                )
+                .returning(NodeSnapshot.id)
+            ).scalar()
+            if inserted is None:
+                # The identity is already recorded (a replay or a concurrent
+                # twin): identical evidence is the same answer, anything else
+                # is a conflict.
+                existing = session.scalars(
+                    select(NodeInventorySnapshot).where(
+                        NodeInventorySnapshot.node_id == value.node_id,
+                        NodeInventorySnapshot.observed_at == value.observed_at,
+                    )
+                ).one()
+                if existing.evidence_digest != digest:
+                    raise InvalidValue(
+                        "inventory identity already binds different evidence",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
+                return existing
+            retained_report = _validated_inventory(row, observed_at=value.observed_at)
+            if latest is None or value.observed_at >= (
+                latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC)
+            ):
+                reconcile_missing_installations(
+                    session,
+                    value.node_id,
+                    retained_report.installations,
+                    observed_at=value.observed_at,
+                    before=value.observed_at - MAX_INVENTORY_FUTURE_SKEW,
+                )
+                if isinstance(row.installation_bytes, list):
+                    refresh_installed_bytes(
+                        session, value.node_id, row.installation_bytes
+                    )
+        # The caller reads the report it sent plus the stored identity.
+        row.id = inserted
+        return row
+
+    def latest(
+        self,
+        node_id: str,
+        *,
+        now: datetime,
+        maximum_age: int,
+        _session: Session | None = None,
+    ) -> InventorySnapshotView:
+        with (
+            nullcontext(_session) if _session is not None else self._sessions()
+        ) as session:
+            row = session.scalar(
+                select(NodeInventorySnapshot)
+                .where(NodeInventorySnapshot.node_id == node_id)
+                .order_by(NodeInventorySnapshot.observed_at.desc())
+                .limit(1)
+            )
+            if row is None:
+                raise KeyError(node_id)
+            return _snapshot_view(row, now=now, maximum_age=maximum_age)
+
+    def snapshot_count(self, node_id: str) -> int:
+        with self._sessions() as session:
+            return int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(NodeInventorySnapshot)
+                    .where(NodeInventorySnapshot.node_id == node_id)
+                )
+                or 0
+            )
+
+
+def _snapshot_view(
+    row: NodeInventorySnapshot, *, now: datetime, maximum_age: int
+) -> InventorySnapshotView:
+    observed = (
+        row.observed_at
+        if row.observed_at.tzinfo
+        else row.observed_at.replace(tzinfo=UTC)
+    )
+    received = (
+        row.received_at
+        if row.received_at.tzinfo
+        else row.received_at.replace(tzinfo=UTC)
+    )
+    # Validate the persisted JSON semantics using the producer's current
+    # contract. A typed annotation or SQL string alone is not evidence.
+    validated = _validated_inventory(row, observed_at=observed)
+    return InventorySnapshotView.model_validate_json(
+        canonical_message(
+            {
+                **validated.model_dump(mode="json"),
+                "id": row.id,
+                "node_id": row.node_id,
+                "received_at": row.received_at,
+                "evidence_digest": row.evidence_digest,
+                "stale": (now - received).total_seconds() > maximum_age,
+            }
+        )
+    )

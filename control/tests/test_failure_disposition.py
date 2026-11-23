@@ -467,7 +467,7 @@ def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -
 def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
     from pathlib import Path
 
-    from .added_line_guards import rust_test_lines
+    from .added_line_guards.scans import rust_test_lines
     from .deterministic_retries import scan_rust_dispositions
 
     root = Path(__file__).resolve().parents[2]
@@ -578,7 +578,7 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
     from vonk_control.recipe_operation_worker import RecipeOperationWorker
     from vonk_control.recovery_policy import ROUTE_RECOVERY
 
-    from .test_recipe_routes import NOW, setup
+    from .recipe_routes_support import NOW, setup
 
     routes, _runtime, applied, run_id = setup(tmp_path)
     worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)

@@ -54,7 +54,7 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     if kind is Kind.RECIPE_START:
         from vonk_agent_protocol import RecipeStartPayload
 
-        from .test_agent_jobs import canonical_start_payload
+        from .agent_jobs_support import canonical_start_payload
         from .test_agent_jobs_postgres import Clock
 
         return RecipeStartPayload.model_validate_json(
@@ -259,12 +259,12 @@ def test_shared_observer_covers_every_kind():
 def _cancelled_job(tmp_path, postgres_engine):
     from vonk_agent_protocol import OutcomeKind, OutcomeUnknown, WaitReason
 
-    from .test_artifact_jobs import (
-        NOW,
+    from .artifact_jobs_support import (
         MutableClock,
         running_artifact_service,
         submitted_artifact_job,
     )
+    from .test_artifact_jobs_part1 import NOW
 
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
@@ -571,7 +571,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     assert evidence is not None and evidence.active_scope_may_remain
 
     # A refused historical cleanup does not poison fresh job authoring.
-    from .test_artifact_jobs import artifact_create_request, create_artifact_job
+    from .artifact_jobs_support import artifact_create_request, create_artifact_job
 
     fresh = create_artifact_job(
         artifacts,

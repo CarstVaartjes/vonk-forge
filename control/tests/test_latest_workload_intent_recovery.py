@@ -21,7 +21,7 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
@@ -38,19 +38,19 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationService,
 )
-from vonk_control.runtime_preflight import mandatory_capabilities
+from vonk_control.runtime.preflight import mandatory_capabilities
 
 from .agent_fences import fenced_operation
+from .fleet_profiles_support import _uuid
+from .recipe_operations_support import installed_recipe, setup_services
+from .run_switch_operations_support import (
+    CompleteArtifactInspector,
+    RecordingArtifactExecutor,
+)
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     claim_agent,
     set_inventory_fingerprint,
-)
-from .test_fleet_profiles import _uuid
-from .test_recipe_operations import installed_recipe, setup_services
-from .test_run_switch_operations import (
-    CompleteArtifactInspector,
-    RecordingArtifactExecutor,
 )
 
 

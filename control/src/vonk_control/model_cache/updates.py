@@ -10,14 +10,14 @@ from vonk_agent_protocol import ModelCacheCode
 from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
-from ..catalog_queries import active_head_revision
-from ..catalog_revision_contract import (
+from ..catalog.queries import active_head_revision
+from ..catalog.revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
 )
 from ..categorized_errors import InvalidValue
 from ..models import CatalogDocumentRevision, ModelCacheSet
-from ..stored_states import CatalogRevisionState
+from ..stored.states import CatalogRevisionState
 from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import (

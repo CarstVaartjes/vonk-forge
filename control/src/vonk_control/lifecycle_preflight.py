@@ -26,11 +26,11 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .failure_classification import is_security_failure
-from .inventory_items import inventory_items
-from .inventory_items_contract import PreflightInventoryItem
+from .inventory.items import inventory_items
+from .inventory.items_contract import PreflightInventoryItem
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from .operation_blockers import (
+from .operations.blockers import (
     MAX_BLOCKERS,
     BlockingOperation,
     OperationBlocker,
@@ -39,7 +39,7 @@ from .operation_blockers import (
 )
 from .persisted_waits import read_wait, typed_wait_reason
 from .recovery_policy import RECOVERY
-from .runtime_preflight import (
+from .runtime.preflight import (
     admission_blockers,
     latest_result,
     recipe_requirements,

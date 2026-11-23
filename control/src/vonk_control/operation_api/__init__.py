@@ -1,6 +1,8 @@
 """Stable public imports; implementations live in focused submodules."""
 
-from ..operation_item_contract import OperationOwnerReference as OperationOwnerReference
+from ..operations.item_contract import (
+    OperationOwnerReference as OperationOwnerReference,
+)
 from .constants import _ACTIVE_PUBLICATION_STATES as _ACTIVE_PUBLICATION_STATES
 from .constants import _ADMIN_OPERATION_IDS as _ADMIN_OPERATION_IDS
 from .constants import _HTTP_METHODS as _HTTP_METHODS

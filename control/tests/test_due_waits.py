@@ -14,12 +14,12 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, WaitOwnerKind
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.due_waits import DueWaitBackstop, WaitSource
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Base, Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
-from vonk_control.worker import Worker
+from vonk_control.worker.loop import Worker
 
 from tests.signed_recipe_release import signed_recipe_releases
 
@@ -42,7 +42,7 @@ from datetime import datetime
 from vonk_control.coordinator_failures import CoordinatorFailures
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.jobs import JobService
+from vonk_control.jobs.queue import JobService
 from vonk_control.models import Job
 from vonk_control.persisted_waits import schedule_wait
 from vonk_control.worker import Worker
@@ -289,7 +289,7 @@ def test_unevidenced_job_uses_its_owner_instead_of_first_table_binding(postgres_
 def test_logical_owners_sharing_a_table_get_independent_turns(postgres_engine):
     """Catches one Job kind consuming another kind's bounded observation turns."""
     from vonk_agent_protocol import WaitReason
-    from vonk_control.operation_blockers import BlockingOperation, make_blocker
+    from vonk_control.operations.blockers import BlockingOperation, make_blocker
     from vonk_control.persisted_waits import write_wait
 
     Base.metadata.create_all(postgres_engine)
@@ -521,15 +521,13 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     """Catches registering a parent callback that only polls its cleanup paths."""
     from sqlalchemy import select
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.models import AgentOperation
     from vonk_control.presence import ManagementAddressPolicy
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
-    from vonk_control.worker import assemble_production_worker
+    from vonk_control.worker.assembly import assemble_production_worker
 
-    from .test_recipe_operations import (
-        NOW as RECIPE_NOW,
-    )
-    from .test_recipe_operations import (
+    from .recipe_operations_support import NOW as RECIPE_NOW
+    from .recipe_operations_support import (
         _job_phases,
         installed_recipe,
         setup_services,
@@ -581,7 +579,7 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             RecipeOperationProgressResult,
             RecipeOperationResult,
         )
-        from vonk_control.stored_json import read_row_column
+        from vonk_control.stored.json_values import read_row_column
 
         with sessions.begin() as session:
             parent = session.get(Job, started.id)
@@ -673,7 +671,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
 ):
     """Catches resampling a logged retry or a restarted catalog owner losing its wait."""
     from vonk_agent_protocol import CatalogSyncCode, CatalogSyncState
-    from vonk_control.catalog_sync import (
+    from vonk_control.catalog.sync import (
         AutomaticCatalogSync,
         ManagedRecipeCatalogSyncService,
     )
@@ -697,7 +695,7 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
         jitter.append((low, high))
         return low if len(jitter) == 1 else high
 
-    monkeypatch.setattr("vonk_control.catalog_sync.random.randint", choose)
+    monkeypatch.setattr("vonk_control.catalog.sync.random.randint", choose)
 
     def construct():
         return ManagedRecipeCatalogSyncService(

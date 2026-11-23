@@ -18,9 +18,9 @@ from vonk_control.models import (
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .recipe_operations_support import NOW, setup_services, started_recipe
 from .test_profile_installed_execution import _drive_to_job, _profile_service
 from .test_profile_port_claims import _ready_profile
-from .test_recipe_operations import NOW, setup_services, started_recipe
 
 
 def _selector(sessions) -> str:

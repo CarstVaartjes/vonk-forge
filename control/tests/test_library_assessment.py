@@ -16,12 +16,12 @@ from sqlalchemy import event, select
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.library_api import install_library_routes
-from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library.api import install_library_routes
+from vonk_control.library.assessment import LibraryAssessment
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
 from vonk_control.models import (
@@ -42,12 +42,12 @@ from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import ControlClient
 
+from .recipe_operations_support import NOW, setup_services
+from .run_switch_operations_support import RecordingArtifactExecutor
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
-from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_artifact_authority import _report_store
-from .test_run_switch_operations import RecordingArtifactExecutor
 
 
 @pytest.fixture
@@ -423,8 +423,8 @@ def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
 ):
     """Catches one jobs scan per candidate placement."""
     from vonk_agent_protocol import LibraryAssessmentCode
-    from vonk_control import library_assessment
-    from vonk_control.library_contract import RecipeReadinessCheck
+    from vonk_control.library import assessment as library_assessment
+    from vonk_control.library.contract import RecipeReadinessCheck
 
     projection, sessions, _, service, _, _, _, _, _, _ = assessed_library
     _add_fitting_spark(sessions, "spk_" + "0" * 32)
@@ -491,7 +491,7 @@ def test_a_failing_group_does_not_turn_a_holder_search_blocked(
 def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessed_library, monkeypatch
 ):
-    import vonk_control.library_assessment as assessment_module
+    import vonk_control.library.assessment as assessment_module
 
     projection, _, _, service, app, *_ = assessed_library
     clock = [0.0]

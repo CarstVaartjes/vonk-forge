@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.job_documents import RecipeStopParent
+from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
@@ -19,7 +19,7 @@ from vonk_control.models import (
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
     bind_route_publications,
@@ -326,12 +326,12 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     from vonk_control.models import FleetProfileApplication
 
     from .agent_fences import fenced_operation
+    from .fleet_profiles_support import _uuid
     from .profile_stop_readmission_support import start_on_released_gang
-    from .test_fleet_profiles import _uuid
+    from .run_switch_operations_support import RecordingArtifactExecutor, _service
     from .test_profile_adapter_parallel_postgres import _stored
     from .test_profile_stop_effect_adoption_postgres import _pending_stop
-    from .test_recipe_operations import _issue_exact_stop_grant
-    from .test_run_switch_operations import RecordingArtifactExecutor, _service
+    from .test_recipe_operations_part5 import _issue_exact_stop_grant
 
     route_owner = []
     publishers = []
@@ -578,16 +578,16 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         RecipeStopResult,
     )
     from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.gateway.route_runtime import AtomicRouteBundlePublisher
     from vonk_control.presence import ManagementAddressPolicy
     from vonk_control.recipe_routes import (
         AtomicRecipeRoutePublisher,
         RecipeRouteService,
     )
-    from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
     from .agent_fences import fenced_operation
     from .profile_stop_readmission_support import start_on_released_gang
-    from .test_recipe_operations import _issue_exact_stop_grant
+    from .test_recipe_operations_part5 import _issue_exact_stop_grant
 
     sessions, service, _jobs, _old_routes, _stand_in, run_id, nodes = (
         published_service_run

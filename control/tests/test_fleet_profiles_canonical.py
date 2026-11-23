@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DesiredAssignmentState, ModelCacheBlockerCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.revision_contract import (
     rederive_projection,
     write_catalog_projection,
 )
@@ -483,7 +483,7 @@ def _draft_input_as_save() -> FleetProfileInput:
 def test_a_draft_equal_to_the_stored_definition_is_reviewed_as_the_replayed_save() -> (
     None
 ):
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
 
     sessions = _sessions()
     _seed(sessions)
@@ -726,7 +726,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
             additional_disk_bytes=20,
         )
 
-    from .test_fleet_profiles import _SwitchAdapter
+    from .fleet_profiles_support import _SwitchAdapter
 
     service = FleetProfileService(
         sessions,
@@ -811,7 +811,7 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
             additional_disk_bytes=20,
         )
 
-    from .test_fleet_profiles import _SwitchAdapter
+    from .fleet_profiles_support import _SwitchAdapter
 
     service = FleetProfileService(
         sessions,
@@ -875,7 +875,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
             blockers=("recipe-not-cached",),
         )
 
-    from .test_fleet_profiles import _SwitchAdapter
+    from .fleet_profiles_support import _SwitchAdapter
 
     service = FleetProfileService(
         sessions,
@@ -1018,7 +1018,7 @@ def test_a_retracted_recipe_needs_attention_until_published_again() -> None:
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_stored_application_with_a_retired_field_does_not_block_apply() -> None:
-    from .test_fleet_profiles import _SwitchAdapter
+    from .fleet_profiles_support import _SwitchAdapter
 
     sessions = _sessions()
     _seed(sessions)
@@ -1270,12 +1270,12 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     """A save must not resolve and parse the same selector per assignment and view."""
     from collections import Counter, OrderedDict
 
-    import vonk_control.catalog_revision_contract as contract
+    import vonk_control.catalog.revision_contract as contract
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog.entities import CatalogEntityService
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions.begin() as session:
@@ -1469,8 +1469,8 @@ def test_profile_read_observes_distinct_content_once(
     _seed(sessions)
     from collections import Counter, OrderedDict
 
-    from vonk_control import catalog_revision_contract as contract
-    from vonk_control.catalog_entities import CatalogEntityService
+    from vonk_control.catalog import revision_contract as contract
+    from vonk_control.catalog.entities import CatalogEntityService
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions() as session:
@@ -1759,7 +1759,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     from vonk_control.profile_read_observation import observe_storage, profile_read
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-    from tests.test_fleet_profiles import _assessment, _exact_preparation
+    from tests.fleet_profiles_support import _assessment, _exact_preparation
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1959,7 +1959,7 @@ def test_profile_preview_preserves_cache_inspection_progress():
     )
     from vonk_control.run_switch_contract import RunSwitchReason
 
-    from tests.test_fleet_profiles import _assessment, _exact_preparation
+    from tests.fleet_profiles_support import _assessment, _exact_preparation
 
     sessions = _sessions()
     _seed(sessions)

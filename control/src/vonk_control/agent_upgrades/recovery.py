@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     LifecycleState,
 )
 
-from .. import agent_operation_states, job_states
+from .. import agent_operation_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -23,6 +23,7 @@ from ..admission_locking import (
 from ..agent_jobs import (
     schedule_agent_upgrade_retry,
 )
+from ..jobs import states as job_states
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.agent_upgrade import KIND, UNSUPPORTED_DISPATCH

@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
-from .. import job_states
 from ..agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE,
 )
+from ..jobs import states as job_states
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 

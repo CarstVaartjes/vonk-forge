@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_projection import FleetProjection
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
@@ -30,13 +30,13 @@ from vonk_control.models import (
 )
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 
-from .test_profile_capacity_admission import _capacity_profile
-from .test_profile_installed_execution import _drive_to_job, _profile_service
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     complete_started_recipe,
     installed_recipe,
     started_recipe,
 )
+from .test_profile_capacity_admission import _capacity_profile
+from .test_profile_installed_execution import _drive_to_job, _profile_service
 
 
 def _ready_profile(tmp_path, engine, *, node_count=1):

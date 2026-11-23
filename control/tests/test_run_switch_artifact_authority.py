@@ -13,14 +13,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
 )
-from vonk_control.library_assessment import LibraryAssessment
-from vonk_control.library_contract import RecipeReadinessCheck
+from vonk_control.library.assessment import LibraryAssessment
+from vonk_control.library.contract import RecipeReadinessCheck
 from vonk_control.models import Job, RecipeBuild
 from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchReason
 from vonk_control.run_switch_operations import (
@@ -37,14 +37,13 @@ from vonk_control.run_switch_operations.result_helpers import (
     _read_progress,
 )
 
-from .runtime_image_fixtures import hold_image_through_another_recipe
-from .test_recipe_operations import NOW, installed_recipe
-from .test_run_switch_operations import (
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .run_switch_operations_support import (
     ModelCacheManifestProvider,
     RecordingArtifactExecutor,
     _request,
-    setup_services,
 )
+from .runtime_image_fixtures import hold_image_through_another_recipe
 
 
 def test_missing_artifact_authority_does_not_poison_repaired_inspection(

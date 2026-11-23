@@ -246,12 +246,12 @@ def test_profile_disk_handoff_preserves_materialized_install_headroom(
     usage, its staging headroom remains promised, and the new profile's claim
     is excluded only for its own child. A competing install must still fail.
     """
-    from vonk_control.inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+    from vonk_control.inventory.repository import MAX_INVENTORY_FUTURE_SKEW
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
+    from .recipe_operations_support import NOW, installed_recipe
     from .test_disk_reservations import _record_disk
     from .test_fleet_profile_recovery_identity import _complete_rebuild
-    from .test_recipe_operations import NOW, installed_recipe
 
     sessions, profiles, planner, profile, _api, _headers, _, nodes = _capacity_profile(
         tmp_path, postgres_engine

@@ -22,9 +22,9 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignmentInput,
     FleetProfileAssignmentView,
 )
-from vonk_control.gateway_keys import GatewayKeyCreateRequest
-from vonk_control.litellm import LiteLlmModelEntry
-from vonk_control.route_bundle_contract import (
+from vonk_control.gateway.keys import GatewayKeyCreateRequest
+from vonk_control.gateway.litellm import LiteLlmModelEntry
+from vonk_control.gateway.route_bundle_contract import (
     RouteBundleDocument,
     RouteIdentityDocument,
 )

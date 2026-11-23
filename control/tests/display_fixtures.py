@@ -8,8 +8,8 @@ from collections.abc import Mapping
 from importlib import resources
 from typing import cast
 
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import PublishedDocument
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import PublishedDocument
 from vonk_control.models import CatalogDocumentRevision
 from vonk_control.recipe_library_types import CatalogModel
 from vonk_forge_contracts import (

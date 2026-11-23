@@ -171,7 +171,7 @@ def test_rust_provenance_annotation_cannot_refuse_stored_content(operator: str) 
     assert [site.kind for site in sites] == [PROVENANCE_COMPARISON]
     assert sites[0].function == "verify_archive"
     # The added-line gate must consume the Rust detector, not just its fixture.
-    from .added_line_guards import check_source
+    from .added_line_guards.check import check_source
 
     assert check_source(path, dedent(source), {sites[0].line}, modes=("identity",))
     assert not check_source(path, dedent(source), {1}, modes=("identity",))

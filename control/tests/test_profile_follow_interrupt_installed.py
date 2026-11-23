@@ -18,7 +18,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.inventory_repository import (
+from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
@@ -29,11 +29,11 @@ from vonk_control.models import (
     FleetProfileApplication,
 )
 
+from .recipe_operations_support import NOW
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
-from .test_recipe_operations import NOW
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 

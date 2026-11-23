@@ -14,7 +14,6 @@ from vonk_agent_protocol.contracts import AgentUpgradeResult
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import agent_operation_states as aos
-from vonk_control import job_states
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrade_contract import (
     AgentUpgradePackage,
@@ -29,7 +28,8 @@ from vonk_control.agent_upgrades import (
     AgentUpgradeService,
 )
 from vonk_control.agent_upgrades import package as agent_upgrades_module
-from vonk_control.jobs import AttemptFence, JobService, StaleAttempt
+from vonk_control.jobs import states as job_states
+from vonk_control.jobs.queue import AttemptFence, JobService, StaleAttempt
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

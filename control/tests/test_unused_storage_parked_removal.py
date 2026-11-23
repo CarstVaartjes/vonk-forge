@@ -30,16 +30,11 @@ from vonk_control.models import (
 from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from vonk_control.unused_storage_collection.common import _Kept
 
+from .model_cache_support import _artifact, _download
 from .removal_settle import advance_until_ended
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import _artifact, _download
-from .test_unused_storage_collection import (
-    ACTOR,
-    GIB,
-    GRACE,
-    _collector,
-    _scope,
-)
+from .test_unused_storage_collection_part1 import ACTOR, GRACE
+from .unused_storage_collection_support import GIB, _collector, _scope
 
 
 @pytest.fixture

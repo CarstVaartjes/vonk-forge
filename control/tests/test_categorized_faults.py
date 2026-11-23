@@ -11,8 +11,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
 
+from .model_cache_support import cache  # noqa: F401 - pytest fixture
 from .removal_settle import advance_until_ended
-from .test_model_cache import cache  # noqa: F401 - pytest fixture
 from .test_model_cache_lifecycle import _queue
 
 

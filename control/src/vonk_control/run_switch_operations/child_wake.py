@@ -28,13 +28,14 @@ from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
 from vonk_agent_protocol import WaitReason
 
-from .. import job_states, model_cache_states
+from .. import model_cache_states
+from ..jobs import states as job_states
 from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_lifecycle_contract import START_CHILD_KINDS
 from ..run_switch_contract import RunSwitchOperationResult
-from ..stored_json import read_row_column
+from ..stored.json_values import read_row_column
 from .awaited_children import awaited_jobs, child_job_ids, start_request_key
 from .constants import _OPERATION_KINDS
 from .planning_helpers import _aware, _stored_job_plan

@@ -30,8 +30,8 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError, StatementError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import exact_integer_adoption as adoption_module
-from vonk_control.catalog_entities import CatalogEntityService
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog.entities import CatalogEntityService
+from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     read_catalog_projection,
 )
@@ -60,8 +60,8 @@ from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
 
 from .display_fixtures import create_draft
+from .model_cache_support import _artifact
 from .test_catalog_entities import _model
-from .test_model_cache import _artifact
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
 VALUES = (0, 9, 10, 2**63 - 1, 2**63, 10**199 + 123)

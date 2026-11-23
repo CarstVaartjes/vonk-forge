@@ -16,7 +16,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_reference_scan import model_set_reference_reasons
-from ..catalog_queries import WITHOUT_DOCUMENT, active_head_revision
+from ..catalog.queries import WITHOUT_DOCUMENT, active_head_revision
 from ..failure_classification import wait_reason
 from ..logging import log_event
 from ..model_cache_contract import (

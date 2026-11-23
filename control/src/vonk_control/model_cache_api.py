@@ -47,8 +47,8 @@ from .operation_api import (
     OperationQuery,
     bounded_error_responses,
 )
-from .operation_contract import AvailabilityOperationFailure
-from .operation_item_contract import (
+from .operations.contract import AvailabilityOperationFailure
+from .operations.item_contract import (
     OperationItem,
     OperationOwnerReference,
     OperationResultFacts,
@@ -128,7 +128,7 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         # answer (503, Retry-After, error code) says to ask again.
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
-        from .library_api import SelectorAmbiguityHTTPError
+        from .library.api import SelectorAmbiguityHTTPError
         from .library_projection import LibrarySelectorAmbiguous
 
         return SelectorAmbiguityHTTPError(

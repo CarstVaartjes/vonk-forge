@@ -13,16 +13,16 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 import pytest
-import vonk_control.catalog_entities as entities
 from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog_revision_contract import (
+from vonk_control.catalog import entities
+from vonk_control.catalog.revision_contract import (
     PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_projection,
 )
-from vonk_control.catalog_service import CatalogService
+from vonk_control.catalog.service import CatalogService
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_forge_contracts import RecipeDefinition
 

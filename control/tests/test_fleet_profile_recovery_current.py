@@ -34,13 +34,13 @@ from vonk_control.models import (
     Job,
     ResourceReservation,
 )
-from vonk_control.operation_blockers import make_blocker
+from vonk_control.operations.blockers import make_blocker
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .display_fixtures import reword
-from .test_fleet_profiles import _uuid
-from .test_recipe_operations import setup_services
-from .test_run_switch_operations import (
+from .fleet_profiles_support import _uuid
+from .recipe_operations_support import setup_services
+from .run_switch_operations_support import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
 )

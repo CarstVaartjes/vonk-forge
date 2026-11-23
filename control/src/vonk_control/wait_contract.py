@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     WaitResumeCondition,
 )
 
-from .operation_blockers import BlockingOperation, OperationBlocker
+from .operations.blockers import BlockingOperation, OperationBlocker
 from .strict_json import StrictModel
 
 
