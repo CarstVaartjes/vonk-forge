@@ -140,7 +140,7 @@ test("authoritative cursor-ahead reset clears the old sparse timeline", () => {
   expect(reset.snapshot?.event_cursor).toBe(20);
   expect(reset.requiredRefreshCursor).toBeNull();
   expect(nextTimeline.snapshot?.event_cursor).toBe(21);
-  expect(nextTimeline.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(77);
+  expect(nextTimeline.snapshot?.nodes[0]?.telemetry?.sample.gpu_utilization_percent).toBe(77);
 });
 
 test("patches one keyed node and ignores stale or duplicate telemetry increments", () => {
@@ -165,7 +165,7 @@ test("patches one keyed node and ignores stale or duplicate telemetry increments
     receivedAt: new Date("2026-08-15T12:00:01Z"),
   });
 
-  expect(patched.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(73);
+  expect(patched.snapshot?.nodes[0]?.telemetry?.sample.gpu_utilization_percent).toBe(73);
   expect(patched.snapshot?.nodes[1]).toBe(untouched);
   expect(patched.snapshot?.event_cursor).toBe(11);
   expect(duplicate).toBe(patched);
@@ -191,7 +191,9 @@ test("rejects telemetry whose sample identity does not match the event node", ()
 
 test("reconciles only telemetry warnings when a valid sample changes freshness", () => {
   const projected = snapshot(10);
-  projected.nodes[0].warnings = [
+  const projectedNode = projected.nodes[0];
+  if (!projectedNode) throw new Error("the snapshot has no node");
+  projectedNode.warnings = [
     { code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning" },
     { code: "telemetry.missing", detail: "No telemetry sample is available.", severity: "warning" },
   ];
@@ -215,11 +217,11 @@ test("reconciles only telemetry warnings when a valid sample changes freshness",
     receivedAt: new Date("2026-08-15T12:00:30Z"),
   });
 
-  expect(delayed.snapshot?.nodes[0].warnings).toEqual([
+  expect(delayed.snapshot?.nodes[0]?.warnings).toEqual([
     { code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning" },
     { code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning" },
   ]);
-  expect(stale.snapshot?.nodes[0].warnings).toEqual([
+  expect(stale.snapshot?.nodes[0]?.warnings).toEqual([
     { code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning" },
     { code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning" },
   ]);
@@ -276,7 +278,7 @@ test("only clears a sparse refresh requirement after a qualifying snapshot appli
   expect(staleRest.snapshot?.event_cursor).toBe(22);
   expect(staleRest.requiredRefreshCursor).toBe(24);
   expect(reconciled.snapshot?.event_cursor).toBe(24);
-  expect(reconciled.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(84);
+  expect(reconciled.snapshot?.nodes[0]?.telemetry?.sample.gpu_utilization_percent).toBe(84);
   expect(reconciled.requiredRefreshCursor).toBeNull();
 });
 

@@ -1,4 +1,4 @@
-import { nodeHealth } from "../../lib/node-health";
+import type { nodeHealth } from "../../lib/node-health";
 import { InstallationReconcile } from "./installation-reconcile";
 import { StatusPill } from "./status-pill";
 import type { ControlApi } from "../../api/types";

@@ -565,7 +565,7 @@ test("resume reconciles a lost response against its own durable request", async 
       raw instanceof Request ? raw : new Request(new URL(String(raw), location.origin), init);
     requests.push(request);
     if (request.method === "POST") throw new TypeError("response lost");
-    const requestId = requests[0].headers.get("X-Request-ID");
+    const requestId = requests[0]?.headers.get("X-Request-ID");
     expect(new URL(request.url).pathname).toBe(`/api/jobs/${JOB_ID}/requests/${requestId}`);
     return new Response(
       JSON.stringify({

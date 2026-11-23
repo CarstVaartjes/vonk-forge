@@ -185,7 +185,7 @@ The hook uses the prepared environment offline without syncing, building wheels,
 or generating or staging inventory. Missing tools fail with the setup command.
 Repeat setup after dependency changes. Python checks skip commits without Python changes.
 For TypeScript, prepare `npm ci --prefix control/web`; the hook checks changed
-TypeScript with pinned Biome and runs the source, browser-test and configuration
+TypeScript with pinned Biome (`biome ci`, the same command CI runs on the whole tree) and runs the source, browser-test and configuration
 type checks. Generated contracts are excluded from Biome and remain generator-owned.
 For Rust, prepare the pinned toolchain and `cargo fetch --locked` explicitly;
 the hook runs formatting and offline Clippy/compiler checks across the workspace.

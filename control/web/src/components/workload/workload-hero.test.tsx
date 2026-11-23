@@ -6,7 +6,6 @@ import type {
   RecipeDetail,
   VisualFleetNode,
 } from "../../api/types";
-import type { JobWorkloadApi } from "../../hooks/use-workload-jobs";
 import type { WorkloadReads } from "../../hooks/use-workload-reads";
 import { groupByWorkload } from "../../lib/fleet";
 
@@ -130,7 +129,10 @@ test("an engine figure takes its title and unit from the catalogue; a metric it 
 class FakeApi {
   reads = 0;
   failures = 0;
-  constructor(private readonly adapter: string) {}
+  private readonly adapter: string;
+  constructor(adapter: string) {
+    this.adapter = adapter;
+  }
   async recipeDetail(selector: string) {
     this.reads += 1;
     if (selector !== REVISION || this.failures-- > 0) throw new Error("404 recipe not found");

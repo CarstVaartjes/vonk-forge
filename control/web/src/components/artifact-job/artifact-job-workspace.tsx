@@ -10,7 +10,6 @@ import type {
   ArtifactJobInterface,
   LibraryApi,
   LibraryViewRecipeDetail,
-  RecipeDefinition,
 } from "../../api/types";
 import {
   addWire,
@@ -39,8 +38,6 @@ import { StatusPill } from "../ui/status-pill";
 import { Time } from "../ui/time";
 import { hashArtifactBlob } from "./artifact-hash";
 import "./artifact-job-workspace.css";
-
-type JobRecipeDocument = RecipeDefinition;
 
 const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
@@ -77,7 +74,6 @@ function isCancelling(job: ArtifactJob): boolean {
 
 type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
 type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
-type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
 // A knob value as the form holds it: typed, or the text being edited while it is not yet valid.
 type Scalar = ArtifactJobParameterValue;
 type RecipeParameter = ArtifactJobParameter;
@@ -283,9 +279,11 @@ function OutputPreview({
         <img src={url} alt={`Generated output ${file.name}`} loading="lazy" />
       )}
       {file.media_type.startsWith("audio/") && (
+        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
         <audio controls preload="metadata" aria-label={`Listen to ${label}`} src={url} />
       )}
       {file.media_type.startsWith("video/") && (
+        // biome-ignore lint/a11y/useMediaCaption: a produced file has no caption track to offer
         <video controls preload="metadata" aria-label={`Watch ${label}`} src={url} />
       )}
       {(file.media_type === "model/gltf-binary" || file.name.toLowerCase().endsWith(".glb")) && (
@@ -312,8 +310,8 @@ function JobHistory({
   onPrepareRetry,
 }: {
   api: LibraryApi;
-  busyJobId?: string;
-  cancelCandidate?: string;
+  busyJobId?: string | undefined;
+  cancelCandidate?: string | undefined;
   job: ArtifactJob;
   onCancel(jobId?: string): void;
   onConfirmCancel(job: ArtifactJob): void;
@@ -442,7 +440,7 @@ export function ArtifactJobWorkspace({
 }: {
   api: LibraryApi;
   detail: LibraryViewRecipeDetail;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
 }) {
   type ActiveRun = { run_id: string; state: string };
   const document = detail.definition;
@@ -1196,7 +1194,7 @@ export function ArtifactJobWorkspace({
     setBusyJobId(undefined);
   }
 
-  function prepareRetry(job: ArtifactJob) {
+  function prepareRetry() {
     setFilesBySlot({});
     setSubmitError("");
     setRetryNotice(
@@ -1254,6 +1252,7 @@ export function ArtifactJobWorkspace({
                 onChange={(event) => setInterfaceIndex(Number(event.target.value))}
               >
                 {jobInterfaces.map((item, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: interfaces are keyed by position: the select value is the index
                   <option value={index} key={`${item.adapter}:${index}`}>
                     {humanizeIdentifier(item.adapter)} · {item.input?.slots?.length ?? 0} bounded
                     slot{item.input?.slots?.length === 1 ? "" : "s"}

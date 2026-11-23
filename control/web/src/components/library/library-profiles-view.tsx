@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectionExamples } from "../ui/connection-examples";
 import type { MouseEvent, ReactNode } from "react";
 import {
@@ -179,24 +179,28 @@ function inputFromDraft(
     name: draft.name,
     description: draft.description,
     expected_revision: draft.revision ?? 0,
-    installation_policy: draft.installationPolicy,
-    labels: draft.labels,
+    ...(draft.installationPolicy ? { installation_policy: draft.installationPolicy } : {}),
+    ...(draft.labels ? { labels: draft.labels } : {}),
     favorite: draft.favorite,
-    assignments: draft.assignments.map((assignment) => ({
-      recipe_selector: assignment.recipeSelector.trim(),
-      spark_ids: [...new Set(assignment.sparkIds)].sort(),
-      assignment_name: assignment.assignmentName.trim() || undefined,
-      model_variant: assignment.modelVariant.trim() || undefined,
-      desired_state: assignment.desiredState,
-      ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
-      // Every option the recipe declares is sent explicitly, defaults included.
-      option_choices: optionsBySelector[assignment.recipeSelector.trim()]
-        ? effectiveChoices(
-            optionsBySelector[assignment.recipeSelector.trim()],
-            assignment.optionChoices,
-          )
-        : assignment.optionChoices,
-    })),
+    assignments: draft.assignments.map((assignment) => {
+      const selectorOptions = optionsBySelector[assignment.recipeSelector.trim()];
+      return {
+        recipe_selector: assignment.recipeSelector.trim(),
+        spark_ids: [...new Set(assignment.sparkIds)].sort(),
+        ...(assignment.assignmentName.trim()
+          ? { assignment_name: assignment.assignmentName.trim() }
+          : {}),
+        ...(assignment.modelVariant.trim()
+          ? { model_variant: assignment.modelVariant.trim() }
+          : {}),
+        ...(assignment.desiredState ? { desired_state: assignment.desiredState } : {}),
+        ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
+        // Every option the recipe declares is sent explicitly, defaults included.
+        option_choices: selectorOptions
+          ? effectiveChoices(selectorOptions, assignment.optionChoices)
+          : assignment.optionChoices,
+      };
+    }),
   };
   return input;
 }
@@ -282,7 +286,7 @@ function ProfileProgress({
   notice,
 }: {
   application: FleetProfileApplicationView;
-  cancel?(requestKey: string): Promise<unknown>;
+  cancel?: ((requestKey: string) => Promise<unknown>) | undefined;
   notice?: ReactNode;
 }) {
   const progress = applicationProgressRecord(application);
@@ -452,6 +456,7 @@ function ProfileReview({ preview }: { preview: FleetProfilePreview }) {
         </dl>
         <ul>
           {(preview.resolved_assignments ?? []).map((assignment, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a read-only preview list without ids
             <li key={index}>
               <strong>{assignment.recipe_title}</strong> ·{" "}
               <code>
@@ -494,14 +499,17 @@ export function LibraryProfilesView({
 }: {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   initialCreate?: boolean;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate: Navigate;
 }) {
   const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);
   const [selectedNumber, setSelectedNumber] = useState<FleetProfileNumber>();
   const [draft, setDraft] = useState<ProfileDraft>();
+  // The opening load reads the draft as it is when the profiles arrive, not as it was at render.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [editing, setEditing] = useState(initialCreate);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -618,6 +626,7 @@ export function LibraryProfilesView({
     const number = selectedNumber;
     observer.start(next, (signal) => api.profileProgress(number, signal));
   };
+  const selectedProfileId = selectedProfile?.id;
   const dirty = Boolean(draft && isDirty(draft, selectedProfile));
   useEffect(() => {
     if (!draft) return;
@@ -633,7 +642,7 @@ export function LibraryProfilesView({
       .then((result) => {
         if (!result) return;
         const first = openingProfile(result.profiles);
-        if (!initialCreate && first && !draft) {
+        if (!initialCreate && first && !draftRef.current) {
           const kept = unsavedDrafts.get(formatWire(first.number));
           setDraft(kept ?? draftFromProfile(first));
           setEditing(Boolean(kept));
@@ -651,7 +660,7 @@ export function LibraryProfilesView({
   }, [refreshProfiles, initialCreate]);
 
   useEffect(() => {
-    if (selectedNumber === undefined || !selectedProfile || editing) {
+    if (selectedNumber === undefined || selectedProfileId === undefined || editing) {
       setPreview(undefined);
       return;
     }
@@ -666,7 +675,7 @@ export function LibraryProfilesView({
           setError(value instanceof Error ? value.message : "The profile preview is unavailable.");
       });
     return () => controller.abort();
-  }, [api, editing, selectedNumber, selectedProfile?.id]);
+  }, [api, editing, selectedNumber, selectedProfileId]);
 
   const loadedNumber =
     selectedProfile?.status === "loaded" && !editing ? selectedProfile.number : undefined;
@@ -1086,15 +1095,18 @@ export function LibraryProfilesView({
                 </div>
                 <span>{availableFleet.length} Sparks</span>
               </div>
-              <div className="library-profile-scope-list" role="list" aria-label="Enrolled Sparks">
-                {availableFleet.map((item) => (
-                  <div key={item.id} role="listitem">
-                    <strong>{item.name}</strong>
-                    <small>{item.state}</small>
-                  </div>
-                ))}
-                {availableFleet.length === 0 && <p>No enrolled Sparks are visible yet.</p>}
-              </div>
+              {availableFleet.length === 0 ? (
+                <p>No enrolled Sparks are visible yet.</p>
+              ) : (
+                <ul className="library-profile-scope-list" aria-label="Enrolled Sparks">
+                  {availableFleet.map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.name}</strong>
+                      <small>{item.state}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
             <section className="library-profile-assignments" aria-label="Profile assignments">
               <header>

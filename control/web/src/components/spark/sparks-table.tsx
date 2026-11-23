@@ -33,7 +33,7 @@ export function SparksTable({
 }: {
   nodes: VisualFleetNode[];
   now: Date;
-  onSelect?(id: string): void;
+  onSelect?: ((id: string) => void) | undefined;
 }) {
   const [query, setQuery] = useState("");
   const visibleNodes = useMemo(() => {

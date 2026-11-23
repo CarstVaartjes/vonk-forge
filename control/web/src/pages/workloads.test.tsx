@@ -5,15 +5,13 @@ vi.mock("../components/ui/metrics-chart", async (importOriginal) => ({
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { WorkloadsPage } from "./workloads";
-import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
-import { ToastProvider } from "../components/ui/toast";
-import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
+import type { ControlApi } from "../api/types";
 import { spark } from "../test-fixtures/fleet-spark";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
-let attentionUnavailable = false;
-let fleetNow = new Date("2026-09-27T10:00:00Z");
+const attentionUnavailable = false;
+const fleetNow = new Date("2026-09-27T10:00:00Z");
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
     snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },
@@ -91,19 +89,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard });
 });
-
-const grant: EnrollmentGrantResponse = {
-  id: "12345678-1234-4234-8234-123456789abc",
-  expires_at: "2026-09-27T10:15:00Z",
-  purpose: "new-node",
-  token: "t".repeat(43),
-  controller_endpoint: "https://controller.example.test",
-  enrollment_endpoint: "https://enroll.example.test",
-  ca_fingerprint: "a".repeat(64),
-  controller_address: "192.168.1.231",
-  service_hostnames: [],
-  installer_url: "https://install.vonkforge.ai/spark",
-};
 
 test("Fleet sorts by name, status, memory and disk, and uses the CLI's status words", () => {
   nodes = [spark("Bravo", 20, 500), spark("Alpha", 60, 100, false), spark("Charlie", 90, 900)];

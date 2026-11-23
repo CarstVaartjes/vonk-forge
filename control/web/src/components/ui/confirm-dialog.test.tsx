@@ -7,7 +7,7 @@ function Harness({
   onConfirm = () => undefined,
   typeName,
 }: {
-  onConfirm?(): void;
+  onConfirm?: (() => void) | undefined;
   typeName?: string;
 }) {
   const [open, setOpen] = useState(false);

@@ -57,9 +57,9 @@ export function countFleetFit(
     const current = best.get(key);
     if (current === undefined || rank > current) best.set(key, rank);
   }
-  const byRank = [0, 0, 0];
+  const byRank: [number, number, number] = [0, 0, 0];
   for (const rank of best.values()) byRank[rank] += 1;
-  return { ...NO_VERDICTS, fits: byRank[2]!, unknown: byRank[1]!, nonFit: byRank[0]! };
+  return { ...NO_VERDICTS, fits: byRank[2], unknown: byRank[1], nonFit: byRank[0] };
 }
 type FacetOption = { value: string; label: string; count: number };
 
@@ -152,7 +152,7 @@ export function LibrarySetupStrip({
   onFiltersChange,
   onQueryChange,
 }: {
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   records: LibraryRecipeRecord[];
   filters: LibraryWorkcellFilters;
   query: string;
@@ -223,7 +223,7 @@ export function LibrarySetupStrip({
         </label>
         <div className="library-toolbar-sparks">
           <span aria-hidden="true">Sparks</span>
-          <div className="segmented" role="group" aria-label="Sparks per recipe">
+          <fieldset className="segmented group-reset" aria-label="Sparks per recipe">
             {tiles.map((tile) => {
               const pressed = filters.sparks === tile.value;
               return (
@@ -255,7 +255,7 @@ export function LibrarySetupStrip({
                 {anyCount}
               </small>
             </button>
-          </div>
+          </fieldset>
         </div>
         <label className="library-toggle">
           <input

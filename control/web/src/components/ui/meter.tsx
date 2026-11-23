@@ -9,6 +9,7 @@ export function Meter({
   if (vital.percent === null) return <>{vital.text}</>;
   return (
     <span className="meter-cell">
+      {/* biome-ignore lint/a11y/useSemanticElements: a styled bar; a native meter element cannot take this styling */}
       <span
         className={vital.amber ? "meter meter-high" : "meter"}
         role="meter"

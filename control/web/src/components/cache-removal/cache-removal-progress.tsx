@@ -26,7 +26,7 @@ export function CacheRemovalProgress({
   api: ControlApi;
   intent: CacheRemovalIntent;
   initial: CacheRemovalReceipt | null;
-  initialError?: string;
+  initialError?: string | undefined;
   onComplete(): void;
   onDismiss(): void;
   onRejected(message: string): void;
@@ -125,7 +125,7 @@ export function CacheRemovalProgress({
   }
 
   return (
-    <div className="library-cache-action" aria-label="Cache removal progress">
+    <section className="library-cache-action" aria-label="Cache removal progress">
       <CacheRemovalReviewDetails review={intent.review} />
       {receipt ? (
         <p role="status">
@@ -175,6 +175,6 @@ export function CacheRemovalProgress({
           </button>
         )}
       {error && <p role="alert">{error}</p>}
-    </div>
+    </section>
   );
 }

@@ -11,9 +11,11 @@ const key = {
 
 async function openKeys(page: Page) {
   let revoked = false;
-  await page.addInitScript(() => {
-    document.cookie = "vonk_csrf=e2e-csrf; Path=/; SameSite=Strict";
-  });
+  await page
+    .context()
+    .addCookies([
+      { name: "vonk_csrf", value: "e2e-csrf", domain: "127.0.0.1", path: "/", sameSite: "Strict" },
+    ]);
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({
       json: { subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z" },

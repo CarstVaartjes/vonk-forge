@@ -6,22 +6,23 @@ import { LibraryRecipeAuthority } from "./library-recipe-detail";
 import { EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell } from "./library-workcell";
 
 const identity = { content_sha256: "a".repeat(64), required_sparks: 2 };
+const lastPass = {
+  identity,
+  outcome: "passed",
+  cause_code: "qualification.hardware_pass",
+  cause_summary: "Hardware checks passed",
+  tested_at: "2026-11-01T10:00:00Z",
+  platform: { controller_version: "1.2.3", spark_count: 2, topology: "multi" },
+} as const;
 const working: RecipeQualification = {
   status: "Working",
   required_sparks: 2,
-  last_pass: {
-    identity,
-    outcome: "passed",
-    cause_code: "qualification.hardware_pass",
-    cause_summary: "Hardware checks passed",
-    tested_at: "2026-11-01T10:00:00Z",
-    platform: { controller_version: "1.2.3", spark_count: 2, topology: "multi" },
-  },
+  last_pass: lastPass,
 };
 const failed: RecipeQualification = {
   status: "Failed: recipe",
   required_sparks: 2,
-  last_pass: working.last_pass,
+  last_pass: lastPass,
   last_failure: {
     identity,
     outcome: "failed",

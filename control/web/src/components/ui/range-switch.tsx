@@ -11,7 +11,7 @@ export function RangeSwitch({
   onChange(range: MetricRange): void;
 }) {
   return (
-    <div className="segmented" role="group" aria-label="Range">
+    <fieldset className="segmented group-reset" aria-label="Range">
       {RANGES.map((value) => (
         <button
           key={value}
@@ -22,6 +22,6 @@ export function RangeSwitch({
           {value}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
