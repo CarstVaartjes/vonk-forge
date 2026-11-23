@@ -616,7 +616,8 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
     for prefix in reproofs:
         assert count(prefix) == (0 if pr_proof else 3), prefix
     assert count("Accept the pull request images") == (1 if pr_proof else 0)
-    assert count("Scan the") == 2 and count("Smoke the litellm") == 1
+    assert count("Scan the") == 2
+    assert count("Smoke the litellm") == 1
     for prefix in (
         "Publish immutable",
         "Verify immutable",

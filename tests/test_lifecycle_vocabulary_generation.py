@@ -24,12 +24,14 @@ def test_lifecycle_producer_store_generated_consumer_roundtrip(tmp_path: Path) -
     defaults = {}
     for name, field in LifecycleVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         defaults[name] = next(iter(enum))
     record = tmp_path / "lifecycle.json"
     for name, field in LifecycleVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         for member in enum:
             producer = LifecycleVocabulary.model_validate({**defaults, name: member})
             record.write_bytes(canonical_message(producer))

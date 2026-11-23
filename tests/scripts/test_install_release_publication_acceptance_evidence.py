@@ -144,7 +144,7 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (
+    [
         ("channel", "dev"),
         ("gates", sorted(NAS_GATES - {"nas_workstation"})),
         ("generation", "c" * 64),
@@ -153,7 +153,7 @@ def test_nas_evidence_combiner_requires_both_exact_candidate_lanes(
         ("status", "failed"),
         ("tailscale_mode", "full"),
         ("version", "1.2.4"),
-    ),
+    ],
 )
 def test_nas_evidence_combiner_rejects_mismatched_lane_identity(
     tmp_path: Path,

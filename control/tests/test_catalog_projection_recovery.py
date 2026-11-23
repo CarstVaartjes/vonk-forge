@@ -56,7 +56,8 @@ def test_verified_catalog_reingestion_repairs_local_bytes_without_a_new_revision
     service.import_catalog_models("test", [document])
     with sessions() as session:
         rows = session.scalars(select(CatalogDocumentRevision)).all()
-        assert len(rows) == 1 and rows[0].id == identity
+        assert len(rows) == 1
+        assert rows[0].id == identity
         assert (
             read_catalog_document(rows[0]).identity.slug == document["identity"]["slug"]
         )
@@ -234,7 +235,8 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations(clea
     assert page.continuation_unavailable is not clears
     restored = read()
     assert calls == 4
-    assert len(restored.items) == 2 and restored.projection_issue is None
+    assert len(restored.items) == 2
+    assert restored.projection_issue is None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -268,7 +270,8 @@ def test_exact_ingress_restores_missing_root_and_selected_consumer():
         selected = session.scalar(
             select(CatalogDocumentRevision).where(active_head_revision())
         )
-        assert selected is not None and selected.id == exact_id
+        assert selected is not None
+        assert selected.id == exact_id
         assert session.get(CatalogDocument, root_id) is not None
     projection = LibraryProjection(sessions, cursors=CursorCodec(b"c" * 32))
     assert [item.identity.content_sha256 for item in projection.models().models] == [
@@ -311,7 +314,8 @@ def test_activity_detail_observes_provider_faults_with_a_finite_budget(clears):
     )
     observed = get_operation_from_providers((faulty, readable), "same")
     assert calls == 3
-    assert observed.id == healthy.id and observed.state == healthy.state
+    assert observed.id == healthy.id
+    assert observed.state == healthy.state
     assert observed.supported_actions == (["cancel"] if clears else [])
     # Ending an unavailable read cannot block the same identity's fresh read.
     assert get_operation_from_providers((faulty, readable), "same") == healthy

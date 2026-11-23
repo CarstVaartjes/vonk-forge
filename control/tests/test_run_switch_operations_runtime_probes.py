@@ -88,7 +88,8 @@ def _probe_states(switch, ids) -> tuple[str, str]:
     with switch.sessions() as session:
         job = session.get(Job, ids[0])
         probe = session.get(AgentOperation, ids[1])
-        assert job is not None and probe is not None
+        assert job is not None
+        assert probe is not None
         return job.state, probe.state
 
 
@@ -223,7 +224,8 @@ def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
 
     view = service.get(operation.operation_id)
     assert view.status_reason == WaitReason.SPARK_BUSY
-    assert view.wait is not None and view.wait.reason == WaitReason.SPARK_BUSY
+    assert view.wait is not None
+    assert view.wait.reason == WaitReason.SPARK_BUSY
     assert view.blockers[0].operation is not None
     assert view.blockers[0].operation.id == holder
     assert view.blockers[0].node_ids == [nodes[0]]
@@ -350,12 +352,14 @@ def test_postgres_a_probe_a_writer_held_at_the_end_is_ended_on_the_next_check(
     # The worker re-drives the ended owner when its terminal wait is due.
     with switch.sessions() as session:
         ended = session.get(Job, switch.operation.operation_id)
-        assert ended is not None and ended.next_action_at is not None
+        assert ended is not None
+        assert ended.next_action_at is not None
         now[0] = ended.next_action_at.replace(tzinfo=UTC)
     switch.service.redrive(switch.operation.operation_id)
     cancelled = LifecycleState.CANCELLED.value
     assert _probe_states(switch, ids) == (cancelled, cancelled)
     with switch.sessions() as session:
         ended = session.get(Job, switch.operation.operation_id)
-        assert ended is not None and ended.next_action_at is None
+        assert ended is not None
+        assert ended.next_action_at is None
     _admits_a_fresh_load(switch)

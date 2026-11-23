@@ -152,7 +152,8 @@ class JobActivationMixin:
                     "run admission", error
                 ) from error
             run = session.get(RecipeRun, run_id)
-            assert run is not None and revision is not None
+            assert run is not None
+            assert revision is not None
             run.state = RunState.RUNNING
             run.route_state = RouteState.WITHDRAWN
             # The run row was written by this very transaction: its plan must

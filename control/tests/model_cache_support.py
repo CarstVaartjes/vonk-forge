@@ -38,7 +38,8 @@ def _first_manifest_artifact(document: dict[str, object]) -> dict[str, object]:
     """Return a mutable copy of the first artifact of a manifest document."""
 
     artifacts = document["artifacts"]
-    assert isinstance(artifacts, list) and artifacts
+    assert isinstance(artifacts, list)
+    assert artifacts
     first = artifacts[0]
     assert isinstance(first, dict)
     return dict(first)

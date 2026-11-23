@@ -174,4 +174,5 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
     )
     availability.run_pending()
     fresh_child = availability.get(third.id).model_child
-    assert fresh_child is not None and fresh_child["id"] != child_id
+    assert fresh_child is not None
+    assert fresh_child["id"] != child_id

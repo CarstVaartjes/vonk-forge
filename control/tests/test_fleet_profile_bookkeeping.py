@@ -269,7 +269,8 @@ def test_damaged_choices_remain_unknown_and_native_assignment_snapshots_roundtri
     # A damaged choice cannot be dropped without deleting saved authoring intent.
     observed = service.read_number(profile.number)
     assert isinstance(observed, UnavailableFleetProfileView)
-    assert observed.id == profile.id and observed.revision == profile.revision
+    assert observed.id == profile.id
+    assert observed.revision == profile.revision
     with sessions() as session:
         row = session.get(FleetProfile, profile.id)
         assert row is not None
@@ -496,7 +497,7 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
     assert fresh.id != ended.id
 
 
-@pytest.mark.parametrize("damage", ("missing", "scope"))
+@pytest.mark.parametrize("damage", ["missing", "scope"])
 def test_planner_observation_damage_admits_load_and_reobserves(damage):
     """Catches an internal assessment becoming a caller refusal or dispatch."""
     from datetime import timedelta

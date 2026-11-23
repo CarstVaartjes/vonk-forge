@@ -328,7 +328,8 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
     assert (RunSwitchCode.INSUFFICIENT_DISK, (nodes[1],)) in expected
     relief = {}
     for node in preview.assessments[0].assessment.fit_current.nodes:
-        assert node.disk_required_bytes is not None and node.disk_free_bytes is not None
+        assert node.disk_required_bytes is not None
+        assert node.disk_free_bytes is not None
         found = collector.relief_for_spark(
             node.node_id,
             node.disk_required_bytes,
@@ -393,10 +394,8 @@ def test_child_retry_preserves_plan_and_per_node_relief_through_progress_api(
         _tick_profile_when_due(restarted, restarted_planner, lifecycle, application.id)
     completed = restarted.application(application.id)
     assert completed.state == LifecycleState.SUCCEEDED, completed.status_reason
-    assert (
-        completed.id == application.id
-        and completed.request_key == application.request_key
-    )
+    assert completed.id == application.id
+    assert completed.request_key == application.request_key
     assert completed.blockers == []
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
@@ -556,7 +555,8 @@ def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
 
     cold_disk = cold.fit.nodes[0].disk_required_bytes
     warm_disk = warm.fit.nodes[0].disk_required_bytes
-    assert cold_disk is not None and warm_disk is not None
+    assert cold_disk is not None
+    assert warm_disk is not None
     # The manifest's one model file is 1 KiB, and nothing else changes.
     assert cold_disk - warm_disk == 1024
     # The load links that file, so the agent never frees it.
@@ -601,7 +601,8 @@ def test_a_recheck_without_preparation_credits_the_set_its_recipe_resolves_to(
 
     cold_disk = cold.fit_current.nodes[0].disk_required_bytes
     warm_disk = warm.fit_current.nodes[0].disk_required_bytes
-    assert cold_disk is not None and warm_disk is not None
+    assert cold_disk is not None
+    assert warm_disk is not None
     # The fixture's model files are 1 KiB, and nothing else changes.
     assert cold_disk - warm_disk == 1024
 
@@ -748,13 +749,15 @@ def test_disk_only_review_submits_a_wait_that_reaches_spark_retention(
     # Review is read-only: only accepted intent can authorize collection.
     with sessions() as session:
         before = store_retention_request(session, nodes[0], lifecycle._clock())
-    assert before is not None and before.required_free_bytes == 0
+    assert before is not None
+    assert before.required_free_bytes == 0
     waiting = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
     assert waiting.state == LifecycleState.QUEUED
     assert waiting.next_attempt_at is not None
     with sessions() as session:
         demand = store_retention_request(session, nodes[0], lifecycle._clock())
-    assert demand is not None and demand.required_free_bytes > 0
+    assert demand is not None
+    assert demand.required_free_bytes > 0
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
@@ -926,7 +929,8 @@ def test_successful_install_child_does_not_hide_invalid_final_installation(
     with sessions.begin() as session:
         installation = session.scalar(select(RecipeInstallation))
         member = session.scalar(select(InstallationNode))
-        assert installation is not None and member is not None
+        assert installation is not None
+        assert member is not None
         if corruption == "missing-member":
             session.delete(member)
         elif corruption == "incomplete-member":
@@ -980,7 +984,8 @@ def test_running_to_installed_stops_and_reuses_the_existing_installation(
         ]
         runs = tuple(session.scalars(select(RecipeRun)))
         assert [item.id for item in runs] == [run.owner_id]
-        assert runs[0].state == "stopped" and runs[0].route_state == "withdrawn"
+        assert runs[0].state == "stopped"
+        assert runs[0].route_state == "withdrawn"
         assert (
             len(tuple(session.scalars(select(Job).where(Job.kind == "recipe.install"))))
             == 1
@@ -1066,7 +1071,8 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
             with sessions.begin() as session:
                 installation = session.scalar(select(RecipeInstallation))
                 inventory = session.scalar(select(NodeInventorySnapshot))
-                assert installation is not None and inventory is not None
+                assert installation is not None
+                assert inventory is not None
                 installed_plan = parse_stored_installation_plan(installation.plan)
                 demand = installed_plan.nodes[0]
                 inventory.disk_free_bytes = (
@@ -1126,7 +1132,8 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
             assert len(tuple(session.scalars(select(RecipeInstallation)))) == 1
             assert not tuple(session.scalars(select(RecipeRun)))
             claim = session.get(ResourceReservation, claim_id)
-            assert claim is not None and claim.owner_kind == "installation"
+            assert claim is not None
+            assert claim.owner_kind == "installation"
             assert claim.state == "active"
             assert list(
                 session.scalars(
@@ -1203,7 +1210,8 @@ def test_a_review_plans_the_eviction_of_many_unused_installations_instead_of_ref
 
     assert review.allowed, review.blockers
     after = review.fit.nodes[0].disk_free_after_bytes
-    assert after is not None and after < 0
+    assert after is not None
+    assert after < 0
 
     # Genuinely unevictable: nothing unused can cover it, and the reason says why.
     with sessions.begin() as session:
@@ -1590,7 +1598,8 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
     assert install is not None
     with sessions() as session:
         copying = session.get(FleetProfileApplication, copying_id)
-        assert copying is not None and copying.state == LifecycleState.RUNNING
+        assert copying is not None
+        assert copying.state == LifecycleState.RUNNING
 
 
 def test_prepared_installation_is_referenced_before_its_child_is_issued(

@@ -107,10 +107,12 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         if fault != "manifest":
             # A Spark without usable inventory that holds no installation of
             # the model cannot reference it, so it does not block removal.
-            assert not wire.blockers and wire.fleet.nas_remove
+            assert not wire.blockers
+            assert wire.fleet.nas_remove
             assert path.read_bytes() == b"shared weights"
             return
-        assert wire.blockers and all(
+        assert wire.blockers
+        assert all(
             item.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
             for item in wire.blockers
         )
@@ -137,7 +139,8 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
                     ModelCacheSet.model_content_sha256 == model_digest
                 )
             )
-            assert row is not None and row.manifest == {}
+            assert row is not None
+            assert row.manifest == {}
             row.manifest = manifest
         now[0] += timedelta(seconds=1)
         inventory(world.sessions, NODE, now[0], [obj])
@@ -171,7 +174,8 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
     )
     with sessions.begin() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.model_content_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
         digest, original = row.model_content_sha256, row.plan
         row.plan = {}
     now = NOW + timedelta(seconds=1)
@@ -181,7 +185,8 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
         for node in nodes:
             inventory(sessions, node, now, [])
         review = cache.review_fleet_model_removal(digest)
-        assert review.fleet is not None and not review.fleet.nas_remove
+        assert review.fleet is not None
+        assert not review.fleet.nas_remove
         assert any(
             issue.subject == installed.owner_id
             and issue.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
@@ -193,10 +198,12 @@ def test_unreadable_installation_is_unknown_and_next_review_recovers(
         )
         with sessions.begin() as session:
             row = session.get(RecipeInstallation, installed.owner_id)
-            assert row is not None and row.plan == {}
+            assert row is not None
+            assert row.plan == {}
             row.plan = original
         healed = cache.review_fleet_model_removal(digest)
-        assert healed.fleet is not None and healed.fleet.nas_remove
+        assert healed.fleet is not None
+        assert healed.fleet.nas_remove
         assert not healed.blockers
     finally:
         cache.close()
@@ -245,7 +252,8 @@ def test_accepted_removal_waits_for_repaired_evidence_under_original_request(
         cache.advance_removals()
         waiting = cache.get_operation(accepted.id)
         assert waiting.state == LifecycleState.BACKOFF
-        assert waiting.fleet is not None and accepted.fleet is not None
+        assert waiting.fleet is not None
+        assert accepted.fleet is not None
         assert waiting.fleet.deadline_at == accepted.fleet.deadline_at
         assert path.read_bytes() == b"weights"
         with world.sessions.begin() as session:

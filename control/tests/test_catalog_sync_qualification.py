@@ -128,7 +128,8 @@ def test_sync_carries_the_published_status_to_the_library_and_follows_new_eviden
         reader.snapshot, items=(replace(item, qualification=failed),)
     )
     shown = library_status()
-    assert shown is not None and shown.status == QualificationStatus.FAILED_RECIPE
+    assert shown is not None
+    assert shown.status == QualificationStatus.FAILED_RECIPE
     assert shown == failed
 
     # A complete published view without a status withdraws it: not yet verified.

@@ -767,7 +767,8 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
             browser = sites["browser"]
             two_mib = 2 * 1024 * 1024
             chat_bound = _edge_body_bound(browser, "POST", "/v1/chat/completions")
-            assert chat_bound is not None and chat_bound >= two_mib
+            assert chat_bound is not None
+            assert chat_bound >= two_mib
             # The transcription bound is exactly the contract's largest upload:
             # that many bytes pass and one more is refused at the edge.
             assert (
@@ -1182,7 +1183,8 @@ def test_caddy_entrypoint_reads_owner_protected_secrets_with_deployed_capabiliti
             entrypoint_arguments=("/bin/true",),
             runtime_options=tuple(without_read_authority),
         )
-        assert refused.returncode != 0 and "Permission denied" in refused.stderr
+        assert refused.returncode != 0
+        assert "Permission denied" in refused.stderr
     finally:
         subprocess.run(
             ["docker", "volume", "rm", volume], check=True, capture_output=True

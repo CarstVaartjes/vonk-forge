@@ -487,7 +487,8 @@ def test_a_recipes_facts_reach_the_result_only_through_the_fold():
     body = source[source.index("def _database_local_state") :]
     body = body[: body.index("\ndef ")]
     targets = re.findall(r"_merge_local\(\s*(\w+)", body)
-    assert targets and set(targets) <= {"cache_facts", "asset_facts"}
+    assert targets
+    assert set(targets) <= {"cache_facts", "asset_facts"}
     assert "_fold_local_facts(" in body
 
 
@@ -766,7 +767,8 @@ def test_cache_resolution_loads_documents_only_where_it_reads_them(
     finally:
         event.remove(engine, "before_cursor_execute", record)
 
-    assert resolution.recipe.cached and resolution.model.cached
+    assert resolution.recipe.cached
+    assert resolution.model.cached
     document_reads = [
         item
         for item in statements

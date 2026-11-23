@@ -463,7 +463,8 @@ def test_profile_read_fetches_spark_names_for_people_but_not_for_json(capsys):
 
     client = FakeClient(dict(responses))
     status, document = run(("profile", "--json"), client)
-    assert status == 0 and "spark_names" not in document
+    assert status == 0
+    assert "spark_names" not in document
     assert ("GET", "/api/fleet") not in [call[:2] for call in client.calls]
 
     client = FakeClient(dict(responses))

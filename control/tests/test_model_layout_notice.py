@@ -90,12 +90,15 @@ def _assert_layout_recovery(
         notice.model_store_layout.path == "installations/id/models/weights.safetensors"
     )
     assert nodes[0] in notice.detail
-    assert "errno=18" in notice.detail and "weights.safetensors" in notice.detail
-    assert notice.recommendation is not None and "filesystem" in notice.recommendation
+    assert "errno=18" in notice.detail
+    assert "weights.safetensors" in notice.detail
+    assert notice.recommendation is not None
+    assert "filesystem" in notice.recommendation
     assert service.get(installation.id).state != LifecycleState.FAILED
 
     parked = fenced_operation(sessions, claim)
-    assert parked.next_action_at is not None and parked.recovery_deadline is not None
+    assert parked.next_action_at is not None
+    assert parked.recovery_deadline is not None
     deadline = parked.recovery_deadline
     now[0] = parked.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     # Recreate the queue owner and resume the original persisted operation.

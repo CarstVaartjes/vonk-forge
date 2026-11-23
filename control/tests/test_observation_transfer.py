@@ -435,7 +435,8 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
             sleep=lambda delay: now.__setitem__(0, now[0] + delay),
         ),
     )
-    assert time.monotonic is real_monotonic and time.sleep is real_sleep
+    assert time.monotonic is real_monotonic
+    assert time.sleep is real_sleep
     client = _client(tmp_path, response)
     peers = []
 
@@ -450,8 +451,10 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
         adopted = client.request("GET", "/api/platform")
     except ControlClientError:
         pass
-    assert adopted is None and now[0] == 115.0
-    assert len(peers) == 3 and all(peer._body.closed for peer in peers)
+    assert adopted is None
+    assert now[0] == 115.0
+    assert len(peers) == 3
+    assert all(peer._body.closed for peer in peers)
     monkeypatch.undo()
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)

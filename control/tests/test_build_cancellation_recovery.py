@@ -122,11 +122,13 @@ def test_explicit_cancellation_does_not_corrupt_the_canonical_build_request(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         job = session.get(Job, original.id)
-        assert build is not None and job is not None
+        assert build is not None
+        assert job is not None
         assert parse_stored_build_plan(build.plan) == parse_stored_build_plan(
             plan.agent_payload
         )
-        assert job.result is not None and job.result["cancel_requested"] is True
+        assert job.result is not None
+        assert job.result["cancel_requested"] is True
     assert bool(_active_claims(sessions, plan.build_id)) is issued
 
 
@@ -151,7 +153,8 @@ def test_cache_removal_preserves_an_accepted_build_and_its_claim(
         before_child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == original.id)
         )
-        assert before_build is not None and before_job is not None
+        assert before_build is not None
+        assert before_job is not None
         assert before_child is not None
         child_id = before_child.id
         child_state = before_child.state
@@ -187,7 +190,9 @@ def test_cache_removal_preserves_an_accepted_build_and_its_claim(
         build_jobs = tuple(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
-        assert build is not None and job is not None and child is not None
+        assert build is not None
+        assert job is not None
+        assert child is not None
         assert build.state == "building"
         assert parse_stored_build_plan(build.plan) == parse_stored_build_plan(
             plan.agent_payload
@@ -249,7 +254,8 @@ def test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt(
         actor="operator",
         request_id=str(uuid.uuid4()),
     )
-    assert fresh.id != original.id and fresh.owner_id == original.owner_id
+    assert fresh.id != original.id
+    assert fresh.owner_id == original.owner_id
     claims = _active_claims(sessions, plan.build_id)
     assert claims
     # A delayed original result and duplicate cleanup must not touch the new use.
@@ -262,7 +268,8 @@ def test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt(
         )
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "building"
+        assert build is not None
+        assert build.state == "building"
     assert _active_claims(sessions, plan.build_id) == claims
     assert operations.get(original.id).state == "cancelled"
     operations.record_node_result(
@@ -274,7 +281,8 @@ def test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt(
         actor="operator",
         request_id=original_key,
     )
-    assert replay.id == original.id and replay.state == "cancelled"
+    assert replay.id == original.id
+    assert replay.state == "cancelled"
 
 
 @pytest.mark.parametrize("issued", [False, True])
@@ -341,7 +349,8 @@ def test_cancelled_replacement_preserves_the_verified_image(
         _settle_cleanup(sessions, operations, plan.build_id, node_id, child_id)
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "succeeded"
+        assert build is not None
+        assert build.state == "succeeded"
         assert build.oci_layout_sha256 == receipt.oci_archive_sha256
     assert storage.build_archive_available(
         receipt.oci_archive_sha256, receipt.image_bytes
@@ -352,7 +361,8 @@ def test_cancelled_replacement_preserves_the_verified_image(
         actor="operator",
         request_id=replacement_key,
     )
-    assert replay.id == replacement.id and replay.state == "cancelled"
+    assert replay.id == replacement.id
+    assert replay.state == "cancelled"
 
 
 def test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt(
@@ -384,7 +394,8 @@ def test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt(
         actor="operator",
         request_id=str(uuid.uuid4()),
     )
-    assert fresh.owner_id == plan.build_id and fresh.state == "running"
+    assert fresh.owner_id == plan.build_id
+    assert fresh.state == "running"
 
 
 @pytest.mark.parametrize("locked_owner", ["job", "build"])
@@ -414,7 +425,8 @@ def test_removal_does_not_lock_or_mutate_an_accepted_build_owner(
         )
         job_before = session.get(Job, original.id)
         build_before = session.get(RecipeBuild, plan.build_id)
-        assert child_before is not None and job_before is not None
+        assert child_before is not None
+        assert job_before is not None
         assert build_before is not None
         child_id = child_before.id
         child_state = child_before.state
@@ -445,11 +457,15 @@ def test_removal_does_not_lock_or_mutate_an_accepted_build_owner(
         build_jobs = tuple(
             session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
         )
-        assert build is not None and build.state == "building"
+        assert build is not None
+        assert build.state == "building"
         assert parse_stored_build_plan(build.plan) == build_plan
-        assert job is not None and job.state == "running" and job.result is None
+        assert job is not None
+        assert job.state == "running"
+        assert job.result is None
         assert job.payload == job_payload
-        assert child is not None and child.id == child_id
+        assert child is not None
+        assert child.id == child_id
         assert child.state == child_state
         assert child.current_attempt == child_attempt
         assert tuple(candidate.id for candidate in build_jobs) == (original.id,)

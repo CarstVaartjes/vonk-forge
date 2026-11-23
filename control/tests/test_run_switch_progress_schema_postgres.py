@@ -44,7 +44,8 @@ def test_damaged_final_verify_reobserves_the_run_without_starting_another(
     assert run_id is not None
     with sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         fault = {"completed_bytes": 2, "total_bytes": 1, "total_bytes_known": True}
         if damage == "checkpoint":
             fault = {"phase_index": True}
@@ -87,7 +88,8 @@ def test_damaged_transfer_reconnects_to_the_original_child_and_finishes(
     child_id = current.result.child_operation_id
     with sessions.begin() as session:
         row = session.get(Job, parent_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         fault = {"completed_bytes": 2, "total_bytes": 1, "total_bytes_known": True}
         if damage == "checkpoint":
             fault = {"phase_index": True}
@@ -109,4 +111,5 @@ def test_damaged_transfer_reconnects_to_the_original_child_and_finishes(
                 select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
             )
         )
-        assert len(orders) == 1 and orders[0].current_attempt == 1
+        assert len(orders) == 1
+        assert orders[0].current_attempt == 1

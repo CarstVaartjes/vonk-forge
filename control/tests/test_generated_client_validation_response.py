@@ -33,13 +33,15 @@ def test_generated_python_list_operations_keeps_cursor_and_recovers_after_reject
             base_url="https://control.invalid", token="fixture"
         ).set_httpx_client(transport)
         rejected = list_operations.sync_detailed(client=client, cursor=cursor, limit=20)
-        assert rejected.status_code == 422 and rejected.parsed is not None
+        assert rejected.status_code == 422
+        assert rejected.parsed is not None
         restored = ProblemProducer.model_validate(rejected.parsed.to_dict())
         assert restored == problem
         assert observed[0].url.params["cursor"] == cursor
         assert observed[0].url.params["limit"] == "20"
         fresh = list_operations.sync_detailed(client=client, limit=20)
-        assert fresh.status_code == 200 and fresh.parsed is not None
+        assert fresh.status_code == 200
+        assert fresh.parsed is not None
         assert fresh.parsed.to_dict()["operations"] == []
         assert fresh.parsed.to_dict()["total"] == 0
         assert fresh.parsed.to_dict()["next_cursor"] is None

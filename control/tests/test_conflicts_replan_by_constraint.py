@@ -209,7 +209,8 @@ def test_a_request_key_raced_by_the_same_request_returns_the_original(
     finally:
         event.remove(Session, "before_flush", other_process_commits_first)
 
-    assert winner and replayed.id == winner[0].id
+    assert winner
+    assert replayed.id == winner[0].id
     with sessions() as session:
         assert session.scalars(
             select(Job.id).where(Job.request_id == request_id)

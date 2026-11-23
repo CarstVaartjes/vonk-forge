@@ -232,7 +232,7 @@ def _fresh_read(client, state):
 
 
 @pytest.mark.parametrize(
-    "stage,status", [("headers", 202), ("body", 202), ("body", 403)]
+    ("stage", "status"), [("headers", 202), ("body", 202), ("body", 403)]
 )
 def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     https_peer, stage, status
@@ -277,7 +277,8 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
 def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_peer):
     _, state = https_peer
     origin = urllib.parse.urlsplit(state["url"])
-    assert origin.hostname is not None and origin.port is not None
+    assert origin.hostname is not None
+    assert origin.port is not None
     context = ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     with (
         socket.create_connection((origin.hostname, origin.port), timeout=0.25) as raw,
@@ -289,7 +290,7 @@ def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_pee
 
 
 @pytest.mark.parametrize(
-    "status,acceptance,calls", [(403, "refused", 1), (202, "unknown", 4)]
+    ("status", "acceptance", "calls"), [(403, "refused", 1), (202, "unknown", 4)]
 )
 def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     https_peer, status, acceptance, calls
@@ -305,7 +306,8 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
         )
     elapsed = time.monotonic() - started
     result = json.loads(output.getvalue())
-    assert exit_code == 2 and result["submission"]["acceptance"] == acceptance
+    assert exit_code == 2
+    assert result["submission"]["acceptance"] == acceptance
     assert result["request_key"] == KEY
     assert elapsed < 4 * DEADLINE, (
         f"submission escaped its {3 * DEADLINE}s total budget: {elapsed:.3f}s"
@@ -428,7 +430,8 @@ def test_redirect_cannot_forward_authenticated_request(https_peer):
             "/api/model/chosen/download",
             {"request_key": KEY},
         )
-    assert len(state["calls"]) == 1 and state["calls"][0][1] != "/redirected"
+    assert len(state["calls"]) == 1
+    assert state["calls"][0][1] != "/redirected"
     _fresh_read(client, state)
 
 
@@ -544,8 +547,10 @@ raise SystemExit(cli.main(sys.argv[2:], control_client=client))
             process.kill()
             process.communicate(timeout=30)
     result = json.loads(output)
-    assert process.returncode == 2 and result["submission"]["acceptance"] == "unknown"
-    assert result["request_key"] == KEY and not state["calls"]
+    assert process.returncode == 2
+    assert result["submission"]["acceptance"] == "unknown"
+    assert result["request_key"] == KEY
+    assert not state["calls"]
     assert "Traceback" not in error
 
 
@@ -620,7 +625,8 @@ def test_ctrl_c_inside_a_response_block_is_not_replaced_by_a_cleanup_failure(
             raise KeyboardInterrupt
     except KeyboardInterrupt:
         interrupted = True
-    assert interrupted and response.closed
+    assert interrupted
+    assert response.closed
     _fresh_loop(monkeypatch)
 
 
@@ -635,7 +641,8 @@ def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch)
         closed_successfully = True
     except RuntimeError:
         pass
-    assert not closed_successfully and response.closed
+    assert not closed_successfully
+    assert response.closed
     _fresh_loop(monkeypatch)
 
 
@@ -699,7 +706,8 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     assert time.monotonic() - started < 3 * DEADLINE
     context = cast(ControlTransportError, failure[0]).context
     assert context is not None
-    assert context.http_status == 200 and context.request_id == "deadline-fixture"
+    assert context.http_status == 200
+    assert context.request_id == "deadline-fixture"
     assert cast(ControlTransportError, failure[0]).retry_after_seconds == 120
     assert state["records_sent"] > 2, "no repeated valid-record progress was exercised"
     assert len(state["calls"]) == 1
@@ -737,7 +745,8 @@ def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
     monkeypatch.setattr(loop, "shutdown_default_executor", interrupt_shutdown)
     with pytest.raises(KeyboardInterrupt):
         response.close()
-    assert response.closed and loop.is_closed()
+    assert response.closed
+    assert loop.is_closed()
     assert all(
         inspect.getcoroutinestate(work) == inspect.CORO_CLOSED for work in coroutines
     )

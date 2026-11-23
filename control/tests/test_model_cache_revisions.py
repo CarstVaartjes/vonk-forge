@@ -188,7 +188,8 @@ def test_shared_objects_are_charged_once_even_with_filters(postgres_engine, tmp_
         for row in rows:
             usage = row.cache_usage
             assert usage is not None
-            assert usage.unique_bytes == 3 and usage.shared_bytes == 6
+            assert usage.unique_bytes == 3
+            assert usage.shared_bytes == 6
         filtered = library.models(cached=True, search="test/bb").models
         assert len(filtered) == 1
         assert filtered[0].resources == next(
@@ -229,7 +230,8 @@ def test_completed_download_repairs_lost_revision_binding_after_restart(
         library._storage_observer._thread.join(timeout=30)
         assert not library._storage_observer._thread.is_alive()
         rows = library.models(cached=True).models
-        assert len(rows) == 1 and rows[0].identity.content_sha256 == digest
+        assert len(rows) == 1
+        assert rows[0].identity.content_sha256 == digest
         assert rows[0].resources.disk_bytes == 9
     finally:
         service.close()
@@ -277,7 +279,8 @@ def test_cache_bindings_keep_their_model_metadata_until_replacement(
         library._storage_observer._thread.join(timeout=30)
         assert not library._storage_observer._thread.is_alive()
         rows = library.models(cached=True).models
-        assert len(rows) == 1 and rows[0].identity.content_sha256 == digest
+        assert len(rows) == 1
+        assert rows[0].identity.content_sha256 == digest
     finally:
         service.close()
 

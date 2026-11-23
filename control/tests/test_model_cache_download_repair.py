@@ -182,7 +182,8 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
     monkeypatch.setattr(service, "activity_operations", original)
     fresh = provider.list_operations(query)
     assert not fresh.continuation_unavailable
-    assert fresh.items == result.items and fresh.total == result.total
+    assert fresh.items == result.items
+    assert fresh.total == result.total
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
@@ -325,7 +326,8 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
         assert service.run_pending() == 1
         waiting = service.get_operation(operation.id)
         assert waiting.state == "queued"
-        assert waiting.failure is not None and waiting.failure["retryable"] is True
+        assert waiting.failure is not None
+        assert waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
     # A network timeout is a wait: it is re-checked on the one bounded,
     # jittered wait cadence, never backed off by failures it did not spend and
@@ -376,7 +378,8 @@ def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
     service.run_pending()
     done = service.get_operation(operation.id)
     assert done.state == "succeeded"
-    assert done.blockers == () and done.next_attempt_at is None
+    assert done.blockers == ()
+    assert done.next_attempt_at is None
 
 
 def test_operator_retry_of_a_failed_download_is_always_accepted(
@@ -816,7 +819,8 @@ def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path
 
     service._object_is_available = spy
     path, size, _ = service.cached_artifact_file(digest, first["sha256"], "a.bin")
-    assert path.read_bytes() == b"served" and size == 6
+    assert path.read_bytes() == b"served"
+    assert size == 6
     assert inspected == [first["sha256"]]
     # A damaged object is still refused when it is the one being served.
     service._object_path(second["sha256"]).unlink()

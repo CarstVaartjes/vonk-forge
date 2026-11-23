@@ -45,7 +45,7 @@ def test_orphaned_or_ended_owner_fails_for_every_hold_class(kind, state):
 
 
 @pytest.mark.parametrize(
-    "ended,fresh",
+    ("ended", "fresh"),
     [
         (Operation("needs-operator"), Operation("queued", "new")),
         (Operation("running"), Operation("queued", "new")),

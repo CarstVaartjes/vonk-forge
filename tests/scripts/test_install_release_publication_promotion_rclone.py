@@ -767,7 +767,7 @@ def test_assemble_binds_lower_arm64_baseline_without_a_pointer(
 
 @pytest.mark.parametrize(
     "missing",
-    ("spark-linux-arm64", "package-linux-arm64"),
+    ["spark-linux-arm64", "package-linux-arm64"],
 )
 def test_assemble_rejects_incomplete_platform_matrix(
     tmp_path: Path, missing: str
@@ -851,7 +851,7 @@ def test_assemble_rejects_package_metadata_from_another_release(tmp_path: Path) 
     assert "package metadata is inconsistent" in result.stderr
 
 
-@pytest.mark.parametrize("role", ("api", "worker", "litellm"))
+@pytest.mark.parametrize("role", ["api", "worker", "litellm"])
 def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) -> None:
     inputs = _inputs(tmp_path)
     command = _assemble_command(tmp_path, inputs)
@@ -893,7 +893,7 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
 # Assembles and signs a whole release publication through the real script.
 @pytest.mark.slow(60)
 @pytest.mark.parametrize(
-    "image_tag", (f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40)
+    "image_tag", [f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40]
 )
 def test_development_assembly_preserves_digest_pins_independent_of_tag_provenance(
     tmp_path: Path, image_tag: str

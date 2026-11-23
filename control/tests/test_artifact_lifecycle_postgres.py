@@ -160,7 +160,8 @@ def test_reused_session_refreshes_committed_deletion_fence(
                     "artifact_sha256": identity.sha256,
                 },
             )
-            assert preloaded is not None and preloaded.removal_owner_id is None
+            assert preloaded is not None
+            assert preloaded.removal_owner_id is None
 
         with artifact_sessions.begin() as other:
             reserve_removal(

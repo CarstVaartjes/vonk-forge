@@ -57,9 +57,11 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         ]
         with sessions() as session:
             claimed = session.get(ModelCacheOperation, original.id)
-            assert claimed is not None and claimed.state == "running"
+            assert claimed is not None
+            assert claimed.state == "running"
             old_fence = claimed.fence
-            assert old_fence is not None and claimed.lease_deadline is not None
+            assert old_fence is not None
+            assert claimed.lease_deadline is not None
 
         object_digest = str(artifact["sha256"])
         writer_lock = root / "locks" / object_digest
@@ -82,11 +84,13 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
                     break
             with sessions() as session:
                 ended = session.get(ModelCacheOperation, original.id)
-                assert ended is not None and ended.state == "cancelled"
+                assert ended is not None
+                assert ended.state == "cancelled"
                 residue = ended.last_error
                 assert residue == WaitReason.STOP_UNCONFIRMED
                 assert ended.completed_at is not None
-                assert ended.next_action_at is None and ended.lease_deadline is None
+                assert ended.next_action_at is None
+                assert ended.lease_deadline is None
                 assert (
                     service._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
                 )
@@ -113,7 +117,8 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         )
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.last_error == residue
+            assert ended is not None
+            assert ended.last_error == residue
             assert (
                 restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.UNKNOWN
             )
@@ -123,14 +128,16 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             model_content_sha256=model_digest,
             artifacts=[artifact],
         )
-        assert fresh.id != original.id and fresh.request_key != original.request_key
+        assert fresh.id != original.id
+        assert fresh.request_key != original.request_key
         assert fresh.artifact_set_sha256 == original.artifact_set_sha256
         assert restarted._claim_operations(limit=1, respect_backoff=False) == [
             (fresh.id, "download")
         ]
         with sessions() as session:
             current = session.get(ModelCacheOperation, fresh.id)
-            assert current is not None and current.state == "running"
+            assert current is not None
+            assert current.state == "running"
             assert current.fence == restarted._claim_owner != old_fence
         restarted._run_download(fresh.id, force=False)
         assert restarted.get_operation(fresh.id).state == "succeeded"

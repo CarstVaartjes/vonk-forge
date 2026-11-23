@@ -243,7 +243,8 @@ def test_recovery_authority_requires_succeeded_start_bound_to_current_plan(
     with sessions.begin() as session:
         run = session.get(RecipeRun, started.owner_id)
         original = session.get(Job, started.id)
-        assert run is not None and original is not None
+        assert run is not None
+        assert original is not None
         run.run_generation = 1
         if tamper == "state":
             original.state = "failed"

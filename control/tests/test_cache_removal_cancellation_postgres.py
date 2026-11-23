@@ -116,7 +116,8 @@ def _recipe_model_with_assets(
     )
     document = model.model_dump(mode="json")
     files = document["files"]
-    assert isinstance(files, list) and len(files) == 1
+    assert isinstance(files, list)
+    assert len(files) == 1
     weight = files[0]
     assert isinstance(weight, dict)
     weight["size_bytes"] = len(partial)
@@ -132,7 +133,8 @@ def _recipe_model_with_assets(
     model = ModelDefinition.model_validate_json(json.dumps(document))
     recipe_document = recipe.model_dump(mode="json")
     models = recipe_document["models"]
-    assert isinstance(models, list) and models
+    assert isinstance(models, list)
+    assert models
     selected = models[0]
     assert isinstance(selected, dict)
     model_reference = selected["model"]

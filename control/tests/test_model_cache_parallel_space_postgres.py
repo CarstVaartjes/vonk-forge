@@ -94,7 +94,8 @@ def test_parallel_downloads_never_overcommit_the_same_free_space(
         with sessions() as session:
             for operation_id in waiting:
                 row = session.get(ModelCacheOperation, operation_id)
-                assert row is not None and row.progress_advanced_at is not None
+                assert row is not None
+                assert row.progress_advanced_at is not None
         (demand,) = demands.active()
         assert demand.scope == NAS_MODELS
         assert demand.required_free_bytes == (fitting + 1) * SIZE

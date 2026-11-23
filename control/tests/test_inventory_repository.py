@@ -91,7 +91,8 @@ def test_new_snapshot_supersedes_old_but_preserves_evidence(tmp_path) -> None:
         )
     )
     latest = repo.latest(node, now=now + timedelta(seconds=6), maximum_age=10)
-    assert latest.id == second.id and latest.id != first.id
+    assert latest.id == second.id
+    assert latest.id != first.id
     assert repo.snapshot_count(node) == 2
 
 
@@ -166,7 +167,8 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         assert snapshot is not None
         snapshot.capabilities = ["runtime.vllm.v1"]
     repaired = repo.latest(node, now=now, maximum_age=60)
-    assert repaired is not None and repaired.id == stored.id
+    assert repaired is not None
+    assert repaired.id == stored.id
     assert repaired.capabilities == ["runtime.vllm.v1"]
     assert repaired.host_memory_free_bytes == 300
 

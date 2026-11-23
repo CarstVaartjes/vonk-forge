@@ -310,7 +310,8 @@ def test_installed_run_asks_again_when_the_profile_moved_then_saves_and_loads(
     ]
     (load,) = [call for call in state.calls if call[1] == "/api/profile/1/load"]
     previews = [call for call in state.calls if call[1] == "/api/profile/1/preview"]
-    assert len(previews) == 2 and cast(dict, load[2])["review"]["effects_digest"]
+    assert len(previews) == 2
+    assert cast(dict, load[2])["review"]["effects_digest"]
     with sessions() as session:
         assert len(list(session.scalars(select(FleetProfileApplication)))) == 1
 
@@ -476,9 +477,11 @@ def test_installed_remove_and_pin_save_ignore_unrelated_cache_evidence(
         )
         assert edited.returncode == 0, edited.stdout + edited.stderr
         view = FleetProfileView.model_validate_json(edited.stdout)
-        assert view.definition == expected and view.revision == revision
+        assert view.definition == expected
+        assert view.revision == revision
     persisted = profiles.definition_number(number)
-    assert persisted.definition == expected and persisted.revision == revision
+    assert persisted.definition == expected
+    assert persisted.revision == revision
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -505,7 +508,8 @@ def test_profile_save_reports_exact_model_damage_and_recovers(
                 CatalogDocumentRevision.kind == "model"
             )
         )
-        assert recipe is not None and model is not None
+        assert recipe is not None
+        assert model is not None
         selector = f"{recipe.publisher}/{recipe.slug}"
         model_id, original = model.id, model.document
         if (

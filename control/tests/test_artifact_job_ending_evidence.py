@@ -193,7 +193,8 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
                 AgentOperation.parent_job_id == ended.operation_id
             )
         )
-        assert operation is not None and operation.state == "failed"
+        assert operation is not None
+        assert operation.state == "failed"
         # The order says the agent's words too, not observation-unavailable.
         assert operation.status_reason is not None
         assert _CAUSE in operation.status_reason, operation.status_reason
@@ -332,7 +333,8 @@ def test_a_pre_launch_wait_reissues_the_job_and_its_success_ends_it_clean(
     done = service.get(job.id)
     assert done.state == "succeeded"
     evidence = done.result_evidence
-    assert evidence is not None and evidence.exit_code == 0
+    assert evidence is not None
+    assert evidence.exit_code == 0
     # The first attempt's wait is no account of how the job ended.
     assert (
         evidence.recoverable,
@@ -399,7 +401,9 @@ def test_an_observation_never_reopens_an_order_put_back_for_reissue(
             )
         )
         parent = session.get(Job, job.operation_id)
-        assert artifact_job and operation and parent
+        assert artifact_job
+        assert operation
+        assert parent
         service._observe_result(
             ArtifactJobAdapter(session, clock=clock),
             operation,
@@ -479,7 +483,8 @@ def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
                 AgentOperationAttempt.operation_id == _order(sessions, job).id
             )
         )
-        assert attempt is not None and attempt.result is not None
+        assert attempt is not None
+        assert attempt.result is not None
         reason_code = attempt.result.get("helper_error_code")
         assert reason_code == "runtime_image_missing"
         run = session.get(RecipeRun, job.run_id)
@@ -519,7 +524,8 @@ def test_a_demoted_installation_lets_go_of_its_claim_but_the_held_run_keeps_its_
     clock.advance(seconds=600)
     with sessions() as session:
         run = session.get(RecipeRun, job.run_id)
-        assert run is not None and run.state == RunState.RUNNING
+        assert run is not None
+        assert run.state == RunState.RUNNING
         installation = session.get(RecipeInstallation, run.installation_id)
         assert installation is not None
         assert installation.state == InstallationState.PARTIAL
@@ -557,7 +563,8 @@ def _launch_grant(sessions, job):
             )
         )
         parent = session.get(Job, job.operation_id)
-        assert order is not None and parent is not None
+        assert order is not None
+        assert parent is not None
         return derive_runtime_plan_binding(
             session,
             parent=parent,
@@ -584,7 +591,7 @@ def _live_installs(sessions, run_id) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "database", ("sqlite", pytest.param("postgres", marks=pytest.mark.postgres))
+    "database", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)]
 )
 def test_a_submission_on_a_run_that_lost_its_image_installs_it_again_then_runs(
     tmp_path, request, database

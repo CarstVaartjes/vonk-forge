@@ -107,7 +107,8 @@ class FakeLifecycle:
     ) -> None:
         # Joining the Sparks' intent is what keeps an unattended Stop from
         # superseding anything.
-        assert actor == ACTOR and workload_intent_ordinal is not None
+        assert actor == ACTOR
+        assert workload_intent_ordinal is not None
         self.stopped.append(run_id)
 
     def uninstall(
@@ -120,7 +121,8 @@ class FakeLifecycle:
         also_removing=(),
         preserve_model_files=False,
     ) -> None:
-        assert actor == ACTOR and unattended_guard is not None
+        assert actor == ACTOR
+        assert unattended_guard is not None
         assert preserve_model_files
         # The sweep has judged the installation unused; a load can still
         # arrive before the removal is queued.

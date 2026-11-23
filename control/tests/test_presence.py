@@ -239,7 +239,7 @@ def test_missing_presence_is_unknown_and_next_authenticated_contact_repairs_it(
     assert observed == recorded
 
 
-@pytest.mark.parametrize("fault", ("time", "storage"))
+@pytest.mark.parametrize("fault", ["time", "storage"])
 def test_latest_observation_fault_cannot_supply_address_and_contact_repairs(
     presence_system, monkeypatch, fault
 ):

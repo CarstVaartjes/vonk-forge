@@ -50,7 +50,8 @@ def test_login_files_are_private_and_resolve_without_env(login) -> None:
     credential = resolve_credential()
 
     assert credential.url == "https://forge.example.test"
-    assert credential.from_login and credential.expires_at == _NOW + timedelta(days=30)
+    assert credential.from_login
+    assert credential.expires_at == _NOW + timedelta(days=30)
     assert stat.S_IMODE(login_token_path().stat().st_mode) == 0o600
     assert stat.S_IMODE(login_token_path().parent.stat().st_mode) == 0o700
 
@@ -70,7 +71,8 @@ def test_warning_starts_seven_days_before_expiry(
         assert warning is None
     else:
         assert warning is not None
-        assert expected in warning and "vonkctl auth login" in warning
+        assert expected in warning
+        assert "vonkctl auth login" in warning
 
 
 def test_an_expired_stored_login_warns_once_and_still_connects(
@@ -96,7 +98,8 @@ def test_an_env_token_file_has_unknown_expiry_and_no_warning(
 
     credential = resolve_credential()
 
-    assert credential.token_file == token and credential.expires_at is None
+    assert credential.token_file == token
+    assert credential.expires_at is None
     assert expiry_warning(credential, _NOW) is None
 
 
@@ -140,4 +143,5 @@ def test_a_bad_stdin_password_fails_without_echoing_its_bytes(
     with pytest.raises(cli_auth.LoginFailed) as failure:
         cli_auth._read_password(True)
 
-    assert "secret" not in str(failure.value) and "\xff" not in str(failure.value)
+    assert "secret" not in str(failure.value)
+    assert "\xff" not in str(failure.value)

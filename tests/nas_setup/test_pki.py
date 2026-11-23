@@ -134,7 +134,7 @@ def test_generated_intermediate_loads_with_controller_crypto_and_explicit_encryp
 
 
 @pytest.mark.parametrize(
-    "days_remaining,renew", [(31, False), (30, True), (29, True), (-1, True)]
+    ("days_remaining", "renew"), [(31, False), (30, True), (29, True), (-1, True)]
 )
 def test_renewal_threshold_keeps_authority_and_valid_identity(
     request_contract: NasStepCaControllerRequest,

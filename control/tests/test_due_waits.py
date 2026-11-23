@@ -27,7 +27,7 @@ from vonk_control.worker.loop import Worker
 from .test_persisted_waits import NOW, _job
 
 
-@pytest.mark.parametrize("with_evidence", (True, False))
+@pytest.mark.parametrize("with_evidence", [True, False])
 def test_quiet_worker_reconstruction_redrives_the_same_fenced_job(
     postgres_engine, with_evidence
 ):
@@ -119,11 +119,12 @@ signal.pause()
     assert calls == [job.id]
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
         assert stored.current_attempt == 1
 
 
-@pytest.mark.parametrize("damage", ("structure", "identity", "kind", "clock"))
+@pytest.mark.parametrize("damage", ["structure", "identity", "kind", "clock"])
 def test_corrupt_first_row_cannot_starve_later_due_work(
     postgres_engine, caplog, damage
 ):
@@ -208,8 +209,8 @@ def test_corrupt_first_row_cannot_starve_later_due_work(
     assert len(failures()) == 2
 
 
-@pytest.mark.parametrize("json_null", (True, False))
-@pytest.mark.parametrize("kind, model", tuple(WAIT_MODELS.items()))
+@pytest.mark.parametrize("json_null", [True, False])
+@pytest.mark.parametrize(("kind", "model"), tuple(WAIT_MODELS.items()))
 def test_every_due_source_redrives_without_evidence(
     postgres_engine, kind, model, json_null
 ):
@@ -374,7 +375,8 @@ def test_cancellation_committed_after_selection_wins_before_retry(postgres_engin
     assert not calls
     with sessions() as session:
         current = session.get(Job, job.id)
-        assert current is not None and current.current_attempt == 0
+        assert current is not None
+        assert current.current_attempt == 0
 
 
 def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_engine):
@@ -446,7 +448,8 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
         pending = session.get(AgentIssuedCertificateRevocation, row.serial)
         assert pending is not None
         wait = read_wait(pending)
-        assert wait is not None and wait.next_check > NOW
+        assert wait is not None
+        assert wait.next_check > NOW
     available[0] = True
     now[0] = wait.next_check
     restarted = construct()
@@ -455,7 +458,8 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     assert revoked == [row.serial]
     with sessions() as session:
         settled = session.get(AgentIssuedCertificateRevocation, row.serial)
-        assert settled is not None and settled.ca_revoked_at == now[0]
+        assert settled is not None
+        assert settled.ca_revoked_at == now[0]
         assert settled.state == CertificateRecordState.REVOKED
         assert read_wait(settled) is None
 
@@ -478,7 +482,8 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
     def handler(request):
         with sessions() as session:
             current = session.get(Job, request.job_id)
-            assert current is not None and current.state == LifecycleState.RUNNING
+            assert current is not None
+            assert current.state == LifecycleState.RUNNING
         calls.append(request.job_id)
         return {}
 
@@ -506,9 +511,9 @@ def test_owner_handler_runs_after_the_selection_connection_is_released(postgres_
         engine.dispose()
 
 
-@pytest.mark.parametrize("with_evidence", (True, False))
+@pytest.mark.parametrize("with_evidence", [True, False])
 @pytest.mark.parametrize(
-    "superseded, missing_receipt", ((False, False), (True, False), (False, True))
+    ("superseded", "missing_receipt"), [(False, False), (True, False), (False, True)]
 )
 def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     tmp_path,
@@ -639,7 +644,8 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             parent = session.get(Job, started.id)
             assert parent is not None
             wait = read_wait(parent)
-            assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+            assert wait is not None
+            assert wait.reason is WaitReason.RECEIPT_MISSING
             assert set(
                 session.scalars(
                     select(AgentOperation.id).where(
@@ -661,7 +667,8 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         if superseded:
             assert current == {child.id for child in children}
             parent = session.get(Job, started.id)
-            assert parent is not None and parent.state == LifecycleState.CANCELLED
+            assert parent is not None
+            assert parent.state == LifecycleState.CANCELLED
         else:
             assert current == expected
             assert current > {child.id for child in children}
@@ -710,8 +717,10 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
 
     step = construct().advance_automatic(90)
     waiting = construct().latest()
-    assert waiting is not None and waiting.wait is not None
-    assert step.failures == 1 and len(jitter) == 1
+    assert waiting is not None
+    assert waiting.wait is not None
+    assert step.failures == 1
+    assert len(jitter) == 1
     assert waiting.wait.next_check == NOW + timedelta(seconds=step.delay_seconds)
     # A restarted worker's backstop runs the sync once its recorded check is due.
     now[0] = waiting.wait.next_check
@@ -733,7 +742,8 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     )
     backstop.tick()
     recovered = service.latest()
-    assert recovered is not None and recovered.state is CatalogSyncState.CURRENT
+    assert recovered is not None
+    assert recovered.state is CatalogSyncState.CURRENT
     assert recovered.wait is not None
     assert recovered.wait.reason is CatalogSyncCode.REFRESH_SCHEDULED
     assert recovered.wait.next_check == now[0] + timedelta(seconds=90)

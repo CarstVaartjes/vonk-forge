@@ -43,7 +43,8 @@ def _committed(name: str) -> dict[str, Any]:
 
 
 def test_fixture_documents_are_valid_published_contract_documents() -> None:
-    assert RECIPES and MODELS
+    assert RECIPES
+    assert MODELS
     for digest, document in MODELS.items():
         assert document_sha256(document) == digest
         read_model(document)

@@ -430,7 +430,8 @@ def test_every_rank_of_a_job_binds_fabric_and_host_network_without_an_endpoint(
         peer_addresses=("192.168.100.10", "192.168.100.11"),
     )
     wire = WireCompiledExecutionPlan.parse(started)
-    assert wire.job is not None and wire.endpoint is None
+    assert wire.job is not None
+    assert wire.endpoint is None
     assert wire.security.network_mode == "host"
     assert wire.runtime.placement.port is None
     placement = wire.runtime.placement

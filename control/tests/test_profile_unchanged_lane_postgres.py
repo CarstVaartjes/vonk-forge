@@ -143,7 +143,8 @@ def test_sibling_load_keeps_ready_run_installation_and_running_job(
             assert sim.settle(application_id) == LifecycleState.SUCCEEDED
             with world.sessions() as session:
                 run = session.get(RecipeRun, run_id)
-                assert run is not None and run.state == RunState.RUNNING
+                assert run is not None
+                assert run.state == RunState.RUNNING
                 assert run.installation_id == installation_id
                 assert (
                     set(

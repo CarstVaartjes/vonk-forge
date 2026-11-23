@@ -82,7 +82,8 @@ def test_accepted_model_request_supersedes_removal_without_crossing_other_lock(
                     "artifact_sha256": set_digest,
                 },
             )
-            assert gate is not None and gate.removal_owner_id == removal.id
+            assert gate is not None
+            assert gate.removal_owner_id == removal.id
         assert service._claim_operations(limit=1, respect_backoff=False) == []
         assert service._object_path(object_digest).read_bytes() == b"abc"
     release_ended_gates(service)
@@ -132,7 +133,8 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
             owner = session.scalar(
                 select(Job).where(Job.request_id == removal["request_key"])
             )
-            assert owner is not None and owner.state == "queued"
+            assert owner is not None
+            assert owner.state == "queued"
         assert receipt_file.exists()
     for _ in range(4):
         if recovered.reconcile_requested_removals():
@@ -141,7 +143,8 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
         owner = session.scalar(
             select(Job).where(Job.request_id == removal["request_key"])
         )
-        assert owner is not None and owner.state == "cancelled"
+        assert owner is not None
+        assert owner.state == "cancelled"
         gate = session.get(
             ArtifactLifecycleGate,
             {
@@ -181,7 +184,8 @@ def test_persisted_model_manifest_recovers_through_removal_gates_after_restart(
     )
     with sessions() as session:
         stored = session.get(ModelCacheOperation, accepted.id)
-        assert stored is not None and isinstance(stored.payload, dict)
+        assert stored is not None
+        assert isinstance(stored.payload, dict)
         assert stored.artifact_set_sha256 == set_digest
         assert stored.plan_digest == accepted.plan_digest
     object_digest = hashlib.sha256(b"abc").hexdigest()

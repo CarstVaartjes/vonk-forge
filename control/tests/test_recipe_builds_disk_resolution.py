@@ -82,7 +82,8 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert plan.agent_payload["source_bundle_sha256"] == revision.source_bundle_sha256
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
-        assert stored is not None and stored.state == "planned"
+        assert stored is not None
+        assert stored.state == "planned"
 
 
 def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -> None:
@@ -421,11 +422,13 @@ def test_present_archive_with_damaged_receipt_is_reprepared_not_rebuilt(
     assert build_jobs == ()
     with sessions() as session:
         repaired = session.get(RecipeBuild, plan.build_id)
-        assert repaired is not None and repaired.image_bytes == len(archive)
+        assert repaired is not None
+        assert repaired.image_bytes == len(archive)
         assert repaired.state == LifecycleState.SUCCEEDED
         assert repaired.error is None
         layout, size = repaired.oci_layout_sha256, repaired.image_bytes
-        assert layout is not None and size is not None
+        assert layout is not None
+        assert size is not None
         assert storage.build_archive_available(layout, size)
     production.close()
 
@@ -802,7 +805,7 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    ("field", "value"),
     [
         ("build_input_sha256", "0" * 64),
         ("image_digest", None),

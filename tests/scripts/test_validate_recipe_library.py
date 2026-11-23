@@ -30,7 +30,8 @@ CANDIDATE = (
 
 _VALIDATOR_LOADER = SourceFileLoader("validate_recipe_library", str(SCRIPT))
 _VALIDATOR_SPEC = spec_from_loader(_VALIDATOR_LOADER.name, _VALIDATOR_LOADER)
-assert _VALIDATOR_SPEC is not None and _VALIDATOR_SPEC.loader is not None
+assert _VALIDATOR_SPEC is not None
+assert _VALIDATOR_SPEC.loader is not None
 _VALIDATOR = module_from_spec(_VALIDATOR_SPEC)
 _VALIDATOR_SPEC.loader.exec_module(_VALIDATOR)
 
@@ -276,7 +277,9 @@ def test_a_launcher_under_another_name_fails_validation_with_the_fix() -> None:
 
     assert _VALIDATOR._launcher_error(wrapper, wrapper, "vllm") is None
     message = _VALIDATOR._launcher_error("/opt/vonk/bin/vllm-api", wrapper, "vllm")
-    assert message is not None and wrapper in message and "vllm-api" in message
+    assert message is not None
+    assert wrapper in message
+    assert "vllm-api" in message
     # A launcher the base image ships is not the recipe's to install.
     assert (
         _VALIDATOR._launcher_error(

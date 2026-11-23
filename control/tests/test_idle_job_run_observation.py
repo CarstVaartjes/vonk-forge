@@ -73,7 +73,8 @@ def test_an_idle_job_member_stays_running_across_complete_empty_reports(
 
         with world.sessions() as session:
             run = session.get(RecipeRun, held)
-            assert run is not None and run.state == "running"
+            assert run is not None
+            assert run.state == "running"
             assert set(
                 session.scalars(select(RunNode.state).where(RunNode.run_id == held))
             ) == {"running"}

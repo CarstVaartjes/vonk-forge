@@ -53,7 +53,8 @@ def _record_original_install_attempts(sessions, installation_id: str) -> None:
                 Job.payload["owner_id"].as_string() == installation_id,
             )
         )
-        assert install_job is not None and isinstance(install_job.result, dict)
+        assert install_job is not None
+        assert isinstance(install_job.result, dict)
         evidence_by_node = install_job.result["node_evidence"]
         operations = tuple(
             session.scalars(
@@ -220,7 +221,8 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
             )
         )
         presence = session.get(AgentNode, node_ids[1])
-        assert child is not None and presence is not None
+        assert child is not None
+        assert presence is not None
         child.state = "running"
         child.current_attempt = 1
         fence = str(uuid.uuid4())
@@ -272,11 +274,13 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
     assert service.get(first.operation_id).state == "failed"
     with sessions() as session:
         cancelled_job = session.get(Job, first_child)
-        assert cancelled_job is not None and cancelled_job.state == "cancelled"
+        assert cancelled_job is not None
+        assert cancelled_job.state == "cancelled"
 
     with sessions() as session:
         partial = session.get(RecipeInstallation, installation.owner_id)
-        assert partial is not None and partial.state == "partial"
+        assert partial is not None
+        assert partial.state == "partial"
         member_states = tuple(
             session.execute(
                 select(InstallationNode.node_id, InstallationNode.state)
@@ -346,7 +350,8 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
     _record_successful_reconcile_member(sessions, lifecycle, retry_child, node_ids[1])
     with sessions() as session:
         completed = session.get(RecipeInstallation, installation.owner_id)
-        assert completed is not None and completed.state == "uninstalled"
+        assert completed is not None
+        assert completed.state == "uninstalled"
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -354,9 +359,8 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
                 )
             )
         )
-        assert claims and all(
-            item.state == ReservationState.RELEASED for item in claims
-        )
+        assert claims
+        assert all(item.state == ReservationState.RELEASED for item in claims)
 
 
 def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
@@ -395,7 +399,8 @@ def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
     assert repair.id != installed.id
     with sessions() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.state == InstallationState.INSTALLING
+        assert row is not None
+        assert row.state == InstallationState.INSTALLING
     lifecycle.record_node_result(
         repair.id, node_ids[0], succeeded=True, evidence={"installed_bytes": 120}
     )
@@ -406,8 +411,10 @@ def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
                 InstallationNode.installation_id == installed.owner_id
             )
         )
-        assert row is not None and row.state == InstallationState.INSTALLED
-        assert rank is not None and rank.state == InstallationNodeState.INSTALLED
+        assert row is not None
+        assert row.state == InstallationState.INSTALLED
+        assert rank is not None
+        assert rank.state == InstallationNodeState.INSTALLED
         assert rank.installed_bytes == 120
 
 
@@ -455,6 +462,7 @@ def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
             plan = _stored_job_plan(healing)
         assert plan is not None
         by_node = plan.runtime_storage.missing_image_distribution_bytes_by_node
-        assert by_node is not None and by_node[spark] > 0
+        assert by_node is not None
+        assert by_node[spark] > 0
     finally:
         world.close()

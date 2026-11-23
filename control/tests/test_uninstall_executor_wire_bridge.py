@@ -74,7 +74,8 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         request_id=str(uuid4()),
     )
     first = claim_agent(jobs, nodes[0], "serial-0")
-    assert first is not None and isinstance(first.payload, RecipeUninstallPayload)
+    assert first is not None
+    assert isinstance(first.payload, RecipeUninstallPayload)
     plan = first.payload.compiled_execution_plan
     assert plan is not None
     installation_id = installed.owner_id
@@ -128,11 +129,13 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         )
         assert unknown.state == AgentResultState.OBSERVING
         jobs.record_result(unknown)
-        assert installation.exists() and all(target.exists() for target in targets)
+        assert installation.exists()
+        assert all(target.exists() for target in targets)
         assert protected.read_bytes() == b"protected user data"
         with sessions() as session:
             stored = session.get(StoredOperation, fenced_operation(sessions, first).id)
-            assert stored is not None and stored.recovery_deadline is not None
+            assert stored is not None
+            assert stored.recovery_deadline is not None
             deadline = stored.recovery_deadline.replace(tzinfo=UTC)
         # Restart both owners; the journal replays the same fence without effects.
         replay = _run_probe(
@@ -155,9 +158,11 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         jobs.reconcile_orders()
         with sessions() as session:
             ended = session.get(Job, owner.id)
-            assert ended is not None and ended.state in TERMINAL_LIFECYCLE_STATES
+            assert ended is not None
+            assert ended.state in TERMINAL_LIFECYCLE_STATES
             assert ended.state != LifecycleState.SUCCEEDED
-        assert installation.exists() and protected.exists()
+        assert installation.exists()
+        assert protected.exists()
     finally:
         if fault_stage == "store-parent":
             store.unlink()
@@ -174,7 +179,8 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         request_id=str(uuid4()),
     )
     claim = claim_agent(jobs, nodes[0], "serial-0")
-    assert claim is not None and claim.fence != first.fence
+    assert claim is not None
+    assert claim.fence != first.fence
     repaired = _run_probe(
         restart_probe,
         _probe_request(
@@ -192,10 +198,13 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     jobs.record_result(repaired)
     with sessions() as session:
         stored = session.get(Job, fresh.id)
-        assert stored is not None and stored.state != LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state != LifecycleState.SUCCEEDED
         actual = session.get(RecipeInstallation, installed.owner_id)
-        assert actual is not None and actual.state != InstallationState.UNINSTALLED
-    assert installation.exists() and all(target.exists() for target in targets)
+        assert actual is not None
+        assert actual.state != InstallationState.UNINSTALLED
+    assert installation.exists()
+    assert all(target.exists() for target in targets)
     assert protected.read_bytes() == b"protected user data"
     if fault_stage == "store-parent":
         assert all(
@@ -203,7 +212,8 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
             for target in targets
         )
     if shared_object:
-        assert targets[0].exists() and (shared / "shared-model").exists()
+        assert targets[0].exists()
+        assert (shared / "shared-model").exists()
     # Pending authority is observable and cannot poison a later keyed request.
     next_preview = recipes.preview_uninstall(installed.owner_id)
     assert next_preview.allowed
@@ -221,12 +231,14 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     # Admission already succeeded; no operator repair or retirement is needed.
     with sessions() as session:
         prior = session.get(StoredOperation, fenced_operation(sessions, claim).id)
-        assert prior is not None and prior.recovery_deadline is not None
+        assert prior is not None
+        assert prior.recovery_deadline is not None
         deadline = prior.recovery_deadline.replace(tzinfo=UTC)
     clock.now = deadline + timedelta(seconds=1)
     jobs.reconcile_orders()
     next_claim = claim_agent(jobs, nodes[0], "serial-0")
-    assert next_claim is not None and next_claim.fence != claim.fence
+    assert next_claim is not None
+    assert next_claim.fence != claim.fence
     with sessions() as session:
         next_operation = session.get(
             StoredOperation, fenced_operation(sessions, next_claim).id

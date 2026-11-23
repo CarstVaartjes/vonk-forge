@@ -39,7 +39,7 @@ class _FixtureHandler(BaseHTTPRequestHandler):
         return
 
 
-@pytest.fixture()
+@pytest.fixture
 def fixture_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _FixtureHandler)
     thread = Thread(target=server.serve_forever, daemon=True)

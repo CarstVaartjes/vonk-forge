@@ -50,7 +50,8 @@ def test_rank_launch_does_not_credit_unmeasured_resident_memory(
                 RunNode.node_id == nodes[0],
             )
         )
-        assert rank is not None and rank.state == "starting"
+        assert rank is not None
+        assert rank.state == "starting"
         totals = memory_reservations(session, nodes[0], memory_pool="shared")
         residuals = totals.unknown_run_residuals_by_kind["unified-memory"]
         assert all(item.run_id == operation.owner_id for item in residuals)

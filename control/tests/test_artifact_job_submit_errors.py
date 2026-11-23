@@ -188,8 +188,10 @@ def test_live_run_submit_admission_conflict_is_typed_and_has_no_effects(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         job = session.get(ArtifactJob, draft.id)
-        assert run is not None and run.state == RunState.RUNNING
-        assert job is not None and job.operation_id is None
+        assert run is not None
+        assert run.state == RunState.RUNNING
+        assert job is not None
+        assert job.operation_id is None
         assert (
             session.scalar(select(func.count()).select_from(AgentOperation)) == before
         )

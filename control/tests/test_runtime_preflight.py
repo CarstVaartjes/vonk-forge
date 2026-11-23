@@ -225,8 +225,10 @@ def test_receipts_are_retained_per_digest_for_the_current_host(tmp_path):
 
     record(a, "a" * 64, clock.now)
     record(b, "a" * 64, later)
-    assert kept(a) is not None and kept(b) is not None
+    assert kept(a) is not None
+    assert kept(b) is not None
     record(b, "c" * 64, later)
     assert kept(a) is None
     current = kept(b)
-    assert current is not None and current.result.fingerprint == "c" * 64
+    assert current is not None
+    assert current.result.fingerprint == "c" * 64

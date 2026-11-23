@@ -252,7 +252,8 @@ def test_removing_a_model_that_is_already_gone_ends_with_nothing_removed(
         first = _settle_removal(
             service, service.get_operation(_remove(service, selector))
         )
-        assert first.state == "succeeded" and not object_path.exists()
+        assert first.state == "succeeded"
+        assert not object_path.exists()
 
         again = _settle_removal(
             service, service.get_operation(_remove(service, selector))

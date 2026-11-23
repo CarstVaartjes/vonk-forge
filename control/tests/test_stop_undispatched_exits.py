@@ -293,4 +293,5 @@ def test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted(
         "run-1", plan_digest="digest", actor="admin", request_id="request-1"
     )
     assert view.id == "stop-1"
-    assert len(refusals) == 1 and refusals[0].__cause__ is deadlock
+    assert len(refusals) == 1
+    assert refusals[0].__cause__ is deadlock

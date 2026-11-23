@@ -55,7 +55,9 @@ def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
             },
         }
     )
-    assert "transfer" in line and "0 B" in line and "total unknown" in line
+    assert "transfer" in line
+    assert "0 B" in line
+    assert "total unknown" in line
     assert "%" not in line
 
 

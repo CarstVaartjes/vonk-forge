@@ -161,7 +161,8 @@ def _vocabulary_documents(
     members: dict[str, list[str]] = {}
     for name, field in carrier.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         members[name] = [member.value for member in enum]
     longest = max(len(values) for values in members.values())
     return [

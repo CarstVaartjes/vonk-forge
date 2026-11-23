@@ -28,7 +28,8 @@ def _relay(root: Path) -> tuple[ASGIApp, list[bytes]]:
     specification = importlib.util.spec_from_file_location(
         "acceptance_receipt_fault", ROOT / "tests/acceptance/receipt_fault.py"
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     accepted: list[bytes] = []

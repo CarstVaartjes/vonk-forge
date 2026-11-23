@@ -93,7 +93,8 @@ def test_oversized_stored_result_retains_identity_and_unrelated_operations(tmp_p
     assert services.get_operation is not None
     operation_detail_response(services.get_operation(damaged_id))
     damaged = client.get(f"/api/operations/{damaged_id}", headers=operator)
-    assert damaged.status_code == 200 and damaged.json()["id"] == damaged_id
+    assert damaged.status_code == 200
+    assert damaged.json()["id"] == damaged_id
     assert damaged.json()["failure"]["uncertain"] is True
     assert items[damaged_id]["id"] == damaged_id
     assert (
@@ -106,8 +107,10 @@ def test_oversized_stored_result_retains_identity_and_unrelated_operations(tmp_p
                 AgentOperationAttempt.operation_id == damaged_id
             )
         )
-        assert attempt is not None and attempt.result == {"reason": "x" * 4097}
+        assert attempt is not None
+        assert attempt.result == {"reason": "x" * 4097}
         attempt.result = {"reason": "Known failure"}
     repaired = client.get(f"/api/operations/{damaged_id}", headers=operator)
-    assert repaired.status_code == 200 and repaired.json()["id"] == damaged_id
+    assert repaired.status_code == 200
+    assert repaired.json()["id"] == damaged_id
     assert repaired.json()["failure"].get("uncertain", False) is False

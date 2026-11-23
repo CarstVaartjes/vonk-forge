@@ -287,7 +287,7 @@ def enroll(
     return issued
 
 
-@pytest.mark.parametrize("ttl_seconds", (0, 901))
+@pytest.mark.parametrize("ttl_seconds", [0, 901])
 def test_grant_creation_rejects_ttl_outside_bounded_contract(
     service, ttl_seconds: int
 ) -> None:
@@ -332,19 +332,22 @@ def test_grant_is_single_use_and_immediately_issues_authorized_certificate(
         certificate = session.get(AgentCertificate, issued.serial)
         node = session.get(AgentNode, NODE_ID)
         profile = session.get(AgentNodeProfile, NODE_ID)
+        assert stored_grant is not None
         assert (
-            stored_grant is not None
-            and stored_grant.token_digest
+            stored_grant.token_digest
             == hashlib.sha256(base64.urlsafe_b64decode(grant.token + "=")).hexdigest()
         )
         assert stored_grant.purpose == "new-node"
         assert not hasattr(stored_grant, "token")
-        assert stored is not None and stored.state == "certificate_issued"
+        assert stored is not None
+        assert stored.state == "certificate_issued"
         assert not hasattr(stored, "decision_actor")
         assert not hasattr(stored, "decided_at")
         assert stored.csr_public_key_fingerprint == public_key_fingerprint(request)
-        assert certificate is not None and certificate.node_id == NODE_ID
-        assert node is not None and node.state == "active"
+        assert certificate is not None
+        assert certificate.node_id == NODE_ID
+        assert node is not None
+        assert node.state == "active"
         assert profile is not None
         assert profile.display_name == NODE_ID
         assert node.inventory_snapshot is None
@@ -425,8 +428,10 @@ def test_unbound_reenrollment_recreates_identity_after_controller_reset(
     with sessions() as session:
         node = session.get(AgentNode, NODE_ID)
         certificate = session.get(AgentCertificate, issued.serial)
-        assert node is not None and node.state == "active"
-        assert certificate is not None and certificate.state == "active"
+        assert node is not None
+        assert node.state == "active"
+        assert certificate is not None
+        assert certificate.state == "active"
 
 
 def test_new_node_grant_still_rejects_existing_identity(service) -> None:
@@ -500,7 +505,8 @@ def test_reenrollment_supersedes_in_progress_rotation(service):
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is None
         source = session.get(AgentCertificate, issued.serial)
-        assert source is not None and source.revoked_at is None
+        assert source is not None
+        assert source.revoked_at is None
 
 
 def test_evidence_miss_preserves_grant_and_corrected_request_is_admitted(service):
@@ -645,17 +651,13 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
     with sessions() as session:
         original = session.get(AgentCertificate, issued.serial)
         staged = session.get(AgentCertificate, renewed.serial)
-        assert (
-            original is not None
-            and original.revoked_at is None
-            and original.state == "active"
-        )
+        assert original is not None
+        assert original.revoked_at is None
+        assert original.state == "active"
         assert original.generation == 1
-        assert (
-            staged is not None
-            and staged.revoked_at is None
-            and staged.state == "staged"
-        )
+        assert staged is not None
+        assert staged.revoked_at is None
+        assert staged.state == "staged"
         assert staged.generation == 2
     replacement = enrollment.renew(NODE_ID, issued.serial, csr())
     assert isinstance(replacement, IssuedCertificate)
@@ -674,16 +676,12 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
     with sessions() as session:
         original = session.get(AgentCertificate, issued.serial)
         active = session.get(AgentCertificate, renewed.serial)
-        assert (
-            original is not None
-            and original.revoked_at is not None
-            and original.state == "revoked"
-        )
-        assert (
-            active is not None
-            and active.revoked_at is None
-            and active.state == "active"
-        )
+        assert original is not None
+        assert original.revoked_at is not None
+        assert original.state == "revoked"
+        assert active is not None
+        assert active.revoked_at is None
+        assert active.state == "active"
     for node_id, malformed in (
         (OTHER_NODE_ID, csr(OTHER_NODE_ID)),
         (NODE_ID, b"not a csr"),
@@ -710,7 +708,7 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
 
 @pytest.mark.parametrize(
     "attempt_state",
-    (
+    [
         "running",
         "expired",
         "finished",
@@ -719,7 +717,7 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
         "superseded",
         "finished-operation",
         "finished-job",
-    ),
+    ],
 )
 def test_rotation_preserves_only_live_operation_authority(
     service, attempt_state
@@ -918,7 +916,8 @@ def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_vali
     with sessions.begin() as session:
         source = session.get(AgentCertificate, issued.serial)
         staged = session.get(AgentCertificate, stale.serial)
-        assert source is not None and staged is not None
+        assert source is not None
+        assert staged is not None
         source.not_after = clock.now + timedelta(hours=1)
         staged.not_after = clock.now - timedelta(seconds=1)
 
@@ -931,10 +930,12 @@ def test_expired_staged_certificate_is_retired_and_reissued_while_source_is_vali
     with sessions() as session:
         expired = session.get(AgentCertificate, stale.serial)
         replacement_row = session.get(AgentCertificate, replacement.serial)
-        assert expired is not None and expired.state == "revoked"
+        assert expired is not None
+        assert expired.state == "revoked"
         assert expired.revoked_at is not None
         assert expired.revoked_at.replace(tzinfo=UTC) == clock.now
-        assert replacement_row is not None and replacement_row.state == "staged"
+        assert replacement_row is not None
+        assert replacement_row.state == "staged"
 
 
 def test_renew_supersedes_a_different_staged_csr_and_replays_idempotently(
@@ -962,7 +963,8 @@ def test_renew_supersedes_a_different_staged_csr_and_replays_idempotently(
         assert old_staged.state == "revoked"
         assert old_staged.revoked_at is not None
         assert old_staged.ca_revoked_at is not None
-        assert new_staged is not None and new_staged.state == "staged"
+        assert new_staged is not None
+        assert new_staged.state == "staged"
         assert new_staged.csr_public_key_fingerprint == public_key_fingerprint(
             pending_csr
         )
@@ -1160,7 +1162,8 @@ def test_sqlite_simultaneous_exact_renewal_issues_one_staged_generation(
     assert isinstance(healed, IssuedCertificate)
     with sessions() as session:
         source = session.get(AgentCertificate, issued.serial)
-        assert source is not None and source.revoked_at is None
+        assert source is not None
+        assert source.revoked_at is None
     authority.release.set()
     first.join(timeout=30)
 
@@ -1211,19 +1214,15 @@ def test_local_revocation_precedes_remote_and_retry_calls_only_unconfirmed_seria
         node = session.get(AgentNode, NODE_ID)
         first = session.get(AgentCertificate, issued.serial)
         second = session.get(AgentCertificate, "2")
-        assert (
-            node is not None and node.state == "retired" and node.revoked_at is not None
-        )
-        assert (
-            first is not None
-            and first.revoked_at is not None
-            and first.ca_revoked_at is not None
-        )
-        assert (
-            second is not None
-            and second.revoked_at is not None
-            and second.ca_revoked_at is None
-        )
+        assert node is not None
+        assert node.state == "retired"
+        assert node.revoked_at is not None
+        assert first is not None
+        assert first.revoked_at is not None
+        assert first.ca_revoked_at is not None
+        assert second is not None
+        assert second.revoked_at is not None
+        assert second.ca_revoked_at is None
     assert authority.revocations == [issued.serial] + ["2"] * 4
 
     authority.revoke_failures.clear()
@@ -1233,7 +1232,7 @@ def test_local_revocation_precedes_remote_and_retry_calls_only_unconfirmed_seria
         assert session.get(AgentCertificate, "2").ca_revoked_at is not None  # type: ignore[union-attr]
 
 
-@pytest.mark.parametrize("crash_new_revocation", (False, True))
+@pytest.mark.parametrize("crash_new_revocation", [False, True])
 def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_serial(
     postgres_engine: Engine,
     crash_new_revocation: bool,
@@ -1302,7 +1301,8 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
             postgres_engine, "after_cursor_execute", pause_after_revocation_node_lock
         )
 
-    assert not renewer.is_alive() and not revoker.is_alive()
+    assert not renewer.is_alive()
+    assert not revoker.is_alive()
     assert len(renewal_results) == 1
     if crash_new_revocation:
         # Either caller can discover and revoke the completed issuance. The
@@ -1318,9 +1318,12 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         original = session.get(AgentCertificate, source.serial)
         issued = session.get(AgentCertificate, "2")
         intent = session.get(AgentCertificateRotation, NODE_ID)
-        assert node is not None and node.state == "retired"
-        assert original is not None and original.state == "revoked"
-        assert issued is not None and issued.state == "revoked"
+        assert node is not None
+        assert node.state == "retired"
+        assert original is not None
+        assert original.state == "revoked"
+        assert issued is not None
+        assert issued.state == "revoked"
         assert issued.revoked_at is not None
         if crash_new_revocation:
             # A concurrent reconciler can already have recovered the crash.
@@ -1348,7 +1351,8 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         with sessions() as session:
             issued = session.get(AgentCertificate, "2")
             intent = session.get(AgentCertificateRotation, NODE_ID)
-            assert issued is not None and issued.ca_revoked_at is not None
+            assert issued is not None
+            assert issued.ca_revoked_at is not None
             assert intent is None
 
     assert isinstance(enroll(revoking, node_id=OTHER_NODE_ID), IssuedCertificate)
@@ -1371,7 +1375,7 @@ def test_postgres_approved_node_cannot_be_deleted_while_certificate_exists(
         assert session.get(AgentNode, NODE_ID) is not None
 
 
-@pytest.mark.parametrize("failure_mode", ("success", "runtime", "system-exit"))
+@pytest.mark.parametrize("failure_mode", ["success", "runtime", "system-exit"])
 def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidence(
     postgres_engine: Engine,
     failure_mode: str,
@@ -1439,10 +1443,8 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
         assert authority.revocations == ["2", "2"]
         with sessions() as session:
             evidence = session.get(AgentIssuedCertificateRevocation, "2")
-            assert (
-                evidence is not None
-                and evidence.state == CertificateRecordState.REVOKED
-            )
+            assert evidence is not None
+            assert evidence.state == CertificateRecordState.REVOKED
             assert evidence.ca_revoked_at is not None
 
     assert isinstance(enroll(reconciling, node_id=OTHER_NODE_ID), IssuedCertificate)
@@ -1492,11 +1494,9 @@ def test_postgres_enrollment_persists_node_before_certificate(
         assert session.get(AgentNode, NODE_ID) is not None
         assert session.get(AgentCertificate, issued.serial) is not None
         stored = session.scalar(select(AgentEnrollment))
-        assert (
-            stored is not None
-            and stored.state == "certificate_issued"
-            and stored.certificate_serial == issued.serial
-        )
+        assert stored is not None
+        assert stored.state == "certificate_issued"
+        assert stored.certificate_serial == issued.serial
 
 
 class PausingAuthority(RecordingAuthority):
@@ -1571,7 +1571,8 @@ def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(
                     AgentEnrollment.grant_id == first_grant.id
                 )
             )
-            assert ended is not None and ended.state == EnrollmentRecordState.ENDED
+            assert ended is not None
+            assert ended.state == EnrollmentRecordState.ENDED
             late_serial = CertificateIssuanceBinding.model_validate_json(
                 json.dumps(ended.provider_request)
             ).serial
@@ -1597,7 +1598,8 @@ def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(
     with sessions() as session:
         assert session.get(AgentCertificate, late_serial) is None
         retained = session.get(AgentCertificate, issued.serial)
-        assert retained is not None and retained.revoked_at is None
+        assert retained is not None
+        assert retained.revoked_at is None
         assert session.scalar(select(func.count()).select_from(AgentNode)) == 1
         assert session.scalar(select(func.count()).select_from(AgentCertificate)) == 1
     fresh = second.create_reenrollment(
@@ -1642,7 +1644,8 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     assert isinstance(healed, IssuedCertificate)
     with sessions() as session:
         source = session.get(AgentCertificate, issued.serial)
-        assert source is not None and source.revoked_at is None
+        assert source is not None
+        assert source.revoked_at is None
     assert len(authority.calls) == 1
 
     authority.release.set()

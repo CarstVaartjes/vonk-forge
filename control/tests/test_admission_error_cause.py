@@ -66,7 +66,7 @@ def test_start_with_a_damaged_stored_recipe_ends_with_the_cause(tmp_path, monkey
 
 
 @pytest.mark.parametrize(
-    "code,waits", [(errno.EIO, True), (errno.ENOENT, False)], ids=["eio", "enoent"]
+    ("code", "waits"), [(errno.EIO, True), (errno.ENOENT, False)], ids=["eio", "enoent"]
 )
 def test_start_storage_fault_waits_only_when_it_can_clear(
     tmp_path, monkeypatch, code, waits
@@ -86,7 +86,7 @@ def test_start_storage_fault_waits_only_when_it_can_clear(
 
 
 @pytest.mark.parametrize(
-    "fault,waits",
+    ("fault", "waits"),
     [
         (OSError(errno.EIO, "managed storage read failed"), True),
         (TypeError("compiled plan field is not a mapping"), False),

@@ -89,10 +89,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            old_claim is not None
-            and fenced_operation(sessions, old_claim).parent_job_id == old_start.id
-        )
+        assert old_claim is not None
+        assert fenced_operation(sessions, old_claim).parent_job_id == old_start.id
 
         with sessions() as session:
             revision = session.scalar(
@@ -151,7 +149,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
             old_job = session.get(Job, old_start.id)
-            assert old_run is not None and old_job is not None
+            assert old_run is not None
+            assert old_job is not None
             assert old_run.state == RunState.STARTING
             assert old_run.route_state == "withdrawn"
             assert old_job.state == "cancelled"
@@ -184,10 +183,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            stop_claim is not None
-            and fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
-        )
+        assert stop_claim is not None
+        assert fenced_operation(sessions, stop_claim).parent_job_id == stop_job.id
         assert isinstance(stop_claim.payload, RecipeStopPayload)
         assert stop_claim.payload.run_id == old_start.owner_id
         assert fenced_operation(sessions, stop_claim).node_id == node_id
@@ -200,7 +197,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
         )
         with sessions() as session:
             old_run = session.get(RecipeRun, old_start.owner_id)
-            assert old_run is not None and old_run.state == "stopped"
+            assert old_run is not None
+            assert old_run.state == "stopped"
             stopped_at = old_run.stopped_at
             snapshot = session.scalar(
                 select(NodeInventorySnapshot).where(
@@ -311,10 +309,8 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             runtime_identity=identity,
             preflight_fingerprint=fingerprint,
         )
-        assert (
-            new_claim is not None
-            and fenced_operation(sessions, new_claim).parent_job_id == replacement.id
-        )
+        assert new_claim is not None
+        assert fenced_operation(sessions, new_claim).parent_job_id == replacement.id
         assert (
             fenced_operation(sessions, new_claim).id
             != fenced_operation(sessions, old_claim).id

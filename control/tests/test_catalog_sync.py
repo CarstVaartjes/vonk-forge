@@ -650,7 +650,8 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
             actor="test",
         )
     )
-    assert recovered.completed_at is not None and recovered.imported_count == 1
+    assert recovered.completed_at is not None
+    assert recovered.imported_count == 1
     assert (
         service.recipe_catalog_local_revisions([(item.publisher, item.slug)])[
             (item.publisher, item.slug)
@@ -736,7 +737,8 @@ def test_worker_sync_runs_when_due_and_leaves_a_live_import_alone(
     )
     sync.advance_automatic(60)
     latest = sync.latest()
-    assert latest is not None and latest.wait is not None
+    assert latest is not None
+    assert latest.wait is not None
     reads: list[str] = []
     listed = reader.list
 
@@ -816,10 +818,12 @@ def test_the_newer_major_note_reaches_the_stored_sync_and_clears_with_the_listin
     cleared = sync.automatic()
 
     assert before.problems == ()
-    assert noted.id != before.id and noted.state == "current"
+    assert noted.id != before.id
+    assert noted.state == "current"
     assert [problem.detail for problem in noted.problems] == [note.detail]
     assert repeated.id == noted.id
-    assert cleared.id != noted.id and cleared.problems == ()
+    assert cleared.id != noted.id
+    assert cleared.problems == ()
 
 
 def test_automatic_sync_retries_partial_same_commit_without_refetching_successes(
@@ -964,7 +968,8 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
                 RecipeLibrarySyncRun.request_key == request_key
             )
         ).all()
-        assert len(rows) == 1 and rows[0].id == result.id
+        assert len(rows) == 1
+        assert rows[0].id == result.id
         assert rows[0].active_slot is None
     fresh = sync.sync(
         ManagedCatalogSyncRequest(
@@ -974,7 +979,8 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
             reviewed_content_sha256=reviewed_catalog_content(reviewed),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 def test_sync_marks_reader_failure_failed_and_releases_active_slot(
@@ -1022,7 +1028,8 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
             actor="test",
         )
     )
-    assert fresh.id != latest.id and fresh.completed_at is not None
+    assert fresh.id != latest.id
+    assert fresh.completed_at is not None
 
 
 @pytest.mark.parametrize(
@@ -1245,7 +1252,8 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
             actor="test",
         )
     )
-    assert fresh.unchanged_count == 1 and fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
     assert result.processed_count == result.total_count
 
 
@@ -1357,14 +1365,17 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
         assert sync.get(live).id == live
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, live)
-        assert row is not None and row.active_slot is not None
+        assert row is not None
+        assert row.active_slot is not None
     # The owner deadline, rather than manual deletion, releases the old slot.
     sync._clock = lambda: now + timedelta(hours=1)
     recovered = sync.automatic()
-    assert recovered.completed_at is not None and recovered.imported_count == 1
+    assert recovered.completed_at is not None
+    assert recovered.imported_count == 1
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, live)
-        assert row is not None and row.completed_at is not None
+        assert row is not None
+        assert row.completed_at is not None
         assert row.active_slot is None
     fresh = sync.sync(
         ManagedCatalogSyncRequest(
@@ -1373,7 +1384,8 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
             actor="test",
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 @pytest.mark.parametrize("package_present", [False, True])
@@ -1398,7 +1410,8 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
         )
     )
     assert first.state == "current"
-    assert item.package_handle is not None and item.source_bundle is not None
+    assert item.package_handle is not None
+    assert item.source_bundle is not None
     with sessions() as session:
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
@@ -1558,14 +1571,16 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
             .values(document={"broken": True})
         )
     restored = sync.automatic()
-    assert restored.completed_at is not None and restored.commit == accepted.commit
+    assert restored.completed_at is not None
+    assert restored.commit == accepted.commit
     with sessions() as session:
         selected = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.id == exact_id, active_head_revision()
             )
         )
-        assert selected is not None and selected.content_digest == exact_digest
+        assert selected is not None
+        assert selected.content_digest == exact_digest
         assert read_catalog_projection(selected) is not None
     projection = LibraryProjection(
         sessions, cursors=TokenCodec(b"s" * 32).cursor_codec()
@@ -1585,7 +1600,8 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
     reader.snapshot = replace(
         reader.snapshot, commit="b" * 40, repository="authorized-republication"
     )
@@ -1619,7 +1635,8 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert replay.id == accepted.id and replay.request_key == key
+    assert replay.id == accepted.id
+    assert replay.request_key == key
     assert replay.completed_at is not None
     with sessions() as session:
         assert (
@@ -1638,7 +1655,8 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 def test_sync_retracts_every_document_kind_absent_from_the_published_library(

@@ -31,7 +31,8 @@ def test_cancel_failed_child_during_retry_records_receipt_and_finishes(
     assert profiles.tick()
     active = profiles.application(application.id)
     adapter = active.progress.switch_adapter
-    assert adapter is not None and adapter.pending_children
+    assert adapter is not None
+    assert adapter.pending_children
     child_id = adapter.pending_children[0].operation_id
     with sessions.begin() as session:
         child = session.get_one(Job, child_id)
@@ -100,7 +101,8 @@ def test_cancel_adopted_executor_refuses_without_acknowledging_acceptance(
             assert profiles._adopted_application_scope(session, row)
             progress = _persisted_profile_progress(row)
             adapter = progress.switch_adapter
-            assert adapter is not None and adapter.pending_children
+            assert adapter is not None
+            assert adapter.pending_children
             child = session.get_one(Job, adapter.pending_children[0].operation_id)
             child.state = LifecycleState.FAILED.value
             child.status_reason = "Member failed during transfer"

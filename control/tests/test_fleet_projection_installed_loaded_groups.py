@@ -386,12 +386,15 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     assert rendered.out.count("Recipe: Pair Recipe") == 3
     attention = rendered.out[rendered.out.index("Needs attention") :]
     assert "pair-healthy" not in attention
-    assert "pair-stale" in attention and "rank-stale" in attention
-    assert "pair-route-failed" in attention and "route-not-published" in attention
+    assert "pair-stale" in attention
+    assert "rank-stale" in attention
+    assert "pair-route-failed" in attention
+    assert "route-not-published" in attention
     assert "incomplete" in attention
     render_payload(snapshot.model_dump(mode="json"), "fleet", wide=True)
     rendered = capsys.readouterr()
-    assert NODE_A in rendered.out and NODE_B in rendered.out
+    assert NODE_A in rendered.out
+    assert NODE_B in rendered.out
     assert str(partial_installation_id) in rendered.out
     selected = snapshot.model_copy(update={"nodes": snapshot.nodes[:1]})
     render_payload(selected.model_dump(mode="json"), "fleet")
@@ -528,7 +531,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
     "damage",
-    (
+    [
         "document",
         "candidate",
         "mapping",
@@ -536,7 +539,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
         "rank",
         "state",
         "labels",
-    ),
+    ],
 )
 def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     damage: str,
@@ -846,7 +849,8 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     if damage == "labels":
         assert observed_snapshot.nodes[0].labels is None
         issues = observed_snapshot.nodes[0].projection_issues
-        assert issues is not None and "unknown" in issues[0]
+        assert issues is not None
+        assert "unknown" in issues[0]
         assert all(value.complete is True for value in snapshot.nodes[0].installed)
         with sessions.begin() as session:
             session.execute(
@@ -884,8 +888,10 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
     assert snapshot.nodes[0].loaded[0].healthy is None
     installation_issue = snapshot.nodes[0].installed[0].projection_issue
     run_issue = snapshot.nodes[0].loaded[0].projection_issue
-    assert installation_issue is not None and "unknown" in installation_issue
-    assert run_issue is not None and "unknown" in run_issue
+    assert installation_issue is not None
+    assert "unknown" in installation_issue
+    assert run_issue is not None
+    assert "unknown" in run_issue
     with sessions.begin() as session:
         session.execute(
             update(ClusterMapping)

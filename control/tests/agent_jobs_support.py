@@ -274,7 +274,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             "serial-a",
             runtime_identity=old_identity,
         )
-        assert first is not None and fenced_operation(sessions, first).id == older.id
+        assert first is not None
+        assert fenced_operation(sessions, first).id == older.id
         clock.advance(seconds=1)
 
     job = parent(sessions, clock)
@@ -310,7 +311,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
         )
         with sessions() as session:
             stored = session.get(AgentOperation, fenced_operation(sessions, first).id)
-            assert stored is not None and stored.next_action_at is not None
+            assert stored is not None
+            assert stored.next_action_at is not None
             clock.now = stored.next_action_at.replace(tzinfo=UTC)
         # Retry and upgrade ordering must survive a Controller restart.
         jobs = AgentJobService(sessions, clock=clock)
@@ -322,9 +324,8 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
             runtime_identity=old_identity,
         )
         assert older is not None
-        assert resumed is not None and fenced_operation(sessions, resumed).id == (
-            older.id
-        )
+        assert resumed is not None
+        assert fenced_operation(sessions, resumed).id == (older.id)
         assert (
             fenced_attempt(sessions, resumed).attempt
             == fenced_attempt(sessions, first).attempt + 1
@@ -371,8 +372,10 @@ def exercise_upgrade_reconnect(service, older_work) -> None:
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.state == "succeeded"
-        assert attempt is not None and attempt.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
+        assert attempt is not None
+        assert attempt.state == "succeeded"
         assert attempt.result == {
             "architecture": "linux-arm64",
             "binary_digest": "a" * 64,

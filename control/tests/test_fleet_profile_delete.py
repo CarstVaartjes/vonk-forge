@@ -79,7 +79,8 @@ def test_delete_removes_the_profile_and_is_idempotent() -> None:
     assert _count(sessions, FleetProfileRecipe) == 0
     # The same request again is the same success, not an error.
     again = service.delete_number(profile.number, actor="admin")
-    assert again.outcome == "already-gone" and again.number == profile.number
+    assert again.outcome == "already-gone"
+    assert again.number == profile.number
 
 
 def test_number_is_free_for_a_later_profile() -> None:
@@ -87,7 +88,8 @@ def test_number_is_free_for_a_later_profile() -> None:
     first = service.create(_input(revision_id), actor="admin")
     service.delete_number(first.number, actor="admin")
     reused = service.create(_input(revision_id, name="Again"), actor="admin")
-    assert reused.number == first.number and reused.id != first.id
+    assert reused.number == first.number
+    assert reused.id != first.id
 
 
 def test_expected_revision_refuses_a_stale_delete() -> None:
@@ -134,14 +136,17 @@ def test_deleting_the_loaded_profile_touches_no_running_workload() -> None:
     application = service.load(profile.number, actor="admin", request_key=_uuid(902))
     _run_to_success(service, application.id, now)
     before = _selection(sessions)
-    assert before.profile_id == profile.id and before.application_id == application.id
+    assert before.profile_id == profile.id
+    assert before.application_id == application.id
     stops = list(adapter.cancellations)
 
     assert service.delete_number(profile.number, actor="admin").outcome == "deleted"
     # Nothing was cancelled or stopped; the pointer cleared, the generation advanced.
-    assert adapter.cancellations == stops and not adapter.cancellation_requests
+    assert adapter.cancellations == stops
+    assert not adapter.cancellation_requests
     after = _selection(sessions)
-    assert after.profile_id is None and after.application_id is None
+    assert after.profile_id is None
+    assert after.application_id is None
     assert after.generation > before.generation
     assert _count(sessions, FleetProfileApplication) == 0
 
@@ -215,4 +220,5 @@ def test_delete_leaves_a_selection_that_names_another_profile() -> None:
 
     service.delete_number(first.number, actor="admin")
     after = _selection(sessions)
-    assert after.profile_id == second.id and after.generation == before.generation
+    assert after.profile_id == second.id
+    assert after.generation == before.generation

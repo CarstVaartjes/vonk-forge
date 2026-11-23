@@ -132,7 +132,8 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     assert child.node_ids == list(nodes)
     with sessions() as session:
         stored_run = session.get(RecipeRun, run.owner_id)
-        assert stored_run is not None and stored_run.state == "running"
+        assert stored_run is not None
+        assert stored_run.state == "running"
         assert (
             session.scalar(select(RecipeRun.id).where(RecipeRun.id != run.owner_id))
             is None
@@ -871,14 +872,17 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
         assert observed.definition == created.definition
         with sessions() as session:
             row = session.get(FleetProfile, created.id)
-            assert row is not None and row.assignments == assignments
+            assert row is not None
+            assert row.assignments == assignments
         return
     assert isinstance(observed, UnavailableFleetProfileView)
-    assert observed.id == created.id and observed.revision == created.revision
+    assert observed.id == created.id
+    assert observed.revision == created.revision
     assert observed.definition is None
     with sessions() as session:
         row = session.get(FleetProfile, created.id)
-        assert row is not None and row.assignments == assignments
+        assert row is not None
+        assert row.assignments == assignments
 
 
 def test_profile_preview_blocks_when_required_preparation_cannot_be_attested() -> None:

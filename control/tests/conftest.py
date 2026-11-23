@@ -100,7 +100,8 @@ def load_tools_module(name: str):
     if module_name not in sys.modules:
         path = Path(__file__).resolve().parents[2] / "tools" / f"{name}.py"
         spec = importlib.util.spec_from_file_location(module_name, path)
-        assert spec is not None and spec.loader is not None
+        assert spec is not None
+        assert spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         spec.loader.exec_module(module)

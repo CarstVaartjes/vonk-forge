@@ -66,10 +66,12 @@ def _running_start(tmp_path):
     )
     # Rank 1 has already reported; rank 0 is the order whose result is pending.
     sibling = claim_agent(jobs, nodes[1], "serial-1")
-    assert sibling is not None and sibling.operation == WireOperation.RECIPE_START
+    assert sibling is not None
+    assert sibling.operation == WireOperation.RECIPE_START
     jobs.record_result(_result(sibling, succeeded=True))
     claim = claim_agent(jobs, nodes[0], "serial-0")
-    assert claim is not None and claim.operation == WireOperation.RECIPE_START
+    assert claim is not None
+    assert claim.operation == WireOperation.RECIPE_START
     return sessions, service, jobs, clock, started, nodes, claim
 
 

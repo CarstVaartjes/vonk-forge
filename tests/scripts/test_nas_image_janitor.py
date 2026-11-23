@@ -21,7 +21,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "deploy/compose/image-janitor/janitor.py"
 spec = importlib.util.spec_from_file_location("nas_image_janitor", SCRIPT)
-assert spec is not None and spec.loader is not None
+assert spec is not None
+assert spec.loader is not None
 janitor = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = janitor
 spec.loader.exec_module(janitor)
@@ -58,7 +59,8 @@ class Daemon(janitor.Docker):
                 return list(self.inventory.values())
             assert path == "/containers/json?all=1"  # A running-only scan is unsafe.
             return self.containers
-        assert method == "DELETE" and path.endswith("?force=false&noprune=true")
+        assert method == "DELETE"
+        assert path.endswith("?force=false&noprune=true")
         selected = unquote(path.split("/images/", 1)[1].split("?", 1)[0])
         assert janitor.IMAGE_ID.fullmatch(selected)  # Never delete a moved tag.
         if self.race:
@@ -256,7 +258,8 @@ class Networks(janitor.Docker):
             self.network(body["Name"], body["Labels"])
             return {"Id": self.networks[body["Name"]]["Id"]}
         if method == "GET" and route == "/containers/json":
-            assert "all=1" in path and "vonk-forge" in unquote(path)
+            assert "all=1" in path
+            assert "vonk-forge" in unquote(path)
             return [
                 {"Id": identity, "Names": [row["Name"]]}
                 for identity, row in self.containers.items()
@@ -478,7 +481,8 @@ def test_declared_network_that_vanished_is_recreated_and_reattached(
     for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy"):
         assert caddy in daemon.networks[name]["Containers"]
     assert api in daemon.networks["vonk-forge_agent-proxy"]["Containers"]
-    assert daemon.running(caddy) and daemon.running(api)
+    assert daemon.running(caddy)
+    assert daemon.running(api)
     daemon.mutations.clear()
     ticks(reconciler, clock, 2)
     assert daemon.mutations == []
@@ -778,7 +782,8 @@ def test_signed_bundle_runs_standalone_janitor_without_giving_controller_socket(
     installed_spec = importlib.util.spec_from_file_location(
         "installed_janitor", installed
     )
-    assert installed_spec is not None and installed_spec.loader is not None
+    assert installed_spec is not None
+    assert installed_spec.loader is not None
     module = importlib.util.module_from_spec(installed_spec)
     sys.modules[installed_spec.name] = module
     installed_spec.loader.exec_module(module)
@@ -988,7 +993,8 @@ def test_container_left_created_by_an_aborted_up_is_started_after_the_grace(
     created(daemon, caddy, "1970-01-12T13:46:40.987654321Z")
     with caplog.at_level("INFO", logger=janitor.LOGGER.name):
         ticks(reconciler, clock, 1)
-    assert daemon.mutations == [] and not daemon.running(caddy)
+    assert daemon.mutations == []
+    assert not daemon.running(caddy)
     assert {
         "reason": janitor.Reason.CREATED_WAIT,
         "container": "vonk-forge-caddy-1",

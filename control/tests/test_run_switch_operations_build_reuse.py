@@ -824,7 +824,9 @@ def _accepted_identity(sessions, build_id: str) -> RuntimeImageIdentity:
     with sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        assert build.image_digest and build.oci_layout_sha256 and build.image_bytes
+        assert build.image_digest
+        assert build.oci_layout_sha256
+        assert build.image_bytes
         return RuntimeImageIdentity(
             image_digest=build.image_digest,
             oci_layout_sha256=build.oci_layout_sha256,

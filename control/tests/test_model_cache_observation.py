@@ -324,7 +324,8 @@ def test_a_pass_checkpoints_by_elapsed_time_not_per_object(
         completed = observer._read(manifest)
     finally:
         service.close()
-    assert completed is not None and completed.completed_at is not None
+    assert completed is not None
+    assert completed.completed_at is not None
     assert all(entry.available for entry in completed.objects.values())
     assert len(completed.objects) == len(data)
     if slow:

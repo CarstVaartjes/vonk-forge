@@ -257,7 +257,8 @@ def test_f_a_swap_backed_load_never_poisons_its_content(
     _telemetry(sessions, now + timedelta(seconds=2), node, int(0.7 * GIB))
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == _FREE - int(0.7 * GIB)
+        assert rank is not None
+        assert rank.observed_memory_bytes == _FREE - int(0.7 * GIB)
     _stop(sessions, run_id, now + timedelta(seconds=3))
 
     later = now + timedelta(seconds=4)
@@ -519,7 +520,8 @@ def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         run = session.get(RecipeRun, old)
-        assert installation is not None and run is not None
+        assert installation is not None
+        assert run is not None
         installation.state = "partial"
         run.state = "running"
         run.route_state = "published"
@@ -879,7 +881,8 @@ def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(
     # A list stored before the evidence existed reads unchanged.
     legacy = [{k: v for k, v in stored[0].items() if k != "swap"}]
     (old,) = read_blockers(legacy)
-    assert old.swap is None and old.code == blocker.code
+    assert old.swap is None
+    assert old.code == blocker.code
 
 
 def _held(sessions, now):

@@ -279,7 +279,8 @@ def test_three_node_topology_maps_deterministic_ranks(tmp_path: Path) -> None:
                 .order_by(ClusterMappingNode.rank)
             )
         )
-        assert mapping is not None and mapping.topology_name == "triple-tp3"
+        assert mapping is not None
+        assert mapping.topology_name == "triple-tp3"
         assert mapping.generation == 1
         assert [node.node_id for node in nodes] == sorted(node_ids)
 

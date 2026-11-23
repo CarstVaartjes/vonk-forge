@@ -66,7 +66,8 @@ def test_activity_reads_reobserve_duplicate_owners_before_exposing_actions(
     response = client.get(path, headers=operator)
     assert response.status_code == 200
     detail = response.json()["operations"][0] if collection else response.json()
-    assert detail["id"] == stable.id and detail["node_ids"] == [NODE_ID]
+    assert detail["id"] == stable.id
+    assert detail["node_ids"] == [NODE_ID]
     assert calls == {"left": 2 if clears else 3, "right": 2 if clears else 3}
     if clears:
         assert detail["state"] == stable.state

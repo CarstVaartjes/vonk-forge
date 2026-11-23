@@ -661,7 +661,8 @@ def _cpu_clock_codes(
 def test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded() -> None:
     codes, details = _cpu_clock_codes(span_seconds=80)
     assert codes == ["cpu.low-clock"]
-    assert "2000 of 3900 MHz" in details[0] and "85" in details[0]
+    assert "2000 of 3900 MHz" in details[0]
+    assert "85" in details[0]
 
     # Loaded but cool also counts.
     assert _cpu_clock_codes(span_seconds=80, temperature=50, gpu_util=90.0)[0] == [
@@ -939,7 +940,8 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     nodes = {node.id: node for node in observed_snapshot.nodes}
     assert set(nodes) == {NODE_A, NODE_B}
     healthy_inventory = nodes[NODE_B].inventory
-    assert healthy_inventory is not None and healthy_inventory.disk_free_bytes == 750
+    assert healthy_inventory is not None
+    assert healthy_inventory.disk_free_bytes == 750
     if damaged == "inventory":
         inventory_state = nodes[NODE_A].inventory
         assert inventory_state is not None

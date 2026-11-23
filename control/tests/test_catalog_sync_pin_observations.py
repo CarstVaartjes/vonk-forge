@@ -74,7 +74,8 @@ def test_sync_withdraws_pins_only_after_a_complete_authoritative_observation(par
         assert result.completed_at is not None
         with sessions() as session:
             receipt = session.get(RecipeLibrarySyncRun, result.id)
-            assert receipt is not None and receipt.active_slot is None
+            assert receipt is not None
+            assert receipt.active_slot is None
             row = session.scalar(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == item.document["kind"]
@@ -139,16 +140,19 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
     with monkeypatch.context() as patch:
         patch.setattr(entities, "build_policy_projection", unavailable_policy)
         ended = sync.automatic()
-        assert ended.id != first.id and ended.completed_at is not None
+        assert ended.id != first.id
+        assert ended.completed_at is not None
         assert (
             catalog.recipe_catalog_local_revisions([(item.publisher, item.slug)])
             == local
         )
         with sessions() as session:
             row = session.get(RecipeLibrarySyncRun, ended.id)
-            assert row is not None and row.active_slot is None
+            assert row is not None
+            assert row.active_slot is None
     restored = sync.automatic()
-    assert restored.id != ended.id and restored.completed_at is not None
+    assert restored.id != ended.id
+    assert restored.completed_at is not None
     assert (
         catalog.recipe_catalog_local_revisions([(item.publisher, item.slug)]) == local
     )
@@ -159,7 +163,8 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
             actor="test",
         )
     )
-    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    assert fresh.completed_at is not None
+    assert fresh.unchanged_count == 1
 
 
 def test_current_sync_releases_receipt_connection_before_availability(postgres_engine):

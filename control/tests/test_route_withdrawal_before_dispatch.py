@@ -184,7 +184,8 @@ def _stop_waits_without_a_transaction(tmp_path: Path, engine) -> None:
             # may hold the owner lock meanwhile, and the Stop is not dispatched.
             _owner_lock_is_free(routes)
             accepted = _stop_jobs(sessions)
-            assert len(accepted) == 1 and accepted[0].state == "running"
+            assert len(accepted) == 1
+            assert accepted[0].state == "running"
             assert accepted[0].request_id == "c" * 36
             assert accepted[0].payload["plan_digest"] == plan.plan_digest
             assert accepted[0].payload.get("phases") is None
@@ -275,7 +276,8 @@ def test_a_stop_killed_while_withdrawing_resumes_from_the_claim(
 
     # Consent survived; the completion and native dispatch did not.
     accepted = _stop_jobs(sessions)
-    assert len(accepted) == 1 and accepted[0].state == "running"
+    assert len(accepted) == 1
+    assert accepted[0].state == "running"
     assert accepted[0].payload.get("phases") is None
     with sessions() as session:
         assert _required(session.get(RecipeRun, run.owner_id)).state == "running"
@@ -377,7 +379,8 @@ def test_postgres_stop_waits_for_a_held_route_owner_then_completes(
     # A wait, not a refusal: the Stop stays accepted and nothing is dispatched.
     assert waiting.state == "running"
     accepted = _stop_jobs(sessions)
-    assert len(accepted) == 1 and accepted[0].id == waiting.id
+    assert len(accepted) == 1
+    assert accepted[0].id == waiting.id
     assert accepted[0].payload.get("phases") is None
 
     # The owner is free again; the Stop's own continuation completes it.
@@ -389,7 +392,8 @@ def test_postgres_stop_waits_for_a_held_route_owner_then_completes(
         stored = _required(session.get(RecipeRun, run.owner_id))
         assert (stored.state, stored.route_state) == ("stopping", "withdrawn")
     continued = _stop_jobs(sessions)
-    assert len(continued) == 1 and continued[0].id == waiting.id
+    assert len(continued) == 1
+    assert continued[0].id == waiting.id
     assert continued[0].payload.get("phases")
     # The wait held nothing: a fresh request for the same installation is admitted.
     with sessions() as session:
@@ -487,7 +491,8 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
         ):
             node.updated_at = later
     accepted = _stop_jobs(sessions)
-    assert len(accepted) == 1 and accepted[0].payload.get("phases") is None
+    assert len(accepted) == 1
+    assert accepted[0].payload.get("phases") is None
     routes.maintain()
     assert _aliases(root) == set()
     gate.die = False
@@ -514,7 +519,8 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
             == f"{ProjectionCode.NODE_OFFLINE}: exact Stop pending reconnect"
         )
     continued = _stop_jobs(sessions)
-    assert len(continued) == 1 and continued[0].id == accepted[0].id
+    assert len(continued) == 1
+    assert continued[0].id == accepted[0].id
     assert continued[0].payload.get("phases")
     assert continued[0].state == LifecycleState.SUCCEEDED
     assert deferred_stop_nodes(continued[0]) == frozenset(continued[0].targets)

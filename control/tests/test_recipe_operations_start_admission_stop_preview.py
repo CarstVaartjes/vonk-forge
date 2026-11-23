@@ -429,7 +429,8 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     assert queue.available == 2
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
-        assert run is not None and run.alias == alternate.alias
+        assert run is not None
+        assert run.alias == alternate.alias
 
     with sessions() as session:
         runs = tuple(session.scalars(select(RecipeRun)))
@@ -678,7 +679,8 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
     with sessions() as session:
         assert _required(session.get(RecipeRun, start.owner_id)).state == "running"
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c"))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
         stop_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
@@ -753,7 +755,8 @@ def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
         assert stored is not None
         assert (stored.state, stored.route_state) == ("running", "published")
         accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f"))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == plan.plan_digest
         stop_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
@@ -887,7 +890,7 @@ def test_stop_preview_is_not_blocked_by_its_reservations(tmp_path: Path) -> None
     assert fresh.state == "running"
 
 
-@pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
+@pytest.mark.parametrize("changed_identity", ["run_id", "plan_digest"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_stop_uses_run_ownership_when_start_history_has_changed(
     tmp_path: Path, changed_identity: str

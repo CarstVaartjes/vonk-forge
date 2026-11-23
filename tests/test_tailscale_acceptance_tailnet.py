@@ -1514,7 +1514,7 @@ def test_missing_factory_secrets_fail_before_any_api_request(
 
 @pytest.mark.parametrize(
     ("failure", "cause"),
-    (
+    [
         (
             urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")),
             "ConnectionRefusedError",
@@ -1525,7 +1525,7 @@ def test_missing_factory_secrets_fail_before_any_api_request(
         ),
         (urllib.error.URLError(TimeoutError("timed out")), "TimeoutError"),
         (TimeoutError("timed out"), "TimeoutError"),
-    ),
+    ],
 )
 def test_transport_failure_names_the_underlying_cause(
     lifecycle: ModuleType,

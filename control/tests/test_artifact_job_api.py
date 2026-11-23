@@ -450,7 +450,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
             )
         )
         blob = session.get(ArtifactJobBlob, digest)
-        assert file is not None and blob is not None
+        assert file is not None
+        assert blob is not None
         assert (file.media_type, file.size_bytes, file.blob_sha256) == (
             "image/png",
             len(content),
@@ -459,7 +460,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
         blob_path = service._blob_store.resolve(
             blob.storage_key, blob.sha256, blob.size_bytes
         )
-    assert blob_path is not None and blob_path.read_bytes() == content
+    assert blob_path is not None
+    assert blob_path.read_bytes() == content
 
 
 def test_result_evidence_preserves_current_values_without_field_presence() -> None:

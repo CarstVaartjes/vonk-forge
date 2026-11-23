@@ -314,8 +314,10 @@ def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
         row.assignments = [{"recipe_selector": "vonk-forge/missing-fields"}]
     # Observability retains the identity without inventing an empty intent.
     observed = service.definition_number(created.number)
-    assert observed.id == created.id and observed.revision == created.revision
-    assert observed.definition is None and observed.projection_issue is not None
+    assert observed.id == created.id
+    assert observed.revision == created.revision
+    assert observed.definition is None
+    assert observed.projection_issue is not None
     with sessions() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None
@@ -324,7 +326,7 @@ def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "field,value", [("labels", []), ("assignments", [{"invalid": "choice"}])]
+    ("field", "value"), [("labels", []), ("assignments", [{"invalid": "choice"}])]
 )
 def test_saved_profile_identity_never_embeds_a_damaged_column(field, value):
     from vonk_control.fleet_profiles.projection_support import _profile_document
@@ -1266,7 +1268,9 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
         assert service._assignment_state(session, matching).current_state == "placed"
 
 
-@pytest.mark.parametrize("assignment_count,selector_count", [(1, 1), (34, 1), (34, 34)])
+@pytest.mark.parametrize(
+    ("assignment_count", "selector_count"), [(1, 1), (34, 1), (34, 34)]
+)
 def test_profile_save_bounds_document_parses_and_database_round_trips(
     monkeypatch,
     postgres_engine,

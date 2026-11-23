@@ -439,7 +439,8 @@ def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path)
     assert service.get_operation(first.id).state == LifecycleState.SUCCEEDED
     after = service.download_preview(artifact_set_sha256=manifest.digest)
     assert after["new_bytes"] == 0
-    assert isinstance(before["new_bytes"], int) and before["new_bytes"] > 0
+    assert isinstance(before["new_bytes"], int)
+    assert before["new_bytes"] > 0
     fresh = service.start_download(
         actor="operator",
         request_key=str(uuid.uuid4()),

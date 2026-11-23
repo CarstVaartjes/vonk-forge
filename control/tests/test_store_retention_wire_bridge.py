@@ -41,7 +41,7 @@ def store_retention_probe() -> Path:
     return prebuilt_probe("VONK_STORE_RETENTION_PROBE")
 
 
-@pytest.mark.parametrize("installed", (False, True))
+@pytest.mark.parametrize("installed", [False, True])
 def test_full_disk_load_evicts_unused_objects_keeps_installed_content_and_retries(
     tmp_path: Path, postgres_engine, store_retention_probe: Path, installed: bool
 ) -> None:
@@ -75,7 +75,8 @@ def test_full_disk_load_evicts_unused_objects_keeps_installed_content_and_retrie
         _report_disk(world.sessions, 90 * 1024, at=now, total=512 * 1024)
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
-        assert request is not None and request.required_free_bytes == target
+        assert request is not None
+        assert request.required_free_bytes == target
         root = tmp_path / "spark"
         objects = root / "distribution/models"
         objects.mkdir(parents=True)

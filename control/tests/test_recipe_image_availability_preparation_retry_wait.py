@@ -93,13 +93,15 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
         assert service.run_pending() == 1
         waiting = service.get(accepted.id)
         assert waiting.state == "queued"
-        assert waiting.failure is not None and waiting.failure["retryable"] is True
+        assert waiting.failure is not None
+        assert waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
         next_attempt = service.get(accepted.id).next_attempt_at
         assert next_attempt is not None
         now[0] = datetime.fromisoformat(next_attempt)
     # The core's one bounded, jittered clock: it grows, never past its cap.
-    assert min(delays) >= 1 and max(delays) <= 90
+    assert min(delays) >= 1
+    assert max(delays) <= 90
     assert delays[-1] > delays[0]
     assert max(delays) <= 900
     assert service.run_pending() == 1

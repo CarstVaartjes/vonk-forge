@@ -48,7 +48,8 @@ def inventory_request(inventory_wire_probe: Path) -> InventoryRequest:
     )
     assert len(completed.stdout) > 64 * 1024
     request = InventoryRequest.model_validate_json(completed.stdout)
-    assert request.model_objects is not None and len(request.model_objects) == 1024
+    assert request.model_objects is not None
+    assert len(request.model_objects) == 1024
     return request
 
 
@@ -166,7 +167,8 @@ def test_optional_model_evidence_damage_keeps_core_and_fresh_report_recovers(
     )
     repo = InventoryRepository(services.sessions)
     stored = repo.latest(NODE_A, now=clock.now, maximum_age=60)
-    assert not stored.stale and stored.model_objects is None
+    assert not stored.stale
+    assert stored.model_objects is None
     # Damage only optional evidence through the actual PostgreSQL storage seam.
     with services.sessions.begin() as session:
         session.execute(
@@ -177,7 +179,8 @@ def test_optional_model_evidence_damage_keeps_core_and_fresh_report_recovers(
         )
     damaged = repo.latest(NODE_A, now=clock.now, maximum_age=60)
     assert damaged.disk_free_bytes == request.disk_free_bytes
-    assert not damaged.stale and damaged.model_objects is None
+    assert not damaged.stale
+    assert damaged.model_objects is None
     assert any(
         json.loads(record.getMessage())["code"]
         == AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED.value

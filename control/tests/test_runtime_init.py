@@ -273,7 +273,8 @@ def test_shared_volume_preparation_rejects_symlinked_component(
     assert list(outside.iterdir()) == []
     routes.unlink()
     prepare_shared_volumes(paths)
-    assert routes.is_dir() and not routes.is_symlink()
+    assert routes.is_dir()
+    assert not routes.is_symlink()
     assert list(outside.iterdir()) == []
 
 

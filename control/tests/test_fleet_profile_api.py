@@ -98,7 +98,7 @@ def _headers(codec: TokenCodec, role: str = "viewer") -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.mark.parametrize("role", ("viewer", "operator"))
+@pytest.mark.parametrize("role", ["viewer", "operator"])
 def test_profile_preview_requires_administrator_before_reading_profile(role):
     # Break caught: preview skips the mutation-role matrix and exposes the
     # administrator-only decision to a lesser role.
@@ -115,7 +115,7 @@ def test_profile_preview_requires_administrator_before_reading_profile(role):
     )
 
 
-@pytest.mark.parametrize("role", ("viewer", "operator"))
+@pytest.mark.parametrize("role", ["viewer", "operator"])
 def test_non_admin_cannot_change_an_accepted_profile(role: str) -> None:
     client, codec = _client(with_idle_spark=True)
     admin = _headers(codec, "administrator")

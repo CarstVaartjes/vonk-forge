@@ -147,7 +147,8 @@ def _follow_due(sessions, worker, application_id, clock):
         assert row.next_action_at == due
         journal = progress.switch_adapter
         assert journal is not None
-        assert journal.pending_children == pending and journal.children == closed
+        assert journal.pending_children == pending
+        assert journal.children == closed
     clock[0] = due
     return due.isoformat()
 
@@ -319,9 +320,8 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
     # does; an omitted field truthfully invalidates old preflight evidence.
     with sessions() as session:
         host = session.get(AgentNode, node_b)
-        assert (
-            host is not None and inventory_items(host).preflight_fingerprint is not None
-        )
+        assert host is not None
+        assert inventory_items(host).preflight_fingerprint is not None
         host_fingerprint = inventory_items(host).preflight_fingerprint
     # Drive only native coordinators until B's exact Stop has been issued.
     stop_claim = None
@@ -336,7 +336,8 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         )
         if stop_claim is not None:
             break
-    assert stop_claim is not None and stop_claim.operation.value == "recipe.stop"
+    assert stop_claim is not None
+    assert stop_claim.operation.value == "recipe.stop"
     before = _journal(sessions, accepted.id)
     with sessions() as session:
         row = session.get(FleetProfileApplication, accepted.id)
@@ -387,7 +388,8 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
         assert session.get(Job, sibling_history.id) is None
         assert set(session.scalars(select(AgentOperation.id))) == issued_ids
         serving = session.get(RecipeRun, run_a.owner_id)
-        assert serving is not None and serving.state == "running"
+        assert serving is not None
+        assert serving.state == "running"
     # The issued exact receipt and subsequent cleanup remain platform-owned.
     jobs.record_result(
         AgentResult(
@@ -418,12 +420,11 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                     if c.kind == "cleanup"
                 )
                 child = coordinator.get(cleanup.operation_id)
-                assert (
-                    child.action == "cleanup"
-                    and child.installation_id == installed_b.owner_id
-                )
+                assert child.action == "cleanup"
+                assert child.installation_id == installed_b.owner_id
                 assert child.node_ids == [node_b]
-                assert child.result is not None and child.result.preflight is not None
+                assert child.result is not None
+                assert child.result.preflight is not None
                 with sessions() as session:
                     operation = session.scalar(
                         select(AgentOperation)
@@ -433,15 +434,14 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
                         )
                         .where(AgentOperationAttempt.fence == claim.fence)
                     )
-                    assert operation is not None and operation.node_id == node_b
+                    assert operation is not None
+                    assert operation.node_id == node_b
                     assert operation.parent_job_id == next(
                         iter(child.result.preflight.pending_jobs.values()), None
                     )
                     node = session.get(AgentNode, node_b)
-                    assert (
-                        node is not None
-                        and inventory_items(node).preflight_fingerprint is not None
-                    )
+                    assert node is not None
+                    assert inventory_items(node).preflight_fingerprint is not None
                     fingerprint = inventory_items(node).preflight_fingerprint
                     assert fingerprint is not None
                 jobs.record_result(
@@ -486,13 +486,15 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
     assert publisher.accepted_run(run_a.owner_id, policy) == accepted_a
     with sessions() as session:
         serving = session.get(RecipeRun, run_a.owner_id)
-        assert serving is not None and serving.state == "running"
+        assert serving is not None
+        assert serving.state == "running"
         assert set(session.scalars(select(RecipeRun.id))) == {
             run_a.owner_id,
             run_b.owner_id,
         }
         removed = session.get(RecipeInstallation, installed_b.owner_id)
-        assert removed is not None and removed.state == InstallationState.UNINSTALLED
+        assert removed is not None
+        assert removed.state == InstallationState.UNINSTALLED
 
         row = session.get(FleetProfileApplication, accepted.id)
         assert row is not None

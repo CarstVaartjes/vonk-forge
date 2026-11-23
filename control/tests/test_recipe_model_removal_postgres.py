@@ -65,7 +65,8 @@ def _recipe_using_model(
     document = json.loads(_recipe("recipe-source-build.json").model_dump_json())
     assert isinstance(document, dict)
     models = document.get("models")
-    assert isinstance(models, list) and len(models) == 1
+    assert isinstance(models, list)
+    assert len(models) == 1
     model_selection = models[0]
     assert isinstance(model_selection, dict)
     model_reference = model_selection.get("model")
@@ -183,7 +184,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
 
     with sessions() as session:
         parent_row = session.get(Job, parent_id)
-        assert parent_row is not None and parent_row.state == "queued"
+        assert parent_row is not None
+        assert parent_row.state == "queued"
         parent_owner = RecipeCacheRemovalOwner.model_validate_json(
             json.dumps(parent_row.payload)
         )
@@ -220,7 +222,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     assert pending["state"] == "backoff"
     with sessions() as session:
         pending_parent = session.get(Job, parent_id)
-        assert pending_parent is not None and pending_parent.result is None
+        assert pending_parent is not None
+        assert pending_parent.result is None
         pending_owner = RecipeCacheRemovalOwner.model_validate_json(
             json.dumps(pending_parent.payload)
         )
@@ -230,7 +233,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
         assert pending_owner.checkpoint.model_reclaimed_bytes == 0
         assert pending_owner.checkpoint.failure is not None
         pending_child = session.get(ModelCacheOperation, child_id)
-        assert pending_child is not None and pending_child.state == "queued"
+        assert pending_child is not None
+        assert pending_child.state == "queued"
         assert pending_child.request_key == child_request_key
         assert pending_child.plan_digest == child_plan_digest
     assert shared_object.read_bytes() == model_bytes
@@ -319,7 +323,8 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     assert final["reclaimed_bytes"] == len(ARCHIVE) + child_view.result.reclaimed_bytes
     with sessions() as session:
         final_parent = session.get(Job, parent_id)
-        assert final_parent is not None and final_parent.result is not None
+        assert final_parent is not None
+        assert final_parent.result is not None
         final_owner = RecipeCacheRemovalOwner.model_validate_json(
             json.dumps(final_parent.payload)
         )

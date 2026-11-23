@@ -256,7 +256,8 @@ def test_an_unreadable_manifest_deletes_nothing_until_it_can_be_read(
     monkeypatch.undo()
     result = collector.collect()
 
-    assert manifest.exists() and result is not None
+    assert manifest.exists()
+    assert result is not None
     assert _blobs(storage) == published
     assert result.blobs_removed == len(retired - published)
 

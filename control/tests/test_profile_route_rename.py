@@ -208,7 +208,8 @@ def test_a_profile_over_an_identical_run_renames_it_with_zero_restarts(
         # The name moved in whole bundles: old name, then new name, never both
         # names in one bundle and never neither.
         names = _published(world, bundles)
-        assert names and names[-1] == ("owner-alias",)
+        assert names
+        assert names[-1] == ("owner-alias",)
         assert set(names) <= {("sweep-alias",), ("owner-alias",)}
         assert names == sorted(names, key=lambda item: item != ("sweep-alias",))
 
@@ -293,7 +294,8 @@ def test_a_second_rename_during_a_publisher_outage_publishes_only_the_last_name(
         sim.round()
 
         added = _published(world, bundles)
-        assert added and set(added) == {("third-alias",)}
+        assert added
+        assert set(added) == {("third-alias",)}
         assert ("owner-alias",) not in publisher.aliases
         assert (_process_orders(world), _process_jobs(world)) == (orders, jobs)
     finally:
@@ -327,7 +329,8 @@ def test_the_original_start_key_replays_after_a_rename(
 
         lifecycle = world.controller.lifecycle
         adopted = lifecycle.adopt_start(installation_id, request_id=request_id)
-        assert adopted is not None and adopted.owner_id == before.id
+        assert adopted is not None
+        assert adopted.owner_id == before.id
         with world.sessions() as session:
             replayed = lifecycle._idempotent_job_in_session(
                 session,
@@ -338,7 +341,8 @@ def test_the_original_start_key_replays_after_a_rename(
                 owner_id=before.id,
                 installation_id=installation_id,
             )
-        assert replayed is not None and replayed.id == start.id
+        assert replayed is not None
+        assert replayed.id == start.id
         assert (_process_orders(world), _process_jobs(world)) == (orders, jobs)
     finally:
         world.close()
@@ -416,7 +420,8 @@ def test_new_run_plans_carry_no_alias_and_keep_digests_and_routes(
         # contract refuses one that does.
         with world.sessions() as session:
             run = session.get(RecipeRun, before.id)
-            assert run is not None and "alias" not in run.plan
+            assert run is not None
+            assert "alias" not in run.plan
             parse_stored_run_plan(run.plan)
             with pytest.raises(RecipeExecutionContractError):
                 parse_stored_run_plan({**run.plan, "alias": run.alias})
@@ -478,10 +483,12 @@ def test_a_rename_owns_the_name_over_a_newer_run_the_same_plan_stops(
             )
             older = session.get(RecipeRun, before.id)
             holder = session.get(RecipeRun, newer.id)
-            assert older is not None and holder is not None
+            assert older is not None
+            assert holder is not None
             assert older.alias == holder.alias == "coder"
             assert holder.created_at > older.created_at
-            assert older.renamed_at is not None and holder.renamed_at is None
+            assert older.renamed_at is not None
+            assert holder.renamed_at is None
             assert older.id in candidate.included
             assert holder.id not in candidate.included
         assert sim.settle(load) == "succeeded"
@@ -575,7 +582,8 @@ def test_a_crashed_rank_is_recovered_under_the_new_name(
         assert ("pair-old",) not in world.publisher.aliases[bundles:]
         with world.sessions() as session:
             run = session.get(RecipeRun, before.id)
-            assert run is not None and run.alias == "pair-new"
+            assert run is not None
+            assert run.alias == "pair-new"
     finally:
         world.close()
 
@@ -608,7 +616,8 @@ def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
                     lambda item: sha256(canonical_message(item.plan)).hexdigest(),
                 )
                 assert common._wait_for_plan_change(run, world.clock())
-            assert read_wait(run) is not None and run.route_error
+            assert read_wait(run) is not None
+            assert run.route_error
             # The remembered outcome belongs to the old reader, not to this one.
             assert not common._unchanged_unreadable(run)
 
@@ -616,7 +625,8 @@ def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
         with world.sessions() as session:
             run = session.get(RecipeRun, before.id)
             assert run is not None
-            assert read_wait(run) is None and run.route_error is None
+            assert read_wait(run) is None
+            assert run.route_error is None
 
         _recover(world, sim, before.id)
     finally:

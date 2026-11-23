@@ -60,7 +60,7 @@ def test_agent_scope_source_must_be_typed_and_bound_to_identity() -> None:
         )
 
 
-@pytest.mark.parametrize("node,verified", (("not-a-node", True), (NODE, False)))
+@pytest.mark.parametrize(("node", "verified"), [("not-a-node", True), (NODE, False)])
 def test_agent_identity_rejects_noncanonical_or_unverified_values(
     node: str, verified: bool
 ) -> None:
@@ -245,7 +245,8 @@ def test_agent_identity_is_validated_once_and_handlers_reuse_it() -> None:
     scope = {"type": "http", "path": "/agent/telemetry", "headers": headers}
     asyncio.run(middleware(scope, lambda: None, lambda _: None))
     assert lookups == [NODE]
-    assert seen[0] is not None and seen[0].node_id == NODE
+    assert seen[0] is not None
+    assert seen[0].node_id == NODE
 
     # A request that skipped the middleware is unvalidated.
     identity = AgentIdentity(NODE, "123", "fingerprint", True)

@@ -190,18 +190,17 @@ def test_changed_contact_skips_busy_admission_then_recovers(sessions) -> None:
             assert done.wait(10), "contact reply queued behind capacity admission"
     finally:
         traffic.join(10)
-    assert not traffic.is_alive() and not errors
+    assert not traffic.is_alive()
+    assert not errors
     delivery._record(NODE, 422, NOW + timedelta(seconds=1))
     # A delayed older success must not clear the newer rejection.
     delivery._record(NODE, 204, NOW)
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert (
-            node is not None and contact_row(node).recipe_observation_http_status == 422
-        )
+        assert node is not None
+        assert contact_row(node).recipe_observation_http_status == 422
     delivery._record(NODE, 204, NOW + timedelta(seconds=2))
     with sessions() as session:
         node = session.get(AgentNode, NODE)
-        assert (
-            node is not None and contact_row(node).recipe_observation_http_status == 204
-        )
+        assert node is not None
+        assert contact_row(node).recipe_observation_http_status == 204

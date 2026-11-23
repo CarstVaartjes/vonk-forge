@@ -188,7 +188,8 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
             assert len(rows) == 2
             parent = session.get(Job, original.id)
             retry = session.get(Job, response["id"])
-            assert parent is not None and retry is not None
+            assert parent is not None
+            assert retry is not None
             assert retry.authority_revision == parent.authority_revision == revision_id
             assert retry.targets == parent.targets == [revision_id]
             assert parent.state == "failed" and parent.request_id == PARENT_KEY

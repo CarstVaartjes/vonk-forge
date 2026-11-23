@@ -95,8 +95,10 @@ def test_partial_content_survives_unknown_deadline_restart_and_fresh_request(
         assert restarted.run_pending() == 0
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.completed_at is not None
-            assert ended.lease_deadline is None and ended.next_action_at is None
+            assert ended is not None
+            assert ended.completed_at is not None
+            assert ended.lease_deadline is None
+            assert ended.next_action_at is None
             assert (
                 restarted._lifecycle.recovery_deadline(
                     restarted._lifecycle.lifecycle(ended, now[0])
@@ -109,10 +111,8 @@ def test_partial_content_survives_unknown_deadline_restart_and_fresh_request(
         assert partial.read_bytes() == data[:7]
         mode[0] = "healthy"
         fresh = _start(restarted, artifact)
-        assert (
-            fresh.id != original.id
-            and fresh.artifact_set_sha256 == original.artifact_set_sha256
-        )
+        assert fresh.id != original.id
+        assert fresh.artifact_set_sha256 == original.artifact_set_sha256
         assert restarted.run_pending() == 1
         assert restarted.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
         assert restarted._object_path(str(artifact["sha256"])).read_bytes() == data
@@ -153,15 +153,19 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
         service.run_pending()
         with sessions() as session:
             waiting = session.get(ModelCacheOperation, original.id)
-            assert waiting is not None and waiting.completed_at is None
-            assert waiting.lease_deadline is None and waiting.next_action_at is not None
+            assert waiting is not None
+            assert waiting.completed_at is None
+            assert waiting.lease_deadline is None
+            assert waiting.next_action_at is not None
         assert not service._object_path(digest).exists()
         now[0] += RECOVERY_BUDGET + timedelta(seconds=1)
         service.run_pending()
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.completed_at is not None
-            assert ended.lease_deadline is None and ended.next_action_at is None
+            assert ended is not None
+            assert ended.completed_at is not None
+            assert ended.lease_deadline is None
+            assert ended.next_action_at is None
         fresh = _start(service, artifact)
         assert fresh.id != original.id
         assert fresh.artifact_set_sha256 == original.artifact_set_sha256
@@ -192,7 +196,8 @@ def test_budget_is_a_stall_window_measured_from_the_last_received_bytes(
         service.run_pending()
         with sessions() as session:
             stored = session.get(ModelCacheOperation, operation.id)
-            assert stored is not None and stored.progress_advanced_at is not None
+            assert stored is not None
+            assert stored.progress_advanced_at is not None
             assert stored.progress_advanced_at.replace(tzinfo=UTC) == now[0]
 
         # Advancing recently: past 24h in total, still not ended.
@@ -206,14 +211,16 @@ def test_budget_is_a_stall_window_measured_from_the_last_received_bytes(
         service._reconciler.reconcile()
         with sessions() as session:
             row = session.get(ModelCacheOperation, operation.id)
-            assert row is not None and row.completed_at is None
+            assert row is not None
+            assert row.completed_at is None
 
         # No bytes for the whole window: ended as before.
         now[0] += RECOVERY_BUDGET
         service._reconciler.reconcile()
         with sessions() as session:
             row = session.get(ModelCacheOperation, operation.id)
-            assert row is not None and row.completed_at is not None
+            assert row is not None
+            assert row.completed_at is not None
     finally:
         service.close()
         client.close()

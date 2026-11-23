@@ -408,7 +408,8 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(
             select(NodeInventorySnapshot).where(NodeInventorySnapshot.node_id == NODE_B)
         )
         assert row is not None
-        assert row.fabric_address is None and row.fabric_bandwidth_mbps is None
+        assert row.fabric_address is None
+        assert row.fabric_bandwidth_mbps is None
         assert row.gpu_memory_total_bytes == 1000
 
     # The mandatory core stays strict.
@@ -460,7 +461,8 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
         },
     )
 
-    assert older.status_code == 204 and older.content == b""
+    assert older.status_code == 204
+    assert older.content == b""
     assert judged.status_code == 200
     verdict = InventoryVerdict.model_validate_json(judged.content)
     assert verdict.untracked_installations == [forgotten]
@@ -550,7 +552,8 @@ def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog)
         if "agent.request_rejected" in r.getMessage()
     ]
     assert len(lines) == 1
-    assert "gpu_count" in lines[0] and "request_id" in lines[0]
+    assert "gpu_count" in lines[0]
+    assert "request_id" in lines[0]
     assert clock.now.isoformat() not in lines[0]
 
 
@@ -1050,7 +1053,8 @@ def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
     def due() -> datetime:
         with services.sessions() as session:
             stored = session.get(Job, job.id)
-            assert stored is not None and stored.next_action_at is not None
+            assert stored is not None
+            assert stored.next_action_at is not None
             return stored.next_action_at.replace(tzinfo=UTC)
 
     # A collection at the floor cannot settle the wait.

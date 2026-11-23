@@ -60,7 +60,8 @@ def export(output: Path) -> None:
                 )
             )
             run = session.get(RecipeRun, run_id)
-            assert revision is not None and run is not None
+            assert revision is not None
+            assert run is not None
             definition = RecipeDefinition.model_validate_json(
                 canonical_message(revision.document), strict=True
             )

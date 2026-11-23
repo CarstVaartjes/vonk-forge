@@ -127,10 +127,13 @@ def test_a_transient_child_observation_retains_claims_and_recovers(
     load.profiles.tick()
     with load.sessions() as session:
         row = session.get(FleetProfileApplication, load.application.id)
-        assert faults and row is not None and row.state == LifecycleState.RUNNING
+        assert faults
+        assert row is not None
+        assert row.state == LifecycleState.RUNNING
         assert row.current_operation_id == faults[0]
     claims = _claims(load, owner_kind="fleet-profile", kind="disk")
-    assert claims and all(claim.state == ReservationState.ACTIVE for claim in claims)
+    assert claims
+    assert all(claim.state == ReservationState.ACTIVE for claim in claims)
     # Unknown observations retain claims and the exact child. Recovery follows
     # its persisted due time, without an operator retry or replacement receipt.
     _follow_due(load)
@@ -154,11 +157,13 @@ def test_a_load_survives_the_release_of_the_installation_that_held_its_claim(
     # A retry from the first phase (as any replanned attempt does).
     with load.sessions.begin() as session:
         job = session.get(Job, _the_switch(load).id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         job.result = {**job.result, "phase_index": 0, "item_index": 0}
     assert _settle(load), _application(load).status_reason
     (installation,) = _installed(load)
-    assert installation.id != held and installation.state == "installed"
+    assert installation.id != held
+    assert installation.state == "installed"
 
 
 def test_active_claims_with_different_owners_are_named_not_adopted(
@@ -179,7 +184,8 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
         claim.owner_kind = "fleet-profile"
         claim.owner_id = load.application.id
         job = session.get(Job, _the_switch(load).id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         job.result = {**job.result, "phase_index": 0, "item_index": 0}
     with load.sessions() as session:
         owners = {

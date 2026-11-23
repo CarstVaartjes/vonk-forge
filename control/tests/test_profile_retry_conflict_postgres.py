@@ -62,7 +62,8 @@ def test_superseded_replay_ends_and_selected_load_replans(
         assert profiles.tick()
         assert profiles.tick()
         document = profiles.application(older.id).progress.switch_adapter
-        assert document is not None and document.pending_children
+        assert document is not None
+        assert document.pending_children
         child_id = document.pending_children[0].operation_id
         world.advance(1)
         replacement = FleetProfileAssignmentInput(

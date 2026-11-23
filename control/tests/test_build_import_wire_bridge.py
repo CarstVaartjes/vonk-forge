@@ -53,7 +53,8 @@ def test_queued_build_crosses_rust_parser_and_typed_evidence(
         actor="test",
         request_id=str(uuid.uuid4()),
     )
-    assert queued.kind == "recipe.build.v1" and queued.state == "running"
+    assert queued.kind == "recipe.build.v1"
+    assert queued.state == "running"
 
     def probe(operation: str, payload: dict[str, object]) -> dict[str, object]:
         completed = subprocess.run(
@@ -191,13 +192,13 @@ def test_build_wire_consumes_producer_bytes_without_scalar_coercion(
 
 @pytest.mark.parametrize(
     ("path", "value"),
-    (
+    [
         (("capabilities",), ["SYS_ADMIN"]),
         (("capabilities",), ["DAC_OVERRIDE", "DAC_OVERRIDE"]),
         (("network", "hosts"), ["localhost"]),
         (("limits", "gpu"), 1),
         (("options", "layer_compression"), "zstd"),
-    ),
+    ],
 )
 def test_build_wire_preserves_rust_security_invariants(
     tmp_path: Path, path: tuple[str, ...], value: object

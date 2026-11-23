@@ -249,7 +249,8 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
             select(AgentOperation).where(AgentOperation.parent_job_id == cleanup_id)
         )
         build = session.get(RecipeBuild, plan.build_id)
-        assert original_row is not None and original_row.result is not None
+        assert original_row is not None
+        assert original_row.result is not None
         assert original_row.result["cancel_requested"] is True
         assert original_row.result["cancel_request_id"] == cancellation_key
         assert original_row.result["cancel_actor"] == cancellation_actor
@@ -260,7 +261,8 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
         cancellation_payload = cleanup.payload.get("build_cancellation")
         assert isinstance(cancellation_payload, dict)
         assert cancellation_payload.get("cancel_request_id") == cancellation_key
-        assert cleanup_operation is not None and cleanup_operation.state == "queued"
+        assert cleanup_operation is not None
+        assert cleanup_operation.state == "queued"
         assert cleanup_operation.payload == {
             "build_id": plan.build_id,
             "operation_id": child_id,
@@ -341,8 +343,10 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
     assert _active_claims(sessions, plan.build_id) == fresh_claims
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "building"
-        assert build.image_digest is None and build.oci_layout_sha256 is None
+        assert build is not None
+        assert build.state == "building"
+        assert build.image_digest is None
+        assert build.oci_layout_sha256 is None
         assert (
             session.scalar(
                 select(func.count(Job.id)).where(Job.kind == "recipe.build.cleanup.v1")

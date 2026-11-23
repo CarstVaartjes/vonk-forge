@@ -723,7 +723,8 @@ def _issue_exact_stop_grant(
         runtime_identity=runtime_identity,
         preflight_fingerprint=fingerprint,
     )
-    assert claim is not None and claim.operation.value == "recipe.stop"
+    assert claim is not None
+    assert claim.operation.value == "recipe.stop"
     stop = RecipeStopPayload.model_validate_json(
         canonical_message(claim.payload), strict=True
     )
@@ -986,19 +987,22 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
             for node in source_nodes
         )
         source_phases = source_start.payload.get("phases")
-        assert isinstance(source_phases, list) and source_phases
+        assert isinstance(source_phases, list)
+        assert source_phases
         start_job_id = str(uuid.uuid4())
         cloned_phases: list[list[dict[str, object]]] = []
         cloned_operations: list[AgentOperation] = []
         cloned_targets: set[str] = set()
         for phase in source_phases:
-            assert isinstance(phase, list) and phase
+            assert isinstance(phase, list)
+            assert phase
             cloned_phase: list[dict[str, object]] = []
             for raw_entry in phase:
                 assert isinstance(raw_entry, Mapping)
                 node_id = raw_entry.get("node_id")
                 raw_payload = raw_entry.get("payload")
-                assert isinstance(node_id, str) and isinstance(raw_payload, Mapping)
+                assert isinstance(node_id, str)
+                assert isinstance(raw_payload, Mapping)
                 cloned_targets.add(node_id)
                 source_payload = RecipeStartPayload.model_validate_json(
                     canonical_message(raw_payload), strict=True

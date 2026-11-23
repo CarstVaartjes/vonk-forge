@@ -110,10 +110,11 @@ def test_waiting_load_demand_survives_postgres_and_inventory_round_trip(
         application.state = LifecycleState.CANCELLED
     with world.sessions() as session:
         settled = store_retention_request(session, NODE, NOW)
-    assert settled is not None and settled.required_free_bytes == 0
+    assert settled is not None
+    assert settled.required_free_bytes == 0
 
 
-@pytest.mark.parametrize("owner", ("profile", "operation"))
+@pytest.mark.parametrize("owner", ["profile", "operation"])
 def test_referenced_model_expands_to_protected_content_objects(
     world, cached, owner: str
 ) -> None:
@@ -152,7 +153,8 @@ def test_saved_profile_does_not_pin_an_unused_spark_image(world) -> None:
     _profile(world, "vonk-forge/glm")
     with world.sessions() as session:
         build = session.get(RecipeBuild, build_id)
-        assert build is not None and build.image_digest is not None
+        assert build is not None
+        assert build.image_digest is not None
         request = store_retention_request(session, NODE, world.now)
         assert request is not None
         assert (
@@ -172,7 +174,8 @@ def test_live_operation_protects_file_identity_without_a_matching_cache_owner(
     model_id = world.revision("weights", 1, kind="model")
     with world.sessions.begin() as session:
         revision = session.get(CatalogDocumentRevision, model_id)
-        assert revision is not None and revision.content_digest is not None
+        assert revision is not None
+        assert revision.content_digest is not None
         definition = read_model(revision.document)
         digest = document_sha256(revision.document)
         session.execute(
@@ -214,7 +217,8 @@ def test_missing_model_dependency_defers_collection_instead_of_authorizing_parti
     model_id = world.revision("weights", 1, kind="model")
     with world.sessions.begin() as session:
         revision = session.get(CatalogDocumentRevision, model_id)
-        assert revision is not None and revision.content_digest is not None
+        assert revision is not None
+        assert revision.content_digest is not None
         definition = read_model(revision.document)
         dependency = ModelReference(
             publisher="vonk-forge", slug="missing", content_sha256="e" * 64

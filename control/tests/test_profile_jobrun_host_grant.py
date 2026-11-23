@@ -77,7 +77,8 @@ def _selected_profile_grant(tmp_path, reason="superseded by newer workload inten
 
     with write_guard_mode(strict=False), sessions.begin() as session:
         source = session.get(Job, artifact.operation_id)
-        assert source is not None and isinstance(source.result, dict)
+        assert source is not None
+        assert isinstance(source.result, dict)
         source.result = {**source.result, "reason": reason}
     node_id = stop.targets[0]
     claim = claim_agent(agent_jobs, node_id, "serial-0")

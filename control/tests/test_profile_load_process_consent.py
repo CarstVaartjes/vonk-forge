@@ -24,7 +24,7 @@ from .test_profile_load_submission import _profile_api
 
 @pytest.mark.lane
 @pytest.mark.parametrize(
-    "mode,expected_status", [("redirected", 2), ("eof", 2), ("interrupt", 130)]
+    ("mode", "expected_status"), [("redirected", 2), ("eof", 2), ("interrupt", 130)]
 )
 def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     installed_vonkctl: Path,
@@ -82,7 +82,8 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
                 review_content=digest,
             )
 
-        assert status == expected_status and not stdout
+        assert status == expected_status
+        assert not stdout
         with sessions() as session:
             assert not list(session.scalars(select(FleetProfileApplication)))
         abort_calls = list(state.calls)

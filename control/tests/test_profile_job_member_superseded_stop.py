@@ -126,6 +126,7 @@ def test_a_job_member_stop_superseded_before_acceptance_is_not_failed(
             (stop,) = session.scalars(select(Job).where(Job.kind == "recipe.stop.v2"))
             assert stop.state == "cancelled", stop.status_reason
             run_after = session.get(RecipeRun, run_id)
-            assert run_after is not None and run_after.state == "running"
+            assert run_after is not None
+            assert run_after.state == "running"
     finally:
         world.close()

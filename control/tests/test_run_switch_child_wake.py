@@ -166,7 +166,8 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
     with sessions() as session:
         wait = read_wait(_get(session, Job, operation_id))
         # The wake names what the parent will read, not a generic fallback.
-        assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+        assert wait is not None
+        assert wait.reason is WaitReason.RECEIPT_MISSING
     # The worker's next look consumes the wake: no due clock is left behind
     # for the due-waits backstop to spin on.
     _replace_child(executor, child_id, state=ended)

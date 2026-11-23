@@ -205,7 +205,8 @@ def _background_image_switch(
         assert build is not None
         image_digest, layout_digest = build.image_digest, build.oci_layout_sha256
         image_bytes = build.image_bytes
-    assert image_digest is not None and layout_digest is not None
+    assert image_digest is not None
+    assert layout_digest is not None
     assert image_bytes is not None
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
     archive = b"canonical-runtime-image-archive"[:image_bytes]
@@ -548,7 +549,8 @@ def test_a_lock_busy_preparation_backs_off_longer_and_completes_by_itself(
         if v.result.retry_reason == ArtifactLifecycleCode.REFERENCE_BUSY
     ]
     # Whether backing off or running again, the item names what it waits on.
-    assert shown and all(
+    assert shown
+    assert all(
         "target ownership is changing" in text
         or ArtifactLifecycleCode.REFERENCE_BUSY in text
         for text in shown
@@ -633,7 +635,8 @@ def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
         stored.distribution_slug == "sibling-recipe"
     )
     intent = view.result.runtime_image_reference_intent
-    assert intent is not None and intent.build_id != "sibling-build"
+    assert intent is not None
+    assert intent.build_id != "sibling-build"
 
 
 def test_a_replan_after_publication_republishes_the_image_reference(
@@ -753,7 +756,8 @@ def test_phase_owner_is_its_own_or_current_generation_key(tmp_path: Path) -> Non
     with switch.sessions.begin() as session:
         for key in (request_id, _phase_request_key(request_id, 1, 0, 2)):
             owner = _lock_phase_owner(session, key, 1, 0)
-            assert owner is not None and owner.id == switch.operation_id
+            assert owner is not None
+            assert owner.id == switch.operation_id
         # An earlier generation's or another phase's key owns nothing.
         assert (
             _lock_phase_owner(session, _phase_request_key(request_id, 1, 0, 1), 1, 0)

@@ -171,7 +171,8 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                     select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
                 )
             }
-            assert len(jobs) == 1 and jobs[0].id == job_id
+            assert len(jobs) == 1
+            assert jobs[0].id == job_id
             assert set(children) == {NODE_A, NODE_B}
             assert children[NODE_A].state in aos.PARKED
             assert children[NODE_A].next_action_at is not None

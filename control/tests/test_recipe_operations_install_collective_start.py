@@ -263,7 +263,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
 
 @pytest.mark.parametrize(
     "start_order",
-    (("worker", "entrypoint"), ("entrypoint", "worker")),
+    [("worker", "entrypoint"), ("entrypoint", "worker")],
 )
 @pytest.mark.parametrize("startup_budget", [60, 1800])
 def test_distributed_start_launches_all_ranks_then_checks_collective(

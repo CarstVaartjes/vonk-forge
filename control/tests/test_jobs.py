@@ -103,7 +103,8 @@ def test_stale_attempt_cannot_publish_success_after_lease_reclaim(service) -> No
     assert first is not None
     clock.now += timedelta(seconds=11)
     second = jobs.claim("worker-2", 30, kinds=("probe",))
-    assert second is not None and second.fence != first.fence
+    assert second is not None
+    assert second.fence != first.fence
     with pytest.raises(StaleAttempt):
         jobs.succeed(first, {"wrong": True})
     jobs.succeed(second, {"ok": True})
@@ -128,7 +129,8 @@ def test_job_payload_and_result_reject_nonfinite_json_numbers(service, value) ->
 
     job = jobs.enqueue("probe", "admin", "abc", [], {})
     attempt = jobs.claim("worker", 30, kinds=("probe",))
-    assert attempt is not None and attempt.job_id == job.id
+    assert attempt is not None
+    assert attempt.job_id == job.id
     with pytest.raises(ValueError):
         jobs.succeed(attempt, {"nested": [value]})
     assert jobs.get(job.id).state == "running"
@@ -284,7 +286,8 @@ def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> Non
 
     attempt = jobs.claim("worker", 10, kinds=("install",))
 
-    assert attempt is not None and attempt.job_id == install.id
+    assert attempt is not None
+    assert attempt.job_id == install.id
     stored = jobs.get(upgrade.id)
     assert stored.state == "queued"
     assert stored.current_attempt == 0
@@ -343,7 +346,8 @@ def test_job_waiting_on_its_agent_operation_is_neither_claimed_nor_starved(
         assert read_runnable_job_ages(session, clock.now) == {"probe": 30 * 60}
     kinds = ("artifact-distribution", "probe")
     claimed = jobs.claim("worker", 10, kinds=kinds)
-    assert claimed is not None and claimed.job_id == probe.id
+    assert claimed is not None
+    assert claimed.job_id == probe.id
     assert jobs.claim("worker", 10, kinds=kinds) is None
     with sessions() as session:
         assert read_runnable_job_ages(session, clock.now) == {}

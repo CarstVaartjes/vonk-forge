@@ -26,7 +26,7 @@ from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
 
-@pytest.mark.parametrize("sibling_blocked", (False, True))
+@pytest.mark.parametrize("sibling_blocked", [False, True])
 def test_recovered_claim_repairs_parent_api_reason_after_restart(
     service, sibling_blocked
 ):
@@ -63,8 +63,10 @@ def test_recovered_claim_repairs_parent_api_reason_after_restart(
         refused = session.get(AgentOperation, recovering.id)
         other = session.get(AgentOperation, sibling.id)
         persisted = session.get(Job, current.id)
-        assert refused is not None and refused.current_attempt == 0
-        assert other is not None and persisted is not None
+        assert refused is not None
+        assert refused.current_attempt == 0
+        assert other is not None
+        assert persisted is not None
         expected_reason = other.status_reason
         refused_reason = persisted.status_reason
         assert (expected_reason is not None) == sibling_blocked
@@ -105,10 +107,11 @@ def test_recovered_claim_repairs_parent_api_reason_after_restart(
         with restarted_sessions() as session:
             row = session.get(AgentOperation, recovering.id)
             other = session.get(AgentOperation, sibling.id)
-            assert (
-                row is not None and row.state == "running" and row.status_reason is None
-            )
-            assert other is not None and other.state == "queued"
+            assert row is not None
+            assert row.state == "running"
+            assert row.status_reason is None
+            assert other is not None
+            assert other.state == "queued"
             assert other.status_reason == expected_reason
     finally:
         restarted_engine.dispose()

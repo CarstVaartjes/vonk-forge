@@ -319,7 +319,8 @@ def test_cancel_follow_and_controller_failures_match_their_published_schemas(
     # A Controller refusal: its code, detail and recovery actions are typed.
     refused = _failed(client, capsys, "--profile", "99", "profile", "load", "--review")
     assert refused["error_type"] == "control_api"
-    assert refused["code"] and refused["detail"]
+    assert refused["code"]
+    assert refused["detail"]
     assert isinstance(refused["recovery_actions"], list)
 
 

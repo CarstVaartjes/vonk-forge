@@ -134,7 +134,8 @@ class _World:
 
     def child_id(self) -> str:
         document = self.service.application(self.id).progress.switch_adapter
-        assert document is not None and document.pending_children
+        assert document is not None
+        assert document.pending_children
         return document.pending_children[0].operation_id
 
     def cancel(self, key: int = 700):
@@ -251,7 +252,8 @@ def test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent(
         world.run_switch.tick()
     final = world.service.application(world.id)
     assert final.state == "cancelled"
-    assert final.cancellation is not None and final.cancellation.state == "cancelled"
+    assert final.cancellation is not None
+    assert final.cancellation.state == "cancelled"
     assert final.state != LifecycleState.NEEDS_OPERATOR
 
     world.assert_fresh_admitted()
@@ -285,11 +287,13 @@ def test_a_cancel_completes_when_the_stop_cannot_be_confirmed(tmp_path) -> None:
     assert final.state == "cancelled", states[-5:]
     assert "needs-operator" not in states
     assert world.now[0] - NOW >= timedelta(0)
-    assert final.cancellation is not None and final.cancellation.state == "cancelled"
+    assert final.cancellation is not None
+    assert final.cancellation.state == "cancelled"
     # the child kept running on its own lifecycle: it was never aborted
     with world.sessions() as session:
         child = session.get(Job, world.child_id())
-        assert child is not None and child.state not in {"cancelled", "failed"}
+        assert child is not None
+        assert child.state not in {"cancelled", "failed"}
 
     world.assert_fresh_admitted()
 
@@ -345,7 +349,8 @@ def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(
     world = _World(tmp_path)
     first = world.cancel(710)
     again = world.cancel(710)
-    assert again.cancellation is not None and first.cancellation is not None
+    assert again.cancellation is not None
+    assert first.cancellation is not None
     assert again.cancellation.request_key == first.cancellation.request_key
     with pytest.raises(InvalidRequestError) as refused:
         world.cancel(711)
@@ -503,7 +508,8 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
     child_id = world.child_id()
     with world.sessions.begin() as session:
         child = session.get(Job, child_id)
-        assert child is not None and isinstance(child.result, dict)
+        assert child is not None
+        assert isinstance(child.result, dict)
         result = dict(child.result)
         result.pop("observation_due_at", None)
         child.result = result
@@ -519,5 +525,6 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
     world.service.tick()
     with world.sessions() as session:
         healed = session.get(Job, child_id)
-        assert healed is not None and healed.state != LifecycleState.NEEDS_OPERATOR
+        assert healed is not None
+        assert healed.state != LifecycleState.NEEDS_OPERATOR
     assert world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR

@@ -129,7 +129,8 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     assert isinstance(recovered, IssuedCertificate)
     with sessions() as session:
         certificate = session.get(AgentCertificate, source.serial)
-        assert certificate is not None and certificate.state == "active"
+        assert certificate is not None
+        assert certificate.state == "active"
         assert session.get(AgentCertificateRotation, NODE_ID) is None
         accepted = session.get(AgentCertificate, recovered.serial)
         assert accepted is not None
@@ -144,9 +145,11 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     assert len(provider.calls) == 2
     with sessions() as session:
         certificate = session.get(AgentCertificate, source.serial)
-        assert certificate is not None and certificate.state == "active"
+        assert certificate is not None
+        assert certificate.state == "active"
         certificate = session.get(AgentCertificate, issued.serial)
-        assert certificate is not None and certificate.state == "staged"
+        assert certificate is not None
+        assert certificate.state == "staged"
 
 
 def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(

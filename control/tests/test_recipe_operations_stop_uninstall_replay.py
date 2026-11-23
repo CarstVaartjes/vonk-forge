@@ -537,7 +537,8 @@ def test_new_install_intent_retires_only_unissued_older_install(tmp_path: Path) 
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == old.id)
         )
-        assert child is not None and child.state == "cancelled"
+        assert child is not None
+        assert child.state == "cancelled"
         assert (
             _required(session.get(Job, new.id)).payload["workload_intent_ordinal"] == 2
         )
@@ -667,7 +668,8 @@ def test_issued_stop_is_not_retired_as_unissued(tmp_path: Path) -> None:
     assert pending.job_id == old.id
     assert pending.observe_due_at <= pending.observation_deadline
     fresh = service.preview_stop(run.owner_id)
-    assert fresh.allowed and fresh.run_state == "stopping"
+    assert fresh.allowed
+    assert fresh.run_state == "stopping"
     replacement = service.stop(
         run.owner_id,
         plan_digest=fresh.plan_digest,

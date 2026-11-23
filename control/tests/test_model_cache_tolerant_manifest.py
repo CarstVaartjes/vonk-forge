@@ -278,14 +278,18 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     cache.storage_summary()
     with sessions() as session:
         row = session.get(ModelCacheSet, "3" * 64)
-        assert row is not None and "recipe-installation" in row.protected_reasons
+        assert row is not None
+        assert "recipe-installation" in row.protected_reasons
         unknown = session.get(ModelCacheSet, "4" * 64)
-        assert unknown is not None and unknown.protected
+        assert unknown is not None
+        assert unknown.protected
     _replace_stored_document(sessions, old_id, recipe_document)
     cache.storage_summary()
     with sessions() as session:
         retained = session.get(ModelCacheSet, "3" * 64)
         unrelated = session.get(ModelCacheSet, "4" * 64)
-        assert retained is not None and retained.protected
-        assert unrelated is not None and not unrelated.protected
+        assert retained is not None
+        assert retained.protected
+        assert unrelated is not None
+        assert not unrelated.protected
     cache.close()

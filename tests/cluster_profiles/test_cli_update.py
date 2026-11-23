@@ -317,7 +317,8 @@ def test_update_installs_only_changed_signed_wheel(
         apply=False,
         download=download,
     )
-    assert checked["update_available"] is True and not seen
+    assert checked["update_available"] is True
+    assert not seen
     applied = cli_update.run_update(
         channel="stable",
         public_key=key,
@@ -326,7 +327,8 @@ def test_update_installs_only_changed_signed_wheel(
         download=download,
         compatibility_observation=_controller_observation,
     )
-    assert applied["updated"] is True and len(seen) == 1
+    assert applied["updated"] is True
+    assert len(seen) == 1
     assert applied["previous"] == checked["current"]
     assert applied["current"] == {"version": "1.2.3", "source_sha": source_sha}
     assert applied["update_available"] is False
@@ -350,7 +352,8 @@ def test_update_installs_only_changed_signed_wheel(
         download=download,
         compatibility_observation=_controller_observation,
     )
-    assert unchanged["updated"] is False and len(seen) == 1
+    assert unchanged["updated"] is False
+    assert len(seen) == 1
 
 
 def test_update_rejects_tampered_release_before_wheel_install(
@@ -650,8 +653,10 @@ def test_signed_client_update_trusts_accepted_bytes_despite_projection_drift(
     assert result["updated"] is True
     current_result = result["current"]
     controller_result = result["controller"]
-    assert isinstance(current_result, dict) and current_result["source_sha"] == "b" * 40
-    assert isinstance(controller_result, dict) and controller_result["api"] == api
+    assert isinstance(current_result, dict)
+    assert current_result["source_sha"] == "b" * 40
+    assert isinstance(controller_result, dict)
+    assert controller_result["api"] == api
 
 
 @pytest.mark.parametrize(
@@ -817,7 +822,8 @@ def _prepare_signed_update_tool(
     assert installed.returncode == 0, installed.stderr
     executable = workspace / "bin" / "vonkctl"
     python = workspace / "tools" / "vonk-cluster-profiles" / "bin" / "python"
-    assert executable.is_file() and python.is_file()
+    assert executable.is_file()
+    assert python.is_file()
     return workspace, environment, executable, python, wheels[1]
 
 
@@ -830,7 +836,8 @@ def _source_revision(root: Path) -> str:
         else "VONK_TRANSITION_SOURCE_SHA"
     )
     revision = os.environ[name]
-    assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision)
+    assert len(revision) == 40
+    assert all(c in "0123456789abcdef" for c in revision)
     return revision
 
 
@@ -1250,7 +1257,8 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             json.dumps(client.get("/api/platform"))
         )
         assert platform.api.source_sha == current_source
-        assert platform.workers is not None and len(platform.workers) == 1
+        assert platform.workers is not None
+        assert len(platform.workers) == 1
         assert platform.workers[0].source_sha == current_source
         assert api_responses[-1] == ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
         assert client.get("/api/cli/contract")["worker_compatibility"] == "compatible"
@@ -1446,7 +1454,8 @@ def test_update_installs_across_release_format_changes(
         download=lambda url, maximum: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert result["updated"] is True and len(installed) == 1
+    assert result["updated"] is True
+    assert len(installed) == 1
     request_update = cli_update.run_update
     fresh = request_update(
         channel="stable",
@@ -1500,7 +1509,8 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
         update()
     assert not installed
     objects[url] = original
-    assert update()["updated"] is True and len(installed) == 1
+    assert update()["updated"] is True
+    assert len(installed) == 1
 
 
 def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
@@ -1544,7 +1554,9 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
         clock=lambda: ticks[0],
         sleeper=sleep,
     )
-    assert result["updated"] and len(installed) == 1 and ticks[0] == 1.0
+    assert result["updated"]
+    assert len(installed) == 1
+    assert ticks[0] == 1.0
     fresh = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
@@ -1553,7 +1565,8 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
         download=lambda url, _: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert fresh["updated"] and len(installed) == 2
+    assert fresh["updated"]
+    assert len(installed) == 2
 
 
 def test_unknown_update_ends_without_install_then_fresh_request_works(
@@ -1592,7 +1605,8 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
             clock=lambda: ticks[0],
             sleeper=sleep,
         )
-    assert ticks[0] == 1 and installed == []
+    assert ticks[0] == 1
+    assert installed == []
     fresh = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
@@ -1601,7 +1615,8 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
         download=lambda url, _: objects[url],
         compatibility_observation=_controller_observation,
     )
-    assert fresh["updated"] and len(installed) == 1
+    assert fresh["updated"]
+    assert len(installed) == 1
 
 
 def test_notice_owner_cannot_unlink_replacement_lock(tmp_path):
@@ -1707,7 +1722,8 @@ def test_an_install_that_keeps_logging_outlives_its_quiet_window(tmp_path, monke
         tmp_path, "for i in 1 2 3 4 5 6; do echo resolving $i; sleep 0.5; done\n"
     )
     completed = cli_update._install([uv, "tool", "install", "wheel.whl"])
-    assert completed is not None and completed.returncode == 0
+    assert completed is not None
+    assert completed.returncode == 0
     assert "resolving 6" in completed.stdout
 
 

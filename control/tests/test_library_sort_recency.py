@@ -174,7 +174,8 @@ def test_cursor_continues_after_a_boundary_that_left_the_catalog(
 
     projection, sessions = _build(tmp_path)
     selectors, cursor = page(projection, 2)
-    assert selectors == _selectors(order[:2]) and cursor
+    assert selectors == _selectors(order[:2])
+    assert cursor
     with sessions.begin() as session:
         session.query(CatalogDocumentHead).filter_by(kind=kind, slug=order[1]).delete()
     # A fresh projection: the first one may hold the earlier catalog snapshot.

@@ -143,9 +143,12 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
                 InstallationNode.node_id == nodes[0],
             )
         )
-        assert job is not None and job.state == "running"
-        assert installation is not None and installation.state == "installing"
-        assert node is not None and node.state != "failed"
+        assert job is not None
+        assert job.state == "running"
+        assert installation is not None
+        assert installation.state == "installing"
+        assert node is not None
+        assert node.state != "failed"
     view = service.get(installation_operation.id)
     assert view.retry_due_at == NOW + timedelta(seconds=2)
 
@@ -182,7 +185,8 @@ def test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry(
                 InstallationNode.node_id == nodes[0],
             )
         )
-        assert installation is not None and node is not None
+        assert installation is not None
+        assert node is not None
         if retry_state == "succeeded":
             assert installation.state == "installed"
             assert node.state == "installed"
@@ -224,8 +228,10 @@ def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
-        assert run is not None and run.state == "starting"
-        assert node is not None and node.state != "failed"
+        assert run is not None
+        assert run.state == "starting"
+        assert node is not None
+        assert node.state != "failed"
     assert service.get(started.id).retry_due_at == NOW + timedelta(seconds=2)
 
 

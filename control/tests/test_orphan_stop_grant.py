@@ -186,7 +186,7 @@ def _unowned(client, run_id: str, node: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    "state, on, remapped",
+    ("state", "on", "remapped"),
     [
         pytest.param(None, (NODE_A,), False, id="run-row-deleted"),
         pytest.param("running", (NODE_A,), True, id="running-installation-remapped"),
@@ -245,7 +245,7 @@ def test_grant_is_refused_while_a_live_operation_owns_the_run(world, state) -> N
 
 
 @pytest.mark.parametrize(
-    "state, assigned",
+    ("state", "assigned"),
     [
         (state, assigned)
         for state in (

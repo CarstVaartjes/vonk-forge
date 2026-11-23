@@ -776,12 +776,13 @@ def test_authenticated_claim_persists_certificate_bound_source(agent_system) -> 
         )
         assert contact_row(presence).management_address == "10.0.0.42"
         observed = contact_row(presence).management_observed_at
-        assert observed is not None and observed.replace(tzinfo=UTC) == clock.now
+        assert observed is not None
+        assert observed.replace(tzinfo=UTC) == clock.now
 
 
 @pytest.mark.parametrize(
     "hostname",
-    ("", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256),
+    ["", "-spark", "spark_3542", "spark 3542", "spark..lab", "a" * 256],
 )
 def test_authenticated_claim_drops_an_invalid_reported_hostname(
     agent_system, hostname: str
@@ -803,14 +804,14 @@ def test_authenticated_claim_drops_an_invalid_reported_hostname(
 
 @pytest.mark.parametrize(
     ("removed_field", "removed_value"),
-    (
+    [
         ("active_slot", "B"),
         ("agent_sha256", "c" * 64),
         ("platform_version", "1.2.3"),
         ("supervisor_generation", 7),
         ("supervisor_ready_generation", 7),
         ("activation_deadline", "2026-08-20T12:00:00Z"),
-    ),
+    ],
 )
 def test_claim_rejects_retired_supervisor_identity_fields(
     agent_system, removed_field: str, removed_value: object
@@ -837,7 +838,7 @@ def test_claim_rejects_retired_supervisor_identity_fields(
         assert runtime_value(node, lambda identity: identity.semantic_version) is None
 
 
-@pytest.mark.parametrize("architecture", ("linux-amd64", "linux-arm64"))
+@pytest.mark.parametrize("architecture", ["linux-amd64", "linux-arm64"])
 def test_claim_accepts_independently_valid_packaged_build_and_binary_digests(
     agent_system, architecture: str
 ) -> None:

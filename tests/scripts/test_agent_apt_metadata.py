@@ -22,7 +22,7 @@ def run_metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.parametrize(
     ("channel", "version", "expected"),
-    (
+    [
         (
             "dev",
             "0.1.0~dev.1786300000+g0123456789ab",
@@ -47,7 +47,7 @@ def run_metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
                 "state_prefix=arm64/versions/0.1.0",
             ],
         ),
-    ),
+    ],
 )
 def test_metadata_emits_only_fixed_channel_authority(
     channel: str, version: str, expected: list[str]
@@ -60,7 +60,7 @@ def test_metadata_emits_only_fixed_channel_authority(
 
 @pytest.mark.parametrize(
     "arguments",
-    (
+    [
         (),
         ("dev",),
         ("testing", "0.1.0"),
@@ -69,7 +69,7 @@ def test_metadata_emits_only_fixed_channel_authority(
         ("stable", "01.1.0"),
         ("dev", "0.1.0~dev.0+g0123456789AB"),
         ("dev", "0.1.0~dev.1+g0123456789ab", "vonk-forge"),
-    ),
+    ],
 )
 def test_metadata_rejects_noncanonical_or_caller_selected_authority(
     arguments: tuple[str, ...],

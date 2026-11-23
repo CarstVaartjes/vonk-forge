@@ -188,7 +188,8 @@ def copy_as_another_recipe(session, revision_id: str, *, model_content_sha256=No
     if model_content_sha256 is not None:
         document = copying.deepcopy(copy.document)
         models = document["models"]
-        assert isinstance(models, list) and isinstance(models[0], dict)
+        assert isinstance(models, list)
+        assert isinstance(models[0], dict)
         models[0]["model"] = {
             **models[0]["model"],
             "content_sha256": model_content_sha256,
@@ -214,7 +215,8 @@ def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     with sessions() as session:
         build = session.scalar(select(RecipeBuild))
         mapping = session.scalar(select(ClusterMapping))
-        assert build is not None and mapping is not None
+        assert build is not None
+        assert mapping is not None
         mapping_id = mapping.id
     install_plan = lifecycle.preview_install(mapping_id, build.id)
     stored_plan = install_plan.stored_plan()

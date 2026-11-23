@@ -167,7 +167,7 @@ def test_fleet_cursor_and_membership_are_one_real_sql_snapshot(postgres_engine):
 
 
 @pytest.mark.parametrize(
-    "resource,table",
+    ("resource", "table"),
     [("fleet", "agent_nodes"), ("platform", "control_process_heartbeats")],
 )
 def test_slow_stream_releases_sql_and_keeps_original_observation(
@@ -332,7 +332,7 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
 
 
 @pytest.mark.parametrize(
-    "resource,table",
+    ("resource", "table"),
     [
         ("fleet", "agent_nodes"),
         (f"fleet/{NODE}", "agent_nodes"),
@@ -366,7 +366,8 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             assert response.headers["retry-after"] == "5"
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["content-type"] == "application/json"
-            assert "nodes" not in response.json() and "workers" not in response.json()
+            assert "nodes" not in response.json()
+            assert "workers" not in response.json()
             # The lock applies only to this observation's dependency; unrelated
             # work does not wait behind the failed capture transaction.
             other = peer.get(

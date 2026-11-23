@@ -75,7 +75,8 @@ def _cli_dependencies_module(root: Path):
     spec = importlib.util.spec_from_file_location(
         "vonk_cli_dependencies", root / "tools" / "cli_dependencies.py"
     )
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

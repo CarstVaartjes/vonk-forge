@@ -567,7 +567,8 @@ def test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable(
     valid, unreadable = operations
     with sessions.begin() as session:
         job = session.get(Job, unreadable.operation_id)
-        assert job is not None and isinstance(job.payload, dict)
+        assert job is not None
+        assert isinstance(job.payload, dict)
         persisted_payload = dict(job.payload)
         persisted_plan = persisted_payload.get("plan")
         assert isinstance(persisted_plan, dict)
@@ -1015,7 +1016,8 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
         reason="Different intent",
     )
     assert repeated.state == "cancelled"
-    assert repeated.result is not None and repeated.result.cancellation is not None
+    assert repeated.result is not None
+    assert repeated.result.cancellation is not None
     assert repeated.result.cancellation.reason == "Keep the current profile"
     request_key = str(uuid.uuid4())
     active = service.apply(
@@ -1076,7 +1078,8 @@ def test_production_build_queue_receipt_survives_phase_handoff_and_completion(
     )
     lifecycle = planner._lifecycle
     executor = planner._phase_executor
-    assert lifecycle is not None and executor is not None
+    assert lifecycle is not None
+    assert executor is not None
     with sessions() as session:
         job = session.get(Job, parent.operation_id)
         assert job is not None

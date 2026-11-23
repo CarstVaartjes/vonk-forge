@@ -134,7 +134,8 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
     )
     assert "vonk_node_ready" not in text
     assert "probe" not in text.lower()
-    assert "192.168." not in text and "node.local" not in text
+    assert "192.168." not in text
+    assert "node.local" not in text
 
 
 def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
@@ -249,7 +250,8 @@ def test_metric_labels_are_allowlisted_and_unknown_values_collapse() -> None:
     metrics.set_job_count("user-supplied-unique-kind", "surprise", 3)
     text = metrics.render()
     assert 'kind="other",state="other"' in text
-    assert "user-supplied" not in text and "surprise" not in text
+    assert "user-supplied" not in text
+    assert "surprise" not in text
 
 
 def test_job_count_snapshot_replaces_previous_states() -> None:

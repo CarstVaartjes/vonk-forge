@@ -122,7 +122,8 @@ def test_profile_saves_share_references_with_distribution_and_downloads(
                     assert not release.is_set()
                     with world.sessions() as session:
                         holders = report_admission_locks(session).held
-                    assert holders and all(
+                    assert holders
+                    assert all(
                         holder.holder.startswith("profile-save:") for holder in holders
                     )
                 finally:

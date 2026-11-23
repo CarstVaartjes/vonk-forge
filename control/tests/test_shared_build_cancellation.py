@@ -93,7 +93,8 @@ def test_shared_build_survives_one_detachment_then_stops_after_last_consumer(
     with sessions() as session:
         child_id = session.scalar(select(Job.id).where(Job.kind == "recipe.build.v1"))
         revision = session.get(CatalogDocumentRevision, selected.recipe_revision_id)
-        assert child_id is not None and revision is not None
+        assert child_id is not None
+        assert revision is not None
     availability = _availability(
         sessions,
         FilesystemRuntimeImageStorage(tmp_path / "images"),
@@ -188,7 +189,8 @@ def test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes
             job = session.get(Job, parent.operation_id)
             assert job is not None
             cancellation = planner.get(parent.operation_id).result
-            assert cancellation is not None and cancellation.cancellation is not None
+            assert cancellation is not None
+            assert cancellation.cancellation is not None
             assert cancellation.cancellation.request_key == key
             assert job.result is not None
             expected_result = {**before[2], "cancellation": job.result["cancellation"]}
@@ -248,7 +250,8 @@ def test_new_consumer_cannot_join_across_last_consumer_cleanup(
     with sessions.begin() as session:
         child_id = session.scalar(select(Job.id).where(Job.kind == "recipe.build.v1"))
         revision = session.get(CatalogDocumentRevision, selected.recipe_revision_id)
-        assert child_id is not None and revision is not None
+        assert child_id is not None
+        assert revision is not None
     executor_id = _issue(sessions, child_id) if issued else None
     planner.cancel(
         parent.operation_id,
@@ -349,4 +352,5 @@ def test_malformed_ownership_cannot_starve_an_unneeded_valid_build(
         for identity in malformed_ids:
             malformed = session.get(Job, identity)
             assert malformed is not None
-            assert malformed.state == "running" and malformed.result is None
+            assert malformed.state == "running"
+            assert malformed.result is None

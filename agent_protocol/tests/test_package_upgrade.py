@@ -98,7 +98,7 @@ def test_source_authority_rejects_arbitrary_path_and_root_receipt_is_current() -
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    ("field", "value"),
     [
         ("source_version", "../old.deb"),
         ("outcome", "shell output secret"),

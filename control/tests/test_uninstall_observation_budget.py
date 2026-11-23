@@ -93,7 +93,8 @@ def exercise_unknown_cleanup(
     if failure is None:
         with sessions() as session:
             stored = session.get(Job, owner.id)
-            assert stored is not None and stored.state == LifecycleState.QUEUED
+            assert stored is not None
+            assert stored.state == LifecycleState.QUEUED
         # The immutable recovery deadline survives recreation and later attempts.
         clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
         # Its Spark is present the whole time: an unknown it does not resolve
@@ -104,7 +105,8 @@ def exercise_unknown_cleanup(
     # A definite failure (no transient kind) ends at once; it is not reissued.
     with sessions() as session:
         stored = session.get(Job, owner.id)
-        assert stored is not None and stored.state in TERMINAL_LIFECYCLE_STATES
+        assert stored is not None
+        assert stored.state in TERMINAL_LIFECYCLE_STATES
         assert stored.state != LifecycleState.SUCCEEDED
     fresh_owner = parent(sessions, clock)
     fresh = jobs.enqueue(fresh_owner.id, NODE_A, operation_kind, "a" * 64, payload)
@@ -128,7 +130,8 @@ def exercise_unknown_cleanup(
     )
     with sessions() as session:
         stored = session.get(Job, fresh_owner.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize(
@@ -296,7 +299,8 @@ def test_live_retry_crosses_its_recovery_deadline_without_losing_ownership(
     jobs.reconcile_orders()
     with sessions() as session:
         stored = session.get(StoredOperation, operation.id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING
     jobs.record_result(
         AgentResult(
             fence=retry.fence,
@@ -354,7 +358,8 @@ def test_explicit_helper_denial_has_no_reissue_and_allows_fresh_admission(
     )
     with sessions() as session:
         ended = session.get(Job, owner.id)
-        assert ended is not None and ended.state in TERMINAL_LIFECYCLE_STATES
+        assert ended is not None
+        assert ended.state in TERMINAL_LIFECYCLE_STATES
     jobs.reconcile_orders()
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     fresh_owner = parent(sessions, clock)
@@ -362,10 +367,8 @@ def test_explicit_helper_denial_has_no_reissue_and_allows_fresh_admission(
         fresh_owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload
     )
     independent = claim_agent(jobs, NODE_A, "serial-a")
-    assert (
-        independent is not None
-        and fenced_operation(sessions, independent).id == fresh.id
-    )
+    assert independent is not None
+    assert fenced_operation(sessions, independent).id == fresh.id
 
 
 def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> None:
@@ -414,7 +417,8 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
         assert stored is not None
         assert stored.state not in TERMINAL_LIFECYCLE_STATES
         job = session.get(Job, owner.id)
-        assert job is not None and job.state not in TERMINAL_LIFECYCLE_STATES
+        assert job is not None
+        assert job.state not in TERMINAL_LIFECYCLE_STATES
     # Back, and it stays unresolved there for a whole window: it has stalled.
     _present(sessions, clock.now)
     clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
@@ -422,7 +426,8 @@ def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> 
     jobs.reconcile_orders()
     with sessions() as session:
         job = session.get(Job, owner.id)
-        assert job is not None and job.state in TERMINAL_LIFECYCLE_STATES
+        assert job is not None
+        assert job.state in TERMINAL_LIFECYCLE_STATES
     fresh_owner = parent(sessions, clock)
     jobs.enqueue(
         fresh_owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload

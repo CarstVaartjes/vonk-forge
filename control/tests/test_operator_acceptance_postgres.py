@@ -90,7 +90,8 @@ def test_profile_save_lost_response_replays_committed_revision(postgres_engine):
         transport.put("/api/profile/1", json=body, headers=headers)
     with sessions() as session:
         saved = session.scalar(select(FleetProfile))
-        assert saved is not None and saved.revision == 1
+        assert saved is not None
+        assert saved.revision == 1
         identity = saved.id
     restarted, _ = _client(sessions)
     replay = restarted.put("/api/profile/1", json=body, headers=headers)
@@ -128,7 +129,8 @@ def test_profile_load_lost_response_reconnects_after_restart(postgres_engine):
             == 1
         )
         accepted = session.scalar(select(FleetProfileApplication))
-        assert accepted is not None and accepted.request_key == key
+        assert accepted is not None
+        assert accepted.request_key == key
         identity = accepted.id
     restarted, _ = _client(sessions)
     response = restarted.post(path, json={"request_key": key}, headers=headers)

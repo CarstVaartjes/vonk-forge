@@ -124,7 +124,8 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         assert failure.headers["Cache-Control"] == "no-store"
         problem = failure.json()
         assert damaged_identity not in failure.text
-        assert "workers" not in problem and "worker_count" not in problem
+        assert "workers" not in problem
+        assert "worker_count" not in problem
     with sessions.begin() as session:
         session.execute(
             update(ControlProcessHeartbeat)

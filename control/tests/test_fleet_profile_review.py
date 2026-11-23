@@ -113,9 +113,8 @@ def test_profile_review_exposes_planner_headroom_without_hashing_free_memory(
     assert "Physical memory pool: shared" in rendered
     assert "Memory reserve: 0 B" in rendered
     assert "Ports required" in rendered
-    assert fit.ports_required and all(
-        str(port) in rendered for port in fit.ports_required
-    )
+    assert fit.ports_required
+    assert all(str(port) in rendered for port in fit.ports_required)
 
     with sessions.begin() as session:
         inventory = session.scalar(select(NodeInventorySnapshot))
@@ -363,10 +362,12 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
         if new_effect == "stop":
             replacement = session.get(RecipeRun, replacement_id)
-            assert replacement is not None and replacement.state == "running"
+            assert replacement is not None
+            assert replacement.state == "running"
         else:
             installation = session.get(RecipeInstallation, replacement_id)
-            assert installation is not None and installation.state == "installed"
+            assert installation is not None
+            assert installation.state == "installed"
 
 
 def test_review_binds_idle_roster_and_definition_but_not_observation_time():
@@ -933,7 +934,9 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
         profile = session.scalar(select(FleetProfile))
         installation = session.scalar(select(RecipeInstallation))
         sample = session.scalar(select(NodeInventorySnapshot))
-        assert profile is not None and installation is not None and sample is not None
+        assert profile is not None
+        assert installation is not None
+        assert sample is not None
         profile_id, installation_id = profile.id, installation.id
         installed = parse_stored_installation_plan(installation.plan)
         image = next(iter(installed.compiled_execution_plans.values())).runtime_image

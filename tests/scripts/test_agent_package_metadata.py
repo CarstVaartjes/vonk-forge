@@ -76,7 +76,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
 
 @pytest.mark.parametrize(
     ("channel", "ref_type", "ref_name", "sha", "sequence"),
-    (
+    [
         ("development", "tag", "main", SHA, "417"),
         ("development", "branch", "release", SHA, "417"),
         ("production", "branch", "v0.1.0", SHA, "0"),
@@ -91,7 +91,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
         ("development", "branch", "main", SHA, "9999999999999999999"),
         ("development", "branch", "main", SHA, "10000000000000000000"),
         ("production", "tag", "v0.1.1", SHA, "417"),
-    ),
+    ],
 )
 def test_metadata_rejects_noncanonical_release_inputs(
     channel: str, ref_type: str, ref_name: str, sha: str, sequence: str

@@ -40,7 +40,7 @@ INSTALLED_PLAN = (
 )
 
 
-@pytest.fixture()
+@pytest.fixture
 def installation(tmp_path):
     """Activate the committed fixture recipe and its exact models."""
 

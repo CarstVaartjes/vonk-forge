@@ -155,7 +155,7 @@ def test_lock_change_generates_updated_sbom_instead_of_stale_source_failure(
 
 
 @pytest.mark.parametrize(
-    ("field", "replacement"), (("revision", "0" * 40), ("sha256", "0" * 64))
+    ("field", "replacement"), [("revision", "0" * 40), ("sha256", "0" * 64)]
 )
 def test_reviewed_third_party_contract_wheel_pin_fails_closed(
     tmp_path: Path, field: str, replacement: str
@@ -178,7 +178,7 @@ def test_reviewed_third_party_contract_wheel_pin_fails_closed(
     assert "public contract" in " ".join(_errors(result))
 
 
-@pytest.mark.parametrize("image", ("caddy", "postgres", "tailscale"))
+@pytest.mark.parametrize("image", ["caddy", "postgres", "tailscale"])
 def test_image_lock_rejects_floating_runtime_references(
     tmp_path: Path, image: str
 ) -> None:
@@ -213,7 +213,7 @@ def test_platform_version_tags_without_digests_are_refused(tmp_path: Path) -> No
     )
 
 
-@pytest.mark.parametrize("name", ("litellm", "node", "python"))
+@pytest.mark.parametrize("name", ["litellm", "node", "python"])
 def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"
@@ -227,7 +227,7 @@ def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> N
     assert f"{name} image uses a floating tag" in " ".join(_errors(result))
 
 
-@pytest.mark.parametrize("target", ("lock", "dockerfile"))
+@pytest.mark.parametrize("target", ["lock", "dockerfile"])
 def test_litellm_dockerfile_must_match_locked_digest(
     tmp_path: Path, target: str
 ) -> None:
@@ -269,7 +269,7 @@ def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     assert "version" in " ".join(_errors(result))
 
 
-@pytest.mark.parametrize("value", (None, [], {}))
+@pytest.mark.parametrize("value", [None, [], {}])
 def test_malformed_runtime_image_lock_values_fail_closed(
     tmp_path: Path, value: object
 ) -> None:

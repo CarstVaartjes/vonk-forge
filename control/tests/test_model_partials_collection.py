@@ -240,7 +240,8 @@ def test_live_repair_keeps_its_partial_and_a_failed_one_loses_it_a_day_later(
         if service.get_operation(repair.id).state == LifecycleState.FAILED:
             break
     failure = service.get_operation(repair.id).failure
-    assert failure is not None and failure["code"] == ModelCacheCode.SOURCE_GONE
+    assert failure is not None
+    assert failure["code"] == ModelCacheCode.SOURCE_GONE
     ended = _updated_at(sessions, repair.id)
     clock.now = ended + timedelta(hours=23, minutes=59)
     assert gatherer.collect() == (0, False)
@@ -317,7 +318,8 @@ def test_transfers_take_the_shared_owner_lock(collector, tmp_path: Path) -> None
 
     service._download_locked = probe  # type: ignore[method-assign]
     service._run_download(started.id, force=False, interrupt_after_bytes=_HALF_MEBIBYTE)
-    assert seen and all(seen)
+    assert seen
+    assert all(seen)
 
 
 def test_pass_resumes_from_a_cursor_with_one_query_per_stale_directory(
@@ -404,7 +406,8 @@ def test_a_failed_download_keeps_its_partial_a_day_from_the_failure(tmp_path: Pa
         if service.get_operation(started.id).state == LifecycleState.FAILED:
             break
     failure = service.get_operation(started.id).failure
-    assert failure is not None and failure["code"] == ModelCacheCode.SOURCE_GONE
+    assert failure is not None
+    assert failure["code"] == ModelCacheCode.SOURCE_GONE
     ended = _updated_at(sessions, started.id)
     clock.now = ended + timedelta(hours=23, minutes=59)
     assert gatherer.collect() == (0, False)
@@ -525,7 +528,8 @@ def test_a_failed_query_or_unreadable_directory_does_not_stop_the_pass(
     monkeypatch.setattr(gatherer, "_ownership", ownership)
     monkeypatch.setattr(gatherer, "_newest_change", newest_change)
     assert gatherer.collect() == (1, False)
-    assert broken_query.exists() and unreadable.exists()
+    assert broken_query.exists()
+    assert unreadable.exists()
     assert not healthy.exists()
     monkeypatch.undo()
     # Both heal on the next pass.

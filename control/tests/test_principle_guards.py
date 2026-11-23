@@ -18,7 +18,7 @@ from .principle_guards import (
 
 
 @pytest.mark.parametrize(
-    "mode,bad,good",
+    ("mode", "bad", "good"),
     [
         (
             "waits",
@@ -409,8 +409,8 @@ def test_bounded_ending_requires_distinct_fresh_execution_and_completion():
     )
 
 
-@pytest.mark.parametrize("fault", (False, True))
-@pytest.mark.parametrize("collecting", (False, True))
+@pytest.mark.parametrize("fault", [False, True])
+@pytest.mark.parametrize("collecting", [False, True])
 def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
     """Catches scanner failure leaking a disabled collector into later work."""
     import gc
@@ -438,7 +438,7 @@ def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecti
         gc.enable() if original else gc.disable()
 
 
-@pytest.mark.parametrize("failure_at", (None, 8))
+@pytest.mark.parametrize("failure_at", [None, 8])
 def test_inventory_releases_temporary_trees_without_scanning_old_generations(
     tmp_path, monkeypatch, failure_at
 ):
@@ -710,7 +710,7 @@ FIXED_CAPS = [
 ]
 
 
-@pytest.mark.parametrize("bad,good", FIXED_CAPS)
+@pytest.mark.parametrize(("bad", "good"), FIXED_CAPS)
 def test_a_transfer_ends_on_inactivity_never_on_a_fixed_total(bad, good):
     assert scan_rust(bad, path="agent.rs")
     assert not scan_rust_fixed_caps(good, path="agent.rs")
@@ -743,7 +743,8 @@ def test_every_agent_transfer_ends_on_inactivity():
     crate = ROOT / "rust/crates/vonk-agent/src"
     tests = rust_test_files(crate)
     production = [path for path in sorted(crate.rglob("*.rs")) if path not in tests]
-    assert len(production) > 50 and len(tests) > 20  # the scan sees the crate
+    assert len(production) > 50
+    assert len(tests) > 20
     sites = [
         site
         for path in production
@@ -1125,7 +1126,7 @@ def test_no_waiting_load_reads_a_joining_spark_as_a_newer_intent_anywhere():
 
 
 @pytest.mark.parametrize(
-    "event_type,bounded", [("asyncio.Event", True), ("threading.Event", False)]
+    ("event_type", "bounded"), [("asyncio.Event", True), ("threading.Event", False)]
 )
 def test_wait_for_bounds_only_an_async_event(event_type: str, bounded: bool) -> None:
     source = f"async def tick(stop: {event_type}):\n    await asyncio.wait_for(stop.wait(), timeout=5)\n"

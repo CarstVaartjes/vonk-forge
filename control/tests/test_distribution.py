@@ -141,7 +141,8 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         "/agent/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
         headers=agent_headers(NODE_B, "serial-b"),
     )
-    assert second.status_code == 200 and "x-vonk-file" in second.headers
+    assert second.status_code == 200
+    assert "x-vonk-file" in second.headers
 
 
 def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
@@ -346,11 +347,9 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
             )
 
         def cached_artifact_file(self, set_digest, object_digest, object_path):
-            assert (
-                set_digest == "b" * 64
-                and object_digest == digest
-                and object_path == "weights/model.bin"
-            )
+            assert set_digest == "b" * 64
+            assert object_digest == digest
+            assert object_path == "weights/model.bin"
             return path, len(payload), digest
 
     source = ModelCacheObjectSource.from_service(Cache())
@@ -490,7 +489,8 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
     for _ in range(5):
         _assignment_value, spec, location = service.locate_object(**ask)
     assert source.opened == 1
-    assert spec.sha256 == model and location.path == source.root / model
+    assert spec.sha256 == model
+    assert location.path == source.root / model
 
     # A file that disappeared is looked up again as a recoverable miss.
     (source.root / model).unlink()

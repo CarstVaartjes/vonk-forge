@@ -76,6 +76,7 @@ def test_a_stale_job_member_stop_plan_is_re_planned_and_the_run_stops(
         assert drifted == [run_id]
         with world.sessions() as session:
             stopped = session.get(RecipeRun, run_id)
-            assert stopped is not None and stopped.state == "stopped"
+            assert stopped is not None
+            assert stopped.state == "stopped"
     finally:
         world.close()

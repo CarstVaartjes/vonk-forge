@@ -144,7 +144,8 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
                 ArtifactLifecycleGate,
                 {"artifact_kind": "model-set", "artifact_sha256": set_digest},
             )
-            assert gate is not None and gate.removal_owner_id == removal.id
+            assert gate is not None
+            assert gate.removal_owner_id == removal.id
     # A complete bounded inventory cycle revisits the previously busy gate.
     release_ended_gates(service)
     downloaded = _download(
@@ -187,7 +188,8 @@ def test_receipt_unlink_is_outside_sql_with_committed_fence_and_fresh_admission(
                 .where(ArtifactLifecycleGate.artifact_sha256 == archive)
                 .with_for_update(nowait=True)
             )
-            assert gate is not None and gate.removal_owner_id is not None
+            assert gate is not None
+            assert gate.removal_owner_id is not None
             blocked = False
             try:
                 require_reference_open(
@@ -809,7 +811,8 @@ def test_an_unmet_spark_demand_uninstalls_only_as_far_as_the_line(
     relief = collector.relief_for_spark(
         NODE, 900 * GIB, source="profile-load", subject="p", reason="x"
     )
-    assert relief is not None and relief.code == STORAGE_INSUFFICIENT
+    assert relief is not None
+    assert relief.code == STORAGE_INSUFFICIENT
 
 
 def _inside_window(world: Catalog, service: ModelCacheService, **kwargs):
@@ -850,7 +853,8 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
     path = _receipt(tmp_path, AN_IMAGE)
     free = TOTAL // 2
     result = _collector(world, image_cache_root=tmp_path, free=free).collect()
-    assert not path.exists() and result.images == 1
+    assert not path.exists()
+    assert result.images == 1
 
     path = _receipt(tmp_path, AN_IMAGE)
     world.job(
@@ -859,7 +863,8 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
         updated=NOW - timedelta(hours=1),
     )
     result = _collector(world, image_cache_root=tmp_path, free=free).collect()
-    assert path.exists() and result.images == 0
+    assert path.exists()
+    assert result.images == 0
 
 
 def _world_none(world: Catalog, set_digest: str, tmp_path: Path) -> None:
@@ -1071,8 +1076,11 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_evicted_last_under_press
     result = _collector(
         world, image_cache_root=tmp_path, free=100 * GIB - 1, **exact
     ).collect()
-    assert recent.exists() and not idle.exists() and result.images == 1
+    assert recent.exists()
+    assert not idle.exists()
+    assert result.images == 1
     assert _kept(result, "live operation") == 0
 
     result = _collector(world, image_cache_root=tmp_path, free=GIB, **exact).collect()
-    assert not recent.exists() and result.images == 1
+    assert not recent.exists()
+    assert result.images == 1

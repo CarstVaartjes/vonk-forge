@@ -130,7 +130,8 @@ def test_stream_preserves_split_unicode_and_output_without_newline(capsys):
         ],
         timeout=2,
     )
-    assert code == 0 and output == "€ tail"
+    assert code == 0
+    assert output == "€ tail"
     assert capsys.readouterr().out == output
 
 
@@ -157,7 +158,8 @@ def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
     code, output = module.stream(
         [sys.executable, "-c", "print('fresh bytes')"], timeout=2
     )
-    assert code == 0 and output == "fresh bytes\n"
+    assert code == 0
+    assert output == "fresh bytes\n"
 
 
 def test_container_timeout_removes_only_owned_scope_and_preserves_log(

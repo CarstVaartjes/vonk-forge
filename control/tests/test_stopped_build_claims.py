@@ -127,7 +127,8 @@ def stopped_build_releases_its_resources(tmp_path, engine):
     operations.record_node_result(cancelled.id, node_id, succeeded=False, evidence={})
     with sessions() as session:
         parent = session.get(Job, cancelled.id)
-        assert parent is not None and parent.state == "running"
+        assert parent is not None
+        assert parent.state == "running"
     assert operations.reconcile_cancelled_builds() is False
 
     assert _counted(sessions, node_id) == 0
@@ -178,7 +179,8 @@ def stopped_build_releases_its_resources(tmp_path, engine):
     later = now + OWNER_SETTLE_GRACE
     with sessions() as session:
         owner = reservation_owner(session, "recipe-build", plan.build_id, now=later)
-    assert owner.dead and "orders have ended" in owner.describe()
+    assert owner.dead
+    assert "orders have ended" in owner.describe()
     _reconcile(sessions, later)
     assert _held_kinds(sessions, plan.build_id) == set()
     assert _held_kinds(sessions, other_plan.build_id) == {"disk", "host-memory"}

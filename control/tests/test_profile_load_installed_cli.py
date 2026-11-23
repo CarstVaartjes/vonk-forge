@@ -430,7 +430,8 @@ def _run_pty(
             process.communicate(timeout=30)
         os.close(master)
     returncode = process.returncode
-    assert returncode is not None and stdout is not None
+    assert returncode is not None
+    assert stdout is not None
     return returncode, stdout.decode(), transcript.decode(errors="replace")
 
 

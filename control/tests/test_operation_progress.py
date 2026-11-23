@@ -148,7 +148,8 @@ def test_parallel_aggregate_eta_uses_slowest_and_unknown_member_stays_unknown():
     unknown = aggregate_progress(
         [a, b.model_copy(update={"total_bytes": None, "eta_seconds": None})]
     )
-    assert unknown.total_bytes is None and unknown.eta_seconds is None
+    assert unknown.total_bytes is None
+    assert unknown.eta_seconds is None
 
 
 @pytest.mark.parametrize("value", ["nonsense", "2026-09-08T12:00:00"])
@@ -172,7 +173,8 @@ def test_total_knowledge_can_be_explicitly_withdrawn_without_losing_bytes():
     first = sample(completed_bytes=10, total_bytes=20, total_bytes_known=True)
     next_sample = sample(first, seconds=2, total_bytes_known=False)
     assert next_sample.completed_bytes == 10
-    assert next_sample.total_bytes is None and next_sample.eta_seconds is None
+    assert next_sample.total_bytes is None
+    assert next_sample.eta_seconds is None
 
 
 def test_image_availability_boundary_preserves_canonical_measurements():

@@ -61,7 +61,8 @@ def _small(tmp_path: Path) -> Small:
     )
     with sessions.begin() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
-        assert row is not None and row.model_content_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
         revision = session.get(CatalogDocumentRevision, row.recipe_revision_id)
         assert revision is not None
         target, target_recipe = (

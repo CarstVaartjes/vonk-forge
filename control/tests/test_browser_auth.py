@@ -314,7 +314,8 @@ def test_throttle_success_clears_only_its_subject_failure_state() -> None:
     for _ in range(4):
         admin = limiter.reserve("admin")
         other = limiter.reserve("other-subject")
-        assert admin is not None and other is not None
+        assert admin is not None
+        assert other is not None
         limiter.fail(admin)
         limiter.fail(other)
     other = limiter.reserve("other-subject")
@@ -375,7 +376,7 @@ def test_login_issues_independent_session_and_csrf_tokens(
     assert issued.token != issued.csrf
 
 
-@pytest.mark.parametrize(("field", "value"), (("role", "viewer"), ("subject", "other")))
+@pytest.mark.parametrize(("field", "value"), [("role", "viewer"), ("subject", "other")])
 def test_resolution_rejects_session_when_exact_browser_authority_changes(
     sessions: sessionmaker[Session], field: str, value: str
 ) -> None:

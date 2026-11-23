@@ -124,7 +124,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         inventory(world.sessions, NODE, now[0], [obj])
         inventory(world.sessions, second, now[0], [obj])
         review = cache.review_fleet_model_removal(selector)
-        assert review.fleet is not None and review.fleet.nas_remove
+        assert review.fleet is not None
+        assert review.fleet.nas_remove
         assert review.fleet.targets[0].reclaimable_bytes == len(b"finished weights")
         key = str(uuid4())
         accepted = cache.remove_fleet_model_selector(
@@ -136,7 +137,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         assert accepted.state == LifecycleState.QUEUED
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now[0])
-        assert request is not None and request.remove_model_objects == [obj.sha256]
+        assert request is not None
+        assert request.remove_model_objects == [obj.sha256]
         cache.advance_removals()
         assert cache.get_operation(accepted.id).state != LifecycleState.SUCCEEDED
         assert path.exists()
@@ -166,7 +168,8 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         result = cache.get_operation(accepted.id)
         assert result.state == LifecycleState.SUCCEEDED, result.last_error
         assert not path.exists()
-        assert result.fleet is not None and result.fleet.confirmed_nodes == [
+        assert result.fleet is not None
+        assert result.fleet.confirmed_nodes == [
             NODE,
             second,
         ]
@@ -201,7 +204,8 @@ def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
         obj = ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)
         inventory(world.sessions, NODE, now[0], [obj], collected_before=slow)
         review = cache.review_fleet_model_removal(selector)
-        assert review.fleet is not None and review.fleet.nas_remove
+        assert review.fleet is not None
+        assert review.fleet.nas_remove
         accepted = cache.remove_fleet_model_selector(
             selector,
             actor="operator",
@@ -299,7 +303,8 @@ def test_shared_content_is_retained_on_nas_and_spark(
             assert resumed.cancellation is None
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
-        assert request is not None and not request.remove_model_objects
+        assert request is not None
+        assert not request.remove_model_objects
     finally:
         cache.close()
 
@@ -343,9 +348,8 @@ def test_unused_installation_uninstalls_through_existing_job(
     )
     with sessions() as session:
         installation = session.get(RecipeInstallation, first.owner_id)
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         selector = installation.model_content_sha256
         revision_id = installation.recipe_revision_id
         model = session.scalar(
@@ -506,9 +510,8 @@ def test_profile_or_running_workload_retains_model_and_installation(
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
     with sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         installation_id, digest = installation.id, installation.model_content_sha256
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
@@ -535,7 +538,8 @@ def test_profile_or_running_workload_retains_model_and_installation(
     try:
         inventory(sessions, nodes[0], now, [])
         review = cache.review_fleet_model_removal(digest)
-        assert review.fleet is not None and not review.fleet.nas_remove
+        assert review.fleet is not None
+        assert not review.fleet.nas_remove
         assert (
             review.fleet.targets[0].installations[0].disposition
             == FleetRemovalDisposition.RETAIN
@@ -550,7 +554,8 @@ def test_profile_or_running_workload_retains_model_and_installation(
         assert cache.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
         with sessions() as session:
             kept = session.get(RecipeInstallation, installation_id)
-            assert kept is not None and kept.state == InstallationState.INSTALLED
+            assert kept is not None
+            assert kept.state == InstallationState.INSTALLED
             assert (
                 session.scalar(
                     select(Job).where(Job.kind == AgentOperation.RECIPE_UNINSTALL)
@@ -648,9 +653,8 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
     with sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert (
-            installation is not None and installation.model_content_sha256 is not None
-        )
+        assert installation is not None
+        assert installation.model_content_sha256 is not None
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         digest, recipe = (
@@ -689,7 +693,8 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
                 review_digest=old.review_digest,
             )
         current = cache.review_fleet_model_removal(digest)
-        assert current.fleet is not None and not current.fleet.nas_remove
+        assert current.fleet is not None
+        assert not current.fleet.nas_remove
         receipt = cache.remove_fleet_model_selector(
             digest,
             actor="admin",
@@ -748,7 +753,8 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         assert receipt.fleet is not None
         with world.sessions() as session:
             grant = store_retention_request(session, NODE, now[0])
-            assert grant is not None and grant.remove_model_objects == [path.name]
+            assert grant is not None
+            assert grant.remove_model_objects == [path.name]
         if damage == "deadline":
             now[0] = receipt.fleet.deadline_at + timedelta(seconds=1)
         else:
@@ -781,7 +787,8 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         assert path.exists()
         with world.sessions() as session:
             grant = store_retention_request(session, NODE, now[0])
-            assert grant is not None and grant.remove_model_objects == []
+            assert grant is not None
+            assert grant.remove_model_objects == []
         cache.reconcile_removal_gates()
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
@@ -881,7 +888,8 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
             _store_operation_payload(row, "remove", plan)
         with world.sessions() as session:
             request = store_retention_request(session, NODE, now)
-        assert request is not None and request.remove_model_objects == []
+        assert request is not None
+        assert request.remove_model_objects == []
         assert path.read_bytes() == b"accepted weights"
         submit_model_download(cache, tmp_path)
     finally:
@@ -985,7 +993,8 @@ def test_offline_spark_without_the_model_does_not_block_fleet_removal(
         )
         review = cache.review_fleet_model_removal(selector)
         assert review.fleet is not None
-        assert review.fleet.nas_remove and not review.fleet.observation_issues
+        assert review.fleet.nas_remove
+        assert not review.fleet.observation_issues
         accepted = cache.remove_fleet_model_selector(
             selector,
             actor="operator",

@@ -312,7 +312,8 @@ def test_a_3_0_document_with_a_newer_minor_field_is_accepted() -> None:
     document = _example("recipe-job.json")
     document["a_field_a_newer_minor_added"] = {"x": 1}
     parsed, clean, *_ = _parse(document)
-    assert clean == document and parsed.identity.slug == document["identity"]["slug"]
+    assert clean == document
+    assert parsed.identity.slug == document["identity"]["slug"]
 
 
 def test_a_display_must_describe_its_own_document(sessions) -> None:
@@ -374,7 +375,8 @@ def test_a_row_the_3_0_controller_wrote_is_already_current(sessions) -> None:
                 CatalogDocumentRevision.kind == "recipe"
             )
         )
-        assert stored is not None and stored.projected["artifact_inputs"]
+        assert stored is not None
+        assert stored.projected["artifact_inputs"]
     with sessions() as session:
         before = {
             row.id: row.projected
@@ -446,4 +448,5 @@ def test_a_3_0_sync_over_a_stored_2x_row_adds_one_head_and_one_update_notice(
         newest = newest_active_revisions(session, {new.document_id})[new.document_id]
         assert newest.id == new.id
         notice = recipe_update_notice("Synthetic Tiny build", old, newest)
-        assert notice is not None and notice.newest_revision_id == new.id
+        assert notice is not None
+        assert notice.newest_revision_id == new.id

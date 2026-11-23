@@ -254,7 +254,8 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                 with sessions() as session:
                     revision = session.get(CatalogDocumentRevision, revision_id)
                     build = session.get(RecipeBuild, build_id)
-                    assert revision is not None and build is not None
+                    assert revision is not None
+                    assert build is not None
                     entities = resolve_recipe_entities(session, revision)
                     option_choices, settings = split_option_choices(
                         plan.mapping.parameters if plan.mapping is not None else None
@@ -492,7 +493,8 @@ def test_a_switch_longer_than_five_minutes_runs_one_preflight_round(
     assert len(installations) == 1
     assert installations[0].plan_digest == switch.admitted.plan_digest
     completed = switch.service.get(switch.operation.operation_id)
-    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.result is not None
+    assert completed.result.retry_attempt is None
     assert completed.progress.operation.phase != "install-preflight-refresh"
     assert _runtime_probes(switch.sessions) == probes
 
@@ -580,7 +582,8 @@ def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
         switch.drive()
     completed = service.get(operation_id)
     assert completed.state != "failed", completed.status_reason
-    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.result is not None
+    assert completed.result.retry_attempt is None
     assert completed.progress.operation.phase != "install-preflight-refresh"
     with sessions() as session:
         assert len(list(session.scalars(select(RecipeInstallation)))) == 1
@@ -615,7 +618,8 @@ def test_runtime_install_capacity_busy_parks_and_retries_the_switch(
     assert switch.executor.events.count("runtime-install") == 2
     recovered = switch.service.get(switch.operation.operation_id)
     assert recovered.state != "failed"
-    assert recovered.result is not None and recovered.result.retry_attempt is None
+    assert recovered.result is not None
+    assert recovered.result.retry_attempt is None
 
 
 def test_run_switch_retry_reports_its_wait_and_is_not_failed(
@@ -650,7 +654,8 @@ def test_run_switch_retry_reports_its_wait_and_is_not_failed(
         if switch.executor.events.count("runtime-install") >= 2:
             break
     recovered = switch.service.get(switch.operation.operation_id)
-    assert recovered.blockers == [] and recovered.next_attempt_at is None
+    assert recovered.blockers == []
+    assert recovered.next_attempt_at is None
 
 
 def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
@@ -671,7 +676,8 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         )
         view = switch.service.get(switch.operation.operation_id)
         assert view.state == "running"
-        assert view.result is not None and view.next_attempt_at is not None
+        assert view.result is not None
+        assert view.next_attempt_at is not None
         due = view.next_attempt_at
         observed_delays.append(int((due - switch.clock.now).total_seconds()))
         assert max(1, cap * 3 // 4) <= observed_delays[-1] <= min(60, cap * 5 // 4)
@@ -694,7 +700,8 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
         from vonk_control.jobs.documents import RunSwitchRunIntent
 
         payload = _run_switch_payload(session.get(Job, operation.operation_id))
-        assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)
+        assert payload is not None
+        assert isinstance(payload.intent, RunSwitchRunIntent)
         request = payload.intent.request
 
     def end(_operation):

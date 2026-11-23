@@ -300,7 +300,7 @@ def _assert_admission_free(
 
 
 @pytest.mark.parametrize(
-    "kind", ("heartbeat", "reclaim", "fresh-claim", "succeed", "fail", "delivery")
+    "kind", ["heartbeat", "reclaim", "fresh-claim", "succeed", "fail", "delivery"]
 )
 def test_open_agent_transaction_leaves_admission_and_publication_free(
     fleet, postgres_engine, kind
@@ -433,7 +433,7 @@ def _recipe_write(world, kind: str) -> Callable[[], object]:
     return lambda: jobs.record_result(cancelled)
 
 
-@pytest.mark.parametrize("kind", ("claim", "heartbeat", "succeed"))
+@pytest.mark.parametrize("kind", ["claim", "heartbeat", "succeed"])
 def test_recipe_agent_writes_through_the_production_consumer_leave_admission_free(
     recipe_world, postgres_engine, kind
 ):
@@ -570,8 +570,10 @@ def test_hammered_agent_traffic_never_refuses_admission_or_deadlocks(
     assert not failures, failures[:3]
     assert not refusals, refusals[:3]
     assert node_statements == []
-    assert rounds > 0 and passes[0] > 0
-    assert ended[2] > 0 and ended[3] > 0
+    assert rounds > 0
+    assert passes[0] > 0
+    assert ended[2] > 0
+    assert ended[3] > 0
     with sessions() as session:
         stored = {row.node_id: row for row in session.scalars(select(AgentNodeContact))}
         assert {

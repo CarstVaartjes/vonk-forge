@@ -1099,7 +1099,7 @@ def test_public_objects_upload_concurrently_within_commit_phases(
 
 @pytest.mark.parametrize(
     "failed_key",
-    (
+    [
         "vonk-forge-dev-archive-keyring.gpg",
         (
             "pool/main/v/vonk-forge-agent/"
@@ -1108,7 +1108,7 @@ def test_public_objects_upload_concurrently_within_commit_phases(
         "dists/dev/Release",
         "dists/dev/Release.gpg",
         "dists/dev/InRelease",
-    ),
+    ],
 )
 def test_public_failure_before_or_at_inrelease_never_advances_latest(
     tmp_path: Path, failed_key: str
@@ -1324,10 +1324,10 @@ def test_public_bundle_binds_the_exact_verified_package_hash(tmp_path: Path) -> 
 
 @pytest.mark.parametrize(
     "missing_name",
-    (
+    [
         "public/dists/dev/Release",
         "public/dists/dev/Release.gpg",
-    ),
+    ],
 )
 def test_public_bundle_requires_exact_release_metadata_objects(
     tmp_path: Path, missing_name: str
@@ -1380,14 +1380,14 @@ def test_public_bundle_rejects_by_hash_alias_outside_its_digest_directory(
 
 @pytest.mark.parametrize(
     "names",
-    (
+    [
         ("aptly", "aptly/db", "aptly/./db", "publication-receipt.json"),
         ("aptly", "aptly/db", "aptly//db", "publication-receipt.json"),
         ("aptly", "aptly/db", "aptly/../db", "publication-receipt.json"),
         ("aptly", "aptly/db", "/aptly/db", "publication-receipt.json"),
         ("aptly", "aptly/db", "aptly/control\nname", "publication-receipt.json"),
         ("aptly", "aptly/db", "outside/file", "publication-receipt.json"),
-    ),
+    ],
 )
 def test_structural_tar_validation_rejects_noncanonical_destinations(
     names: tuple[str, ...],
@@ -1416,13 +1416,13 @@ def test_structural_tar_validation_rejects_noncanonical_destinations(
 
 @pytest.mark.parametrize(
     "member_type",
-    (
+    [
         tarfile.SYMTYPE,
         tarfile.LNKTYPE,
         tarfile.CHRTYPE,
         tarfile.BLKTYPE,
         tarfile.FIFOTYPE,
-    ),
+    ],
 )
 def test_structural_tar_validation_rejects_links_devices_and_fifos(
     member_type: bytes,

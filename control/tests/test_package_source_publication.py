@@ -57,7 +57,7 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 version=version,
                 acceptance_baseline=True,
             )
-            self.assertEqual(built.returncode, 0, built.stderr)
+            assert built.returncode == 0, built.stderr
             # Consume only the files actually uploaded by the production action.
             action = yaml.safe_load(
                 (ROOT / ".github/actions/agent-package-build/action.yml").read_text()
@@ -90,26 +90,26 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 loaded = load_package_source(
                     client, "dev", source.build_digest, source.package.binary_sha256
                 )
-                self.assertEqual(loaded, source)
-                self.assertEqual(requested, ["/" + source.object_key("dev")])
-                with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
+                assert loaded == source
+                assert requested == ["/" + source.object_key("dev")]
+                with pytest.raises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                     load_package_source(client, "dev", source.build_digest, "a" * 64)
-                self.assertEqual(
+                assert (
                     load_package_source(
                         client, "dev", source.build_digest, source.package.binary_sha256
-                    ),
-                    source,
+                    )
+                    == source
                 )
             provenance = package.with_suffix(".provenance.json")
             verified_provenance = provenance.read_bytes()
             document = json.loads(verified_provenance)
             document["subject"][1]["digest"]["sha256"] = "f" * 64
             provenance.write_text(json.dumps(document))
-            with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
+            with pytest.raises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                 package_source(package, version=version)
-            self.assertTrue(package.is_file())
+            assert package.is_file()
             provenance.write_bytes(verified_provenance)
-            self.assertEqual(package_source(package, version=version), source)
+            assert package_source(package, version=version) == source
 
 
 if __name__ == "__main__":

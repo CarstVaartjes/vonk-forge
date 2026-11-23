@@ -37,7 +37,8 @@ def start_on_released_gang(
     assert lifecycle._clock() == clock()
     with sessions() as session:
         stopped = session.get(RecipeRun, old_run_id)
-        assert stopped is not None and stopped.state == "stopped"
+        assert stopped is not None
+        assert stopped.state == "stopped"
         assert set(
             session.scalars(select(RunNode.node_id).where(RunNode.run_id == old_run_id))
         ) == set(nodes)

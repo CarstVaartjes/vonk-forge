@@ -100,10 +100,10 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
         switch.worker.composite.close()
 
 
-@pytest.mark.parametrize("wrapped", (False, True))
+@pytest.mark.parametrize("wrapped", [False, True])
 @pytest.mark.parametrize(
     "cause",
-    (
+    [
         "version",
         "lock",
         "deadlock",
@@ -112,7 +112,7 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
         "shutdown",
         "pool",
         "deterministic",
-    ),
+    ],
 )
 def test_wait_reason_preserves_contention_and_typed_evidence(cause, wrapped):
     """Catches a wait logged without a reason, or contention as unavailability."""

@@ -60,7 +60,8 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     with sessions.begin() as session:
         initial = session.get(FleetProfileApplication, first.id)
         selection = session.get(FleetProfileSelection, 1)
-        assert initial is not None and selection is not None
+        assert initial is not None
+        assert selection is not None
         initial.state = "succeeded"
         session.delete(selection)
     both = service.apply(both_profile.id, request_key=_uuid(18100), actor="admin")
@@ -257,7 +258,8 @@ def test_an_unplaced_assignment_counts_only_inside_the_adopted_lanes(
     with sessions.begin() as session:
         initial = session.get(FleetProfileApplication, first.id)
         selection = session.get(FleetProfileSelection, 1)
-        assert initial is not None and selection is not None
+        assert initial is not None
+        assert selection is not None
         initial.state = "succeeded"
         session.delete(selection)
     both = service.apply(both_profile.id, request_key=_uuid(18300), actor="admin")

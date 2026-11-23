@@ -176,7 +176,8 @@ def test_the_first_release_is_skipped_visibly(tmp_path: Path, monkeypatch, capsy
         "::notice title=Upgrade-carry acceptance skipped::" in capsys.readouterr().out
     )
     report = json.loads(output.read_text())
-    assert report["status"] == "skipped" and "no previous promoted" in report["reason"]
+    assert report["status"] == "skipped"
+    assert "no previous promoted" in report["reason"]
 
 
 CLEANUP_ID = "11111111-1111-4111-8111-111111111111"
@@ -417,7 +418,8 @@ def test_a_superseded_load_is_followed_to_its_automatic_retry(monkeypatch):
     result = lane._await_profile_application(
         dict(replies["first"]), label="editorial successor profile load", node_id="n"
     )
-    assert result["id"] == "retry" and result["state"] == "succeeded"
+    assert result["id"] == "retry"
+    assert result["state"] == "succeeded"
 
 
 def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
@@ -470,7 +472,8 @@ def test_a_fixture_the_live_library_withdrew_is_imported_and_served_once_more(
 
     assert lane._offered_once_more(serve, imported.append) == "serving"
     # The second attempt uses its own request keys, after a fresh import.
-    assert imported == ["-again"] and served == ["", "-again"]
+    assert imported == ["-again"]
+    assert served == ["", "-again"]
 
 
 def test_a_failure_without_a_library_withdrawal_is_not_retried(monkeypatch):

@@ -21,12 +21,14 @@ def test_reason_producer_store_generated_consumer_roundtrip(tmp_path: Path) -> N
     defaults = {}
     for name, field in ReasonCodeVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         defaults[name] = next(iter(enum))
     record = tmp_path / "reasons.json"
     for name, field in ReasonCodeVocabulary.model_fields.items():
         enum = field.annotation
-        assert isinstance(enum, type) and issubclass(enum, Enum)
+        assert isinstance(enum, type)
+        assert issubclass(enum, Enum)
         for member in enum:
             producer = ReasonCodeVocabulary.model_validate({**defaults, name: member})
             record.write_bytes(canonical_message(producer))

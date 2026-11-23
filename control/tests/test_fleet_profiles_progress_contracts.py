@@ -60,7 +60,8 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
     assert isinstance(step_result, FleetProfileVerificationResult)
     assert step_result.verified is True
     application_result = FleetProfileApplicationResult(changed=True, completed_steps=1)
-    assert application_result.changed and application_result.completed_steps == 1
+    assert application_result.changed
+    assert application_result.completed_steps == 1
     adapter_result = FleetProfileSwitchAdapterResult(
         children=[
             FleetProfileSwitchChildState(

@@ -203,7 +203,8 @@ def test_health_outage_recovers_without_reconstructing_or_replaying_effects():
     now[0] += timedelta(seconds=1)
     registry.retry_due()
     service.issue()
-    assert effects[0] == 2 and constructions[0] == 1
+    assert effects[0] == 2
+    assert constructions[0] == 1
 
 
 def test_background_recovery_is_independent_of_reads_and_requests():
@@ -269,7 +270,8 @@ def test_initializer_retry_reuses_owned_resources_and_shutdown_does_not_construc
     broken[0] = False
     now[0] += timedelta(seconds=1)
     registry.retry_due()
-    assert constructed[0] == 1 and initialized[0] == 2
+    assert constructed[0] == 1
+    assert initialized[0] == 2
     service.close()
     assert closed[0] == 1
     unopened = registry.guard(ControllerCapability.ARTIFACT_STORAGE, Service, Service)
@@ -277,7 +279,7 @@ def test_initializer_retry_reuses_owned_resources_and_shutdown_does_not_construc
     assert constructed[0] == 1
 
 
-@pytest.mark.parametrize("boundary", ("factory", "initializer", "health"))
+@pytest.mark.parametrize("boundary", ["factory", "initializer", "health"])
 def test_hung_construction_releases_owner_and_fences_late_result(boundary, monkeypatch):
     """Catches a timeout that leaves the lock owned or publishes a stale result."""
     from threading import Event, Thread

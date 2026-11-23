@@ -93,14 +93,16 @@ def test_a_foreign_container_refusal_waits_visibly_and_the_start_resumes_when_it
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)
     assert due >= clock.now + timedelta(seconds=30)
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = due + timedelta(seconds=1)
     retry = claim_agent(jobs, NODE_A, "serial-a")
-    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    assert retry is not None
+    assert fenced_attempt(sessions, retry).attempt == 2
 
 
 def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> None:
@@ -131,14 +133,16 @@ def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> 
 
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "failed"
+        assert stored is not None
+        assert stored.state == "failed"
         assert stored.next_action_at is None
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert attempt is not None and attempt.state == "failed"
+        assert attempt is not None
+        assert attempt.state == "failed"
     assert job_state(sessions, operation.parent_job_id).state == "failed"
 
 
@@ -173,7 +177,8 @@ def test_start_failure_after_the_deadline_is_not_retried(service) -> None:
     )
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "failed"
+        assert stored is not None
+        assert stored.state == "failed"
         assert stored.next_action_at is None
 
 
@@ -221,7 +226,8 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
     if body.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY:
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
-            assert stored is not None and stored.state == LifecycleState.FAILED
+            assert stored is not None
+            assert stored.state == LifecycleState.FAILED
             assert stored.next_action_at is None
         _assert_parent_ending_admit_fresh_request(
             jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
@@ -229,7 +235,8 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
         return
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
         assert stored.next_action_at is not None  # the retry is scheduled
         assert stored.status_reason is not None
     assert job_state(sessions, operation.parent_job_id).state == "queued"
@@ -309,7 +316,8 @@ def test_a_typed_done_and_cancel_close_their_orders(service) -> None:
     )
     with sessions() as session:
         stored = session.get(AgentOperation, first.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
         assert fenced_attempt(sessions, claim).result == {}
 
 
@@ -421,7 +429,8 @@ def test_distribution_retry_records_reobserved_progress_without_a_high_water_cla
         NODE_A,
         "serial-a",
     )
-    assert resumed is not None and fenced_attempt(sessions, resumed).attempt == 2
+    assert resumed is not None
+    assert fenced_attempt(sessions, resumed).attempt == 2
     jobs.heartbeat(
         resumed, {"phase": "verifying", "completed_bytes": 50, "completed_items": 0}, 60
     )
@@ -468,8 +477,10 @@ def test_exact_late_stop_success_settles_without_another_attempt(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
-        assert attempt is not None and attempt.state == LifecycleState.SUCCEEDED
+        assert stored is not None
+        assert stored.state == LifecycleState.SUCCEEDED
+        assert attempt is not None
+        assert attempt.state == LifecycleState.SUCCEEDED
         assert stored.current_attempt == 1
         assert attempt.result == STOP_RESULT.model_dump(mode="json")
     assert jobs.record_late_result(late) is False
@@ -515,7 +526,8 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
     assert jobs.record_late_result(late) is True
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
     resumed = None
     for _ in range(4):
         resumed = claim_agent(jobs, NODE_A, "serial-a")
@@ -528,17 +540,16 @@ def test_late_result_under_expired_fence_does_not_park_exact_resume_forever(
             assert stored.next_action_at is not None
             clock.now = max(clock.now, stored.next_action_at.replace(tzinfo=UTC))
     assert resumed is not None
-    assert (
-        fenced_operation(sessions, resumed).id == operation.id
-        and fenced_attempt(sessions, resumed).attempt == 2
-    )
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert fenced_attempt(sessions, resumed).attempt == 2
     with sessions() as session:
         previous = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert previous is not None and aos.attempt_lapsed(previous)
+        assert previous is not None
+        assert aos.attempt_lapsed(previous)
         assert previous.result is not None
     jobs.succeed(resumed, STOP_RESULT)
     assert (
@@ -579,9 +590,11 @@ def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operato
     clock.advance(seconds=45)
     assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
     claim = _claim_until_due(jobs, sessions, clock, operation.id)
-    assert claim is not None and fenced_attempt(sessions, claim).attempt == 2
+    assert claim is not None
+    assert fenced_attempt(sessions, claim).attempt == 2
     resumed_progress = fenced_attempt(sessions, claim).progress
-    assert resumed_progress is not None and resumed_progress["completed_bytes"] == 100
+    assert resumed_progress is not None
+    assert resumed_progress["completed_bytes"] == 100
 
     clock.advance(seconds=45)
     assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
@@ -591,7 +604,8 @@ def test_distribution_interrupted_twice_by_agent_restart_resumes_without_operato
     assert job_state(sessions, operation.parent_job_id).state == "queued"
 
     third = _claim_until_due(jobs, sessions, clock, operation.id)
-    assert third is not None and fenced_attempt(sessions, third).attempt == 3
+    assert third is not None
+    assert fenced_attempt(sessions, third).attempt == 3
     assert third.payload == claim.payload
     jobs.succeed(third, {"downloaded_bytes": 100})
     assert job_state(sessions, operation.parent_job_id).state == "succeeded"
@@ -701,7 +715,8 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
             reason = stored.status_reason or ""
 
     assert max(delays[:2]) <= 5
-    assert delays[3] >= 30 and delays[4] >= 60
+    assert delays[3] >= 30
+    assert delays[4] >= 60
     assert "interrupted 5 times in a row" in reason
 
 
@@ -775,7 +790,8 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service) -> None:
         distribution.authorize(node_id=NODE_A, plan_digest=COMMIT)
 
     retry = _claim_until_due(jobs, sessions, clock, operation.id)
-    assert retry is not None and fenced_attempt(sessions, retry).attempt == 2
+    assert retry is not None
+    assert fenced_attempt(sessions, retry).attempt == 2
     fresh = DistributionService(distribution.source, clock=clock, sessions=sessions)
     grant = fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
     assert grant.expires_at > clock.now + timedelta(minutes=30)
@@ -810,7 +826,8 @@ def test_a_failed_job_does_not_leave_a_sibling_parked_behind_an_unclaimable_retr
             )
     claim_a = claim_agent(jobs, NODE_A, "serial-a")
     claim_b = claim_agent(jobs, NODE_B, "serial-b")
-    assert claim_a is not None and claim_b is not None
+    assert claim_a is not None
+    assert claim_b is not None
 
     def refuse() -> None:
         jobs.record_result(
@@ -923,7 +940,8 @@ def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
         session.get(Job, stored.parent_job_id).state = "needs-operator"
 
     resumed = _claim_until_due(jobs, sessions, clock, operation.id)
-    assert resumed is not None and fenced_attempt(sessions, resumed).attempt == 3
+    assert resumed is not None
+    assert fenced_attempt(sessions, resumed).attempt == 3
     assert fenced_operation(sessions, resumed).id == operation.id
 
 

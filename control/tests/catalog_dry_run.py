@@ -76,7 +76,8 @@ def indexed_recipes(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Every indexed recipe row (document, content digest, package) by slug."""
 
     recipes = index["recipes"]
-    assert isinstance(recipes, list) and recipes
+    assert isinstance(recipes, list)
+    assert recipes
     return {row["document"]["identity"]["slug"]: row for row in recipes}
 
 

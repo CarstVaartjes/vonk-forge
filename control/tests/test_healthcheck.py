@@ -39,11 +39,11 @@ def test_healthcheck_probes_actual_readiness() -> None:
 
 @pytest.mark.parametrize(
     "response",
-    (
+    [
         {"status": "wrong"},
         {"ready": True},
         ["ready"],
-    ),
+    ],
 )
 def test_healthcheck_rejects_non_ready_response(response: object) -> None:
     from vonk_control import healthcheck

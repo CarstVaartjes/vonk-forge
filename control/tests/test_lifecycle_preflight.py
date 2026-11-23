@@ -151,7 +151,8 @@ def test_failed_probe_is_reissued_after_backoff(tmp_path):
                 AgentOperation.parent_job_id == _pending(checkpoint)
             )
         )
-        assert child is not None and operation is not None
+        assert child is not None
+        assert operation is not None
         child.state = "failed"
         child.status_reason = "runtime_preflight.execution_failed"
         operation.state = "failed"
@@ -175,7 +176,8 @@ def _fail_child(sessions, pending, now, *, reason, result):
                 AgentOperation.parent_job_id == _pending(pending)
             )
         )
-        assert child is not None and operation is not None
+        assert child is not None
+        assert operation is not None
         child.state = "failed"
         child.status_reason = reason
         operation.state = "failed"
@@ -226,7 +228,8 @@ def _fail_child(sessions, pending, now, *, reason, result):
 def test_security_probe_failures_are_returned_without_reprobe(tmp_path, code: str):
     sessions, _queue, clock, _node, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)
-    assert error is None and _pending(pending) is not None
+    assert error is None
+    assert _pending(pending) is not None
     _fail_child(
         sessions,
         pending,
@@ -300,7 +303,8 @@ def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None
     assert stale.next_check_at is not None
     clock.now = stale.next_check_at
     recovered, error = service.ensure(**arguments, previous=stale)
-    assert error is None and _pending(recovered) is not None
+    assert error is None
+    assert _pending(recovered) is not None
     _finish(sessions, recovered, clock.now, fingerprint="b" * 64)
     fresh, error = service.ensure(**arguments, previous=recovered)
     assert error is None
@@ -348,9 +352,8 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
         "serial-0",
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
     )
-    assert claim is not None and fenced_operation(
-        sessions, claim
-    ).parent_job_id == _pending(pending)
+    assert claim is not None
+    assert fenced_operation(sessions, claim).parent_job_id == _pending(pending)
     # Exercise the HTTP request contract against IDs from the real dispatcher.
     request = HostRuntimeGrantRequest.model_validate(
         {
@@ -382,7 +385,8 @@ def test_dispatched_preflight_claim_can_receive_its_signed_helper_grant(tmp_path
 def test_probe_restart_and_duplicate_dispatch_converge_without_advancing_work(tmp_path):
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     first, error = service.ensure(**arguments, previous=None)
-    assert error is None and _pending(first)
+    assert error is None
+    assert _pending(first)
     duplicate, error = service.ensure(**arguments, previous=None)
     assert _pending(duplicate) == _pending(first)
     restarted = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
@@ -390,7 +394,8 @@ def test_probe_restart_and_duplicate_dispatch_converge_without_advancing_work(tm
     assert _pending(pending) == _pending(first)
     _finish(sessions, pending, clock.now)
     complete, error = restarted.ensure(**arguments, previous=pending)
-    assert error is None and _pending(complete) is None
+    assert error is None
+    assert _pending(complete) is None
     assert complete.receipts[node_id].result.fingerprint
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
@@ -427,9 +432,8 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
     else:
         arguments["nodes"] = {node_id: True}
     refreshed, error = service.ensure(**arguments, previous=completed)
-    assert error is None and _pending(refreshed) != next(
-        iter(pending.pending_jobs.values()), None
-    )
+    assert error is None
+    assert _pending(refreshed) != next(iter(pending.pending_jobs.values()), None)
     assert refreshed.attempts[node_id] == 2
     assert node_id not in refreshed.receipts
 
@@ -440,7 +444,8 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
         nodes = sorted(session.scalars(select(AgentNode.node_id)))
     arguments["nodes"] = dict.fromkeys(nodes, False)
     pending, error = service.ensure(**arguments, previous=None)
-    assert error is None and set(pending.pending_jobs) == set(nodes)
+    assert error is None
+    assert set(pending.pending_jobs) == set(nodes)
     for node_id in nodes:
         _finish(
             sessions,
@@ -459,7 +464,8 @@ def test_changed_earlier_rank_is_reprobed_after_pending_peer_completes(tmp_path)
     assert nodes[1] in refreshed.receipts
     clock.now = refreshed.next_check_at
     refreshed, error = service.ensure(**arguments, previous=refreshed)
-    assert error is None and nodes[0] in refreshed.pending_jobs
+    assert error is None
+    assert nodes[0] in refreshed.pending_jobs
     assert refreshed.attempts[nodes[0]] == 2
 
 
@@ -475,7 +481,8 @@ def _upgrade_during_a_probe_round(tmp_path):
     """Issue a probe, upgrade the agent under it, then finish it on the new host."""
     sessions, _queue, clock, node_id, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(**arguments, previous=None)
-    assert error is None and _pending(pending)
+    assert error is None
+    assert _pending(pending)
     # The first post-restart claim samples the host before the daemon-reload.
     _claim_reports(sessions, node_id, "b" * 64)
     # The probe then runs on the host after the reload.
@@ -505,7 +512,8 @@ def test_a_real_host_change_after_the_receipt_causes_exactly_one_reprobe(tmp_pat
         _upgrade_during_a_probe_round(tmp_path)
     )
     completed, error = service.ensure(**arguments, previous=pending)
-    assert error is None and node_id in completed.receipts
+    assert error is None
+    assert node_id in completed.receipts
     _claim_reports(sessions, node_id, "d" * 64)
     dropped, error = service.ensure(**arguments, previous=completed)
     assert error is None
@@ -513,10 +521,12 @@ def test_a_real_host_change_after_the_receipt_causes_exactly_one_reprobe(tmp_pat
     assert dropped.next_check_at is not None
     clock.now = dropped.next_check_at
     reprobing, error = service.ensure(**arguments, previous=dropped)
-    assert error is None and _pending(reprobing)
+    assert error is None
+    assert _pending(reprobing)
     _finish(sessions, reprobing, clock.now, fingerprint="d" * 64)
     passed, error = service.ensure(**arguments, previous=reprobing)
-    assert error is None and _pending(passed) is None
+    assert error is None
+    assert _pending(passed) is None
     assert passed.next_check_at is None
     assert passed.receipts[node_id].result.fingerprint == "d" * 64
     assert passed.attempts[node_id] == 2
@@ -529,17 +539,20 @@ def test_repeated_host_changes_recover_after_restart_beyond_previous_attempt_lim
 ):
     sessions, queue, clock, node_id, service, arguments = _setup(tmp_path)
     checkpoint, error = service.ensure(**arguments, previous=None)
-    assert error is None and _pending(checkpoint)
+    assert error is None
+    assert _pending(checkpoint)
     host = "a" * 64
     for change in range(5):
         _finish(sessions, checkpoint, clock.now, fingerprint=host)
         accepted, error = service.ensure(**arguments, previous=checkpoint)
-        assert error is None and node_id in accepted.receipts
+        assert error is None
+        assert node_id in accepted.receipts
         # A claim after the receipt reports a host that changed again.
         host = f"{change + 1:x}" * 64
         _claim_reports(sessions, node_id, host)
         checkpoint, error = service.ensure(**arguments, previous=accepted)
-        assert error is None and _pending(checkpoint)
+        assert error is None
+        assert _pending(checkpoint)
         assert node_id not in checkpoint.receipts
         pending_id = _pending(checkpoint)
         checkpoint = LifecyclePreflightCheckpoint.model_validate_json(
@@ -547,11 +560,13 @@ def test_repeated_host_changes_recover_after_restart_beyond_previous_attempt_lim
         )
         service = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
         resumed, error = service.ensure(**arguments, previous=checkpoint)
-        assert error is None and _pending(resumed) == pending_id
+        assert error is None
+        assert _pending(resumed) == pending_id
         checkpoint = resumed
     _finish(sessions, checkpoint, clock.now, fingerprint=host)
     checkpoint, error = service.ensure(**arguments, previous=checkpoint)
-    assert error is None and _pending(checkpoint) is None
+    assert error is None
+    assert _pending(checkpoint) is None
     assert checkpoint.next_check_at is None
     assert checkpoint.attempts[node_id] == 6
     assert checkpoint.receipts[node_id].result.fingerprint == host
@@ -572,9 +587,8 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
         child.updated_at = clock.now
     restarted = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
     pending, error = restarted.ensure(**arguments, previous=checkpoint)
-    assert error is None and _pending(pending) == next(
-        iter(checkpoint.pending_jobs.values()), None
-    )
+    assert error is None
+    assert _pending(pending) == next(iter(checkpoint.pending_jobs.values()), None)
     clock.now += timedelta(seconds=1)
     waiting, error = restarted.ensure(**arguments, previous=pending)
     assert error is None
@@ -587,9 +601,8 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
     with sessions.begin() as session:
         refresh_queue_waits(session, clock.now, node_id=node_id)
     waiting, error = restarted.ensure(**arguments, previous=waiting)
-    assert error is None and _pending(waiting) == next(
-        iter(checkpoint.pending_jobs.values()), None
-    )
+    assert error is None
+    assert _pending(waiting) == next(iter(checkpoint.pending_jobs.values()), None)
     # A day without a poll is a named, alarmed wait on the exact child, never
     # a silent one: its typed reason and the stall past its fixed window.
     assert waiting.next_check_at is not None
@@ -601,7 +614,8 @@ def test_disconnected_probe_keeps_exact_child_until_recovery_after_restart(
     assert all(blocker.node_ids == [node_id] for blocker in waiting.child_waits)
     _finish(sessions, waiting, clock.now)
     completed, error = restarted.ensure(**arguments, previous=waiting)
-    assert error is None and _pending(completed) is None
+    assert error is None
+    assert _pending(completed) is None
     assert completed.next_check_at is None
     assert node_id in completed.receipts
     with sessions() as session:
@@ -648,7 +662,8 @@ def test_completed_probe_is_consumed_even_when_controller_resumes_after_deadline
     _finish(sessions, checkpoint, clock.now)
     clock.now += timedelta(seconds=180)
     completed, error = service.ensure(**arguments, previous=checkpoint)
-    assert error is None and _pending(completed) is None
+    assert error is None
+    assert _pending(completed) is None
     assert node_id in completed.receipts
 
 
@@ -766,16 +781,17 @@ def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path)
         "pending_node_id": node_id,
     }
     restored = RunSwitchOperationResult.model_validate_json(canonical_message(stored))
-    assert restored.phase_index == 2 and restored.completed_phases == [
-        ProfileChildPhase.PREPARE.value
-    ]
+    assert restored.phase_index == 2
+    assert restored.completed_phases == [ProfileChildPhase.PREPARE.value]
     assert restored.preflight is None
     restarted = LifecyclePreflight(sessions, queue, lambda: clock.now, 10)
     resumed, error = restarted.ensure(**arguments, previous=restored.preflight)
-    assert error is None and _pending(resumed) == child_id
+    assert error is None
+    assert _pending(resumed) == child_id
     _finish(sessions, resumed, clock.now)
     complete, error = restarted.ensure(**arguments, previous=resumed)
-    assert error is None and not complete.pending_jobs
+    assert error is None
+    assert not complete.pending_jobs
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
@@ -798,8 +814,10 @@ def test_one_round_admits_every_later_phase_on_an_unchanged_host(tmp_path):
         pending, error = service.ensure(
             previous=pending, **{**arguments, "phase_index": phase_index}
         )
-        assert error is None and not pending.pending_jobs
-        assert pending.next_check_at is None and node_id in pending.receipts
+        assert error is None
+        assert not pending.pending_jobs
+        assert pending.next_check_at is None
+        assert node_id in pending.receipts
     with sessions() as session:
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
@@ -895,14 +913,16 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
             clock.now,
         )
     complete, error = service.ensure(**arguments, previous=first)
-    assert error is None and set(complete.receipts) == {node_a, node_b}
+    assert error is None
+    assert set(complete.receipts) == {node_a, node_b}
 
     # Both Sparks reboot: the new round starts because their hosts changed.
     for node_id in (node_a, node_b):
         _claim_reports(sessions, node_id, "b" * 64)
     build_id = _heartbeating_build(sessions, node_b, clock.now)
     probing, error = service.ensure(**arguments, previous=complete)
-    assert error is None and set(probing.pending_jobs) == {node_a, node_b}
+    assert error is None
+    assert set(probing.pending_jobs) == {node_a, node_b}
     assert probing.last_failure_code == RuntimePreflightCode.HOST_CHANGED
     _finish(
         sessions,
@@ -917,7 +937,8 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
     clock.now += timedelta(minutes=10)
     _heartbeat(sessions, build_id, node_b, clock.now)
     waiting, error = service.ensure(**arguments, previous=probing)
-    assert error is None and set(waiting.pending_jobs) == {node_b}
+    assert error is None
+    assert set(waiting.pending_jobs) == {node_b}
     with sessions() as session:
         probe = session.scalar(
             select(AgentOperation).where(
@@ -1017,9 +1038,8 @@ def test_a_claimed_probe_shows_itself_running_never_the_round_start_reason(tmp_p
     assert error is None
     _claim_reports(sessions, node_id, "b" * 64)
     probing, error = service.ensure(**arguments, previous=complete)
-    assert (
-        error is None and probing.last_failure_code == RuntimePreflightCode.HOST_CHANGED
-    )
+    assert error is None
+    assert probing.last_failure_code == RuntimePreflightCode.HOST_CHANGED
     with sessions.begin() as session:
         probe = session.scalar(
             select(AgentOperation).where(

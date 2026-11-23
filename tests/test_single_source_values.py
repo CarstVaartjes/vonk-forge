@@ -13,7 +13,7 @@ def test_registered_values_have_one_owner() -> None:
     assert violations(ROOT) == []
 
 
-@pytest.mark.parametrize("suffix", (".py", ".yml", "Dockerfile", ".md", ""))
+@pytest.mark.parametrize("suffix", [".py", ".yml", "Dockerfile", ".md", ""])
 def test_guard_rejects_copied_policy_in_executable_surfaces(
     tmp_path: Path, suffix: str
 ) -> None:
@@ -116,19 +116,19 @@ def fixture_files(root: Path) -> list[str]:
 
 @pytest.mark.parametrize(
     "consumer",
-    (
+    [
         "scripts/example",
         ".github/workflows/example.yml",
         "Dockerfile",
         "docs/example.md",
-    ),
+    ],
 )
 @pytest.mark.parametrize(
     "filename",
-    (
+    [
         "vonk_agent_protocol-0.0.1-py3-none-any.whl",
         "vonk_agent_protocol-999.0.0-py3-none-any.whl",
-    ),
+    ],
 )
 def test_guard_rejects_old_and_future_wheel_filenames(
     registered_tree: Path, consumer: str, filename: str
@@ -156,7 +156,7 @@ def test_unrelated_domains_are_not_floating_tag_policy(registered_tree: Path) ->
     assert violations(root, fixture_files(root)) == []
 
 
-@pytest.mark.parametrize("field", ("max_count = 6", "baseline = 6", "debt = 6"))
+@pytest.mark.parametrize("field", ["max_count = 6", "baseline = 6", "debt = 6"])
 def test_registry_refuses_debt_allowances(registered_tree: Path, field: str) -> None:
     from pydantic import ValidationError
 

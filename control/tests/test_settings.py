@@ -196,7 +196,7 @@ def test_development_uses_ephemeral_api_secrets(
 
 @pytest.mark.parametrize(
     "proxy_auth",
-    (
+    [
         "p" * 31 + "\n",
         "p" * 32 + " ",
         " " + "p" * 32,
@@ -204,7 +204,7 @@ def test_development_uses_ephemeral_api_secrets(
         "p" * 31 + "=",
         "p" * 16 + "\n" + "p" * 16,
         "p" * 16 + "\x00" + "p" * 16,
-    ),
+    ],
 )
 def test_noncanonical_agent_proxy_auth_is_refused(
     secrets_root: Path, proxy_auth: str

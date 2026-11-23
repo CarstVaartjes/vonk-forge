@@ -101,7 +101,8 @@ def _state(services, run_id: str) -> tuple[str, str]:
     with services.sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         return run.state, node.state
 
 
@@ -119,7 +120,8 @@ def test_running_process_of_ended_run_reopens_it_as_lost(
     with services.sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         assert run.state == "lost"
         assert run.stopped_at is None
         assert run.route_error is not None

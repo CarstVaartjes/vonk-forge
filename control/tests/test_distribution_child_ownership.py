@@ -170,4 +170,5 @@ def test_owned_distribution_without_receipts_stays_with_distribution(
     assert artifact.get(str(uuid4())) is None
     with sessions() as session:
         stored = session.get(Job, operation_id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING

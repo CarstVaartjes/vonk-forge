@@ -283,7 +283,8 @@ def _production_controller_app(
     assert set(captured) == set(node_ids)
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and isinstance(run.plan, dict)
+        assert run is not None
+        assert isinstance(run.plan, dict)
         run_plan_document = require_mapping(run.plan, "run plan")
         plan_nodes = {
             item["node_id"]: item
@@ -492,7 +493,8 @@ def test_production_start_rust_observation_and_controller_consume(
     identity = {"node_id": node_id, **binding}
     with sessions() as session:
         job = session.get(Job, start_job_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         launch = require_mapping(
             require_mapping(job.result["launch_evidence"], "launch evidence")[node_id],
             "node launch evidence",
@@ -594,7 +596,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         accepted_plan_digest = stored_run.plan_digest
         accepted_installation_id = stored_run.installation_id
         original_start = session.get(Job, original_start_id)
-        assert original_start is not None and original_start.state == "succeeded"
+        assert original_start is not None
+        assert original_start.state == "succeeded"
         original_start_operation = session.scalar(
             select(AgentOperation).where(
                 AgentOperation.parent_job_id == original_start_id,
@@ -651,7 +654,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         stop = recovery_stops[0]
         assert stop.actor == "system:singleton-recovery"
         assert stop.payload["workload_intent_ordinal"] == 2
-        assert run is not None and run.state == "stopping"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 2
         assert node.observed_run_generation is None
         assert node.observation_process_running is None
@@ -663,12 +667,14 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 )
             )
         )
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
     bound_service.record_node_result(stop.id, node_ids[0], succeeded=True, evidence={})
     with sessions() as session:
         completed_stop = session.get(Job, stop.id)
-        assert completed_stop is not None and completed_stop.state == "succeeded"
+        assert completed_stop is not None
+        assert completed_stop.state == "succeeded"
         recovery_context = require_mapping(
             completed_stop.payload["recovery"], "singleton Stop continuation"
         )
@@ -732,7 +738,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
     )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.run_generation == 2
         assert run.route_state == "pending"
         assert run.installation_id == accepted_installation_id
@@ -745,7 +752,8 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 )
             )
         )
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
     # A current-generation running observation allows the route to
     # publish again after the exact accepted image and plan restart.
@@ -766,8 +774,10 @@ def test_singleton_absence_reboots_through_new_controller_processes(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id).one()
-        assert run is not None and run.route_state == "published"
-        assert run.state == "running" and run.run_generation == 2
+        assert run is not None
+        assert run.route_state == "published"
+        assert run.state == "running"
+        assert run.run_generation == 2
         assert node.observation_process_running is True
 
     now[0] = NOW + timedelta(seconds=7)
@@ -812,11 +822,13 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         )
         assert len(recovery_stops) == 2
         assert sum(stop.state == "running" for stop in recovery_stops) == 1
-        assert run is not None and run.state == "stopping"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 3
         assert node.observed_run_generation is None
         assert node.observation_process_running is None
-    assert claims and all(claim.state == "active" for claim in claims)
+    assert claims
+    assert all(claim.state == "active" for claim in claims)
 
 
 def test_singleton_recovery_stop_grant_survives_start_deadline(
@@ -884,7 +896,8 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
     with sessions() as session:
         parent = session.get(Job, stop.id)
         run = session.get(RecipeRun, run_id)
-        assert parent is not None and run is not None
+        assert parent is not None
+        assert run is not None
         assert fenced_operation(sessions, claim).parent_job_id == parent.id
         assert payload.run_generation + 1 == run.run_generation
         assert parent.actor == "system:singleton-recovery"
@@ -957,8 +970,10 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
         assert run.route_state == "withdrawn"
         assert "newer workload intent" in (run.route_error or "")
         assert run.run_generation == 1
-        assert node is not None and node.workload_intent_ordinal == 3
-        assert claims and all(claim.state == "released" for claim in claims)
+        assert node is not None
+        assert node.workload_intent_ordinal == 3
+        assert claims
+        assert all(claim.state == "released" for claim in claims)
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind == "recipe.stop",
@@ -1039,9 +1054,11 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
         )
         # An uncertain Stop proves nothing gone: the run is lost, not failed,
         # and keeps its claims until absence is observed.
-        assert run is not None and run.state == "lost"
+        assert run is not None
+        assert run.state == "lost"
         assert run.route_state == "withdrawn"
-        assert claims and all(claim.state == "active" for claim in claims)
+        assert claims
+        assert all(claim.state == "active" for claim in claims)
 
 
 def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
@@ -1096,7 +1113,8 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         # Waiting for fresh absence evidence spends no attempt.
-        assert run is not None and run.recovery_attempts == 0
+        assert run is not None
+        assert run.recovery_attempts == 0
         assert run.next_action_at is not None
         assert now[0] < run.next_action_at <= now[0] + timedelta(seconds=15)
         assert "fresh exact absence" in (run.route_error or "")
@@ -1155,7 +1173,8 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id).one()
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.route_state == "withdrawn"
         assert "fresh exact absence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
@@ -1190,8 +1209,10 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
                 Job.payload["recovery"].as_string().is_not(None),
             )
         )
-        assert stop is not None and stop.state == "running"
-        assert run is not None and run.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
+        assert run is not None
+        assert run.state == "stopping"
         assert run.run_generation == 2
 
 
@@ -1242,7 +1263,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
         assert run.route_state == "withdrawn"
         assert "fresh Controller-observed Spark presence" in (run.route_error or "")
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
@@ -1258,7 +1280,8 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.next_action_at is not None
+        assert run is not None
+        assert run.next_action_at is not None
         now[0] = max(NOW + timedelta(seconds=10), run.next_action_at)
     with sessions.begin() as session:
         presence = session.get(AgentNode, node_id)
@@ -1276,8 +1299,10 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
                 Job.payload["recovery"].as_string().is_not(None),
             )
         )
-        assert run is not None and run.state == "stopping"
-        assert stop is not None and stop.state == "running"
+        assert run is not None
+        assert run.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
 
 
 def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
@@ -1382,8 +1407,10 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         # A wait is re-checked on the bounded wait cadence (it spends no attempt).
         assert stale.next_action_at is not None
         assert now[0] < stale.next_action_at <= now[0] + timedelta(seconds=15)
-        assert later is not None and later.state == "stopping"
-        assert stop is not None and stop.state == "running"
+        assert later is not None
+        assert later.state == "stopping"
+        assert stop is not None
+        assert stop.state == "running"
         first_wait_updated_at = stale.updated_at
         first_wait_due_at = stale.next_action_at
 
@@ -1495,7 +1522,8 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
         assert run.route_state == "withdrawn"
         assert "lifecycle" in (run.route_error or "")
         # A failed run can no longer be stopped by a plan, so it holds nothing.
-        assert claims and all(claim.state == "released" for claim in claims)
+        assert claims
+        assert all(claim.state == "released" for claim in claims)
         assert not session.scalar(
             select(Job.id).where(
                 Job.kind.in_({"recipe.stop", "recipe.start"}),
@@ -1638,7 +1666,8 @@ def test_observation_deadline_applies_to_first_observation_not_renewal(
         assert worker._expire_initial_observation_deadline() is False
         with sessions() as session:
             run = session.get(RecipeRun, run_id)
-            assert run is not None and run.route_state == "pending"
+            assert run is not None
+            assert run.route_state == "pending"
 
 
 @pytest.mark.parametrize("endpoint_ready", [None, True])

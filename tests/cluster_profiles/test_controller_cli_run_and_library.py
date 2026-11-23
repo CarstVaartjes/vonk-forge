@@ -64,7 +64,8 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 
     status, payload = run(tuple(arguments), client)
 
-    assert status == 0 and payload == repaired
+    assert status == 0
+    assert payload == repaired
     assert [call[1] for call in client.calls] == [path] * (3 if follow else 2)
 
 
@@ -369,7 +370,8 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
             raise AssertionError((method, path, payload))
 
         def profile_endpoints(self, number, alias=None):
-            assert number == 1 and alias is None
+            assert number == 1
+            assert alias is None
             return FleetProfileEndpointsView.from_dict(
                 {
                     "assignments": [],
@@ -553,7 +555,8 @@ def test_run_lost_load_response_reports_the_submission_to_reconnect_to(
         control_client=client,
         request_id_factory=lambda: _RUN_KEY,
     )
-    assert status == 0 and fresh["application"]["request_key"] == _RUN_KEY
+    assert status == 0
+    assert fresh["application"]["request_key"] == _RUN_KEY
 
 
 @pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])

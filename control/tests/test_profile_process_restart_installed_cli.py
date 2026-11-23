@@ -304,7 +304,8 @@ def test_installed_cli_follows_same_profile_application_after_api_process_restar
         intended = accepted_progress.get("intended_profile")
         assert isinstance(intended, dict)
         assert intended.get("reviewed_plan_digest") == plan_digest
-        assert isinstance(accepted_plan_digest, str) and accepted_plan_digest
+        assert isinstance(accepted_plan_digest, str)
+        assert accepted_plan_digest
         assert profile_digest
         assert application_path is not None
         _wait_for_trace(

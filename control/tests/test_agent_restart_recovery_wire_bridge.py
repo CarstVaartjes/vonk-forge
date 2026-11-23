@@ -369,7 +369,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         "serial-a",
         runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert first is not None and fenced_operation(sessions, first).id == operation.id
+    assert first is not None
+    assert fenced_operation(sessions, first).id == operation.id
     data_root = tmp_path / "agent-data"
     first_process = subprocess.Popen(
         [str(restart_probe)],
@@ -450,7 +451,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         jobs.record_result(interrupted)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.next_action_at is not None
+        assert stored is not None
+        assert stored.next_action_at is not None
         due = stored.next_action_at
     clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
     second = claim_agent(
@@ -459,16 +461,13 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
         "serial-a",
         runtime_identity=PACKAGED_RUNTIME_IDENTITY,
     )
-    assert (
-        second is not None
-        and fenced_operation(sessions, second).id
-        == fenced_operation(sessions, first).id
-    )
+    assert second is not None
+    assert fenced_operation(sessions, second).id == fenced_operation(sessions, first).id
     assert (
         fenced_attempt(sessions, second).attempt
         == fenced_attempt(sessions, first).attempt + 1
-        and second.fence != first.fence
     )
+    assert second.fence != first.fence
     completed = _run_probe(
         restart_probe,
         _probe_request("execute-distribution", second, data_root, server, certs),
@@ -477,7 +476,8 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     jobs.record_result(completed)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "succeeded"
+        assert stored is not None
+        assert stored.state == "succeeded"
     with server.requests_lock:
         requests = tuple(server.requests)
     assert any(

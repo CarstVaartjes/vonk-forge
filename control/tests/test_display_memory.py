@@ -36,7 +36,7 @@ def test_agent_vectors_roundtrip_and_unknown_never_claims_two_gb():
 
 
 @pytest.mark.parametrize(
-    "firmware,update",
+    ("firmware", "update"),
     [(0x02009B0B, True), (0x02009E0F, False), (0x02009E10, False), (None, False)],
 )
 def test_firmware_changes_only_the_advice_not_admission(firmware, update):

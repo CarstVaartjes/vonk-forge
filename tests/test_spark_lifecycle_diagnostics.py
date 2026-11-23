@@ -45,7 +45,8 @@ def test_failure_report_survives_every_failure_boundary(
     cleanup_reports: list[dict] = []
 
     def transport(method, path, _body, _headers, timeout):
-        assert method == "GET" and path == "/litellm/health/readiness"
+        assert method == "GET"
+        assert path == "/litellm/health/readiness"
         assert 0 < timeout <= 30
         attempts.append(clock[0])
         return (200 if fault == "delayed" and clock[0] >= 100 else 502), b"{}"
@@ -94,7 +95,8 @@ def test_failure_report_survives_every_failure_boundary(
         assert cleanup_reports[0]["status"] == "failed"
         assert cleanup_reports[0]["failure"]["cause"]
     if fault == "delayed":
-        assert clock[0] >= 100 and len(attempts) > 1
+        assert clock[0] >= 100
+        assert len(attempts) > 1
     if fault == "unavailable":
         assert 0 < clock[0] <= module._LITELLM_READINESS_SECONDS
     # A failed attempt leaves no local admission gate: a fresh run succeeds.
@@ -252,4 +254,5 @@ def test_noisy_logs_cannot_hide_the_canary_phase_in_final_stderr(
     line = capsys.readouterr().err.strip()
     assert "\n" not in line
     assert "synthetic canary/route-publication" in line
-    assert "SliceError" in line and "GET /api/fleet returned HTTP 503" in line
+    assert "SliceError" in line
+    assert "GET /api/fleet returned HTTP 503" in line

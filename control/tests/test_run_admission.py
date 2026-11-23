@@ -297,12 +297,10 @@ def test_run_alias_is_not_in_the_digest_and_is_not_persisted_in_the_plan(
     )
     plan = service.plan_run(installation, alias="qwen", now=now)
     alternate = service.plan_run(installation, alias="qwen-alt", now=now)
-    assert (
-        plan.allowed is True
-        and plan.nodes[0].required_memory_bytes == 225
-        and plan.nodes[0].free_after_bytes == 75
-        and plan.nodes[0].memory_floor_bytes == 50
-    )
+    assert plan.allowed is True
+    assert plan.nodes[0].required_memory_bytes == 225
+    assert plan.nodes[0].free_after_bytes == 75
+    assert plan.nodes[0].memory_floor_bytes == 50
     assert plan.alias == "qwen"
     assert alternate.alias == "qwen-alt"
     # The route name is routing metadata, not execution identity.
@@ -506,7 +504,8 @@ def test_a_3x_model_display_row_does_not_break_run_planning(tmp_path) -> None:
                 CatalogDocumentRevision.kind == "model"
             )
         )
-        assert root is not None and revision is not None
+        assert root is not None
+        assert revision is not None
         session.execute(
             update(CatalogDocument)
             .where(CatalogDocument.id == root.id)
@@ -756,7 +755,8 @@ def test_a_retryable_plan_blocker_keeps_its_typed_code_and_detail(tmp_path) -> N
         service.accept_run(plan, actor="admin", now=now)
     busy = raised.value
     assert busy.code in {reason.code for item in plan.nodes for reason in item.blockers}
-    assert busy.detail is not None and busy.code in busy.detail
+    assert busy.detail is not None
+    assert busy.code in busy.detail
 
 
 def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) -> None:
@@ -783,7 +783,8 @@ def test_run_adopts_a_fresh_plan_after_nonblocking_reservation_change(tmp_path) 
     assert current.allowed
     current_free = current.nodes[0].free_after_bytes
     preview_free = preview.nodes[0].free_after_bytes
-    assert current_free is not None and preview_free is not None
+    assert current_free is not None
+    assert preview_free is not None
     assert current_free < preview_free
 
     run_id = service.accept_run(preview, actor="admin", now=now)
@@ -888,7 +889,7 @@ def test_postgres_retention_lock_on_an_old_report_does_not_block_admission(
 )
 @pytest.mark.parametrize("discovery", [True, False])
 @pytest.mark.parametrize(
-    "health,code",
+    ("health", "code"),
     [
         (GpuHealth.NEEDS_RESET, ProjectionCode.NODE_GPU_REQUIRES_RESET),
         (GpuHealth.UNAVAILABLE, ProjectionCode.NODE_GPU_UNAVAILABLE),
@@ -938,7 +939,8 @@ def test_gpu_health_refuses_work_and_fresh_healthy_inventory_recovers(
     assert wait.value.code == code
     fleet = FleetProjection(sessions, clock=lambda: at).read()
     spark = next(spark for spark in fleet.nodes if spark.id == node)
-    assert spark.inventory is not None and spark.inventory.gpu_health == health
+    assert spark.inventory is not None
+    assert spark.inventory.gpu_health == health
     assert any(w.code == code for w in spark.warnings)
     healthy = observation.model_copy(
         update={

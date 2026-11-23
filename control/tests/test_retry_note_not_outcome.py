@@ -71,7 +71,8 @@ def _retry_after_a_temporary_failure(tmp_path):
     assert service.get(started.id).state == LifecycleState.QUEUED
     clock.advance(_RETRY_AFTER_SECONDS * 4)
     retry = claim_agent(jobs, nodes[0], "serial-0")
-    assert retry is not None and retry.operation == WireOperation.RECIPE_START
+    assert retry is not None
+    assert retry.operation == WireOperation.RECIPE_START
     return sessions, service, jobs, started, nodes, note, retry
 
 

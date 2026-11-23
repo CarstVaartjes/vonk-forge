@@ -209,7 +209,8 @@ def test_assignment_duplicate_does_not_wait_on_existing_row_lock(postgres_engine
     assert refused.value.code == DistributionCode.ASSIGNMENT_CONFLICT
     with sessions() as session:
         row = session.get(ArtifactDistributionAssignment, assignment.assignment_id)
-        assert row is not None and row.state == DistributionAssignmentState.ACTIVE
+        assert row is not None
+        assert row.state == DistributionAssignmentState.ACTIVE
         assert row.generation == assignment.generation
 
 
@@ -307,5 +308,6 @@ def test_identity_replay_refreshes_a_previously_observed_winner(postgres_engine)
         replayed, created = insert_identity(
             observer, candidate, key=("kind", "publisher", "slug")
         )
-        assert not created and replayed.id == observed.id
+        assert not created
+        assert replayed.id == observed.id
         assert replayed.title == "Latest publisher title"

@@ -140,7 +140,8 @@ def test_every_stored_shape_adopts_without_a_wait() -> None:
 def test_a_live_lease_is_never_lapsed_by_adoption() -> None:
     live = (NOW + timedelta(seconds=30)).isoformat()
     row = _adapter().adopt(_job(state="running", claim_until=live, claim_owner="w"))
-    assert row.state is State.RUNNING and row.fence == "w"
+    assert row.state is State.RUNNING
+    assert row.fence == "w"
     assert row.lease_deadline == datetime.fromisoformat(live)
 
 
@@ -153,7 +154,8 @@ def test_the_cancel_budget_is_derived_from_the_recorded_request() -> None:
     }
     assert adapter.adopt(_job(state="observing", cancellation=young)).observe_count == 0
     spent = adapter.adopt(_job(state="observing", cancellation=old))
-    assert spent.observe_count >= STOP_BUDGET and spent.cancel_requested
+    assert spent.observe_count >= STOP_BUDGET
+    assert spent.cancel_requested
 
 
 # ------------------------------------------------- no operator wait, ever
@@ -202,10 +204,12 @@ def test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor() -> N
     after = adapter.plan_failure(job, NOW, Disposition.OBSERVE, retry_after=floor)
     updated = adapter.commit(job, after, NOW, reason="boom", payload=payload)
     assert updated is not None
-    assert after.state is State.BACKOFF and job.state == "queued"
+    assert after.state is State.BACKOFF
+    assert job.state == "queued"
     due = job.next_action_at
     assert due is not None
-    assert due >= floor and due <= floor + timedelta(seconds=90)
+    assert due >= floor
+    assert due <= floor + timedelta(seconds=90)
 
 
 def test_a_definite_failure_ends_and_a_removal_failure_is_partial() -> None:
@@ -218,8 +222,10 @@ def test_a_definite_failure_ends_and_a_removal_failure_is_partial() -> None:
     assert prep.state == "failed"
     removal = _job(REMOVAL_KIND, "running", attempt=1)
     after = adapter.fail(removal, NOW, Disposition.WAIT, reason="busy")
-    assert after.state is State.BACKOFF and removal.state == LifecycleState.BACKOFF
-    assert after.next_action_at is not None and after.next_action_at > NOW
+    assert after.state is State.BACKOFF
+    assert removal.state == LifecycleState.BACKOFF
+    assert after.next_action_at is not None
+    assert after.next_action_at > NOW
 
 
 def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
@@ -234,7 +240,8 @@ def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
     updated = adapter.defer(job, NOW, NOW + timedelta(seconds=1), payload=payload)
     assert job.state == LifecycleState.BACKOFF
     assert adapter.lifecycle(job, NOW).state is State.BACKOFF
-    assert updated is not None and job.next_action_at is not None
+    assert updated is not None
+    assert job.next_action_at is not None
 
 
 def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:
@@ -258,7 +265,8 @@ def test_removal_steps_run_and_a_retry_clock_never_blocks_the_next_step() -> Non
     adapter.advance_removal(job, NOW + timedelta(seconds=5))  # a step in a step
     assert job.state == "running"
     done = adapter.succeed(job, NOW)
-    assert done.state is State.SUCCEEDED and job.state == "succeeded"
+    assert done.state is State.SUCCEEDED
+    assert job.state == "succeeded"
 
 
 # ------------------------------------------------------------------- cancel
@@ -268,7 +276,8 @@ def test_a_cancel_of_work_that_never_ran_ends_at_once() -> None:
     adapter = _adapter()
     job = _job(state="queued")
     assert adapter.request_cancel(job, "k", "stop", NOW).state is State.CANCELLED
-    assert job.state == "cancelled" and job.status_reason == "stop"
+    assert job.state == "cancelled"
+    assert job.status_reason == "stop"
 
 
 def test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding() -> (
@@ -286,9 +295,11 @@ def test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding(
         }
     }
     still = adapter.settle_cancel(job, NOW, outstanding=True)
-    assert still.state is State.OBSERVING and job.state == LifecycleState.OBSERVING
+    assert still.state is State.OBSERVING
+    assert job.state == LifecycleState.OBSERVING
     done = adapter.settle_cancel(job, NOW, outstanding=False)
-    assert done.state is State.CANCELLED and job.state == "cancelled"
+    assert done.state is State.CANCELLED
+    assert job.state == "cancelled"
 
 
 def test_an_update_batch_is_always_observed_by_its_owner() -> None:
@@ -330,9 +341,11 @@ def test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim() -> N
         )
     )
     ended = adapter.settle_cancel(job, NOW + CANCEL_BUDGET, outstanding=True)
-    assert ended.state is State.CANCELLED and ended.effect.value == "unknown"
+    assert ended.state is State.CANCELLED
+    assert ended.effect.value == "unknown"
     assert job.state == LifecycleState.CANCELLED.value
-    assert not job.payload.get("claim_owner") and not job.payload.get("claim_until")
+    assert not job.payload.get("claim_owner")
+    assert not job.payload.get("claim_until")
 
 
 # --------------------------------------------------------- the owner service
@@ -383,14 +396,14 @@ def test_a_legacy_cancelling_preparation_with_a_stuck_claim_heals(
     service.reconcile_cancellations()
     with sessions() as session:
         stuck = session.get(Job, queued.id)
-        assert stuck is not None and job_states.means(
-            stuck.state, LifecycleState.OBSERVING
-        )  # inside the budget (an old row keeps its word until it changes)
+        assert stuck is not None
+        assert job_states.means(stuck.state, LifecycleState.OBSERVING)
     now[0] = NOW + CANCEL_BUDGET
     service.reconcile_cancellations()
     with sessions() as session:
         job = session.get(Job, queued.id)
-        assert job is not None and job.state == "cancelled"
+        assert job is not None
+        assert job.state == "cancelled"
         assert not job.payload.get("claim_owner")
     engine.dispose()
 
@@ -460,7 +473,8 @@ def test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget() ->
         retry_after_at="tomorrow-ish",
     )
     row = adapter.adopt(job)
-    assert row.state is State.RUNNING and row.lease_deadline == live
+    assert row.state is State.RUNNING
+    assert row.lease_deadline == live
     assert row.retry_count == 0
     job.state = "observing"
     job.payload = dict(job.payload) | {
@@ -470,7 +484,8 @@ def test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget() ->
         }
     }
     ended = adapter.settle_cancel(job, NOW, outstanding=True)
-    assert ended.state is State.CANCELLED and ended.effect is Effect.UNKNOWN
+    assert ended.state is State.CANCELLED
+    assert ended.effect is Effect.UNKNOWN
     # A damaged envelope cannot be rewritten as a valid execution document;
     # its former executor is fenced by the terminal state instead.
     assert job.state == "cancelled"

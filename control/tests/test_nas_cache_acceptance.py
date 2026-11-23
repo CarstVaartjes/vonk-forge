@@ -651,10 +651,10 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(
     # The short source never publishes; the download keeps retrying.
     assert failed.state == "queued"
     assert failed.attempt == 3  # attempts are counted at claim: three ran
-    assert failed.failure is not None and failed.failure["retryable"] is True
-    assert (
-        failed.last_error and "before the immutable artifact size" in failed.last_error
-    )
+    assert failed.failure is not None
+    assert failed.failure["retryable"] is True
+    assert failed.last_error
+    assert "before the immutable artifact size" in failed.last_error
     assert failed.result is None
     expected_progress = {
         "schema_version": 2,

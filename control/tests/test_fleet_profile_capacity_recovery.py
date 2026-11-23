@@ -62,7 +62,8 @@ def test_another_build_receipt_reuses_and_repairs_the_exact_memory_promise(
         repaired = profile_build_memory_claims(
             session, sibling, memory_pool="shared", request_id=request_id, lock=True
         )
-        assert len(repaired) == 1 and repaired[0].id == original_claim_id
+        assert len(repaired) == 1
+        assert repaired[0].id == original_claim_id
         assert repaired[0].owner_id == application_id
         assert repaired[0].state == ReservationState.PROMISED
         # Different output bytes cannot inherit even with identical source inputs.
@@ -279,9 +280,8 @@ def test_unknown_child_outcome_keeps_waiting_and_settles_before_releasing_claims
                 )
             )
         )
-        assert claims and all(
-            claim.state != ReservationState.RELEASED for claim in claims
-        )
+        assert claims
+        assert all(claim.state != ReservationState.RELEASED for claim in claims)
     # Well past the window after which a waiting load used to end itself.
     world.now[0] = accepted_at + timedelta(minutes=30, seconds=1)
     if expiry_path == "retry":

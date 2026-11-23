@@ -539,7 +539,7 @@ def test_openssl_ed25519_probe_key_conversion_is_strict() -> None:
         )
 
 
-@pytest.mark.parametrize("observed", ("sha256:expected", "sha256:different"))
+@pytest.mark.parametrize("observed", ["sha256:expected", "sha256:different"])
 def test_running_channel_alias_must_match_the_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: str
 ) -> None:

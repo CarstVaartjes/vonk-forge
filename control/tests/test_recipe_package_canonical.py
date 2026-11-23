@@ -86,7 +86,8 @@ def test_candidate_package_decodes_and_restart_reuses_the_cached_package(
     client.prepare(snapshot)
     item = client.fetch(snapshot.items[0].uri)
     assert item.document["kind"] == "recipe"
-    assert item.dependencies and item.dependencies[0]["kind"] == "model"
+    assert item.dependencies
+    assert item.dependencies[0]["kind"] == "model"
     client.close()
 
     release.requests.clear()
@@ -235,13 +236,13 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
 
 @pytest.mark.parametrize(
     "source_path",
-    (
+    [
         "../recipe.json",
         "/recipes/recipe.json",
         "recipes\\recipe.json",
         "recipes/\x00recipe.json",
         "recipes//recipe.json",
-    ),
+    ],
 )
 def test_candidate_package_skips_unsafe_source_path(
     tmp_path: Path, source_path: str

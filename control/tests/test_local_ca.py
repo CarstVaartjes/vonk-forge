@@ -218,7 +218,8 @@ def test_renew_revoke_and_signed_crl(local_ca):
     assert crl.next_update_utc is not None
     assert crl.last_update_utc <= NOW < crl.next_update_utc
     entry = crl.get_revoked_certificate_by_serial_number(int(source.serial))
-    assert entry is not None and entry.revocation_date_utc == NOW
+    assert entry is not None
+    assert entry.revocation_date_utc == NOW
     assert crl.get_revoked_certificate_by_serial_number(int(replacement.serial)) is None
     fresh = _csr()
     with pytest.raises(StepCAError) as error:

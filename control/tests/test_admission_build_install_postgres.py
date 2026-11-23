@@ -175,7 +175,8 @@ def test_source_build_plan_writer_and_install_retry_share_builder_admission(
         )
     assert len(installations) == 1
     assert len(install_jobs) == 1
-    assert len(builds_after) == 1 and builds_after[0].state == "planned"
+    assert len(builds_after) == 1
+    assert builds_after[0].state == "planned"
 
 
 def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
@@ -237,4 +238,5 @@ def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
                 )
             )
         )
-        assert live_disk and all(c.id != released_id for c in live_disk)
+        assert live_disk
+        assert all(c.id != released_id for c in live_disk)

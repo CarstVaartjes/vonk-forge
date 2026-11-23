@@ -73,8 +73,10 @@ def test_text_settings_drive_demand_and_identity() -> None:
     large = resolve_effective_settings(
         _recipe_document(_recipe_settings(context=65_536, concurrency=3))
     )
-    assert small.allowed and large.allowed
-    assert small.settings is not None and large.settings is not None
+    assert small.allowed
+    assert large.allowed
+    assert small.settings is not None
+    assert large.settings is not None
     first = resource_demand(small.settings, _evidence())
     second = resource_demand(large.settings, _evidence())
     assert first.total_bytes == 120
@@ -98,9 +100,11 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
             },
         }
     )
-    assert result.allowed and result.settings is not None
+    assert result.allowed
+    assert result.settings is not None
     demand = resource_demand(result.settings, _evidence())
-    assert demand.allowed and demand.total_bytes == 120
+    assert demand.allowed
+    assert demand.total_bytes == 120
 
 
 def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> None:
@@ -121,7 +125,8 @@ def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> No
     assert not result.allowed
     assert result.settings is None
     repaired = resolve_effective_settings(_recipe_document(_recipe_settings()))
-    assert repaired.allowed and repaired.settings is not None
+    assert repaired.allowed
+    assert repaired.settings is not None
 
 
 def test_dimension_product_must_match_node_count() -> None:
@@ -142,7 +147,8 @@ def test_dimension_product_must_match_node_count() -> None:
     assert not result.allowed
     assert result.settings is None
     repaired = resolve_effective_settings(_recipe_document(_recipe_settings()))
-    assert repaired.allowed and repaired.settings is not None
+    assert repaired.allowed
+    assert repaired.settings is not None
 
 
 def test_capacity_only_uses_explicit_planned_stop_release() -> None:
@@ -170,7 +176,8 @@ def test_capacity_only_uses_explicit_planned_stop_release() -> None:
         memory_floor_bytes=200,
     )
     assert not without.allowed
-    assert with_stop.allowed and with_stop.stop_before_prepare
+    assert with_stop.allowed
+    assert with_stop.stop_before_prepare
     assert with_stop.nodes[0].current_free_after_bytes == 180
     assert with_stop.nodes[0].after_stop_free_after_bytes == 280
 
@@ -771,7 +778,8 @@ def test_invalid_engine_knob_and_boolean_context_remain_contract_blockers() -> N
         "engine-owned": {"value": {"nested": True}, "change_effect": "restart"}
     }
     result = resolve_effective_settings(_recipe_document(settings))
-    assert not result.allowed and result.settings is None
+    assert not result.allowed
+    assert result.settings is None
     settings = _recipe_settings()
     settings["context_tokens"] = {"value": True, "change_effect": "restart"}
     result = resolve_effective_settings(_recipe_document(settings))
@@ -782,12 +790,14 @@ def test_decision_context_participates_in_resource_settings_identity() -> None:
     settings = _recipe_settings(context=4096)
     settings["kind"] = "decision"
     first = resolve_effective_settings(_recipe_document(settings))
-    assert first.allowed and first.settings is not None
+    assert first.allowed
+    assert first.settings is not None
     assert first.settings.context_tokens == 4096
     assert first.settings.change_effects["context_tokens"] == "reprepare"
     settings["context_tokens"] = {"value": 8192, "change_effect": "reprepare"}
     second = resolve_effective_settings(_recipe_document(settings))
-    assert second.allowed and second.settings is not None
+    assert second.allowed
+    assert second.settings is not None
     assert first.settings.identity_digest != second.settings.identity_digest
 
 

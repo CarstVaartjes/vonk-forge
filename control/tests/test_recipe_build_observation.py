@@ -43,7 +43,8 @@ def test_storage_recovers_in_same_exact_request(tmp_path, monkeypatch, action):
     kwargs = {"now": now} if action == "prepare_plan" else {}
     result = getattr(service, action)(*args, **kwargs)
     assert result is not None
-    assert len(calls) == 3 and len(set(calls)) == 1
+    assert len(calls) == 3
+    assert len(set(calls)) == 1
     assert delays == [0.1, 0.2]
     with sessions() as session:
         assert_no_orphaned_holds(session)
@@ -234,7 +235,8 @@ def test_damaged_completion_index_is_observed_then_fresh_completion_is_admitted(
     assert delays == [0.1, 0.2]
     with sessions.begin() as session:
         row = session.get(RecipeBuild, plan.build_id)
-        assert row is not None and row.image_digest is None
+        assert row is not None
+        assert row.image_digest is None
         assert_no_orphaned_holds(session)
         row.build_input_sha256 = plan.build_input_sha256
     completed = complete()

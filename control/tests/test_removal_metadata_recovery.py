@@ -91,10 +91,8 @@ def test_new_download_repairs_different_stored_content_and_membership(
                 == accepted.artifact_set_sha256
             )
         )
-        assert (
-            member is not None
-            and member.artifact_sha256 == hashlib.sha256(b"x").hexdigest()
-        )
+        assert member is not None
+        assert member.artifact_sha256 == hashlib.sha256(b"x").hexdigest()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -115,9 +113,8 @@ def test_unreadable_manifest_projects_unknown_assets_and_keeps_bytes(
         assert row is not None
         row.manifest = {}
     assets = service.removal_asset_status(scope)
-    assert assets and all(
-        asset.availability == AssetAvailability.UNKNOWN for asset in assets
-    )
+    assert assets
+    assert all(asset.availability == AssetAvailability.UNKNOWN for asset in assets)
     assert all(asset.available_bytes is None for asset in assets)
     assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
     fresh, _ = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -143,7 +140,8 @@ def test_verified_blob_ingress_repairs_stale_sql_metadata(tmp_path: Path):
         ArtifactJobService._put_blob_in_session(session, stored, now)
     with sessions() as session:
         row = session.get(ArtifactJobBlob, digest)
-        assert row is not None and row.size_bytes == len(data)
+        assert row is not None
+        assert row.size_bytes == len(data)
         assert row.storage_key == stored.storage_key
     assert stored.path.read_bytes() == data
 
@@ -280,7 +278,8 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
                 assert waiting.state == LifecycleState.BACKOFF
                 with sessions() as session:
                     pending = session.get(Job, waiting.operation_id)
-                    assert pending is not None and pending.next_action_at is not None
+                    assert pending is not None
+                    assert pending.next_action_at is not None
                 assert receipt_path.exists()
                 assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
     now[0] += timedelta(minutes=1)
@@ -490,7 +489,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     with sessions.begin() as session:
         row = session.get(ModelCacheSet, digest)
         producer = session.get(ModelCacheOperation, accepted.id)
-        assert row is not None and producer is not None
+        assert row is not None
+        assert producer is not None
         original_manifest, original_payload = row.manifest, producer.payload
         row.manifest = {}
         producer.payload = {}
@@ -513,7 +513,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
     with sessions.begin() as session:
         row = session.get(ModelCacheSet, digest)
         producer = session.get(ModelCacheOperation, accepted.id)
-        assert row is not None and producer is not None
+        assert row is not None
+        assert producer is not None
         row.manifest, producer.payload = original_manifest, original_payload
     advance_until_ended(service, removal.id)
     assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
@@ -526,7 +527,8 @@ def test_scope_observation_recovers_same_removal_without_inventing_objects(
             selector="exact-content",
             selected_sets=(digest,),
         )
-    assert fresh.state in model_cache_states.LIVE and fresh.id != removal.id
+    assert fresh.state in model_cache_states.LIVE
+    assert fresh.id != removal.id
 
 
 @pytest.mark.parametrize("damage", ["missing", "unreadable", "size"])
@@ -606,7 +608,8 @@ def test_recipe_receipt_observation_is_request_owned(
         assert waiting.state == LifecycleState.BACKOFF
         with sessions() as session:
             pending = session.get(Job, waiting.operation_id)
-            assert pending is not None and pending.next_action_at is not None
+            assert pending is not None
+            assert pending.next_action_at is not None
         assert (storage.layout.root / "blobs" / "sha256" / ARCHIVE_SHA).exists()
         # The cause clears after the former ceiling; no new request is needed.
         receipt_path.write_text(valid)
@@ -708,7 +711,8 @@ def test_exact_scope_owner_repair_is_independent_of_inventory_cursor(
         assert exact is None or exact.removal_owner_id is None
         if owner_damage in {"payload", "coverage"}:
             damaged = session.get(ModelCacheOperation, old.id)
-            assert damaged is not None and damaged.state not in model_cache_states.LIVE
+            assert damaged is not None
+            assert damaged.state not in model_cache_states.LIVE
     next_request, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     service.run_pending()
     assert service.get_operation(next_request.id).state == LifecycleState.SUCCEEDED

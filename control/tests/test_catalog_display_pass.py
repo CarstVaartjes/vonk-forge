@@ -146,7 +146,8 @@ def test_a_display_only_release_changes_the_library_text_and_creates_no_revision
     world: World,
 ) -> None:
     first = world.sync()
-    assert first.state == CatalogSyncState.CURRENT and first.imported_count == 1
+    assert first.state == CatalogSyncState.CURRENT
+    assert first.imported_count == 1
     before = world.revisions()
     assert len(before) == 2
     recipe = world.library_recipe()
@@ -164,7 +165,8 @@ def test_a_display_only_release_changes_the_library_text_and_creates_no_revision
     second = world.sync()
 
     assert second.state == CatalogSyncState.CURRENT
-    assert second.unchanged_count == 1 and second.imported_count == 0
+    assert second.unchanged_count == 1
+    assert second.imported_count == 0
     recipe = world.library_recipe()
     assert recipe.identity.title == "Tiny Recipe, retitled"
     assert recipe.identity.description == "Reworded for people."
@@ -182,7 +184,8 @@ def test_a_release_with_unchanged_display_writes_nothing(world: World) -> None:
 
     again = world.sync()
 
-    assert again.state == CatalogSyncState.CURRENT and again.unchanged_count == 1
+    assert again.state == CatalogSyncState.CURRENT
+    assert again.unchanged_count == 1
     assert world.documents() == settled
 
 
@@ -347,12 +350,14 @@ def test_a_persisted_snapshot_without_display_keeps_the_text_until_the_next_fetc
 
     assert [item.display for item in snapshot.items] == [None]
     assert [model.entry.display for model in snapshot.catalog_entities] == [None]
-    assert snapshot.problems == () and len(snapshot.display_notes) == 2
+    assert snapshot.problems == ()
+    assert len(snapshot.display_notes) == 2
     assert result.withdrawn_count == 0
     assert world.revisions() == before
     assert world.documents() == texts
     heads = world.sessions().scalars(select(CatalogDocumentHead)).all()
-    assert len(heads) == 2 and all(head.active_revision_id for head in heads)
+    assert len(heads) == 2
+    assert all(head.active_revision_id for head in heads)
 
     # The contract version is part of what a stored sync receipt must match,
     # so the Controller that can read display fetches again.
@@ -397,7 +402,8 @@ def test_startup_reconcile_adds_the_display_column_and_keeps_the_rows(
         recipe = session.scalar(
             select(CatalogDocument).where(CatalogDocument.kind == "recipe")
         )
-        assert recipe is not None and recipe.recipe_display() is None
+        assert recipe is not None
+        assert recipe.recipe_display() is None
     assert world.library_recipe().recipe_display is None
 
     world.sync()
@@ -533,5 +539,6 @@ def test_a_failed_display_write_is_that_documents_problem_and_the_next_tick_heal
 
     healed = world.sync()
 
-    assert healed.state == CatalogSyncState.CURRENT and healed.problems == ()
+    assert healed.state == CatalogSyncState.CURRENT
+    assert healed.problems == ()
     assert world.library_recipe().identity.title == "Retitled on the wire"

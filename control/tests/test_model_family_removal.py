@@ -147,7 +147,8 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
 
     with sessions() as session:
         legacy_row = session.get(CatalogDocumentRevision, legacy_recipe_id)
-        assert legacy_row is not None and legacy_row.state == "active"
+        assert legacy_row is not None
+        assert legacy_row.state == "active"
         heads = newest_active_revisions(session, [legacy_row.document_id])
         head = heads[legacy_row.document_id]
         assert head.id != legacy_recipe_id
@@ -220,7 +221,8 @@ def test_a_stored_4_9_model_row_still_reads_and_its_projection_drops_the_family(
         row = session.get(CatalogDocumentRevision, revision_id)
         assert row is not None
         assert "family" not in row.projected["identity"]
-        assert row.document == legacy and row.artifact_key == "1" * 64
+        assert row.document == legacy
+        assert row.artifact_key == "1" * 64
 
 
 def test_a_model_display_is_titled_by_its_family_not_its_own_family_title(
@@ -239,5 +241,6 @@ def test_a_model_display_is_titled_by_its_family_not_its_own_family_title(
         for model in client.list().catalog_entities
     }
     display = shown[entry["document"]["identity"]["slug"]]
-    assert display is not None and display.lineage is not None
+    assert display is not None
+    assert display.lineage is not None
     assert display.family_title == titles[display.lineage.family]

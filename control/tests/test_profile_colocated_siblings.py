@@ -144,7 +144,8 @@ def test_a_recipe_under_test_joins_a_serving_baseline_on_its_spark(
 
         assert sim.settle(sweep) == "succeeded"
         serving = sim.sparks.by_node[spark[0]].serving
-        assert len(serving) == 2 and baseline_run in serving
+        assert len(serving) == 2
+        assert baseline_run in serving
         _fresh_load_serves(sim, sweep_profile, sweep)
     finally:
         world.close()

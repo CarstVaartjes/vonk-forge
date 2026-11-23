@@ -145,7 +145,8 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
         }
     observed = service.get(operation.id)
     assert observed.cancellation == cancelled.cancellation
-    assert observed.state == "cancelled" and service.run_pending() == 0
+    assert observed.state == "cancelled"
+    assert service.run_pending() == 0
     from .non_blocking import assert_ended_without_blocking
 
     assert_ended_without_blocking(
@@ -176,7 +177,8 @@ def test_damaged_request_stays_unknown_and_fresh_request_heals(
     fresh = service.start(
         "bookkeeping-revision", actor="operator", request_id="after-damaged-request"
     )
-    assert fresh.id != operation.id and fresh.state == LifecycleState.QUEUED.value
+    assert fresh.id != operation.id
+    assert fresh.state == LifecycleState.QUEUED.value
     assert service.run_pending() == 1
     assert service.get(fresh.id).artifact is not None
     engine.dispose()
@@ -297,13 +299,13 @@ def test_damaged_optional_observations_and_legacy_fields_heal_in_the_worker(
     assert service.get(operation.id).residue is None
     with sessions() as session:
         row = session.get(Job, operation.id)
-        assert row is not None and isinstance(read_row_column(row, "payload"), Residue)
+        assert row is not None
+        assert isinstance(read_row_column(row, "payload"), Residue)
     assert service.run_pending() == 1
     with sessions() as session:
         row = session.get(Job, operation.id)
-        assert row is not None and isinstance(
-            read_row_column(row, "payload"), AvailabilityJobPayload
-        )
+        assert row is not None
+        assert isinstance(read_row_column(row, "payload"), AvailabilityJobPayload)
     assert service.get(operation.id).state == "succeeded"
     engine.dispose()
 
@@ -325,7 +327,8 @@ def test_unreadable_identity_is_residue_and_does_not_block_other_claims(
     view = service.get(damaged.id)
     assert isinstance(view.residue, Residue)
     rows, total, _ = service.list_page(limit=10)
-    assert total == 2 and any(row.residue is not None for row in rows)
+    assert total == 2
+    assert any(row.residue is not None for row in rows)
     claims = service.claim_pending(limit=4)
     assert [claim.operation_id for claim in claims] == [ready.id]
     service.run_claim(claims[0])
@@ -347,7 +350,8 @@ def test_lost_terminal_evidence_is_residue_and_a_new_request_still_runs(
         row.result = {"lost": True}
     unknown = service.get(operation.id)
     assert isinstance(unknown.residue, Residue)
-    assert unknown.result is None and unknown.image_state == "succeeded"
+    assert unknown.result is None
+    assert unknown.image_state == "succeeded"
     accepted = service.start(
         "bookkeeping-revision", actor="operator", request_id="after-lost-result"
     )
@@ -546,7 +550,8 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
         assert row is not None
         payload = read_row_column(row, "payload")
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
     engine.dispose()
 
 
@@ -599,7 +604,8 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
     assert service._observe_recipe_removal(operation_id)
     with sessions() as session:
         gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
-        assert gate is not None and gate.removal_owner_id == operation_id
+        assert gate is not None
+        assert gate.removal_owner_id == operation_id
     operation = service.get_operator_operation(operation_id)
 
     def end(receipt):
@@ -625,7 +631,8 @@ def test_recovered_removal_releases_storage_gate_before_a_fresh_preparation(
             )
         with sessions() as session:
             row = session.get(Job, operation_id)
-            assert row is not None and row.state == LifecycleState.BACKOFF
+            assert row is not None
+            assert row.state == LifecycleState.BACKOFF
             assert row.next_action_at is not None
         # Stop injecting the missing-child observation. Normal execution now
         # observes the exact scope and finishes the original request.
@@ -681,7 +688,8 @@ def test_metadata_security_refusal_is_preserved_without_an_admission_retry(
         service.start(
             "bookkeeping-revision", actor="operator", request_id="denied-metadata"
         )
-    assert observed.value is denied and calls == 1
+    assert observed.value is denied
+    assert calls == 1
     engine.dispose()
 
 
@@ -737,5 +745,6 @@ def test_child_observation_fault_does_not_refuse_read_or_discard_verified_image(
     assert observed.artifact == verified
     assert observed.residue is not None
     page, _, _ = service.list_page()
-    assert page[0].artifact == verified and page[0].residue is not None
+    assert page[0].artifact == verified
+    assert page[0].residue is not None
     engine.dispose()

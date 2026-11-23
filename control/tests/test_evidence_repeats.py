@@ -112,7 +112,7 @@ def _report_order(client, services, clock, result: dict[str, object]) -> None:
 
 
 @pytest.mark.parametrize(
-    "report,code",
+    ("report", "code"),
     [
         (
             {

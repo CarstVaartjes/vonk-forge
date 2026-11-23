@@ -33,7 +33,7 @@ from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 
 
 @pytest.mark.parametrize(
-    "module,cls,method,error",
+    ("module", "cls", "method", "error"),
     [
         (
             install_admission,
@@ -206,11 +206,12 @@ def test_shutdown_retries_checkpointing_then_releases_lifespan(refusals, monkeyp
         api._close_model_cache(cast(ModelCacheService, SimpleNamespace(close=close)))
     )
     assert len(calls) == 3
-    assert len(pauses) == 2 and all(0 < pause < 1 for pause in pauses)
+    assert len(pauses) == 2
+    assert all(0 < pause < 1 for pause in pauses)
 
 
 @pytest.mark.parametrize(
-    "method,once",
+    ("method", "once"),
     [
         ("install", "_install_once"),
         ("start", "_start_once"),
@@ -242,7 +243,8 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
         )
         == "accepted"
     )
-    assert len(calls) == 3 and all(call == calls[0] for call in calls)
+    assert len(calls) == 3
+    assert all(call == calls[0] for call in calls)
 
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
@@ -302,7 +304,8 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
         SimpleNamespace(nodes=[]),
     )
     waiting = service._select_build(*args, now=datetime.now(UTC), inventory=object())
-    assert waiting.build is None and waiting.candidate is None
+    assert waiting.build is None
+    assert waiting.candidate is None
     recovered = service._select_build(*args, now=datetime.now(UTC), inventory=object())
     assert recovered.build is selected
     assert recovered.candidate is selected
@@ -349,7 +352,8 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     )
     with sessions() as session:
         row = session.get(Job, parent.operation_id)
-        assert row is not None and isinstance(row.result, dict)
+        assert row is not None
+        assert isinstance(row.result, dict)
         next_attempt = row.next_action_at
         assert isinstance(next_attempt, datetime)
         clock[0] = next_attempt.replace(tzinfo=UTC)
@@ -364,7 +368,8 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     assert service._refresh_blocked_plan(parent.operation_id, clock[0])
     with sessions() as session:
         row = session.get(Job, parent.operation_id)
-        assert row is not None and isinstance(row.result, dict)
+        assert row is not None
+        assert isinstance(row.result, dict)
         stored_plan = row.payload["plan"]
         assert isinstance(stored_plan, dict)
         assert stored_plan["plan_digest"] == plan.plan_digest
@@ -380,7 +385,8 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
     with sessions() as session:
         assert set(session.scalars(select(Job.id))) == original_jobs
         row = session.get(Job, parent.operation_id)
-        assert row is not None and isinstance(row.result, dict)
+        assert row is not None
+        assert isinstance(row.result, dict)
         stored_plan = row.payload["plan"]
         assert isinstance(stored_plan, dict)
         assert stored_plan["plan_digest"] == plan.plan_digest
@@ -389,7 +395,7 @@ def test_accepted_plan_refresh_records_unknown_cause_and_resumes(tmp_path, monke
 
 
 @pytest.mark.parametrize(
-    "method,once",
+    ("method", "once"),
     [
         ("install", "_install_once"),
         ("start", "_start_once"),
@@ -487,7 +493,8 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
     result = getattr(service, method)(
         plan, plan_digest=plan.plan_digest, actor="operator", request_id="2" * 36
     )
-    assert len(calls) == 2 and calls[0] == calls[1]
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
     assert result == committed[0][0]
     assert effects() == committed[0][1]
 

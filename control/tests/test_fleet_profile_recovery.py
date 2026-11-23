@@ -67,7 +67,8 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-    assert mapping_id is not None and build_id is not None
+    assert mapping_id is not None
+    assert build_id is not None
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=_uuid(809)
     )
@@ -85,7 +86,8 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
 
     with sessions() as session:
         running = session.get(RecipeRun, direct.owner_id)
-        assert running is not None and running.state == "running"
+        assert running is not None
+        assert running.state == "running"
     fresh = service.apply(original.profile_id, request_key=_uuid(811), actor="admin")
     assert fresh.id != declined.id
 

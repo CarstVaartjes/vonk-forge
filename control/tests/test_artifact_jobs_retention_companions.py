@@ -165,7 +165,7 @@ def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> N
         assert session.get(ArtifactJobBlob, digest) is not None
 
 
-@pytest.mark.parametrize("contended", (False, True))
+@pytest.mark.parametrize("contended", [False, True])
 def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     tmp_path, contended
 ) -> None:
@@ -384,7 +384,8 @@ def test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted(
         row.input_manifest = manifest
     assert service.get(created.id).input_declarations is None
     ended = service.finalize(created.id)
-    assert ended.state in ajs.ENDED and ended.operation_id is None
+    assert ended.state in ajs.ENDED
+    assert ended.operation_id is None
     fresh = submitted_artifact_job(service, run_id, request_suffix=390)
     assert fresh.operation_id is not None
 
@@ -466,9 +467,9 @@ def test_artifact_cancel_preserves_declared_evidence_and_meaningful_values(
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("expires", (False, True))
+@pytest.mark.parametrize("expires", [False, True])
 @pytest.mark.parametrize(
-    ("lease_lapses", "reconcile"), ((False, False), (True, False), (True, True))
+    ("lease_lapses", "reconcile"), [(False, False), (True, False), (True, True)]
 )
 def test_undelivered_job_outputs_resume_without_repeating_the_process(
     tmp_path, postgres_engine, expires, lease_lapses, reconcile
@@ -557,7 +558,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
                 AgentOperation.parent_job_id == job.operation_id
             )
         )
-        assert order is not None and order.next_action_at is not None
+        assert order is not None
+        assert order.next_action_at is not None
         deadline = order.recovery_deadline
         due = order.next_action_at
         order_id = order.id
@@ -568,7 +570,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     restarted = AgentJobService(sessions, clock=clock)
     restarted.set_result_consumer(consume)
     second = claim_agent(restarted, node_id, "serial-0")
-    assert second is not None and second.fence != first.fence
+    assert second is not None
+    assert second.fence != first.fence
     from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     assert isinstance(second.payload, RecipeJobRunRequest)
@@ -581,7 +584,8 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
         restarted.record_result(undelivered(second))
         with sessions() as session:
             retained = session.get(AgentOperation, order_id)
-            assert retained is not None and retained.recovery_deadline == deadline
+            assert retained is not None
+            assert retained.recovery_deadline == deadline
         clock.advance(seconds=24 * 60 * 60 + 1)
         for _ in range(3):
             restarted.reconcile_orders()
@@ -703,7 +707,8 @@ def _two_rank_claims(tmp_path, suffix: int):
     companion_node = next(node for node in nodes if node != owner_node)
     owner_claim = claims[owner_node]
     companion_claim = claims[companion_node]
-    assert owner_claim is not None and companion_claim is not None
+    assert owner_claim is not None
+    assert companion_claim is not None
     return (
         sessions,
         recipe_operations,
@@ -838,7 +843,8 @@ def test_a_rank_that_fails_ends_the_two_rank_job_and_stops_the_other(
     # The stopped run takes fresh work: a new job run is admitted on it.
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     fresh_plan = recipe_operations.preview_run(installation_id, "image-job")
     fresh = recipe_operations.activate_job_run(
@@ -1055,7 +1061,8 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
     assert parent_outcome() == (owner_outcome, owner_reason)
     # A fresh job on the same run is admitted.
     fresh = submitted_artifact_job(service, run_id, request_suffix=158)
-    assert fresh.id != submitted.id and fresh.state not in ajs.ENDED
+    assert fresh.id != submitted.id
+    assert fresh.state not in ajs.ENDED
 
 
 def test_a_companion_that_fails_first_makes_the_job_and_parent_failed(tmp_path) -> None:

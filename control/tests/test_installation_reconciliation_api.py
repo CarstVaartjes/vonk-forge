@@ -76,7 +76,8 @@ def _prepare_exact_legacy_install_for_reconciliation(
                 Job.payload["owner_id"].as_string() == installation_id,
             )
         )
-        assert install_job is not None and install_job.result is not None
+        assert install_job is not None
+        assert install_job.result is not None
         operations = tuple(
             session.scalars(
                 select(AgentOperation)
@@ -182,7 +183,7 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     assert operations.preview_cleanup.call_args.kwargs == {"actor": "test-actor"}
 
 
-@pytest.mark.parametrize("role", ("viewer", "operator"))
+@pytest.mark.parametrize("role", ["viewer", "operator"])
 def test_reconciliation_preview_refuses_non_administrators_before_planning(role):
     # Break caught: the read-only preview bypasses its administrator role
     # contract, even though apply enforces that contract.
@@ -282,7 +283,8 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     stale = client.post(
         apply_path, json={**apply_body, "plan_digest": "0" * 64}, headers=headers
     )
-    assert stale.status_code == 409 and "stale_plan" in stale.text
+    assert stale.status_code == 409
+    assert "stale_plan" in stale.text
     accepted_response = client.post(apply_path, json=apply_body, headers=headers)
     assert accepted_response.status_code == 202, accepted_response.text
     accepted = accepted_response.json()
@@ -333,7 +335,8 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
                 select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
             )
         )
-    assert child_job is not None and child_job.kind == "recipe.reconcile"
+    assert child_job is not None
+    assert child_job.kind == "recipe.reconcile"
     assert child_operations, "cleanup must dispatch lifecycle child operations"
     assert {item.node_id for item in child_operations} == set(nodes)
     for child in child_operations:

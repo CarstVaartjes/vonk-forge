@@ -432,7 +432,8 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert view.result.progress.total_bytes == 30
     with services.sessions() as session:
         persisted = session.get(Job, first.operation_id)
-        assert persisted is not None and persisted.result is not None
+        assert persisted is not None
+        assert persisted.result is not None
         persisted_receipt = read_stored_model(
             RunSwitchDistributionChildResult, persisted.result
         )
@@ -489,7 +490,8 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 AgentOperationAttempt.attempt == stored.current_attempt,
             )
         )
-        assert attempt is not None and attempt.result is not None
+        assert attempt is not None
+        assert attempt.result is not None
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
     assert mismatch is not None
@@ -508,7 +510,8 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         attempt.result = {"downloaded_bytes": 15}
     repaired = executor.get(first.operation_id)
     assert repaired is not None
-    assert repaired.progress is not None and repaired.progress.total_bytes == 30
+    assert repaired.progress is not None
+    assert repaired.progress.total_bytes == 30
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -1722,7 +1725,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         progress=RunSwitchOperationResult(),
     )
     cached_id = cached_model.operation_id
-    assert cached_id is not None and cached_id == seeded.id
+    assert cached_id is not None
+    assert cached_id == seeded.id
     assert cache.run_pending() == 0
     reused = executor.get(cached_id)
     assert reused is not None
@@ -2152,7 +2156,8 @@ def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_
     )
     assert fresh != old
     next_claim = claim_agent(services.operations, NODE_A, "serial-a")
-    assert next_claim is not None and next_claim.fence != claim.fence
+    assert next_claim is not None
+    assert next_claim.fence != claim.fence
     services.operations.record_result(
         AgentResult(
             fence=next_claim.fence,

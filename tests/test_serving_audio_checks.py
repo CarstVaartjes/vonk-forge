@@ -98,7 +98,7 @@ class _Audio(BaseHTTPRequestHandler):
         return
 
 
-@pytest.fixture()
+@pytest.fixture
 def server():
     _Audio.seen = []
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Audio)
@@ -195,7 +195,8 @@ def test_speech_that_is_not_audible_wav_fails_the_check(body: bytes, kind: str) 
 
 def test_a_streamed_wav_with_a_placeholder_size_counts_the_bytes_it_has() -> None:
     audio = assert_speech({"content-type": "audio/wav"}, wav(1.0, data_size=0xFFFFFFFF))
-    assert audio.seconds == 1.0 and audio.sample_rate == 16000
+    assert audio.seconds == 1.0
+    assert audio.sample_rate == 16000
 
 
 def test_a_wav_whose_data_chunk_precedes_fmt_is_refused() -> None:

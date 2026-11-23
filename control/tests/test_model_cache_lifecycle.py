@@ -106,7 +106,8 @@ def test_a_corrupt_document_never_raises_out_of_the_core(cache, tmp_path):
     )
     _edit(sessions, operation.id, state="running", payload={"schema_version": 7})
     row = service._lifecycle.adopt(_row(sessions, operation.id))
-    assert row.state is State.RUNNING and not row.cancel_requested
+    assert row.state is State.RUNNING
+    assert not row.cancel_requested
     # Bookkeeping is unknown, then reconciled: the sweep decides, it does not raise.
     now = _clock_at(service, datetime.now(UTC) + timedelta(minutes=5))
     service._reconciler.reconcile()
@@ -137,7 +138,8 @@ def test_no_event_parks_a_cache_operation_for_an_operator(cache, tmp_path, store
     adapter = service._lifecycle
     now = datetime.now(UTC) + timedelta(days=400)
     row = adapter.adopt(_row(sessions, operation.id))
-    assert adapter.actions(row) == () and not adapter.irreversible(row)
+    assert adapter.actions(row) == ()
+    assert not adapter.irreversible(row)
     for event in (
         LeaseLapsed(),
         Tick(),
@@ -164,11 +166,13 @@ def test_a_failed_attempt_is_retried_never_waits_for_a_person(cache, tmp_path):
     service._open_source = broken
     assert service.run_pending() == 1
     waiting = _row(sessions, operation.id)
-    assert waiting.state == "queued" and waiting.next_action_at is not None
+    assert waiting.state == "queued"
+    assert waiting.next_action_at is not None
     assert waiting.attempt == 1  # attempts are counted at claim
     assert waiting.lease_deadline is None
     view = service.get_operation(operation.id)
-    assert view.retryable and view.next_attempt_at is not None
+    assert view.retryable
+    assert view.next_attempt_at is not None
     service._open_source = open_source
     due = waiting.next_action_at
     assert due is not None
@@ -196,10 +200,12 @@ def test_cancelling_a_queued_download_ends_it_at_once(cache, tmp_path):
     )
     assert view.state == "cancelled"
     stored = _row(sessions, operation.id)
-    assert stored.completed_at is not None and stored.next_action_at is None
+    assert stored.completed_at is not None
+    assert stored.next_action_at is None
     with sessions() as session:
         cache_set = session.get(ModelCacheSet, str(operation.artifact_set_sha256))
-        assert cache_set is not None and cache_set.state == "incomplete"
+        assert cache_set is not None
+        assert cache_set.state == "incomplete"
     assert service._object_path(str(artifact["sha256"])).exists() is False
 
     assert_ended_without_blocking(
@@ -295,7 +301,8 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
         fcntl.flock(held, fcntl.LOCK_UN)
     assert states[-1] == "cancelled", states
     stored = _row(sessions, operation.id)
-    assert stored.observe_count == 0 and stored.completed_at is not None
+    assert stored.observe_count == 0
+    assert stored.completed_at is not None
     assert service.get_operation(operation.id).state == "cancelled"
 
     assert_ended_without_blocking(
@@ -366,7 +373,8 @@ def test_a_restart_in_the_middle_of_a_transfer_is_harmless(cache, tmp_path):
     restarted.run_pending()
     assert restarted.get_operation(operation.id).state == "succeeded"
     done = _row(sessions, operation.id)
-    assert done.fence == restarted._claim_owner and done.attempt == 2
+    assert done.fence == restarted._claim_owner
+    assert done.attempt == 2
 
 
 def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_path):
@@ -574,7 +582,8 @@ def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     # The unknown outcome keeps the operation: queued with a bounded retry, not
     # failed, and nobody is asked to resubmit.
     assert waiting.state == "queued"
-    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    assert waiting.failure is not None
+    assert waiting.failure["retryable"] is True
     assert waiting.next_attempt_at is not None
 
     unavailable = False

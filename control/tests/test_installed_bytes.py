@@ -144,12 +144,16 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
         )
         installation = session.get(RecipeInstallation, missing)
         run = session.get(RecipeRun, run_id)
-        assert rank is not None and installation is not None and run is not None
-        assert rank.state == InstallationNodeState.PLANNED and rank.installed_bytes == 0
+        assert rank is not None
+        assert installation is not None
+        assert run is not None
+        assert rank.state == InstallationNodeState.PLANNED
+        assert rank.installed_bytes == 0
         assert installation.state == InstallationState.PARTIAL
         assert run.state == RunState.RUNNING
         kept_row = session.get(RecipeInstallation, kept)
-        assert kept_row is not None and kept_row.state == InstallationState.INSTALLED
+        assert kept_row is not None
+        assert kept_row.state == InstallationState.INSTALLED
     # An out-of-order listing cannot reverse the reconciled absence.
     record(NOW + timedelta(seconds=61.5), [kept, missing])
     assert _sizes(world) == {missing: 0, kept: 1}

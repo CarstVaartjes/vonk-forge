@@ -210,7 +210,8 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             request_key=fresh.request_key,
             progress=progress,
         )
-        assert not result.waiting and result.result is not None
+        assert not result.waiting
+        assert result.result is not None
         assert not old_future.done()
     finally:
         release.set()

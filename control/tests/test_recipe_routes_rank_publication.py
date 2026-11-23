@@ -506,7 +506,8 @@ def test_invalid_publication_ends_immediately_with_its_evidence(tmp_path: Path) 
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.FAILED
         assert run.next_action_at is None
-        assert run.route_error is not None and str(error) in run.route_error
+        assert run.route_error is not None
+        assert str(error) in run.route_error
     assert routes.attempts == 1
 
 
@@ -797,8 +798,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         assert owner.owner_generation == generation.generation
         publication = session.get(RoutePublication, owner.authority_id)
         authority = session.get(RecipeRouteAuthority, owner.authority_id)
-        assert publication is not None and publication.state == "completed"
-        assert authority is not None and authority.authority_id == owner.authority_id
+        assert publication is not None
+        assert publication.state == "completed"
+        assert authority is not None
+        assert authority.authority_id == owner.authority_id
 
     def profile_endpoint_intent(session, number):
         run = session.get(RecipeRun, run_id)
@@ -1021,9 +1024,8 @@ def test_worker_republishes_from_fresh_all_rank_evidence_and_recovers_owner(
         run = _recipe_run(session, run_id)
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
-        assert (
-            run.route_generation is not None and run.route_generation > first.generation
-        )
+        assert run.route_generation is not None
+        assert run.route_generation > first.generation
         assert publication.generation == run.route_generation
 
 
@@ -1096,4 +1098,5 @@ def test_a_serving_route_outlives_missing_rank_reports(
     kept = [
         r for r in caplog.messages if "recipe.route.kept_without_current_evidence" in r
     ]
-    assert len(kept) == 1 and "evidence is 301s old" in kept[0]
+    assert len(kept) == 1
+    assert "evidence is 301s old" in kept[0]

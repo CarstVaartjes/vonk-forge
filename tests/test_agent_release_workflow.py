@@ -1292,7 +1292,8 @@ def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> N
 
     assert "snapshot create" in local
     assert "publish switch" in local
-    assert "gpgv" in local and "InRelease" in local
+    assert "gpgv" in local
+    assert "InRelease" in local
     assert "publication-receipt.json" in state
     assert "canonical_json" in state
     signing = apt_step("Materialize and verify apt signing key")

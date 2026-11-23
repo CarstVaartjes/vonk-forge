@@ -976,7 +976,8 @@ def _make_install_specs_missing_placement_authority(
                 Job.payload["owner_id"].as_string() == installation_id,
             )
         )
-        assert install_job is not None and install_job.result is not None
+        assert install_job is not None
+        assert install_job.result is not None
         operations = tuple(
             session.scalars(
                 select(AgentOperation)

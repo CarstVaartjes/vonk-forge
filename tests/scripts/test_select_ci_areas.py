@@ -370,7 +370,8 @@ def test_changed_image_consumers_keep_the_image_build(path: str) -> None:
     # that executes tests marked built_image.
     module = _module()
     selected = module.select([path], "pull_request")
-    assert selected["control"] and selected["nas_install"]
+    assert selected["control"]
+    assert selected["nas_install"]
 
 
 @pytest.mark.parametrize(

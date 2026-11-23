@@ -12,7 +12,8 @@ def test_retry_budget_is_stable_and_honors_dependency_cooldown() -> None:
     policy = RecoveryPolicy(max_failures=3, base_delay_seconds=2, max_delay_seconds=16)
     now = datetime(2026, 9, 14, tzinfo=UTC)
     first = policy.next_attempt("exact-transfer", 1, now)
-    assert first is not None and now < first <= now + timedelta(seconds=3)
+    assert first is not None
+    assert now < first <= now + timedelta(seconds=3)
     assert policy.next_attempt("exact-transfer", 1, now) == first
     cooldown = now + timedelta(seconds=30)
     assert (
@@ -20,7 +21,8 @@ def test_retry_budget_is_stable_and_honors_dependency_cooldown() -> None:
     )
     assert policy.next_attempt("exact-transfer", 3, now) is None
     fresh = policy.next_attempt("fresh-transfer", 1, now)
-    assert fresh is not None and now < fresh <= now + timedelta(seconds=3)
+    assert fresh is not None
+    assert now < fresh <= now + timedelta(seconds=3)
 
 
 def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:

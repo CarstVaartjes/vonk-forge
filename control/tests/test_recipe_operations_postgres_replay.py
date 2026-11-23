@@ -426,7 +426,8 @@ def test_postgres_pending_stop_reconciler_waits_for_dispatch_of_accepted_stop(
         review = RecipeStopParent.model_validate_json(
             canonical_message(job.payload)
         ).service_stop_review
-        assert review is not None and review.stage == "dispatched"
+        assert review is not None
+        assert review.stage == "dispatched"
         assert session.scalar(
             select(AgentOperation.id).where(AgentOperation.parent_job_id == stop_id)
         )

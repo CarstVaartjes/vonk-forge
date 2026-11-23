@@ -99,7 +99,8 @@ def test_new_lane_adopts_original_identity_without_fencing_its_spark():
     assert adapter.cancellations[-1][0] == (_node_id(2),)
     with sessions() as session:
         selection = session.get(FleetProfileSelection, 1)
-        assert selection is not None and selection.application_id == second.id
+        assert selection is not None
+        assert selection.application_id == second.id
         old = session.get(FleetProfileApplication, first.id)
         assert old is not None
         assert service._application_is_current_selection(session, old)
@@ -291,10 +292,12 @@ def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
     )
     newer = service.apply(newer_profile.id, request_key=_uuid(18021), actor="admin")
     took = service.application(newer.id).progress.workload_intent_ordinal
-    assert took is not None and took < 50
+    assert took is not None
+    assert took < 50
 
     older = service.application(first.id)
-    assert older.state == "superseded" and older.superseded_by == newer.id
+    assert older.state == "superseded"
+    assert older.superseded_by == newer.id
 
 
 def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes():

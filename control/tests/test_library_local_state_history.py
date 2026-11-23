@@ -426,7 +426,8 @@ def _plan_work(node: dict[str, object]) -> int:
 
     loops = node.get("Actual Loops", 0)
     rows = node.get("Actual Rows", 0)
-    assert isinstance(loops, int | float) and isinstance(rows, int | float)
+    assert isinstance(loops, int | float)
+    assert isinstance(rows, int | float)
     work = int(loops + rows * loops)
     for key in ("Rows Removed by Filter", "Rows Removed by Join Filter"):
         removed = node.get(key, 0)

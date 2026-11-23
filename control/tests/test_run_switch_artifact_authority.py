@@ -230,7 +230,8 @@ def test_replan_after_a_failed_target_copy_waits_for_a_scan_received_after_it(
     def fail_attempt() -> None:
         with sessions.begin() as session:
             row = session.get(Job, op_id)
-            assert row is not None and row.result is not None
+            assert row is not None
+            assert row.result is not None
             progress = _read_progress(row.result)
             progress.force_replan = True
             progress.subphase = "target-copy"
@@ -292,7 +293,8 @@ def test_new_plan_after_a_definite_target_copy_failure_waits_for_a_newer_scan(
     )
     with sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.result is not None
+        assert row is not None
+        assert row.result is not None
         progress = _read_progress(row.result)
         progress.subphase = "target-copy"
         row.result = _persisted_result(progress)

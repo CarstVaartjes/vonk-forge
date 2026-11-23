@@ -314,7 +314,8 @@ def test_typed_knobs_compile_enforce_and_show_display_wording(tmp_path) -> None:
     before = service.job_contract(run_id=run_id)
     _show_wording(sessions, run_id)
     after = service.job_contract(run_id=run_id)
-    assert before.contract is not None and after.contract is not None
+    assert before.contract is not None
+    assert after.contract is not None
 
     # Wording is joined from the display row and is not execution identity.
     assert after.contract_sha256 == before.contract_sha256
@@ -326,7 +327,8 @@ def test_typed_knobs_compile_enforce_and_show_display_wording(tmp_path) -> None:
 
     definitions = after.contract.parameters
     flow = {item.name: item for item in definitions}["flow-shift"]
-    assert flow.type == "float" and isinstance(flow.default, float)
+    assert flow.type == "float"
+    assert isinstance(flow.default, float)
     assert _effective_parameters(definitions, {"num-frames": 141})["num-frames"] == 141
     assert (
         _effective_parameters(definitions, {"flow-shift": 12.5})["flow-shift"] == 12.5

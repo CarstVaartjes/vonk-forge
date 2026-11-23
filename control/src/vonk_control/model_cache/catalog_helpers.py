@@ -81,7 +81,8 @@ def _huggingface_catalog_source(artifact: CatalogArtifact) -> tuple[str, str | N
     repository = artifact.repository
     path = artifact.path
     revision = artifact.revision
-    assert isinstance(repository, str) and isinstance(path, str)
+    assert isinstance(repository, str)
+    assert isinstance(path, str)
     # Catalog repositories are immutable HTTPS URLs.  Parse and bind the
     # repository path to the one trusted Hugging Face authority before
     # constructing the file URL; accepting the raw URL here would permit

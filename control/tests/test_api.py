@@ -208,7 +208,8 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
     assert cli.main(("fleet", "detail", "Atlas", "--json"), control_client=client) == 2
     problem = json.loads(capsys.readouterr().out)
     assert problem["candidates"] == [node.id for node in snapshot.nodes]
-    assert problem["http_status"] == 422 and problem["request_id"]
+    assert problem["http_status"] == 422
+    assert problem["request_id"]
     assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 2
     output = capsys.readouterr()
     assert all(node.id in output.err for node in snapshot.nodes)

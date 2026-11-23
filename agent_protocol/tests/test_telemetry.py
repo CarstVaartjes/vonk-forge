@@ -205,5 +205,6 @@ def test_a_ninth_engine_is_kept_and_a_dropped_entry_is_counted() -> None:
     sample = TelemetryRequest.parse(
         {"samples": [{**VECTOR_V2["sample"], "engines": [bad, *engines, engines[0]]}]}
     ).samples[0]
-    assert sample.engines is not None and len(sample.engines) == 9
+    assert sample.engines is not None
+    assert len(sample.engines) == 9
     assert sample.dropped_engine_entries == 2

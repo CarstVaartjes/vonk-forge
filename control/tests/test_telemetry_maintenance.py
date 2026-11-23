@@ -407,5 +407,6 @@ def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(
     assert kept == [(NODE_A, 2), (node_b, 50)]
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and node.inventory_snapshot is not None
+        assert node is not None
+        assert node.inventory_snapshot is not None
         assert inventory_items(node).hostname == "retained.internal"

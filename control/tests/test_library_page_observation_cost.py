@@ -114,7 +114,8 @@ def test_recipe_page_observes_only_the_entries_it_returns(
     projection = _counting_projection(assessed_library, counted)
 
     full = projection.recipe_library(limit=512, assess=assess)
-    assert len(full.recipes) > _ENTRIES and full.next_cursor is None
+    assert len(full.recipes) > _ENTRIES
+    assert full.next_cursor is None
     budget = _response_bytes(projection.recipe_library(limit=512, assess=True)) // 4
     monkeypatch.setattr(common, "MAX_CONTROL_DOCUMENT_BYTES", budget)
     plain = len(projection.recipe_library(limit=512).recipes)
@@ -169,7 +170,8 @@ def test_model_page_observes_only_the_entries_it_returns(
     projection = _counting_projection(assessed_library, counted)
 
     full = projection.models(limit=512)
-    assert len(full.models) > _ENTRIES and full.next_cursor is None
+    assert len(full.models) > _ENTRIES
+    assert full.next_cursor is None
     budget = _response_bytes(full) // 4
     monkeypatch.setattr(common, "MAX_CONTROL_DOCUMENT_BYTES", budget)
     counted.clear()

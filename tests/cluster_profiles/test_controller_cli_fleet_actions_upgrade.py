@@ -89,7 +89,8 @@ def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
         ("model", "download", "qwen", "--interval-seconds", "0.01", "--json"),
         client,
     )
-    assert status == 0 and payload["state"] == "succeeded"
+    assert status == 0
+    assert payload["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
         "/api/model/qwen/download",
         "/api/model/operations/download-1",
@@ -132,7 +133,8 @@ def test_cache_request_lookup_pins_following_to_its_original_operation(
         ),
         client,
     )
-    assert status == 0 and result["state"] == "succeeded"
+    assert status == 0
+    assert result["state"] == "succeeded"
     assert [(call[0], call[1]) for call in client.calls] == [
         ("GET", lookup),
         ("GET", target),
@@ -165,7 +167,8 @@ def test_recipe_download_follows_its_canonical_receipt_id() -> None:
         ),
         client,
     )
-    assert status == 0 and result["state"] == "succeeded"
+    assert status == 0
+    assert result["state"] == "succeeded"
     assert [call[1] for call in client.calls] == [
         "/api/recipe/qwen-code/download",
         "/api/recipe/operations/recipe-download",
@@ -212,7 +215,8 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         ),
         client,
     )
-    assert status == 0 and result["state"] == "observing"
+    assert status == 0
+    assert result["state"] == "observing"
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("POST", "/api/recipe/operations/recipe-operation/cancel"),
         ("GET", "/api/recipe/operations/recipe-operation"),
@@ -226,7 +230,8 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
 def test_recipe_cancel_requires_explicit_yes_before_mutation() -> None:
     client = FakeClient({})
     status, result = run(("recipe", "cancel", "operation", "--json"), client)
-    assert status == 2 and "requires --yes" in str(result["error"])
+    assert status == 2
+    assert "requires --yes" in str(result["error"])
     assert client.calls == []
 
 
@@ -277,7 +282,8 @@ def test_cache_reconnection_discards_wrong_binding_until_exact_owner_repairs(
         client,
     )
     assert status == 0
-    assert result["operation_id"] == "original" and result["request_key"] == key
+    assert result["operation_id"] == "original"
+    assert result["request_key"] == key
     assert all(call[0] == "GET" for call in client.calls)
 
 
@@ -300,7 +306,8 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
     status, payload = run(
         ("recipe", "download", "qwen-code", "--detach", "--json"), client
     )
-    assert status == 0 and payload["state"] == "queued"
+    assert status == 0
+    assert payload["state"] == "queued"
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
@@ -361,14 +368,16 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     status, payload = run(("model", "remove", "qwen", "--json"), model)
     removal_error = payload["error"]
     assert isinstance(removal_error, str)
-    assert status == 2 and "--yes" in removal_error
+    assert status == 2
+    assert "--yes" in removal_error
     assert model.calls == []
 
     recipe = FakeClient({})
     status, payload = run(("recipe", "remove", "qwen-code", "--yes", "--json"), recipe)
     model_choice_error = payload["error"]
     assert isinstance(model_choice_error, str)
-    assert status == 2 and "--with-model or --keep-model" in model_choice_error
+    assert status == 2
+    assert "--with-model or --keep-model" in model_choice_error
     assert recipe.calls == []
 
 
@@ -612,11 +621,13 @@ def test_fleet_log_follow_resolves_alias_once_and_pins_every_poll_to_node_id() -
         client,
     )
 
-    assert status == 0 and payload["node_id"] == node_id
+    assert status == 0
+    assert payload["node_id"] == node_id
     assert [call[1] for call in client.calls] == ["/api/fleet", path, path, path]
     first_query = client.calls[-2][3]
     second_query = client.calls[-1][3]
-    assert isinstance(first_query, dict) and isinstance(second_query, dict)
+    assert isinstance(first_query, dict)
+    assert isinstance(second_query, dict)
     assert second_query == first_query
     assert second_query["recipe"] == "vllm"
     assert second_query["source"] == "job"
@@ -637,7 +648,8 @@ def test_fleet_loginfo_validates_identity_even_for_a_canonical_selector() -> Non
 
     status, payload = run(("fleet", "loginfo", node_id, "--json"), client)
 
-    assert status == 0 and payload["node_id"] == node_id
+    assert status == 0
+    assert payload["node_id"] == node_id
     assert [call[1] for call in client.calls] == [path, path]
 
 
@@ -902,7 +914,8 @@ def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error(
     assert observation["status"] == "timed_out"
     assert "error" not in observation
     inner = result["result"]
-    assert isinstance(inner, dict) and len(inner["operations"]) == 4
+    assert isinstance(inner, dict)
+    assert len(inner["operations"]) == 4
 
 
 def test_fleet_upgrade_timeout_reports_the_job_as_still_running(
@@ -969,7 +982,8 @@ def test_fleet_upgrade_follow_still_refuses_another_jobs_targets(
     assert isinstance(observation, dict)
     assert observation["error"]
     inner = result["result"]
-    assert isinstance(inner, dict) and "operations" not in inner
+    assert isinstance(inner, dict)
+    assert "operations" not in inner
 
 
 def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
@@ -1074,4 +1088,5 @@ def test_fleet_upgrade_unknown_acceptance_keeps_exact_request_for_fresh_observer
         ),
         client,
     )
-    assert status == 0 and fresh["operation_id"] == "original-job"
+    assert status == 0
+    assert fresh["operation_id"] == "original-job"

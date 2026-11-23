@@ -102,7 +102,8 @@ def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path
     assert fresh.policy_report["prebuilt_image"] == reference
     with sessions() as session:
         build = session.get(RecipeBuild, fresh.build_id)
-        assert build is not None and build.error is None
+        assert build is not None
+        assert build.error is None
         assert_no_orphaned_holds(session)
 
 
@@ -186,7 +187,8 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
     assert unavailable.run_pending() == 1
     with sessions() as session:
         ended = session.get(Job, job.id)
-        assert ended is not None and ended.state not in (
+        assert ended is not None
+        assert ended.state not in (
             LifecycleState.RUNNING.value,
             LifecycleState.QUEUED.value,
         )
@@ -209,9 +211,8 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
     with sessions() as session:
         completed = session.get(Job, accepted.id)
         build = session.get(RecipeBuild, fresh.build_id)
-        assert (
-            completed is not None and completed.state == LifecycleState.SUCCEEDED.value
-        )
+        assert completed is not None
+        assert completed.state == LifecycleState.SUCCEEDED.value
         assert build is not None
         assert build.image_digest == REFERENCE.rsplit("@", 1)[1]
         assert build.oci_layout_sha256 == ADDRESS
@@ -255,7 +256,8 @@ def test_damaged_plan_repairs_without_discarding_last_verified_image(tmp_path):
     assert fresh.agent_payload == plan.agent_payload
     with sessions() as session:
         row = session.get(RecipeBuild, plan.build_id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED.value
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED.value
         assert row.image_digest == "sha256:" + "b" * 64
         assert row.oci_layout_sha256 == "c" * 64
         assert_no_orphaned_holds(session)

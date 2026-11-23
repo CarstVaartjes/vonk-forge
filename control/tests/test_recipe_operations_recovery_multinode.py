@@ -631,9 +631,11 @@ def test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop
         if newer_intent == "one-node":
             # No single intent owns both Sparks: nothing may take authority over
             # either, and the run stays stoppable for whoever does.
-            assert cleanups == () and run.state == "lost"
+            assert cleanups == ()
+            assert run.state == "lost"
         else:
-            assert len(cleanups) == 1 and run.state == "stopping"
+            assert len(cleanups) == 1
+            assert run.state == "stopping"
             assert (
                 cleanups[0].payload["workload_intent_ordinal"] == owner_ordinals.pop()
             )

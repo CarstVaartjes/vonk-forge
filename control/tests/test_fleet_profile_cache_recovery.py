@@ -75,7 +75,8 @@ def _typed_cache_failure(
     with sessions.begin() as session:
         child = session.get(Job, child_id)
         application = session.get(FleetProfileApplication, application_id)
-        assert child is not None and child.result is not None
+        assert child is not None
+        assert child.result is not None
         assert application is not None
         child.result = {
             **child.result,
@@ -308,7 +309,8 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
         )
         archive_digest = build.oci_layout_sha256
         archive_bytes = build.image_bytes
-    assert archive_digest is not None and archive_bytes is not None
+    assert archive_digest is not None
+    assert archive_bytes is not None
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime-images")
     remove_test_image(storage, archive_digest)
     assert storage.build_archive_available(archive_digest, archive_bytes) is False
@@ -400,12 +402,14 @@ def test_cache_recovery_replans_an_actually_missing_build_archive(
             applications = tuple(session.scalars(select(FleetProfileApplication)))
             assert len(applications) == 1
             build = session.get(RecipeBuild, build_plan.build_id)
-            assert build is not None and build.state == before[0]
+            assert build is not None
+            assert build.state == before[0]
         return
 
     assert service.tick() is True
     recovery_review = service.preview(profile.id, allow_pending_cache_rebuild=True)
-    assert recovery_review.allowed and recovery_review.assessments
+    assert recovery_review.allowed
+    assert recovery_review.assessments
     assert service.tick() is True
     with sessions() as session:
         retry = session.scalar(

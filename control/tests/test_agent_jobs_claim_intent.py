@@ -114,7 +114,8 @@ def test_workload_enqueue_refuses_parent_without_an_admitted_intent(service) -> 
         STOP_PAYLOAD,
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None and fenced_operation(sessions, claim).id == fresh.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == fresh.id
     jobs.succeed(claim, STOP_RESULT)
     assert job_state(sessions, fresh.parent_job_id).state == LifecycleState.SUCCEEDED
 
@@ -219,9 +220,12 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         queued_row = session.get(AgentOperation, queued.id)
         running_row = session.get(AgentOperation, running.id)
         parent_row = session.get(Job, job.id)
-        assert queued_row is not None and queued_row.state == "cancelled"
-        assert running_row is not None and running_row.state == "running"
-        assert parent_row is not None and parent_row.result is not None
+        assert queued_row is not None
+        assert queued_row.state == "cancelled"
+        assert running_row is not None
+        assert running_row.state == "running"
+        assert parent_row is not None
+        assert parent_row.result is not None
         assert parent_row.result["cancel_requested"] is True
         pending = AgentJobService.assess_superseded_agent_effects_in_session(
             session, (NODE_A, NODE_B), 2, clock.now
@@ -238,10 +242,8 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         replacement_row.payload = {"workload_intent_ordinal": 2}
     fresh = jobs.enqueue(replacement.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
     fresh_claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert (
-        fresh_claim is not None
-        and fenced_operation(sessions, fresh_claim).id == fresh.id
-    )
+    assert fresh_claim is not None
+    assert fenced_operation(sessions, fresh_claim).id == fresh.id
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         jobs.succeed(claim, {})
     cancelled = AgentResult.model_validate(
@@ -261,8 +263,10 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     with sessions() as session:
         running_row = session.get(AgentOperation, running.id)
         parent_row = session.get(Job, job.id)
-        assert running_row is not None and running_row.state == "cancelled"
-        assert parent_row is not None and parent_row.state == "cancelled"
+        assert running_row is not None
+        assert running_row.state == "cancelled"
+        assert parent_row is not None
+        assert parent_row.state == "cancelled"
         assert not AgentJobService.assess_superseded_agent_effects_in_session(
             session, (NODE_A, NODE_B), 2, clock.now
         )
@@ -291,7 +295,8 @@ def test_an_intent_that_fences_no_spark_cancels_nothing(service) -> None:
         )
     with sessions() as session:
         queued_row = session.get(AgentOperation, queued.id)
-        assert queued_row is not None and queued_row.state == "queued"
+        assert queued_row is not None
+        assert queued_row.state == "queued"
 
 
 def test_new_intent_cancels_an_order_by_its_children_never_its_targets(
@@ -315,7 +320,8 @@ def test_new_intent_cancels_an_order_by_its_children_never_its_targets(
         inside_row = session.get(Job, inside.id)
         outside_row = session.get(Job, outside.id)
         node = session.get(AgentNode, NODE_A)
-        assert inside_row is not None and outside_row is not None
+        assert inside_row is not None
+        assert outside_row is not None
         assert node is not None
         inside_row.targets = ["another-spark"]
         outside_row.targets = [NODE_A]
@@ -329,13 +335,17 @@ def test_new_intent_cancels_an_order_by_its_children_never_its_targets(
         outside_row = session.get(Job, outside.id)
         running_row = session.get(AgentOperation, running.id)
         queued_row = session.get(AgentOperation, queued.id)
-        assert inside_row is not None and isinstance(inside_row.result, dict)
+        assert inside_row is not None
+        assert isinstance(inside_row.result, dict)
         assert inside_row.result["cancel_requested"] is True
-        assert running_row is not None and running_row.state == "running"
+        assert running_row is not None
+        assert running_row.state == "running"
         # The order on the other Spark is outside the newer intent: untouched.
-        assert outside_row is not None and outside_row.state == "queued"
+        assert outside_row is not None
+        assert outside_row.state == "queued"
         assert outside_row.result is None
-        assert queued_row is not None and queued_row.state == "queued"
+        assert queued_row is not None
+        assert queued_row.state == "queued"
 
 
 def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
@@ -361,13 +371,11 @@ def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
         cancelled_row = session.get(AgentOperation, cancelled.id)
         node_a = session.get(AgentNode, NODE_A)
         node_b = session.get(AgentNode, NODE_B)
-        assert (
-            parent_row is not None
-            and succeeded_row is not None
-            and cancelled_row is not None
-            and node_a is not None
-            and node_b is not None
-        )
+        assert parent_row is not None
+        assert succeeded_row is not None
+        assert cancelled_row is not None
+        assert node_a is not None
+        assert node_b is not None
         parent_row.state = "running"
         parent_row.result = {
             "cancel_requested": True,
@@ -406,13 +414,11 @@ def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -
         parked_row = session.get(AgentOperation, parked.id)
         node_a = session.get(AgentNode, NODE_A)
         node_b = session.get(AgentNode, NODE_B)
-        assert (
-            parent_row is not None
-            and succeeded_row is not None
-            and parked_row is not None
-            and node_a is not None
-            and node_b is not None
-        )
+        assert parent_row is not None
+        assert succeeded_row is not None
+        assert parked_row is not None
+        assert node_a is not None
+        assert node_b is not None
         session.add(
             RecipeRun(
                 id=run_id,
@@ -446,8 +452,10 @@ def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -
     with sessions() as session:
         parent_row = session.get(Job, old_parent.id)
         parked_row = session.get(AgentOperation, parked.id)
-        assert parent_row is not None and parent_row.state == "cancelled"
-        assert parked_row is not None and parked_row.state == "cancelled"
+        assert parent_row is not None
+        assert parent_row.state == "cancelled"
+        assert parked_row is not None
+        assert parked_row.state == "cancelled"
 
 
 def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
@@ -465,7 +473,9 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
                 AgentOperationAttempt.fence == first.fence
             )
         )
-        assert node is not None and row is not None and first_attempt is not None
+        assert node is not None
+        assert row is not None
+        assert first_attempt is not None
         node.workload_intent_ordinal = 2
         jobs.request_superseded_workload_cancellation_in_session(
             session, (NODE_A,), 2, clock.now
@@ -503,11 +513,15 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
                 AgentOperationAttempt.fence == second_fence
             )
         )
-        assert row is not None and row.current_attempt == 2 and row.state == "running"
-        assert newer is not None and newer.state == "running" and newer.result is None
+        assert row is not None
+        assert row.current_attempt == 2
+        assert row.state == "running"
+        assert newer is not None
+        assert newer.state == "running"
+        assert newer.result is None
 
 
-@pytest.mark.parametrize("older_work", (None, "exact-retry", "running"))
+@pytest.mark.parametrize("older_work", [None, "exact-retry", "running"])
 def test_agent_upgrade_completes_only_after_exact_new_runtime_reconnects(
     service,
     older_work,
@@ -544,7 +558,8 @@ def test_artifact_distribution_is_serialized_as_a_mutation(
     )
     with sessions() as session:
         stored = session.get(AgentOperation, second.id)
-        assert stored is not None and stored.state == "queued"
+        assert stored is not None
+        assert stored.state == "queued"
 
 
 def test_rust_claim_updates_current_contact(service) -> None:
@@ -868,7 +883,8 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(
         claim = waiting.result(timeout=30)
     elapsed = time.monotonic() - started
 
-    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == operation.id
     # Woken by the enqueue, far before its own 30 s long-poll timeout.
     assert elapsed < 10
 
@@ -911,7 +927,8 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
         jobs.notify_available()
         pool.shutdown(wait=True)
 
-    assert claim is not None and fenced_operation(sessions, claim).id == operation.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == operation.id
 
 
 def test_expired_attempt_cannot_publish_success(service) -> None:
@@ -929,4 +946,5 @@ def test_expired_attempt_cannot_publish_success(service) -> None:
         jobs.succeed(first, STOP_RESULT)
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED

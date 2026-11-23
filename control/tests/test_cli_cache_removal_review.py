@@ -703,7 +703,8 @@ def test_fleet_review_is_read_only_and_submission_binds_its_scope(
     assert json.loads(capsys.readouterr().out)["fleet"] == effects.model_dump(
         mode="json"
     )
-    assert len(client.calls) == 1 and client.calls[0][3] == {"fleet": True}
+    assert len(client.calls) == 1
+    assert client.calls[0][3] == {"fleet": True}
     args = _parse(
         "--json", "model", "remove", "publisher/model", "--fleet", "--yes", "--detach"
     )

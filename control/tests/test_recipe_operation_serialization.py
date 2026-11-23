@@ -74,7 +74,7 @@ def test_start_receipts_keep_the_agent_canonical_encoding(tmp_path, nodes):
         assert view.result == json.loads(canonical_message(view.lifecycle_result))
 
 
-@pytest.mark.parametrize("kind,reader", list(_RECIPE_PARENT_READERS.items()))
+@pytest.mark.parametrize(("kind", "reader"), list(_RECIPE_PARENT_READERS.items()))
 def test_controller_parent_documents_round_trip(kind, reader):
     """Catch canonical egress dropping defaults from a Controller parent write."""
     parent = reader.validate_json(
@@ -126,7 +126,7 @@ def test_controller_recovery_context_round_trip():
 
 
 @pytest.mark.parametrize(
-    "kind,document",
+    ("kind", "document"),
     [
         (
             "recipe.start",

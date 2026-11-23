@@ -75,18 +75,19 @@ def _render(state) -> str:
 def test_matching_compose_file_raises_no_attention(tmp_path: Path) -> None:
     state = compose_bundle({ENVIRONMENT_VARIABLE: RELEASE}, _embedded(tmp_path))
 
-    assert state is not None and state.current
+    assert state is not None
+    assert state.current
     assert _fires(_render(state)) is None
 
 
 @pytest.mark.parametrize(
     ("environment", "running"),
-    (
+    [
         ({ENVIRONMENT_VARIABLE: OLDER}, OLDER),
         # Today's NAS: a Compose file from before the stamp existed.
         ({}, "missing"),
         ({ENVIRONMENT_VARIABLE: "not-a-digest"}, "invalid"),
-    ),
+    ],
 )
 def test_older_or_unstamped_compose_file_is_attention_with_the_fix(
     tmp_path: Path, environment: dict[str, str], running: str
@@ -138,7 +139,8 @@ def _embedded_digest(template: Path) -> str:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(origin, target)
     command = shlex.split(stage.split("RUN ", 1)[1].split(" > ", 1)[0])
-    assert command[:2] == ["python", "-c"] and len(command) == 3
+    assert command[:2] == ["python", "-c"]
+    assert len(command) == 3
     script = command[2].replace('"/compose/', f'"{image}/compose/')
     try:
         result = subprocess.run(
@@ -152,7 +154,7 @@ def _embedded_digest(template: Path) -> str:
     return result.stdout.strip()
 
 
-@pytest.mark.parametrize("renderer", ("production", "dev"))
+@pytest.mark.parametrize("renderer", ["production", "dev"])
 def test_installer_compose_carries_the_digest_the_controller_image_embeds(
     tmp_path: Path, renderer: str
 ) -> None:
@@ -189,7 +191,8 @@ def test_installer_compose_carries_the_digest_the_controller_image_embeds(
 
     state = compose_bundle(services["control-api"]["environment"], embedded)
 
-    assert state is not None and state.current
+    assert state is not None
+    assert state.current
     assert (
         services["control-worker"]["environment"][ENVIRONMENT_VARIABLE] == state.running
     )

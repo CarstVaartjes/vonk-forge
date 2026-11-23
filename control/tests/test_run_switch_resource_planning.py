@@ -187,7 +187,8 @@ def test_published_qwen_dspark_corpus_scopes_target_and_drafter_bytes() -> None:
 def test_run_switch_resource_view_binds_canonical_identity_and_evidence() -> None:
     recipe = _recipe()
     resolved = resolve_effective_settings(recipe)
-    assert resolved.allowed and resolved.settings is not None
+    assert resolved.allowed
+    assert resolved.settings is not None
     view = _settings_view(resolved.settings)
     assert view.parallelism.world_size == 1
     assert view.identity_sha256 == resolved.settings.identity_digest

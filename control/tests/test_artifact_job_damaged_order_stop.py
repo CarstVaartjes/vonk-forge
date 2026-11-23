@@ -36,7 +36,8 @@ def test_a_damaged_artifact_job_order_never_holds_the_run_stop(
     submitted = submitted_artifact_job(service, run_id, request_suffix=118)
     with sessions.begin() as session:
         artifact = session.get(ArtifactJob, submitted.id)
-        assert artifact is not None and artifact.operation_id is not None
+        assert artifact is not None
+        assert artifact.operation_id is not None
         order = session.get(Job, artifact.operation_id)
         assert order is not None
         if damage == "order-kind":
@@ -59,7 +60,8 @@ def test_a_damaged_artifact_job_order_never_holds_the_run_stop(
     ArtifactJobAdapter(sessions=sessions).reconcile()
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
         (child,) = session.scalars(
             select(AgentOperation).where(AgentOperation.parent_job_id == order_id)

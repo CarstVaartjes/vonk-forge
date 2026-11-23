@@ -234,12 +234,14 @@ def _seed_profile_application_for_run(
         assert run is not None
         installation = session.get(RecipeInstallation, run.installation_id)
         mapping = session.get(ClusterMapping, run.mapping_id)
-        assert installation is not None and mapping is not None
+        assert installation is not None
+        assert mapping is not None
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         recipe = session.get(CatalogDocument, revision.document_id)
         build = session.get(RecipeBuild, installation.recipe_build_id)
-        assert recipe is not None and build is not None
+        assert recipe is not None
+        assert build is not None
         assignment_alias = (
             None
             if desired_state == DesiredAssignmentState.INSTALLED
@@ -562,7 +564,8 @@ def test_invalid_profile_history_is_reported_without_false_alias_not_found(
     assert "stored document is invalid" in view.projection_issue.detail
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
-        assert application is not None and application.plan == {}
+        assert application is not None
+        assert application.plan == {}
 
 
 @pytest.mark.lane
@@ -594,7 +597,8 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
     assert len(owner_view.assignments) == 1
     loaded_assignment = owner_view.assignments[0]
     endpoint = loaded_assignment.endpoint
-    assert endpoint is not None and loaded_assignment.alias is not None
+    assert endpoint is not None
+    assert loaded_assignment.alias is not None
 
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
         environment = _credentials_environment(tmp_path, url, certificate, token)

@@ -235,7 +235,8 @@ def test_uncapped_attention_requires_receipt_and_current_evidence(
     ]
     assert bool(warnings) == warns
     if state == GpuClockApplyState.WAITING:
-        assert node.telemetry is not None and node.telemetry.sample is not None
+        assert node.telemetry is not None
+        assert node.telemetry.sample is not None
         assert node.telemetry.sample.gpu_clock is not None
         assert node.telemetry.sample.gpu_clock.detail == cause
         assert "1060" in warnings[0].detail
@@ -310,7 +311,8 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
         .nodes
         if node.id == NODE_A
     )
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert node.telemetry.sample.gpu_clock == report.samples[0].gpu_clock
     render_payload(node.model_dump(mode="json"), "fleet", action="detail")
     output = capsys.readouterr().out

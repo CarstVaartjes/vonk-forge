@@ -2701,7 +2701,8 @@ class SparkLifecycle:
         return digest
 
     def _verify_synthetic_docker_device(self) -> None:
-        assert self.bundle is not None and self.temporary_root is not None
+        assert self.bundle is not None
+        assert self.temporary_root is not None
         caddy_container = self._run_command(
             self._compose("ps", "--quiet", "caddy"), cwd=self.bundle
         ).stdout.strip()
@@ -2911,7 +2912,8 @@ class SparkLifecycle:
         )
 
     def _prepare_synthetic_firewall_environment(self) -> None:
-        assert self.bundle is not None and self.temporary_root is not None
+        assert self.bundle is not None
+        assert self.temporary_root is not None
         suffix = self.synthetic_fabric_octet
         management_interface = f"vmgt{os.getpid() % 100000}"
         management_peer = f"vnas{os.getpid() % 100000}"
@@ -3436,11 +3438,9 @@ class SparkLifecycle:
         response_digest: str | None = None
         phase = "preconditions"
         try:
-            assert (
-                self.control is not None
-                and self.browser is not None
-                and isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
-            )
+            assert self.control is not None
+            assert self.browser is not None
+            assert isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
             if NODE_ID.fullmatch(node_id) is None:
                 raise LifecycleError("synthetic canary node identity is invalid")
             fixture = self.synthetic_canary_fixture
@@ -4069,7 +4069,8 @@ class SparkLifecycle:
         The running container and retained exact runtime files remain intact;
         recovery must reconnect, adopt them and complete subsequent cleanup.
         """
-        assert self.agent_installed and self.temporary_root is not None
+        assert self.agent_installed
+        assert self.temporary_root is not None
         temporary_root = self.temporary_root
         if UUID.fullmatch(run_id) is None or NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("journal recovery canary identity is invalid")

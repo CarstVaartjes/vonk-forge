@@ -73,7 +73,8 @@ def budget_modules(tree: ast.Module) -> tuple[str, ...]:
             for target in node.targets
         ):
             value = ast.literal_eval(node.value)
-            assert isinstance(value, tuple) and all(isinstance(s, str) for s in value)
+            assert isinstance(value, tuple)
+            assert all(isinstance(s, str) for s in value)
             return value
     raise AssertionError("Pass-budget clock registry is missing")
 

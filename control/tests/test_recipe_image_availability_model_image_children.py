@@ -622,7 +622,8 @@ def test_late_verified_image_result_cannot_publish_after_cancellation(
     assert retained.is_file()
     with sessions() as session:
         row = session.get(Job, operation.id)
-        assert row is not None and row.state == "cancelled"
+        assert row is not None
+        assert row.state == "cancelled"
         assert "image_result" not in row.payload
         assert "image_reference_intent" not in row.payload
     assert_ended_without_blocking(

@@ -60,7 +60,9 @@ def audit_catalog_documents(session: Session) -> list[CatalogReadFailure]:
                     row.id, row.publisher, row.slug, row.content_digest, current, parsed
                 )
             )
-    assert not session.new and not session.dirty and not session.deleted
+    assert not session.new
+    assert not session.dirty
+    assert not session.deleted
     return failures
 
 
@@ -162,7 +164,8 @@ def test_historical_damage_is_retired_without_blocking_current_reads(
     try:
         review = cache.review_fleet_model_removal(target.content_digest)
         assert review.fleet is not None
-        assert not review.fleet.observation_issues and not review.blockers
+        assert not review.fleet.observation_issues
+        assert not review.blockers
     finally:
         cache.close()
     with catalog._sessions() as session:
@@ -205,18 +208,21 @@ def test_current_head_reports_field_and_normal_sync_rebuilds_exact_revision(
         assert review.blockers
         with catalog._sessions() as session:
             failures = audit_catalog_documents(session)
-            assert len(failures) == 1 and failures[0].current_head
+            assert len(failures) == 1
+            assert failures[0].current_head
         # The next ordinary sync, at the same source commit, owns repair.
         assert sync.automatic().state == CatalogSyncState.CURRENT
         assert sync.automatic().state == CatalogSyncState.CURRENT
         with catalog._sessions() as session:
             assert not audit_catalog_documents(session)
             repaired = session.get(CatalogDocumentRevision, revision_id)
-            assert repaired is not None and repaired.content_digest == digest
+            assert repaired is not None
+            assert repaired.content_digest == digest
             assert isinstance(read_catalog_document(repaired), ModelDefinition)
             assert len(session.scalars(select(CatalogDocumentRevision)).all()) == 1
         healed = cache.review_fleet_model_removal(digest)
-        assert healed.fleet is not None and not healed.fleet.observation_issues
+        assert healed.fleet is not None
+        assert not healed.fleet.observation_issues
         assert not healed.blockers
     finally:
         cache.close()
@@ -286,10 +292,12 @@ def test_sync_replaces_a_damaged_head_when_source_revision_is_already_local(
         selected = session.scalar(
             select(CatalogDocumentRevision).where(active_head_revision())
         )
-        assert selected is not None and selected.id == original.id
+        assert selected is not None
+        assert selected.id == original.id
         assert read_catalog_document(selected) == model
         failures = audit_catalog_documents(session)
-        assert len(failures) == 1 and not failures[0].current_head
+        assert len(failures) == 1
+        assert not failures[0].current_head
         assert failures[0].revision_id == candidate.id
         assert len(session.scalars(select(CatalogDocumentRevision)).all()) == 2
     assert sync.automatic().id == healed.id
@@ -326,11 +334,13 @@ def test_unrelated_damaged_head_does_not_gate_removal_before_sync(
         digest = document_sha256(target.model_dump(mode="json"))
         review = cache.review_fleet_model_removal(digest)
         assert review.fleet is not None
-        assert not review.fleet.observation_issues and not review.blockers
+        assert not review.fleet.observation_issues
+        assert not review.blockers
         with catalog._sessions() as session:
             session.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
             failures = audit_catalog_documents(session)
-            assert len(failures) == 1 and failures[0].current_head
+            assert len(failures) == 1
+            assert failures[0].current_head
             assert failures[0].revision_id == old.id
             assert _model_objects(session, digest)[:2] == (
                 {target.files[0].sha256},

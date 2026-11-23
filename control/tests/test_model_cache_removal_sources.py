@@ -101,7 +101,8 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
             row.next_action_at = None  # the one retry clock: due now
     waiting = service.get_operation(removal.id)
     assert waiting.state in {"queued", LifecycleState.BACKOFF}
-    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    assert waiting.failure is not None
+    assert waiting.failure["retryable"] is True
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is not None
 
@@ -540,7 +541,8 @@ def test_permanent_missing_source_ends_and_admits_a_fresh_download(
         assert f"HTTP {status}" in detail
         assert served["count"] == 5
         # Nothing waits any more: no blocker, no retry clock.
-        assert gone.blockers == () and gone.next_attempt_at is None
+        assert gone.blockers == ()
+        assert gone.next_attempt_at is None
         assert service.run_pending() == 0
         fresh = _download(
             service,

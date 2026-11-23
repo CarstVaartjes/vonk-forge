@@ -192,7 +192,7 @@ def test_changed_removal_scope_requires_a_new_plan_and_can_then_be_accepted(worl
 
 
 @pytest.mark.parametrize(
-    "action,options,suffix",
+    ("action", "options", "suffix"),
     [("detail", (), ""), ("remove", ("--review",), "/remove-review")],
 )
 def test_model_cli_passes_exact_digest_to_the_real_api(

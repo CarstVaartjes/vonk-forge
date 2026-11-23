@@ -373,7 +373,8 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
     )
     assert projected is not None
     assert projected.completed_bytes == 128
-    assert projected.total_bytes == 256 and projected.total_bytes_known
+    assert projected.total_bytes == 256
+    assert projected.total_bytes_known
     assert projected.object_sha256 == "a" * 64
     unknown = _progress_projection({"phase": "verify"})
     assert unknown is not None
@@ -852,7 +853,8 @@ def test_durable_resume_has_one_atomic_winner(tmp_path) -> None:
     with sessions() as session:
         stored_job = session.get(Job, job_id)
         stored_operation = session.get(AgentOperation, operation.id)
-        assert stored_job is not None and stored_job.state == "queued"
+        assert stored_job is not None
+        assert stored_job.state == "queued"
         assert stored_operation is not None
         assert stored_operation.next_action_at is not None
 
@@ -998,10 +1000,13 @@ def test_durable_retire_retains_uncertain_run_capacity(tmp_path) -> None:
         reservation = session.scalar(
             select(ResourceReservation).where(ResourceReservation.owner_id == owner_id)
         )
-        assert stored is not None and parent is not None
-        assert run is not None and reservation is not None
+        assert stored is not None
+        assert parent is not None
+        assert run is not None
+        assert reservation is not None
         assert stored.state == "failed"
-        assert stored.next_action_at is None and stored.next_action_at is None
+        assert stored.next_action_at is None
+        assert stored.next_action_at is None
         assert stored.status_reason
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -1419,7 +1424,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     assert diagnostics.expected_identity.build_digest == expected_build
     assert len(diagnostics.targets) == 1
     target = diagnostics.targets[0]
-    assert target.node_id == NODE_ID and not target.target_proven
+    assert target.node_id == NODE_ID
+    assert not target.target_proven
     assert target.observed_identity is not None
     assert target.observed_identity.binary_digest == old_binary
     assert target.observed_identity.build_digest == old_build
@@ -1465,7 +1471,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
         node = session.get(AgentNode, NODE_ID)
-        assert operation is not None and node is not None
+        assert operation is not None
+        assert node is not None
         # Matching the two headline digests is deliberately weaker than the
         # controller's accepted success gate.
         set_inventory_identity(node, binary_digest=expected_binary)
@@ -1704,7 +1711,8 @@ def test_parallel_job_byte_aggregate_is_independent_of_operation_page(tmp_path) 
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
     )
     first = services.job_operations(job.id, None, 1)
-    assert len(first.items) == 1 and first.next_cursor
+    assert len(first.items) == 1
+    assert first.next_cursor
     second = services.job_operations(job.id, first.next_cursor, 1)
     for page in (first, second):
         aggregate = page.progress.operation
@@ -1961,10 +1969,8 @@ def _park_repeatedly(sessions, jobs, services, operation, times: int = 1):
 
     for expected_attempt in range(1, times + 1):
         claim = _claim_parked(jobs)
-        assert (
-            claim is not None
-            and fenced_attempt(sessions, claim).attempt == expected_attempt
-        )
+        assert claim is not None
+        assert fenced_attempt(sessions, claim).attempt == expected_attempt
         park_for_operator(sessions, jobs, claim, "effect requires operator inspection")
         with sessions() as session:
             stored = session.get(AgentOperation, operation.id)
@@ -2004,7 +2010,8 @@ def test_durable_resume_authorises_the_parked_operation_for_the_next_claim(
     )
     with sessions() as session:
         parent = session.get(Job, job_id)
-        assert parent is not None and parent.state == "queued"
+        assert parent is not None
+        assert parent.state == "queued"
 
 
 def test_durable_resume_refuses_a_job_that_is_not_parked(tmp_path) -> None:
@@ -2039,7 +2046,8 @@ def test_durable_resume_refuses_a_job_that_is_not_parked(tmp_path) -> None:
 
     with sessions() as session:
         stored = session.get(Job, job.id)
-        assert stored is not None and stored.state == "queued"
+        assert stored is not None
+        assert stored.state == "queued"
 
 
 def test_durable_resume_is_never_refused_for_earlier_failed_attempts(
@@ -2062,13 +2070,12 @@ def test_durable_resume_is_never_refused_for_earlier_failed_attempts(
     services.resume_job(job_id)
 
     resumed = _claim_parked(jobs)
-    assert (
-        resumed is not None
-        and fenced_attempt(sessions, resumed).attempt == attempts + 1
-    )
+    assert resumed is not None
+    assert fenced_attempt(sessions, resumed).attempt == attempts + 1
     with sessions() as session:
         parent = session.get(Job, job_id)
-        assert parent is not None and parent.state == "queued"
+        assert parent is not None
+        assert parent.state == "queued"
 
 
 def test_operator_retire_is_a_distinct_disposition() -> None:
@@ -2212,10 +2219,13 @@ def test_durable_retire_fails_the_order_but_retains_uncertain_capacity(
         reservation = session.scalar(
             select(ResourceReservation).where(ResourceReservation.owner_id == owner_id)
         )
-        assert stored is not None and parent is not None
-        assert run is not None and reservation is not None
+        assert stored is not None
+        assert parent is not None
+        assert run is not None
+        assert reservation is not None
         assert stored.state == "failed"
-        assert stored.next_action_at is None and stored.next_action_at is None
+        assert stored.next_action_at is None
+        assert stored.next_action_at is None
         assert stored.status_reason
         assert parent.state == "failed"
         assert parent.status_reason == stored.status_reason
@@ -2241,7 +2251,8 @@ def test_durable_retire_ends_a_parked_operation_without_a_budget_gate(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         parent = session.get(Job, job_id)
-        assert stored is not None and parent is not None
+        assert stored is not None
+        assert parent is not None
         assert stored.state == "failed"
         assert parent.state == "failed"
 
@@ -2313,7 +2324,9 @@ def test_failure_summary_ends_at_a_whole_word() -> None:
     assert _summary_cut("short reason") == "short reason"
     text = "word " * 100
     cut = _summary_cut(text, 256)
-    assert len(cut) <= 256 and cut.endswith("word") and text.startswith(cut)
+    assert len(cut) <= 256
+    assert cut.endswith("word")
+    assert text.startswith(cut)
     # A word that straddles the limit is dropped whole, never split.
     straddling = "a" * 250 + " straddling words"
     assert _summary_cut(straddling) == "a" * 250

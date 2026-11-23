@@ -47,11 +47,11 @@ def test_worker_readiness_requires_a_fresh_completed_loop_from_exact_process(
 
 @pytest.mark.parametrize(
     ("heartbeat", "process_instance_id"),
-    (
+    [
         (None, INSTANCE_A),
         (_heartbeat(completed_at=NOW - timedelta(seconds=31)), INSTANCE_A),
         (_heartbeat(), INSTANCE_B),
-    ),
+    ],
 )
 def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
     tmp_path,
@@ -139,7 +139,8 @@ def test_missing_heartbeat_projection_repairs_without_blocking_a_fresh_worker_lo
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
     with sessions() as session:
         row = session.scalar(select(ControlProcessHeartbeat))
-        assert row is not None and row.loop_sequence == 1
+        assert row is not None
+        assert row.loop_sequence == 1
     recorder.completed_loop()
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
 
@@ -205,7 +206,8 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     )
     running, started = read()
     assert running == "slow-step"
-    assert started is not None and started.replace(tzinfo=UTC) == wall
+    assert started is not None
+    assert started.replace(tzinfo=UTC) == wall
 
     recorder.completed_loop()
     assert read() == (None, None)

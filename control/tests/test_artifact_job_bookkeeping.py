@@ -95,7 +95,7 @@ def test_a_damaged_run_plan_still_finds_the_endpoint_owner_from_the_mapping(
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "rebuildable,lost_output", [(True, False), (False, False), (True, True)]
+    ("rebuildable", "lost_output"), [(True, False), (False, False), (True, True)]
 )
 def test_damaged_contract_rebuilds_or_ends_without_holding_fresh_request(
     tmp_path, rebuildable, lost_output

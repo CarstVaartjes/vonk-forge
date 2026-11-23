@@ -569,7 +569,8 @@ def test_a_normal_pass_takes_only_declared_edges(
         )
     collector = TerminalHistoryCollector(sessions, clock=lambda: NOW)
     removed = collector.collect()
-    assert removed["agent_nodes"] == 1 and removed["jobs"] == 1
+    assert removed["agent_nodes"] == 1
+    assert removed["jobs"] == 1
     removed = collector.collect()
     assert not removed
     with sessions() as session:

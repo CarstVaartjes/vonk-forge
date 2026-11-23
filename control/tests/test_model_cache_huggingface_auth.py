@@ -257,9 +257,8 @@ def test_huggingface_redirect_to_arbitrary_host_is_rejected(tmp_path: Path) -> N
     try:
         with pytest.raises(Exception):  # noqa: B017 -- no credential sent to attacker; fresh request below
             service._open_http_response(client, SOURCE, {})
-        assert requests and all(
-            request.url.host == "huggingface.co" for request in requests
-        )
+        assert requests
+        assert all(request.url.host == "huggingface.co" for request in requests)
         redirect = False
         response = service._open_http_response(client, SOURCE, {})
         assert response.read() == b"model"

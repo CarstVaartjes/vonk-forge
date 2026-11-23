@@ -206,7 +206,8 @@ def test_less_swap_than_desired_is_a_typed_warning_with_the_helper_cause() -> No
     assert warning.code == ProjectionCode.HOST_SWAP_SHORT
     assert "16.0 GiB of 64 GiB desired" in warning.detail
     assert SwapWaitReason.INSUFFICIENT_DISK.value in warning.detail
-    assert warning.recommendation is not None and "1600" in warning.recommendation
+    assert warning.recommendation is not None
+    assert "1600" in warning.recommendation
     # Enough swap, or an agent that does not report swap: no warning.
     enough = host.model_copy(
         update={"swap": SwapObservation(total_bytes=64 * GIB, free_bytes=64 * GIB)}

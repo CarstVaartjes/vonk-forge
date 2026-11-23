@@ -277,7 +277,8 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
             break
     retiring = service.application(retiring.id)
     assert retiring.state == "succeeded"
-    assert retiring.result is not None and retiring.result.changed is True
+    assert retiring.result is not None
+    assert retiring.result.changed is True
     replaced = service.application(backing_off.id)
     assert replaced.state == "superseded"
     assert replaced.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
@@ -294,8 +295,10 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
     )
     assert first.state == second.state == "succeeded"
     assert first.id != second.id
-    assert first.result is not None and first.result.changed is False
-    assert second.result is not None and second.result.changed is False
+    assert first.result is not None
+    assert first.result.changed is False
+    assert second.result is not None
+    assert second.result.changed is False
     assert (
         service.load(
             idle.number,
@@ -459,11 +462,13 @@ def test_retry_of_a_backing_off_order_with_a_live_child_resumes_it(
     assert service.tick()
     with sessions() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
-        assert child is not None and child.state in {"queued", "running"}
+        assert child is not None
+        assert child.state in {"queued", "running"}
     # The order backs off for its retry while its child stayed live.
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
-        assert row is not None and row.current_operation_id is not None
+        assert row is not None
+        assert row.current_operation_id is not None
         row.state = "backoff"
         row.status_reason = "transient advance failure"
 
@@ -591,12 +596,14 @@ def test_cancelling_a_backing_off_order_that_owns_a_live_child_cancels_the_child
     assert service.tick()
     with sessions() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
-        assert child is not None and child.state in {"queued", "running"}
+        assert child is not None
+        assert child.state in {"queued", "running"}
         child_id = child.id
     # The order backs off for its retry while its child stayed live.
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
-        assert row is not None and row.current_operation_id is not None
+        assert row is not None
+        assert row.current_operation_id is not None
         row.state = "backoff"
         row.status_reason = "transient advance failure"
     assert service.application(application.id).state == "backoff"
@@ -1154,7 +1161,8 @@ def test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it(
     ended = service.application(first.id)
     assert ended.state == "superseded"
     assert ended.superseded_by == successors[0].id
-    assert ended.blockers == [] and ended.next_attempt_at is None
+    assert ended.blockers == []
+    assert ended.next_attempt_at is None
     # The ended receipt neither holds claims nor is retried again.
     assert not service.retry_eligible(first.id)
 
@@ -1244,7 +1252,8 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
     evidence = [b for b in view.blockers if "refused the plan" in b.detail]
     assert [b.code for b in evidence] == [ProfileReasonCode.ADMISSION_DEFECT]
     fresh = service.load(profile.number, request_key=_uuid(19103), actor="admin")
-    assert fresh.id != first.id and fresh.state == "queued"
+    assert fresh.id != first.id
+    assert fresh.state == "queued"
 
 
 def test_a_child_start_reobserves_stale_effects_without_new_intent(
@@ -1386,7 +1395,8 @@ def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
     waiting = service.application(application.id)
     assert waiting.state == "running", waiting.status_reason
     assert waiting.superseded_by is None
-    assert waiting.next_attempt_at is not None and waiting.next_attempt_at > now[0]
+    assert waiting.next_attempt_at is not None
+    assert waiting.next_attempt_at > now[0]
     assert attempts == 1, "not-yet-due observation must not repeat admission"
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
@@ -1415,12 +1425,15 @@ def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
     resumed = restarted.application(application.id)
     assert resumed.state == "running", resumed.status_reason
     adapter = resumed.progress.switch_adapter
-    assert adapter is not None and adapter.pending_children
+    assert adapter is not None
+    assert adapter.pending_children
     child = run_switch.get(adapter.pending_children[0].operation_id)
-    assert child is not None and child.node_ids == list(nodes)
+    assert child is not None
+    assert child.node_ids == list(nodes)
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
-        assert row is not None and row.request_key == application.request_key
+        assert row is not None
+        assert row.request_key == application.request_key
         assert canonical_message(row.plan) == accepted_plan
         assert row.progress["workload_intent_ordinal"] == accepted_ordinal
         assert tuple(session.scalars(select(FleetProfileApplication.id))) == (
@@ -1709,7 +1722,8 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
     ended = service.application(first.id)
-    assert ended.state == LifecycleState.FAILED and ended.next_attempt_at is None
+    assert ended.state == LifecycleState.FAILED
+    assert ended.next_attempt_at is None
     adapter = ended.progress.switch_adapter
     assert adapter is not None
     (failure,) = adapter.assignment_failures
@@ -1847,10 +1861,12 @@ def test_a_stall_with_a_stable_cause_keeps_retrying_with_evidence(
         )
     assert last_id is not None
     last = service.application(last_id)
-    assert last.state == LifecycleState.BACKOFF and last.next_attempt_at is not None
+    assert last.state == LifecycleState.BACKOFF
+    assert last.next_attempt_at is not None
     with sessions() as session:
         adapter = service._switch_adapter
         assert adapter is not None
         signature = adapter.failure_signature(last.id, session=session)
-    assert signature is not None and cause in signature
+    assert signature is not None
+    assert cause in signature
     assert "final-verification-timeout" not in signature

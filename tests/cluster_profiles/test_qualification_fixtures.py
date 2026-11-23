@@ -155,7 +155,8 @@ def test_registry_isolates_damaged_member_and_repairs_on_the_same_resolver(tmp_p
     assert registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0] is None
     asset.write_bytes(PNG)
     repaired = registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0]
-    assert repaired is not None and repaired.inputs[0][1].content == PNG
+    assert repaired is not None
+    assert repaired.inputs[0][1].content == PNG
     assert registry.resolve("vonk-forge/bad", "a" * 64, "image-job")[0] is None
     assert registry.resolve("vonk-forge/image", "a" * 64, "image-job")[0] is not None
 
@@ -380,7 +381,8 @@ def test_registry_fails_closed_for_missing_changed_and_special_fixtures() -> Non
     registry = _registry()
 
     recipe, blocker = registry.resolve("vonk-forge/image", "a" * 64, "image-job")
-    assert recipe is not None and blocker is None
+    assert recipe is not None
+    assert blocker is None
     _recipe, digest_blocker = registry.resolve(
         "vonk-forge/image", "c" * 64, "image-job"
     )
@@ -648,9 +650,11 @@ def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_aft
     first = run()
     assert first[0]["output_files"][0]["sha256"] == hashlib.sha256(PNG).hexdigest()
     fresh = run()
-    assert fresh[0]["job_id"] != first[0]["job_id"] and client.created == 2
+    assert fresh[0]["job_id"] != first[0]["job_id"]
+    assert client.created == 2
     independent = run("fresh")
-    assert independent[0]["job_id"] != fresh[0]["job_id"] and client.created == 3
+    assert independent[0]["job_id"] != fresh[0]["job_id"]
+    assert client.created == 3
 
 
 def test_artifact_wait_ends_without_cancelling_the_job_and_admits_fresh_case(
@@ -700,9 +704,11 @@ def test_artifact_wait_ends_without_cancelling_the_job_and_admits_fresh_case(
     waited = run()[0]
     assert waited["state"] == "observing"
     assert client.cancelled is False
-    assert ticks[0] <= 2.1 and client.created == 1
+    assert ticks[0] <= 2.1
+    assert client.created == 1
     fresh = run()[0]
-    assert fresh["job_id"] != waited["job_id"] and client.created == 2
+    assert fresh["job_id"] != waited["job_id"]
+    assert client.created == 2
 
 
 @pytest.mark.parametrize(
@@ -760,7 +766,8 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
     result = serving_execution.execute_http_check(
         "https://example.invalid", check, timeout_seconds=1, opener=open_reply
     )
-    assert result["choices"] == 1 and requested == [1, 0.5]
+    assert result["choices"] == 1
+    assert requested == [1, 0.5]
     with not_adopted():
         serving_execution.evaluate_http_response(
             serving_execution.HttpObservation(
@@ -809,11 +816,9 @@ def test_service_quality_failure_is_scoped_and_unknown_reply_reobserves(monkeypa
         "assertions": [{"kind": "path.equals", "path": "value", "value": 1}],
     }
     measured = adapter._run_service_case("https://example.invalid", case)
-    assert (
-        measured["case_id"] == "one"
-        and "http_status" not in measured
-        and ticks[0] == 0.5
-    )
+    assert measured["case_id"] == "one"
+    assert "http_status" not in measured
+    assert ticks[0] == 0.5
     fresh = adapter._run_service_case("https://example.invalid", case)
     assert fresh["http_status"] == 200
 
@@ -853,9 +858,11 @@ def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeyp
     for _ in range(2):
         with not_adopted():
             adapter._run_service_case("https://example.invalid", case, until=0.25)
-    assert ticks[0] == 0.25 and opened == [0.25]
+    assert ticks[0] == 0.25
+    assert opened == [0.25]
     fresh = adapter._run_service_case("https://example.invalid", case)
-    assert fresh["http_status"] == 200 and len(opened) == 2
+    assert fresh["http_status"] == 200
+    assert len(opened) == 2
 
 
 _MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16

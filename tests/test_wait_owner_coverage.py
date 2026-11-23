@@ -120,7 +120,8 @@ def _backstop_gaps(adapters: set[str], models: set[str], kinds: set[str]):
     }
     adapter_map = registries["ADAPTER_WAIT_KINDS"]
     owner_map = registries["WAIT_MODELS"]
-    assert isinstance(adapter_map, ast.Dict) and isinstance(owner_map, ast.Dict)
+    assert isinstance(adapter_map, ast.Dict)
+    assert isinstance(owner_map, ast.Dict)
     return (
         adapters - {ast.literal_eval(key) for key in adapter_map.keys if key},
         models - {ast.unparse(value) for value in owner_map.values},
@@ -172,7 +173,9 @@ def test_every_persisted_wait_owner_is_redriven_by_the_worker() -> None:
         for target in member.targets
         if isinstance(target, ast.Name)
     }
-    assert adapters and models and kinds
+    assert adapters
+    assert models
+    assert kinds
     assert _backstop_gaps(adapters, models, kinds) == (set(), set(), set())
 
 

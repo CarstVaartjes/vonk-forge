@@ -139,18 +139,19 @@ def test_postgres_exact_intent_recovers_within_budget_after_process_death(
         recipe_stop_payload(NODE_B, plan_digest=COMMIT),
     )
     other_claim = claim_agent(jobs, NODE_B, "serial-b")
-    assert (
-        other_claim is not None
-        and fenced_operation(sessions, other_claim).id == unrelated.id
-    )
+    assert other_claim is not None
+    assert fenced_operation(sessions, other_claim).id == unrelated.id
     jobs.succeed(other_claim, STOP_RESULT)
     with sessions() as session:
         completed = session.get(Job, unrelated_request.id)
-        assert completed is not None and completed.state == "succeeded"
+        assert completed is not None
+        assert completed.state == "succeeded"
 
     clock.now = due
     recovered = claim_agent(jobs, NODE_A, "serial-a")
-    assert recovered is not None and first is not None and last is not None
+    assert recovered is not None
+    assert first is not None
+    assert last is not None
     assert fenced_operation(sessions, recovered).id == operation.id
     assert recovered.payload == first.payload
     assert (
@@ -194,8 +195,6 @@ def test_postgres_exact_intent_recovers_within_budget_after_process_death(
     fresh_payload = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
     fresh = jobs.enqueue(fresh_request.id, NODE_A, "recipe.stop", COMMIT, fresh_payload)
     fresh_claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert (
-        fresh_claim is not None
-        and fenced_operation(sessions, fresh_claim).id == fresh.id
-    )
+    assert fresh_claim is not None
+    assert fenced_operation(sessions, fresh_claim).id == fresh.id
     jobs.succeed(fresh_claim, STOP_RESULT)

@@ -212,7 +212,8 @@ def _pending_stop(
             return native_start(
                 application_id, item, assignments, scope, actor, request, index, ordinal
             )
-        assert item.kind == "run" and tuple(scope) == (_node_id(2),)
+        assert item.kind == "run"
+        assert tuple(scope) == (_node_id(2),)
         healthy_dispatches.append(item.id)
         return healthy_child
 
@@ -242,7 +243,8 @@ def _pending_stop(
     )
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.request_id == request_key))
-        assert stop is not None and stop.kind == "recipe.stop.v2"
+        assert stop is not None
+        assert stop.kind == "recipe.stop.v2"
         stop_id = stop.id
         native = list(
             session.scalars(
@@ -278,7 +280,8 @@ def _pending_stop(
         assert stop_plan.run_id == run.owner_id
         assert stop_plan.target_runtime_id == run.owner_id
 
-        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert claim is not None
+        assert claim.operation.value == "recipe.stop"
         assert fenced_operation(sessions, claim).id == native_id
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
@@ -347,7 +350,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         assert len(link.stops) == 1
         stop = link.stops[0]
         assert stop.queue_index == stop_index
-        assert stop.operation_id == stop_id and stop.request_key == request_key
+        assert stop.operation_id == stop_id
+        assert stop.request_key == request_key
         assert stop.effect.run_id == before.queue[stop_index].id
         assert stop.effect.node_ids == [nodes[0]]
         assert stop.effect.profile_stop_scope is None
@@ -360,7 +364,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         with sessions() as session:
             row = session.get(FleetProfileApplication, original.id)
             selected_row = session.get(FleetProfileApplication, selected.id)
-            assert row is not None and selected_row is not None
+            assert row is not None
+            assert selected_row is not None
             assert profiles._adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
             assert isinstance(bound, FleetProfilePreview), bound
@@ -389,7 +394,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         )
         restarted.advance(original.id)
         stored = _stored(sessions, original.id)
-        assert stored.queue == before.queue and stored.request_id == before.request_id
+        assert stored.queue == before.queue
+        assert stored.request_id == before.request_id
         assert any(
             item.queue_index == stop_index and item.operation_id == stop_id
             for item in stored.pending_children
@@ -457,7 +463,8 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         grant_now=clock[0],
     )
     assert fresh_stop.run_id == adopted_stop.effect.run_id
-    assert fresh is not None and fresh.fence != old_claim.fence
+    assert fresh is not None
+    assert fresh.fence != old_claim.fence
     assert fenced_operation(sessions, fresh).id == native_id
     assert fresh.payload == old_claim.payload
     assert (

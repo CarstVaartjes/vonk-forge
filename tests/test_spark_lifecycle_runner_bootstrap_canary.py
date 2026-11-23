@@ -500,7 +500,8 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", _module().CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index_path = Path(library) / "tests/fixtures/canonical-synthetic-canary/index.json"
@@ -563,7 +564,8 @@ def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None
         "canary_import_refusal",
         ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     unreadable = {"document": {"kind": "recipe"}, "package": {}}
@@ -592,7 +594,8 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
         "canary_import_contract",
         ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     engine = create_engine(f"sqlite:///{tmp_path / 'sync.sqlite'}")
@@ -621,11 +624,12 @@ def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     fresh = program.sync_canary_catalog(
         installed, request_key=str(uuid.uuid4()), snapshot=snapshot
     )
-    assert first.completed_at is not None and not first.problems
+    assert first.completed_at is not None
+    assert not first.problems
     assert replay.id == first.id
-    assert (
-        fresh.id != first.id and fresh.completed_at is not None and not fresh.problems
-    )
+    assert fresh.id != first.id
+    assert fresh.completed_at is not None
+    assert not fresh.problems
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(

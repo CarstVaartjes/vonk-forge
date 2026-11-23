@@ -128,10 +128,12 @@ def test_lossy_numeric_mutation_is_detected() -> None:
 
 
 def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
-    assert job.state == "failed" and job.kind == "recipe.stop"
+    assert job.state == "failed"
+    assert job.kind == "recipe.stop"
     assert job.targets == [NODE]
     assert job.projection_issue is None
-    assert job.operations is not None and len(job.operations) == 1
+    assert job.operations is not None
+    assert len(job.operations) == 1
     assert job.operations[0].id == OPERATION
     assert job.operations[0].node_id == NODE
     assert job.operations[0].state == "failed"
@@ -355,7 +357,8 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         if status == 200:
             directive = AgentDirective.model_validate_json(result.stdout)
             assert directive == AgentDirective.model_validate_json(body)
-            assert len(received) == 1 and received[0][0] == "/agent/heartbeat"
+            assert len(received) == 1
+            assert received[0][0] == "/agent/heartbeat"
             assert AgentProgress.model_validate_json(
                 received[0][1]
             ) == AgentProgress.model_validate_json(selected["text"])

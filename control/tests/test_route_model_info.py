@@ -176,8 +176,10 @@ def test_an_audio_route_needs_no_generation_settings() -> None:
     )
     info = _built(vector)
     assert info.mode == "audio_transcription"
-    assert info.max_input_tokens is None and info.max_output_tokens is None
-    assert info.supports_audio_input and not info.supports_audio_output
+    assert info.max_input_tokens is None
+    assert info.max_output_tokens is None
+    assert info.supports_audio_input
+    assert not info.supports_audio_output
 
 
 def test_the_audio_endpoint_is_the_mode_never_a_recipe_choice() -> None:
@@ -357,7 +359,8 @@ def _source_build_api_with_output(tokens: int) -> dict:
 
 def _published_entries(root: Path) -> dict[str, dict]:
     verified = verify_active_route_bundle(root)
-    assert not isinstance(verified, UnknownError) and verified.litellm is not None
+    assert not isinstance(verified, UnknownError)
+    assert verified.litellm is not None
     return {
         entry.model_name: entry.model_dump(mode="json", exclude_none=True)
         for entry in verified.litellm.model_list
@@ -493,7 +496,8 @@ def test_the_bundle_is_never_read_inside_the_publication_transaction(
     service.publish_run(run_id)
     service.maintain()
     service.withdraw_run(run_id)
-    assert held and not any(held)
+    assert held
+    assert not any(held)
 
 
 def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
@@ -581,7 +585,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     live = tmp_path / "live"
     published = verify_active_route_bundle(live)
     assert not isinstance(published, UnknownError)
-    assert published.routes is not None and published.litellm is not None
+    assert published.routes is not None
+    assert published.litellm is not None
 
     # The same route as the earlier Controller wrote it: a count cap per
     # deployment and pre-call checks on.
@@ -631,7 +636,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     assert isinstance(verify_active_route_bundle(live), UnknownError)
     assert service._publisher.active_marker_digest() == marker.digest
     served = service._publisher.served_model_info()
-    assert served.routes == {} and served.unreadable
+    assert served.routes == {}
+    assert served.unreadable
     # Every endpoint read fails until the bundle is republished.
     assert _endpoint_read_fails(base, live)
 
@@ -643,7 +649,8 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     assert "rpm" not in entries["qwen"]["litellm_params"]
     assert "tpm" not in entries["qwen"]["litellm_params"]
     after = verify_active_route_bundle(live)
-    assert not isinstance(after, UnknownError) and after.litellm is not None
+    assert not isinstance(after, UnknownError)
+    assert after.litellm is not None
     assert after.litellm.router_settings.enable_pre_call_checks is False
     assert not _endpoint_read_fails(base, live)
 
@@ -686,7 +693,8 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
     service.publish_run(run_id)
     published = verify_active_route_bundle(live)
     assert not isinstance(published, UnknownError)
-    assert published.routes is not None and published.litellm is not None
+    assert published.routes is not None
+    assert published.litellm is not None
 
     # The live file as the earlier Controller wrote it: no effort kind.
     earlier = json.loads(published.litellm.model_dump_json(exclude_none=True))

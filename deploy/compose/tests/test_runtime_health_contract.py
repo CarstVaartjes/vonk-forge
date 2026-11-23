@@ -205,7 +205,8 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     model = _rendered()
     services = model["services"]
     networks = model["networks"]
-    assert isinstance(services, dict) and isinstance(networks, dict)
+    assert isinstance(services, dict)
+    assert isinstance(networks, dict)
 
     assert networks["tailnet-web-edge"]["internal"] is True
     assert set(services["caddy"]["networks"]) & set(

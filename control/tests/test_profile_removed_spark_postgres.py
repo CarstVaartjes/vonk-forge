@@ -46,7 +46,8 @@ def test_preview_reviews_partial_cleanup_when_a_dual_model_spark_is_revoked(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -106,7 +107,8 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                 CatalogDocumentRevision.kind == "recipe"
             )
         )
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
 
@@ -390,7 +392,8 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
             item.amount_bytes for item in live_memory_claims
         )
         stop_operation = session.get(Job, stop_job.id)
-        assert stop_operation is not None and stop_operation.state == "succeeded"
+        assert stop_operation is not None
+        assert stop_operation.state == "succeeded"
         run_switch = session.scalar(
             select(Job).where(
                 Job.kind == "recipe.stop.v2",

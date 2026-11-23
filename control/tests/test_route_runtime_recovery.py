@@ -94,7 +94,8 @@ def test_activation_uncertainty_releases_lock_and_admits_fresh_publication(
         )
 
     def assert_reason(_operation):
-        assert observed and not isinstance(observed[0], ActivationMarker)
+        assert observed
+        assert not isinstance(observed[0], ActivationMarker)
 
     assert_ended_without_blocking(
         publisher,

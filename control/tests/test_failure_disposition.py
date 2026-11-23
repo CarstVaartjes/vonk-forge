@@ -259,7 +259,8 @@ def test_a_deterministic_failure_ends_on_its_first_occurrence_with_its_cause() -
     ended = transition(row, Reported.failed(cause, fence=row.fence), adapter, now).row
     assert ended.state is State.FAILED
     assert ended.retry_count == 0
-    assert ended.reason is not None and "power of two" in ended.reason
+    assert ended.reason is not None
+    assert "power of two" in ended.reason
     # The end is the request's, not the queue's: a fresh request runs at once.
     fresh = Lifecycle(id="fresh", kind="fake", effect=Effect.NONE)
     assert transition(fresh, Tick(), adapter, now).commands == (Execute(),)
@@ -284,7 +285,8 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
         assert row.next_action_at is not None
     row, now = _run(adapter, row, now)
     done = transition(row, Reported(Outcome.DONE, fence=row.fence), adapter, now).row
-    assert done.id == "order" and done.state is State.SUCCEEDED
+    assert done.id == "order"
+    assert done.state is State.SUCCEEDED
 
 
 def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
@@ -293,16 +295,16 @@ def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
     for _ in range(policy.max_failures * 4):
         step = schedule(policy, "route", failures, Disposition.WAIT, NOW)
         assert step.failures == failures == 0
-        assert step.next_at is not None and step.next_at > NOW
+        assert step.next_at is not None
+        assert step.next_at > NOW
     assert schedule(policy, "route", 0, Disposition.FAIL, NOW).next_at is None
     assert schedule(policy, "route", 0, Disposition.SECURITY, NOW).next_at is None
     for spent in range(1, policy.max_failures * 2 + 1):
         step = schedule(policy, "route", failures, Disposition.OBSERVE, NOW)
         failures = step.failures
         assert failures == spent
-    assert step.next_at is not None and NOW < step.next_at <= NOW + timedelta(
-        seconds=policy.max_delay_seconds
-    )
+    assert step.next_at is not None
+    assert NOW < step.next_at <= NOW + timedelta(seconds=policy.max_delay_seconds)
 
 
 # ------------------------------------------------------------------ the guard
@@ -489,7 +491,7 @@ def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
 
 
 @pytest.mark.parametrize(
-    "error_type,code",
+    ("error_type", "code"),
     [
         (ModelCacheConflictInvalid, ModelCacheCode.STALE_PLAN),
         (ModelCacheResolutionInvalid, ModelCacheCode.MODEL_PIN_INVALID),
@@ -506,7 +508,7 @@ def test_invalid_cache_errors_end_instead_of_spending_observation_attempts(
 
 
 @pytest.mark.parametrize(
-    "error_type,code",
+    ("error_type", "code"),
     [
         (ModelCacheStorageRefused, ModelCacheCode.LOCK_UNAVAILABLE),
         (ModelCacheStorageRefused, ModelCacheCode.REMOVAL_PATH_UNSAFE),
@@ -532,7 +534,7 @@ def test_discarded_unverified_bytes_can_be_fetched_again_under_the_same_pin(code
 
 
 @pytest.mark.parametrize(
-    "condition,expected",
+    ("condition", "expected"),
     [
         ("invalid", Disposition.FAIL),
         ("busy", Disposition.OBSERVE),
@@ -601,11 +603,13 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
             worker._publish_runs((run_id,))
             with routes.sessions() as session:
                 run = session.get(RecipeRun, run_id)
-                assert run is not None and run.route_state == RouteState.PENDING
+                assert run is not None
+                assert run.route_state == RouteState.PENDING
                 assert run.route_attempts == 0
                 assert run.next_action_at is not None
     worker._publish_runs((run_id,))
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
     assert len(applied) == 1

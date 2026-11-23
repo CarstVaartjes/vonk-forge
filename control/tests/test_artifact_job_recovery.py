@@ -97,7 +97,8 @@ def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
         assert replay.id == recovered.id
     assert service.get_by_request_id(request["request_id"]).id == replay.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=1092)
-    assert fresh.id != replay.id and fresh.operation_id is not None
+    assert fresh.id != replay.id
+    assert fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -143,7 +144,8 @@ def test_draft_limit_damage_ends_replay_and_admits_fresh_intent(tmp_path):
     observed = service.get(original.id)
     assert observed.output_limits is None
     ended = create_artifact_job(service, **request)
-    assert ended.id == original.id and ended.state in ajs.ENDED
+    assert ended.id == original.id
+    assert ended.state in ajs.ENDED
     assert ended.operation_id is None
     with pytest.raises(ArtifactJobInvalid) as refused:
         service.cancel(
@@ -159,7 +161,8 @@ def test_draft_limit_damage_ends_replay_and_admits_fresh_intent(tmp_path):
     )
     assert fresh_draft.id != original.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=1008)
-    assert fresh.id == fresh_draft.id and fresh.operation_id is not None
+    assert fresh.id == fresh_draft.id
+    assert fresh.operation_id is not None
 
 
 def test_missing_input_bytes_end_without_dispatch_and_fresh_upload_recovers(tmp_path):
@@ -183,7 +186,8 @@ def test_missing_input_bytes_end_without_dispatch_and_fresh_upload_recovers(tmp_
     ended = service.submit(
         original.id, actor="operator", request_id="00000000-0000-4000-8000-000000001011"
     )
-    assert ended.state in ajs.ENDED and ended.operation_id is None
+    assert ended.state in ajs.ENDED
+    assert ended.operation_id is None
     with sessions() as session:
         assert not tuple(
             session.scalars(
@@ -197,7 +201,8 @@ def test_missing_input_bytes_end_without_dispatch_and_fresh_upload_recovers(tmp_
     restored = service._blob_store.resolve(
         f"{digest[:2]}/{digest}", digest, len(content)
     )
-    assert restored is not None and restored.read_bytes() == content
+    assert restored is not None
+    assert restored.read_bytes() == content
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -223,14 +228,12 @@ def test_submitted_limits_are_recovered_from_the_exact_accepted_request(tmp_path
     assert original.output_limits is not None
     with sessions() as session:
         row = session.get(ArtifactJob, original.id)
-        assert (
-            row is not None and row.output_limits == original.output_limits.model_dump()
-        )
+        assert row is not None
+        assert row.output_limits == original.output_limits.model_dump()
     # A newer request cancels the still-unissued order and obtains its own fence.
     fresh = submitted_artifact_job(service, run_id, request_suffix=1022)
-    assert (
-        fresh.operation_id is not None and fresh.operation_id != original.operation_id
-    )
+    assert fresh.operation_id is not None
+    assert fresh.operation_id != original.operation_id
     assert service.get(original.id).state in ajs.ENDED
 
 
@@ -282,7 +285,8 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
                     AgentOperation.parent_job_id == original.operation_id
                 )
             )
-            assert operation is not None and operation.current_attempt == 1
+            assert operation is not None
+            assert operation.current_attempt == 1
     else:
         clock.advance(seconds=31)
         queue.reconcile_orders()
@@ -300,17 +304,17 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     # Past its timeout and its recovery deadline the job may still run: it is
     # lost (observed, its Stop advertised), never failed by a deadline.
     lost = service.get(original.id)
-    assert lost.state == ajs.OBSERVING and lost.supported_actions == ("stop",)
+    assert lost.state == ajs.OBSERVING
+    assert lost.supported_actions == ("stop",)
     with sessions() as session:
         assert_no_orphaned_holds(session)
-    assert (
-        lost.result_evidence is not None
-        and lost.result_evidence.active_scope_may_remain
-    )
+    assert lost.result_evidence is not None
+    assert lost.result_evidence.active_scope_may_remain
     restored = service._blob_store.resolve(
         f"{digest[:2]}/{digest}", digest, len(content)
     )
-    assert restored is not None and restored.read_bytes() == content
+    assert restored is not None
+    assert restored.read_bytes() == content
     # The lost job's effect cannot be observed, and a newer submit is admitted
     # at once: the helper keeps one job container per run. The Controller
     # cancels or stops nothing: no run Stop, no new workload ordinal, and the
@@ -330,10 +334,12 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     )
     assert newer.operation_id is not None
     kept = service.get(original.id)
-    assert kept.state == ajs.OBSERVING and kept.supported_actions == ("stop",)
+    assert kept.state == ajs.OBSERVING
+    assert kept.supported_actions == ("stop",)
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == RunState.RUNNING
+        assert run is not None
+        assert run.state == RunState.RUNNING
         assert (
             sorted(
                 tuple(row)
@@ -389,7 +395,8 @@ def test_lost_order_projection_ends_at_original_deadline_and_fresh_draft_is_admi
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000001052"),
     )
-    assert fresh.id != original.id and fresh.operation_id is None
+    assert fresh.id != original.id
+    assert fresh.operation_id is None
 
 
 def test_terminal_receipt_repairs_result_projection_without_reexecuting(tmp_path):
@@ -474,11 +481,11 @@ def test_terminal_receipt_repairs_result_projection_without_reexecuting(tmp_path
                 AgentOperation.parent_job_id == original.operation_id
             )
         )
-        assert operation is not None and operation.current_attempt == 1
+        assert operation is not None
+        assert operation.current_attempt == 1
     fresh = submitted_artifact_job(service, run_id, request_suffix=1062)
-    assert (
-        fresh.operation_id is not None and fresh.operation_id != original.operation_id
-    )
+    assert fresh.operation_id is not None
+    assert fresh.operation_id != original.operation_id
 
 
 @pytest.mark.postgres
@@ -510,7 +517,8 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
     job = submitted_artifact_job(service, run_id, request_suffix=1100)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
-    assert claim is not None and job.operation_id is not None
+    assert claim is not None
+    assert job.operation_id is not None
     child_id = fenced_operation(sessions, claim).id
     service.cancel(
         job.id,
@@ -575,7 +583,8 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     with sessions() as session:
         assert_no_orphaned_holds(session)
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == RunState.STOPPED
+        assert run is not None
+        assert run.state == RunState.STOPPED
         installation_id = run.installation_id
 
     def request_key(view):

@@ -416,7 +416,8 @@ def test_revoked_selected_actor_does_not_block_sibling_worker_and_roster_recover
     assert worker.tick() is True
     with sessions() as session:
         due = session.get(Job, due_job_id)
-        assert due is not None and due.state == "succeeded"
+        assert due is not None
+        assert due.state == "succeeded"
         assert len(tuple(session.scalars(select(FleetProfileApplication.id)))) == 2
     view = service.get(profile.id)
     assert not any("restore" in action.lower() for action in view.next_actions)
@@ -914,7 +915,8 @@ def test_dual_spark_loss_during_load_exposes_recovery_admission_and_heals(
     clock[0] += timedelta(seconds=30)
     service.tick()
     again = service.get(profile.id).maintenance_wait
-    assert again is not None and again.dependency_deadline == first_deadline
+    assert again is not None
+    assert again.dependency_deadline == first_deadline
     blocked[0] = False
     clock[0] = again.next_check
     service.tick()

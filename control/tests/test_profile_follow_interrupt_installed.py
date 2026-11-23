@@ -329,7 +329,8 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     document = json.loads(completed.stdout)
     assert document["id"] == identity
     assert document["state"] == "superseded"
-    assert newer_application_id is not None and newer_application_id != identity
+    assert newer_application_id is not None
+    assert newer_application_id != identity
     calls = [(method, path) for method, path, _ in original_calls]
     assert calls[0] == ("GET", latest_path)
     assert len(calls) > 1
@@ -344,14 +345,16 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     with sessions() as session:
         original = session.get(FleetProfileApplication, identity)
         newer = session.get(FleetProfileApplication, newer_application_id)
-        assert original is not None and original.state == "superseded"
+        assert original is not None
+        assert original.state == "superseded"
         assert (
             FleetProfileApplicationProgress.model_validate_json(
                 json.dumps(original.progress)
             ).superseded_by
             == newer_application_id
         )
-        assert newer is not None and newer.id != original.id
+        assert newer is not None
+        assert newer.id != original.id
         assert (
             FleetProfileApplicationProgress.model_validate_json(
                 json.dumps(newer.progress)

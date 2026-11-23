@@ -116,7 +116,8 @@ def test_concurrent_workers_reclaim_a_grant_without_mutating_its_identity(
     with transfer.services.sessions() as session:
         assert session.get(ArtifactDistributionAssignment, old.assignment_id) is None
         row = session.get(ArtifactDistributionAssignment, successor.assignment_id)
-        assert row is not None and row.state == "active"
+        assert row is not None
+        assert row.state == "active"
 
 
 MODEL = DistributionObject(
@@ -303,7 +304,8 @@ def test_a_renewal_that_lands_during_expiry_survives(
                 ArtifactDistributionAssignment.node_id == NODE_A
             )
         )
-    assert row is not None and row.state == "active"
+    assert row is not None
+    assert row.state == "active"
     monkeypatch.undo()
     grant = transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
     assert grant.expires_at == renewed_until

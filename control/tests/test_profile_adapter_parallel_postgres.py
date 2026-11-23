@@ -398,14 +398,16 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     )
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.request_id == stop_key))
-        assert stop is not None and stop.kind == "recipe.stop.v2"
+        assert stop is not None
+        assert stop.kind == "recipe.stop.v2"
         stop_id = stop.id
         exact = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         )
-        assert exact and {item.node_id for item in exact} == {nodes[0]}
+        assert exact
+        assert {item.node_id for item in exact} == {nodes[0]}
         assert all(item.payload["run_id"] == run.owner_id for item in exact)
         exact_ids = {item.id for item in exact}
         exact_parents = {item.parent_job_id for item in exact}
@@ -480,7 +482,8 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
     )
     assert stop_plan.run_id == run.owner_id
     issued = fenced_operation(sessions, claim)
-    assert issued.id in exact_ids and issued.parent_job_id in exact_parents
+    assert issued.id in exact_ids
+    assert issued.parent_job_id in exact_parents
     restarted_jobs = AgentJobService(sessions, clock=lambda: NOW)
     restarted_jobs.set_result_consumer(lifecycle.consume_agent_result)
     restarted_jobs.record_result(

@@ -174,7 +174,7 @@ def _run_bootstrap(
 
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
-    (
+    [
         pytest.param(
             "spark",
             "Linux",
@@ -183,7 +183,7 @@ def _run_bootstrap(
             "--package",
             marks=pytest.mark.linux_only,
         ),
-    ),
+    ],
 )
 def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     tmp_path: Path,
@@ -228,12 +228,12 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
 
 @pytest.mark.parametrize(
     ("system", "machine"),
-    (
+    [
         ("Linux", "x86_64"),
         ("Linux", "aarch64"),
         ("Darwin", "x86_64"),
         ("Darwin", "arm64"),
-    ),
+    ],
 )
 def test_nas_bootstrap_needs_no_arguments_and_supplies_verified_payload(
     tmp_path: Path, system: str, machine: str

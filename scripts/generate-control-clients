@@ -119,7 +119,8 @@ def typescript_vocabulary() -> str:
         )
     )
     for words in word_types:
-        assert isinstance(words, type) and issubclass(words, enum.Enum)
+        assert isinstance(words, type)
+        assert issubclass(words, enum.Enum)
         lines.append(f"export const {words.__name__} = {{")
         lines.extend(
             f"  {member.name}: {json.dumps(member.value)}," for member in words

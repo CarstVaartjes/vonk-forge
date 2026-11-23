@@ -892,5 +892,7 @@ def test_exhausted_publication_ends_the_start_with_its_own_reason(tmp_path):
         tmp_path, stale_reason="retry scheduled at 2026-01-01T00:00:00Z"
     )
     assert state != LifecycleState.RUNNING
-    assert reason and "retry scheduled" not in reason
-    assert result is not None and reason == result["recovery_error"]
+    assert reason
+    assert "retry scheduled" not in reason
+    assert result is not None
+    assert reason == result["recovery_error"]

@@ -52,7 +52,7 @@ def _post(client, clock, *, collected_ago: timedelta) -> None:
 
 
 @pytest.mark.parametrize(
-    "collected_ago", (timedelta(minutes=6), timedelta(minutes=10)), ids=("6m", "10m")
+    "collected_ago", [timedelta(minutes=6), timedelta(minutes=10)], ids=("6m", "10m")
 )
 def test_report_received_now_is_fresh_whatever_the_agent_stamp(
     agent_system, collected_ago

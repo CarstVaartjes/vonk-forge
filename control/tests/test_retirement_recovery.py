@@ -126,7 +126,9 @@ def _parked_start(tmp_path: Path, engine):
                 == fenced_operation(sessions, claim).id
             )
         )
-        assert operation is not None and parent is not None and attempt is not None
+        assert operation is not None
+        assert parent is not None
+        assert attempt is not None
         operation.current_attempt = RecoveryPolicy().max_failures
         operation.state = PARKED
         attempt.attempt = operation.current_attempt
@@ -147,7 +149,7 @@ def _parked_start(tmp_path: Path, engine):
     return sessions, lifecycle, jobs, projection, started, claim
 
 
-@pytest.mark.parametrize("use_backstop", (False, True))
+@pytest.mark.parametrize("use_backstop", [False, True])
 def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     tmp_path: Path, postgres_engine, use_backstop
 ) -> None:
@@ -164,7 +166,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
                 ResourceReservation.owner_id == started.owner_id,
             )
         )
-        assert run is not None and reservation is not None
+        assert run is not None
+        assert reservation is not None
         assert run.state == "starting"
         assert reservation.state == "active"
         assert reservation.released_at is None
@@ -216,7 +219,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     assert worker.tick()
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         accepted_id = accepted.id
         assert accepted.payload.get("phases") is None
         assert "route publication temporarily unavailable" in (
@@ -230,7 +234,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     assert not worker.tick()
     with sessions() as session:
         before_due = session.get(Job, accepted_id)
-        assert before_due is not None and before_due.state == "running"
+        assert before_due is not None
+        assert before_due.state == "running"
         assert before_due.payload["workload_intent_ordinal"] == ordinal
         assert before_due.payload.get("phases") is None
         assert (
@@ -281,11 +286,13 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     worker.tick()
     with sessions() as session:
         cleanup = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert cleanup is not None and cleanup.id == accepted_id
+        assert cleanup is not None
+        assert cleanup.id == accepted_id
         assert cleanup.payload["workload_intent_ordinal"] == ordinal
         assert cleanup.payload["owner_id"] == started.owner_id
         original = session.get(AgentOperation, fenced_operation(sessions, claim).id)
-        assert original is not None and original.state == "failed"
+        assert original is not None
+        assert original.state == "failed"
         assert _required(session.get(RecipeRun, started.owner_id)).state == "stopping"
         assert (
             session.scalar(
@@ -310,10 +317,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         fenced_operation(sessions, claim).node_id,
         "serial-0",
     )
-    assert (
-        stop is not None
-        and fenced_operation(sessions, stop).parent_job_id == cleanup.id
-    )
+    assert stop is not None
+    assert fenced_operation(sessions, stop).parent_job_id == cleanup.id
     restarted_jobs.record_result(
         _result(
             stop,
@@ -348,7 +353,8 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     worker.tick()
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         assert (
             session.scalar(
                 select(ResourceReservation.state).where(
@@ -535,7 +541,8 @@ def test_retired_installation_cleanup_is_reissued_after_a_denial(
         reason = _required(session.get(Job, install.id)).status_reason
     assert progressed, reason
     cleanup = claim_agent(jobs, nodes[0], "serial-0")
-    assert cleanup is not None and cleanup.operation == "recipe.uninstall"
+    assert cleanup is not None
+    assert cleanup.operation == "recipe.uninstall"
     jobs.record_result(
         _result(
             cleanup,
@@ -553,7 +560,8 @@ def test_retired_installation_cleanup_is_reissued_after_a_denial(
     now[0] += timedelta(seconds=700)
     assert lifecycle.reconcile_retired_operations()
     retry = claim_agent(jobs, nodes[0], "serial-0")
-    assert retry is not None and retry.operation == "recipe.uninstall"
+    assert retry is not None
+    assert retry.operation == "recipe.uninstall"
     assert (
         fenced_operation(sessions, retry).id != fenced_operation(sessions, cleanup).id
     )

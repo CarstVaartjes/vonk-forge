@@ -249,7 +249,8 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             request_id=str(uuid.uuid4()),
         )
         parent_claims = service.claim_pending(limit=1, owner_id="build-wire-owner")
-        assert len(parent_claims) == 1 and parent_claims[0].operation_id == parent.id
+        assert len(parent_claims) == 1
+        assert parent_claims[0].operation_id == parent.id
         service.run_claim(parent_claims[0])
 
         with sessions() as session:
@@ -304,14 +305,16 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         jobs.record_result(result)
         with sessions() as session:
             stored_build = session.get(RecipeBuild, plan.build_id)
-            assert stored_build is not None and stored_build.image_digest is None
+            assert stored_build is not None
+            assert stored_build.image_digest is None
         retry_at: datetime | None = None
         with sessions() as session:
             accepted_job = session.get(Job, build_job.id)
             stored_operation = session.get(
                 AgentOperation, fenced_operation(sessions, first_claim).id
             )
-            assert accepted_job is not None and stored_operation is not None
+            assert accepted_job is not None
+            assert stored_operation is not None
             if expected_kind in {
                 AgentFailureKind.TEMPORARY_DEPENDENCY,
                 AgentFailureKind.INVALID_CONTRACT,
@@ -403,7 +406,8 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 actor="operator",
                 request_id=str(uuid.uuid4()),
             )
-            assert fresh.id and fresh.request_id != parent.request_id
+            assert fresh.id
+            assert fresh.request_id != parent.request_id
             return
 
         with sessions() as session:
@@ -458,7 +462,8 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             actor="operator",
             request_id=str(uuid.uuid4()),
         )
-        assert fresh.id and fresh.request_id != parent.request_id
+        assert fresh.id
+        assert fresh.request_id != parent.request_id
         with sessions() as session:
             assert (
                 len(

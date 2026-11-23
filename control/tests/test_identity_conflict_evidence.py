@@ -50,7 +50,8 @@ def test_identity_conflict_names_both_build_inputs_through_the_evidence_download
         revision = session.get(
             CatalogDocumentRevision, switch.admitted.recipe_revision_id
         )
-        assert build is not None and revision is not None
+        assert build is not None
+        assert revision is not None
         assert build.build_input_sha256 is not None
         assert build.image_digest is not None
         assert build.oci_layout_sha256 is not None

@@ -1211,7 +1211,8 @@ def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
     assert accepted
     assert rescinded.revisions == 0
     assert rescinded.kept == {"live operation": 1}
-    assert catalog.exists(named) and catalog.exists(unrelated)
+    assert catalog.exists(named)
+    assert catalog.exists(unrelated)
     assert collector._cursor is not None  # the next worker pass continues
 
     retried = collector.collect()

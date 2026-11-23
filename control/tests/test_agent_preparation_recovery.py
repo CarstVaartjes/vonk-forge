@@ -208,7 +208,8 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     assert scheduled.next_action_at is not None
     clock.now = scheduled.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     next_claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert next_claim is not None and next_claim.fence != claim.fence
+    assert next_claim is not None
+    assert next_claim.fence != claim.fence
     # An executed job does not carry the preparation boundary; its uncertain
     # result must never become a second blind execute claim.
     jobs.record_result(_restart_interrupted_result(next_claim, kind))

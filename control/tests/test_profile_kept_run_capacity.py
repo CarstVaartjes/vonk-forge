@@ -86,7 +86,8 @@ def test_a_recipe_fits_beside_the_baseline_its_plan_keeps(
         load = _load(world, sweep)
         assert sim.settle(load) == "succeeded"
         serving = set(sim.sparks.by_node[world.nodes[0]].serving)
-        assert len(serving) == 2 and baseline_run in serving
+        assert len(serving) == 2
+        assert baseline_run in serving
         # A fresh load of the same profile keeps both and is admitted.
         fresh = _load(world, sweep)
         assert fresh != load
@@ -113,7 +114,8 @@ def test_a_recipe_the_spark_has_no_room_for_is_refused_by_its_own_fit(
             item.assessment.alias: item.assessment for item in review.assessments
         }
         kept, under_test = by_alias["solo-1"], by_alias["solo-b-1"]
-        assert kept.allowed and kept.stops == []
+        assert kept.allowed
+        assert kept.stops == []
         assert under_test.stops == []
         assert [(reason.code, reason.node_ids) for reason in under_test.blockers] == [
             (RunSwitchCode.RESOURCE_INSUFFICIENT_CAPACITY, [world.nodes[0]])
@@ -146,7 +148,8 @@ def test_a_plan_that_stops_the_baseline_fits_a_recipe_as_large(
         load = _load(world, replacement)
         assert sim.settle(load) == "succeeded"
         serving = set(sim.sparks.by_node[world.nodes[0]].serving)
-        assert len(serving) == 1 and baseline_run not in serving
+        assert len(serving) == 1
+        assert baseline_run not in serving
         fresh = _load(world, replacement)
         assert sim.settle(fresh) == "succeeded"
         assert sim.sparks.by_node[world.nodes[0]].serving == serving

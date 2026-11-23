@@ -153,7 +153,8 @@ def test_unused_removal_unknown_acceptance_reads_unknown_not_refused(printed):
     }
     lines = printed(render_payload, payload, "model", action="remove")
     labels = [line.split(":")[0].strip() for line in lines]
-    assert "Unknown" in labels and "Refused" in labels
+    assert "Unknown" in labels
+    assert "Refused" in labels
 
 
 def _stopped_fleet(titles: list[str]) -> dict[str, object]:
@@ -289,7 +290,8 @@ def test_activity_blocker_prints_in_order_on_stdout(capsys):
     assert err == ""
     lines = out.splitlines()
     blocker = lines.index("Blocker: x.failed: no room")
-    assert lines[0].startswith("Activity") and blocker > 0
+    assert lines[0].startswith("Activity")
+    assert blocker > 0
 
 
 def test_profile_names_its_sparks(printed):

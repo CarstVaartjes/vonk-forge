@@ -65,5 +65,6 @@ def test_a_route_rendered_as_a_url_path_is_redacted_in_the_diagnostic() -> None:
 
     assert message.evidence_warnings == (AgentEvidenceCode.RESULT_HOST_PATH_REDACTED,)
     assert stored.diagnostic == redact_host_paths(old)
-    assert "endpoint=" in stored.diagnostic and "/" not in stored.diagnostic
+    assert "endpoint=" in stored.diagnostic
+    assert "/" not in stored.diagnostic
     assert stored.stage == evidence["stage"]

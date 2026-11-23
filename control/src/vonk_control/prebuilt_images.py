@@ -329,7 +329,8 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
         )
         resources = policy["build_resources"]
         security = policy["build_security"]
-        assert isinstance(resources, Mapping) and isinstance(security, Mapping)
+        assert isinstance(resources, Mapping)
+        assert isinstance(security, Mapping)
         adapter = resolve_runtime_adapter(recipe.runtime.engine, recipe.topology)
         directory = output / key / "context"
         directory.mkdir(parents=True, exist_ok=True)
@@ -395,7 +396,8 @@ def _library_recipe(
     identity = document["identity"]
     package = entry["package"]
     display = entry["display"]
-    assert isinstance(identity, Mapping) and isinstance(package, Mapping)
+    assert isinstance(identity, Mapping)
+    assert isinstance(package, Mapping)
     assert isinstance(display, Mapping)
     item = load_recipe_package(
         library_root / str(package["path"]),

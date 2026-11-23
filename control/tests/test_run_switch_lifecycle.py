@@ -138,7 +138,8 @@ class _Harness:
 
         with self.sessions.begin() as session:
             job = session.get(Job, self.id)
-            assert job is not None and isinstance(job.result, dict)
+            assert job is not None
+            assert isinstance(job.result, dict)
             result = dict(job.result)
             for key in ("observation_due_at", "retry_attempt", "retry_reason"):
                 result.pop(key, None)
@@ -251,7 +252,8 @@ def test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision() -> None:
     assert row.state is State.NEEDS_OPERATOR  # legacy, only ever read
     healed = adapter.decide(job, _read_progress(job.result), Tick(), now).row
     assert healed.state is State.BACKOFF
-    assert healed.next_action_at is not None and healed.next_action_at > now
+    assert healed.next_action_at is not None
+    assert healed.next_action_at > now
     # with a clock it was already an observation (what its view presents)
     clocked = _job("needs-operator", dict(_SHAPES["clock"]))
     assert (
@@ -854,4 +856,5 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     assert waiting.reason is (
         WaitReason.STOP_UNCONFIRMED if cancelling else RunSwitchCode.PHASE_RETRY
     )
-    assert waiting.blockers and waiting.blockers[0].code == waiting.reason
+    assert waiting.blockers
+    assert waiting.blockers[0].code == waiting.reason

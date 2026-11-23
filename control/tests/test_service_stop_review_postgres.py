@@ -77,13 +77,15 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
         run = session.get(RecipeRun, run_id)
-        assert accepted is not None and run is not None
+        assert accepted is not None
+        assert run is not None
         accepted_id = accepted.id
         retained = canonical_message(
             accepted.payload["service_stop_review"]["exact_payloads"]
         )
         ordinal = accepted.payload["workload_intent_ordinal"]
-        assert accepted.state == "running" and accepted.payload.get("phases") is None
+        assert accepted.state == "running"
+        assert accepted.payload.get("phases") is None
         assert accepted.payload["plan_digest"] == preview.plan_digest
         assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
         assert run.route_state == "withdrawn" and run.state == "running"
@@ -128,7 +130,8 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
     worker.tick()
     with sessions() as session:
         accepted = session.get(Job, accepted_id)
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         assert accepted.payload["plan_digest"] == preview.plan_digest
         assert accepted.payload["workload_intent_ordinal"] == ordinal
         assert accepted.payload["service_stop_review"]["stage"] == "dispatched"
@@ -143,7 +146,8 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
                 )
             )
         )
-        assert native and {row.node_id for row in native} <= set(nodes)
+        assert native
+        assert {row.node_id for row in native} <= set(nodes)
         manifest = {(row.id, row.payload_digest) for row in native}
     generation = len(publisher.aliases)
     replay = restarted.stop(
@@ -378,7 +382,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         issue_grant=False,
         initial_now=NOW,
     )
-    assert native_id is None and claim is None
+    assert native_id is None
+    assert claim is None
     before_claims = claims(
         sessions, _stored(sessions, original.id).queue[stop_index].id
     )
@@ -391,12 +396,14 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
                 == _stored(sessions, original.id).queue[stop_index].id,
             )
         )
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         accepted_parent = RecipeStopParent.model_validate_json(
             canonical_message(accepted.payload), strict=True
         )
         review = accepted_parent.service_stop_review
-        assert review is not None and review.profile_stop_owner is not None
+        assert review is not None
+        assert review.profile_stop_owner is not None
         accepted_id, accepted_key = accepted.id, accepted.request_id
         reviewed_digest = accepted_parent.plan_digest
         reviewed_payloads = canonical_message(review.exact_payloads)
@@ -414,14 +421,15 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             for item in preview.effects.adopted
             if item.application_id == original.id
         ]
-        assert (
-            link.plan_digest == profile_digest
-            and link.workload_intent_ordinal == ordinal
-        )
-        assert link.node_ids == [nodes[0]] and link.assignment_ids == []
+        assert link.plan_digest == profile_digest
+        assert link.workload_intent_ordinal == ordinal
+        assert link.node_ids == [nodes[0]]
+        assert link.assignment_ids == []
         [effect] = link.stops
-        assert effect.operation_id == stop_id and effect.request_key == request_key
-        assert effect.queue_index == stop_index and effect.effect.run_id == run_id
+        assert effect.operation_id == stop_id
+        assert effect.request_key == request_key
+        assert effect.queue_index == stop_index
+        assert effect.effect.run_id == run_id
         assert effect.effect.node_ids == [nodes[0]]
         selected = profiles.apply(
             desired.id, request_key=_uuid(19710 + index), actor="admin"
@@ -433,7 +441,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             assert not isinstance(selected_plan, Residue)
             assert selected_plan.effects.adopted == preview.effects.adopted
             node = session.get(AgentNode, nodes[0])
-            assert node is not None and node.workload_intent_ordinal == ordinal
+            assert node is not None
+            assert node.workload_intent_ordinal == ordinal
     if replacement == "cancel":
         profiles.cancel(
             selected.id,
@@ -473,10 +482,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
         )
         review = accepted_parent.service_stop_review
         assert review is not None
-        assert (
-            accepted.request_id == accepted_key
-            and accepted_parent.plan_digest == reviewed_digest
-        )
+        assert accepted.request_id == accepted_key
+        assert accepted_parent.plan_digest == reviewed_digest
         assert canonical_message(review.exact_payloads) == reviewed_payloads
         native = tuple(
             session.scalars(
@@ -515,7 +522,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     fresh, stop, _grant = _issue_exact_stop_grant(
         sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=clock[0]
     )
-    assert fenced_operation(sessions, fresh).id == native_id and stop.run_id == run_id
+    assert fenced_operation(sessions, fresh).id == native_id
+    assert stop.run_id == run_id
     jobs.record_result(
         AgentResult(
             fence=fresh.fence,
@@ -559,7 +567,8 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
     )
     with sessions() as session:
         fresh_run = session.get(RecipeRun, fresh_run_id)
-        assert fresh_run is not None and fresh_run.installation_id == installation_id
+        assert fresh_run is not None
+        assert fresh_run.installation_id == installation_id
 
 
 def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
@@ -609,7 +618,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
                 Job.payload["owner_id"].as_string() == run_id,
             )
         )
-        assert history is not None and history.state == "succeeded"
+        assert history is not None
+        assert history.state == "succeeded"
         lost_start_id = history.id
         session.delete(history)
         for member in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
@@ -621,7 +631,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     routes.maintain()
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == "published"
+        assert run is not None
+        assert run.route_state == "published"
         assert session.get(Job, lost_start_id) is None
     assert runtime.inspect() == published_marker
     assert claims(sessions, run_id) == before_claims
@@ -644,7 +655,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
         )
     with sessions() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state == "running"
         accepted_id = accepted.id
         exact_payloads = canonical_message(
             accepted.payload["service_stop_review"]["exact_payloads"]
@@ -687,7 +699,8 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     claim, stop, _grant = _issue_exact_stop_grant(
         sessions, node_id=nodes[0], certificate_serial="serial-0", grant_now=clock
     )
-    assert stop.run_id == run_id and stop.run_generation == accepted_generation
+    assert stop.run_id == run_id
+    assert stop.run_generation == accepted_generation
     assert stop.plan_digest == accepted_run_digest
     assert fenced_operation(sessions, claim).parent_job_id == accepted_id
     jobs.record_result(
@@ -703,11 +716,13 @@ def test_lost_service_start_history_exact_stop_restart_releases_fresh_run(
     )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
     fresh_plan = restarted.preview_run(installation_id, "after-lost-service-cleanup")
     assert fresh_plan.allowed
     after_available = fresh_plan.nodes[0].available_memory_bytes
-    assert after_available is not None and after_available > before_available
+    assert after_available is not None
+    assert after_available > before_available
     fresh_run_id = start_on_released_gang(
         sessions,
         restarted,

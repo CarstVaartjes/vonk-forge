@@ -229,7 +229,8 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
             child_id = str(dependency.operation_id)
             child_request = str(dependency.request_key)
             child = session.get(Job, child_id)
-            assert child is not None and child.kind == "recipe.build.v1"
+            assert child is not None
+            assert child.kind == "recipe.build.v1"
             assert child.request_id == child_request
             assert child.targets == [node_id]
             assert child.payload["plan_digest"] == plan.build_input_sha256

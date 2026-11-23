@@ -169,7 +169,7 @@ def test_interactive_blocked_preview_can_be_confirmed_and_submitted(monkeypatch)
 
 
 @pytest.mark.parametrize(
-    "answer,expected",
+    ("answer", "expected"),
     [("no", 2), ("yes", 0), (None, 2)],
 )
 def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch):

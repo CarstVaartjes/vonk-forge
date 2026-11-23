@@ -170,7 +170,7 @@ def test_a_refused_range_always_raises_the_refusal_not_a_peer_interruption(
 
 
 @pytest.mark.parametrize(
-    "header,body",
+    ("header", "body"),
     [
         ("bytes 1-9/10", b"0123456789"),
         ("bytes 0-9/11", b"0123456789"),

@@ -358,8 +358,10 @@ def test_profile_assignment_says_when_it_runs_an_older_revision() -> None:
         not_loaded = FleetProfileService._loaded_recipe_update(
             session, None, recipe, newest, [NODE_A]
         )
-    assert older is not None and older.newest_revision_id == REVISION_2
-    assert current is None and not_loaded is None
+    assert older is not None
+    assert older.newest_revision_id == REVISION_2
+    assert current is None
+    assert not_loaded is None
 
 
 def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> None:

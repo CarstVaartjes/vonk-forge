@@ -274,7 +274,8 @@ class World:
                 .order_by(RecipeBuild.created_at, RecipeBuild.id)
                 .limit(1)
             )
-            assert latest is not None and build is not None
+            assert latest is not None
+            assert build is not None
             document = _editable(self.readable[recipe])
             reword(document, f"Revision {latest.revision_number + 1}")
             if peak_bytes is not None:

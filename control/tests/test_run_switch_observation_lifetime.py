@@ -181,7 +181,8 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
     assert held.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
     assert held.result is not None
     due = held.next_attempt_at
-    assert due is not None and due > now[0]
+    assert due is not None
+    assert due > now[0]
     with sessions() as session:
         assert not list(session.scalars(select(RecipeRun)))
         assert not list(
@@ -242,7 +243,8 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         with sessions() as session:
             assert not list(session.scalars(select(RecipeRun)))
             persisted = session.get(Job, operation.operation_id)
-            assert persisted is not None and persisted.state == ended.state
+            assert persisted is not None
+            assert persisted.state == ended.state
             from vonk_control.lifecycle.types import Effect
             from vonk_control.run_switch_operations.provider import _ADAPTER
 
@@ -295,8 +297,10 @@ def test_accepted_readiness_observation_has_a_restart_safe_end(tmp_path, repair)
     assert operation.result is not None
     due = operation.next_attempt_at
     deadline = operation.result.observation_deadline_at
-    assert deadline is not None and deadline > NOW
-    assert due is not None and due < deadline
+    assert deadline is not None
+    assert deadline > NOW
+    assert due is not None
+    assert due < deadline
     service = restart(available=repair)
     now[0] = due
     assert service.tick()

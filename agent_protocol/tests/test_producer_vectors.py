@@ -43,7 +43,8 @@ def test_a_refused_upgrade_package_is_accepted_with_its_detail() -> None:
     assert stored.error_code == "agent_upgrade_failed"
     assert stored.helper_error_code == "package_verification_failed"
     # The reason is the typed refusal; the helper's words are the detail.
-    assert stored.reason is not None and "/" not in stored.reason
+    assert stored.reason is not None
+    assert "/" not in stored.reason
     assert stored.diagnostics is not None
     assert "/var/lib/vonk/incoming" in stored.diagnostics.stderr.text
 

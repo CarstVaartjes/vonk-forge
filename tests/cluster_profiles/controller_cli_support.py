@@ -193,7 +193,8 @@ class FakeClient:
                 selector_path is not None and selector_path.group(2) == "remove-review"
             ):
                 if selector_path.group(1) == "recipe":
-                    assert query is not None and set(query) == {"with_model"}
+                    assert query is not None
+                    assert set(query) == {"with_model"}
                     assert type(query["with_model"]) is bool
                 else:
                     assert query in (None, {"fleet": True})
@@ -220,7 +221,8 @@ class FakeClient:
             return
 
         if method == "PUT":
-            assert profile_path is not None and profile_path.group(2) is None
+            assert profile_path is not None
+            assert profile_path.group(2) is None
             validate_control_document("FleetProfileInput", payload)
             return
 
@@ -242,12 +244,12 @@ class FakeClient:
         elif application_cancel_path is not None:
             assert isinstance(payload, dict)
             assert set(payload) == {"profile_number", "request_key"}
-            assert (
-                type(payload["profile_number"]) is int and payload["profile_number"] > 0
-            )
+            assert type(payload["profile_number"]) is int
+            assert payload["profile_number"] > 0
             uuid.UUID(payload["request_key"])
         elif installation_reconcile_path is not None and path.endswith("/reconcile"):
-            assert isinstance(payload, dict) and set(payload) == {"request_key"}
+            assert isinstance(payload, dict)
+            assert set(payload) == {"request_key"}
             uuid.UUID(payload["request_key"])
         elif selector_path is not None and selector_path.group(2) in {
             "download",
@@ -271,7 +273,8 @@ class FakeClient:
             if selector_path.group(1) == "model":
                 assert "with_model" not in payload
             if selector_path.group(2) == "download":
-                assert "yes" not in payload and "with_model" not in payload
+                assert "yes" not in payload
+                assert "with_model" not in payload
         elif path == "/api/recipe/update":
             assert isinstance(payload, dict)
             assert set(payload) == {"request_key", "selectors", "all"}
@@ -297,7 +300,8 @@ class FakeClient:
             )
             uuid.UUID(payload["request_key"])
             if "selectors" in payload:
-                assert isinstance(payload["selectors"], list) and payload["selectors"]
+                assert isinstance(payload["selectors"], list)
+                assert payload["selectors"]
         elif path == "/api/fleet/enroll":
             assert set(payload) == {"name"}
         elif path.endswith("/rename"):

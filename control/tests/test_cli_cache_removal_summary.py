@@ -149,7 +149,8 @@ def test_default_review_is_a_summary(capsys: pytest.CaptureFixture[str]) -> None
     assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
     assert "Review digest: " + str(review["review_digest"]) in text
     # Short by content: no per-asset or per-pair blocks, whatever the model size.
-    assert "Asset:" not in text and "Saved references:\n" not in text
+    assert "Asset:" not in text
+    assert "Saved references:\n" not in text
     assert "Saved references: none" in text
     assert text.count("another cached model set") == 0
     for asset in review["assets"]:  # type: ignore[attr-defined]
@@ -348,7 +349,8 @@ def test_shared_fleet_object_without_membership_finding_names_no_sets(
     )
     text = _human(capsys, review)
 
-    assert "Removes" in text and "in 1 files" in text
+    assert "Removes" in text
+    assert "in 1 files" in text
     assert "Keeps (retain-shared): 1 files" in text
     assert "other" not in text.lower().replace("another", "")
     assert " 0 " not in text.replace("0 model sets", "")
@@ -395,4 +397,5 @@ def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
         receipt | {"fleet": fleet | {"effects": removed}}, "model", action="remove"
     )
     text = capsys.readouterr().out
-    assert "State: succeeded" in text and "Controller copy" not in text
+    assert "State: succeeded" in text
+    assert "Controller copy" not in text

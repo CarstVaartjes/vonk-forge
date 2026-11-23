@@ -453,7 +453,7 @@ def test_hook_preserves_nul_filenames_and_only_runs_checks(
 
 
 @pytest.mark.parametrize(
-    "file,source",
+    ("file", "source"),
     [
         ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n"),
         ("packaging/systemd/new.service", "Restart=no\n"),

@@ -56,4 +56,5 @@ def test_a_new_pin_replaces_the_wheel_and_every_spelling_of_it(tmp_path: Path) -
     assert f'rev = "{commit}"' in (repository / "control/pyproject.toml").read_text()
     for relative in ("control/Dockerfile", "scripts/resolve-publication-producer"):
         text = (repository / relative).read_text()
-        assert new.name in text and Path(old).name not in text
+        assert new.name in text
+        assert Path(old).name not in text

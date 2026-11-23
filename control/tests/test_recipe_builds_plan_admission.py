@@ -359,7 +359,8 @@ def test_planner_repairs_active_projection_without_replacing_execution(tmp_path)
     assert repaired.agent_payload == planned.agent_payload
     with sessions() as session:
         stored = session.get(RecipeBuild, planned.build_id)
-        assert stored is not None and stored.state == ProgressPhase.BUILDING.value
+        assert stored is not None
+        assert stored.state == ProgressPhase.BUILDING.value
         assert stored.plan == planned.agent_payload
     assert service.plan(revision.id, node_id, now=now).build_id == planned.build_id
 
@@ -524,7 +525,8 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
     )
     with sessions() as session:
         original_job = session.get(Job, original.id)
-        assert original_job is not None and original_job.state == source_state
+        assert original_job is not None
+        assert original_job.state == source_state
         assert original_job.result is not None
         assert original_job.result["cancel_requested"] is True
         # A cancellation without a parseable instant can never authorise the
@@ -547,10 +549,8 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
         cleanup_child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == cleanup.id)
         )
-        assert (
-            cleanup_child is not None
-            and cleanup_child.payload["operation_id"] == child_id
-        )
+        assert cleanup_child is not None
+        assert cleanup_child.payload["operation_id"] == child_id
     assert not operations.reconcile_cancelled_builds()
     # A late execution result must not publish the removed image, lose the
     # cancellation metadata, or release the reservation before cleanup.
@@ -601,11 +601,11 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
 
 @pytest.mark.parametrize(
     ("operation_state", "build_state"),
-    (
+    [
         ("failed", "failed"),
         ("needs-operator", "building"),
         ("failed", "building"),
-    ),
+    ],
 )
 def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
     tmp_path: Path, operation_state: str, build_state: str

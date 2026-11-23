@@ -132,7 +132,8 @@ def test_a_cancel_ends_when_every_child_settled() -> None:
     row = adapter.cancel_progress(
         job, None, NOW, settled_children=True, reason="stop it"
     )
-    assert row.state is State.CANCELLED and job.state == "cancelled"
+    assert row.state is State.CANCELLED
+    assert job.state == "cancelled"
 
 
 def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
@@ -240,7 +241,8 @@ def test_a_legacy_running_batch_with_no_claim_is_claimed_and_a_live_one_is_not(
     # the lease lapses (the worker died): the next pass claims it again
     now[0] += timedelta(seconds=11)
     second = service.claim_update(owner="w2")
-    assert second is not None and second.owner != first.owner
+    assert second is not None
+    assert second.owner != first.owner
     with sessions() as session:
         assert session.get(Job, parent.id).current_attempt == 2
 

@@ -16,7 +16,7 @@ from vonk_control.runtime.writable_paths import (
 
 @pytest.mark.parametrize(
     "slug",
-    (
+    [
         "vllm",
         "sglang",
         "tensorrt-llm",
@@ -29,7 +29,7 @@ from vonk_control.runtime.writable_paths import (
         "diffusers",
         "comfyui",
         "pytorch-pipeline",
-    ),
+    ],
 )
 def test_engine_contract_is_below_the_writable_output_mount(slug: str) -> None:
     paths = writable_paths(slug)
@@ -56,11 +56,11 @@ def test_harness_contract_does_not_inject_variant_specific_paths() -> None:
 
 @pytest.mark.parametrize(
     ("name", "value"),
-    (
+    [
         ("XDG_CACHE_HOME", "/tmp/cache"),
         ("VLLM_CACHE_ROOT", "/models/cache"),
         ("TRITON_CACHE_DIR", "/var/tmp/triton"),
-    ),
+    ],
 )
 def test_recipe_cannot_escape_or_conflict_with_runtime_paths(
     name: str, value: str
@@ -88,7 +88,7 @@ def test_non_path_recipe_environment_remains_recipe_owned() -> None:
 
 @pytest.mark.parametrize(
     ("slug", "adapter", "path"),
-    (
+    [
         ("vllm", "vllm", "/metrics"),
         ("sglang", "sglang", "/metrics"),
         ("tensorrt-llm", "unsupported", None),
@@ -101,7 +101,7 @@ def test_non_path_recipe_environment_remains_recipe_owned() -> None:
         ("diffusers", "unsupported", None),
         ("comfyui", "comfyui", "/queue"),
         ("pytorch-pipeline", "unsupported", None),
-    ),
+    ],
 )
 def test_telemetry_contract_matches_agent_producer(
     slug: str, adapter: str, path: str | None

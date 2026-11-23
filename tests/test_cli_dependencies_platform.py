@@ -38,7 +38,9 @@ def test_matching_environment_is_accepted(
     env = _build(tmp_path / "env", cli_dependencies.stamp_text())
     monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(env))
     found, reason = cli_dependencies.site_packages(ROOT)
-    assert reason is None and found is not None and found.is_dir()
+    assert reason is None
+    assert found is not None
+    assert found.is_dir()
 
 
 @pytest.mark.parametrize(
@@ -61,7 +63,8 @@ def test_mismatched_environment_is_refused(
     assert found is None
     (env / cli_dependencies.STAMP).write_text(cli_dependencies.stamp_text())
     recovered, _ = cli_dependencies.site_packages(ROOT)
-    assert recovered is not None and recovered.is_dir()
+    assert recovered is not None
+    assert recovered.is_dir()
 
 
 def test_missing_environment_is_refused(
@@ -69,7 +72,8 @@ def test_missing_environment_is_refused(
 ) -> None:
     monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(tmp_path / "absent"))
     found, reason = cli_dependencies.site_packages(ROOT)
-    assert found is None and reason is not None
+    assert found is None
+    assert reason is not None
 
 
 def test_platform_environment_miss_does_not_poison_a_fresh_environment(
@@ -80,4 +84,5 @@ def test_platform_environment_miss_does_not_poison_a_fresh_environment(
     env = _build(tmp_path / "fresh", cli_dependencies.stamp_text())
     monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(env))
     found, _ = cli_dependencies.site_packages(ROOT)
-    assert found is not None and found.is_dir()
+    assert found is not None
+    assert found.is_dir()

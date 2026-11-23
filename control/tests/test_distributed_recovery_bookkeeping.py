@@ -58,7 +58,8 @@ def test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_re
     with sessions.begin() as session:
         run = session.get(RecipeRun, started.owner_id)
         original = session.get(Job, started.id)
-        assert run is not None and original is not None
+        assert run is not None
+        assert original is not None
         run.run_generation = 1
         original.state = "failed"
         prior_jobs = tuple(session.scalars(select(Job.id)))
@@ -89,10 +90,12 @@ def test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job(
                 Job.payload["owner_id"].as_string() == started.owner_id,
             )
         )
-        assert run is not None and stop is not None
+        assert run is not None
+        assert stop is not None
         payload = read_stored_model(RecipeStopParent, stop.payload, from_json=True)
         marker = payload.recovery
-        assert marker is not None and payload.phases is not None
+        assert marker is not None
+        assert payload.phases is not None
         start_phases = _decode_phases(marker.start_phases)
         assert start_phases is not None
         stop_phases = tuple(
@@ -115,7 +118,8 @@ def test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job(
             failed_rank=marker.failed_rank,
             now=run.updated_at,
         )
-        assert isinstance(answer, Job) and answer.id == stop.id
+        assert isinstance(answer, Job)
+        assert answer.id == stop.id
         assert session.scalar(select(func.count()).select_from(Job)) == before
 
 

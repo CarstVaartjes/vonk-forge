@@ -67,7 +67,8 @@ def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
         assert isinstance(winning.result(timeout=10), Applied)
         winner_committed.set()
         outcome = losing.result(timeout=10)
-    assert isinstance(outcome, Applied) and outcome.value is False
+    assert isinstance(outcome, Applied)
+    assert outcome.value is False
     assert seen == [LifecycleState.QUEUED, LifecycleState.CANCELLED]
     assert jobs.get(job.id).state == LifecycleState.CANCELLED
     assert jobs.get(job.id).version == job.version + 1
@@ -148,7 +149,8 @@ def test_completion_revalidates_fence_after_conflict(postgres_engine) -> None:
             jobs.succeed(first, {})
     finally:
         event.remove(sessions.class_, "before_flush", reclaim)
-    assert injected and successor is not None
+    assert injected
+    assert successor is not None
     row = jobs.get(job.id)
     assert row.state == LifecycleState.RUNNING
     assert row.current_attempt == successor.attempt
@@ -193,7 +195,8 @@ def test_job_service_contention_is_visible_and_recovers(
         attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.fence == fence.fence)
         )
-        assert attempt is not None and attempt.state == LifecycleState.RUNNING
+        assert attempt is not None
+        assert attempt.state == LifecycleState.RUNNING
     # Recovery needs no reset/revision/new request once the holder commits.
     report()
     if action == "succeed":
@@ -231,7 +234,8 @@ def test_same_clock_heartbeat_revalidates_after_reclaim(postgres_engine) -> None
     assert jobs.get(job.id).current_attempt == successor.attempt
     with sessions() as session:
         old = session.scalar(select(JobAttempt).where(JobAttempt.fence == first.fence))
-        assert old is not None and old.lease_deadline == first.lease_deadline
+        assert old is not None
+        assert old.lease_deadline == first.lease_deadline
 
 
 def test_denied_access_is_not_retried_or_softened(postgres_engine) -> None:
@@ -301,6 +305,7 @@ def test_guarded_lifecycle_write_cannot_bypass_the_version_fence(
         )
 
     outcome = transition(sessions, decide)
-    assert isinstance(outcome, Applied) and outcome.value is False
+    assert isinstance(outcome, Applied)
+    assert outcome.value is False
     assert seen == [None, OperatorActionName.STOP.value]
     assert jobs.get(job.id).state == LifecycleState.QUEUED

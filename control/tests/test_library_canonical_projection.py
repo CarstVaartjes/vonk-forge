@@ -1495,14 +1495,16 @@ def test_detail_and_page_scope_history_and_latest_request_by_time(
     assert observed == [digest]
     observed.clear()
     page = projection.models(limit=1, sort="name")
-    assert len(page.models) == 1 and page.models[0].local == detail.local
+    assert len(page.models) == 1
+    assert page.models[0].local == detail.local
     assert observed == []  # parsed catalog index, not another full catalog read
     histories = [
         statement
         for statement, _ in queries
         if "FROM model_cache_operations" in statement
     ]
-    assert histories and all("WHERE" in statement for statement in histories)
+    assert histories
+    assert all("WHERE" in statement for statement in histories)
     assert len(histories) == 2  # One latest-request batch per detail/list read.
     assert "cache progress" not in caplog.text
 
@@ -1552,7 +1554,8 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index = json.loads(fixture.index_bytes)
@@ -1654,14 +1657,16 @@ def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents(
     raw = json.loads(vector.read_text())
     parsed = RecipeLibraryResponse.model_validate_json(vector.read_bytes())
     assert "document" not in raw["recipes"][0]
-    assert parsed.library is not None and parsed.library.commit == "a" * 40
+    assert parsed.library is not None
+    assert parsed.library.commit == "a" * 40
     recipe = parsed.recipes[0]
     assert recipe.selector == "vonk-forge/synthetic-tiny-build"
     assert recipe.model_selectors == [
         f"{reference.publisher}/{reference.slug}"
         for reference in recipe.projected.models
     ]
-    assert recipe.projected.interfaces and recipe.projected.validation.serving.checks
+    assert recipe.projected.interfaces
+    assert recipe.projected.validation.serving.checks
     # The published hardware status crosses the boundary as the contract type.
     assert recipe.qualification is not None
     assert recipe.qualification.status == "Working"

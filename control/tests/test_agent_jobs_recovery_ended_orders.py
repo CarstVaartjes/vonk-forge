@@ -166,7 +166,8 @@ def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, con
         row = session.get(AgentOperation, operation.id)
         assert row is not None
         due = row.next_action_at
-        assert row.current_attempt == 1 and row.payload == original_payload
+        assert row.current_attempt == 1
+        assert row.payload == original_payload
         assert due is None
         assert row.state == LifecycleState.FAILED.value
     if condition in {"revoked", "superseded"}:
@@ -293,7 +294,8 @@ def test_wrong_fence_cannot_finish_work_and_current_fence_can(service) -> None:
         STOP_PAYLOAD,
     )
     fresh = claim_agent(jobs, NODE_A, "serial-a")
-    assert fresh is not None and fenced_operation(sessions, fresh).id == successor.id
+    assert fresh is not None
+    assert fenced_operation(sessions, fresh).id == successor.id
     jobs.succeed(fresh, STOP_RESULT)
     assert (
         job_state(sessions, successor.parent_job_id).state == LifecycleState.SUCCEEDED
@@ -779,7 +781,8 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
         session.execute(delete(AgentOperation).where(AgentOperation.id == operation.id))
     with sessions() as session:
         retained = latest_result(session, NODE_A, requirements_sha256=digest)
-        assert retained is not None and retained.result == result
+        assert retained is not None
+        assert retained.result == result
         assert not admission_blockers(request, retained, current_fingerprint="a" * 64)
         assert admission_blockers(request, retained, current_fingerprint="b" * 64)
 
@@ -816,12 +819,14 @@ def test_failed_child_end_wake_preserves_committed_receipt(service):
         receipt = latest_result(
             session, NODE_A, requirements_sha256=request_digest(request)
         )
-        assert receipt is not None and receipt.received_at == clock.now
+        assert receipt is not None
+        assert receipt.received_at == clock.now
         committed = session.get(Job, job.id)
-        assert committed is not None and committed.state == LifecycleState.SUCCEEDED
+        assert committed is not None
+        assert committed.state == LifecycleState.SUCCEEDED
 
 
-@pytest.mark.parametrize("contact_path", ("claim", "heartbeat"))
+@pytest.mark.parametrize("contact_path", ["claim", "heartbeat"])
 def test_controller_clock_rollback_replaces_pinned_contact(
     service, contact_path
 ) -> None:
@@ -851,4 +856,5 @@ def test_controller_clock_rollback_replaces_pinned_contact(
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         seen = contact_row(node).last_seen_at
-        assert seen is not None and seen.replace(tzinfo=UTC) == clock()
+        assert seen is not None
+        assert seen.replace(tzinfo=UTC) == clock()

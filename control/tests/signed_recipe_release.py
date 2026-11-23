@@ -20,7 +20,7 @@ import hashlib
 import io
 import json
 import tarfile
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from pathlib import Path, PurePosixPath
 
@@ -56,10 +56,9 @@ def _verify(checksums: bytes, bundle: bytes) -> str:
 
 
 @pytest.fixture
-def signed_recipe_releases(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def signed_recipe_releases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accept only releases signed by :class:`SignedRecipeRelease`."""
     monkeypatch.setattr(recipe_packages, "verify_release_checksums", _verify)
-    yield
 
 
 def _canonical(value: object) -> bytes:

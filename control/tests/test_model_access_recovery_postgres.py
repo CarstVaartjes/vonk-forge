@@ -197,7 +197,8 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
                 cache._object_path(hashlib.sha256(DATA).hexdigest()).read_bytes()
                 == DATA
             )
-            assert final.failure is None and not final.blockers
+            assert final.failure is None
+            assert not final.blockers
             if resume in {"approval", "restart"}:
                 assert len(requests) == count + 1
     finally:

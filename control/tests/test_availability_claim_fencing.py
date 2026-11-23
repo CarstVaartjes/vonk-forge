@@ -311,14 +311,16 @@ def test_cancelled_image_owner_recovers_after_publication_process_dies(claimed_i
         service._persist_provisional_image_reference(claim, receipt=receipt)
     with sessions() as session:
         row = session.get(Job, parent.id)
-        assert row is not None and row.state == LifecycleState.CANCELLED
+        assert row is not None
+        assert row.state == LifecycleState.CANCELLED
         assert row.payload.get("claim_owner") is None
         assert "image_reference_intent" not in row.payload
     fresh = service.start(
         claim.recipe_revision_id, actor="operator", request_id=str(uuid.uuid4())
     )
     successor = service.claim_pending(limit=1, owner_id="fresh-worker")
-    assert len(successor) == 1 and successor[0].operation_id == fresh.id
+    assert len(successor) == 1
+    assert successor[0].operation_id == fresh.id
 
 
 def test_contended_progress_releases_the_artifact_worker(claimed_image, monkeypatch):

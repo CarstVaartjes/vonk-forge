@@ -56,8 +56,10 @@ def test_run_whose_recipe_topology_became_unreadable_is_still_stopped(
         assert job is not None
         parent = RecipeStopParent.model_validate_json(canonical_message(job.payload))
         review = parent.service_stop_review
-        assert review is not None and review.stage == "dispatched"
-        assert review.stop_order is None and review.exact_payloads is not None
+        assert review is not None
+        assert review.stage == "dispatched"
+        assert review.stop_order is None
+        assert review.exact_payloads is not None
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)

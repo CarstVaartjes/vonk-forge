@@ -228,7 +228,8 @@ def test_committed_cursor_and_events_survive_repository_recreation(sessions) -> 
     reader = FleetEventRepository(sessions, clock=lambda: NOW)
     assert reader.high_watermark() == 1
     replay = reader.after(0, NOW, limit=1)
-    assert len(replay) == 1 and replay[0].id == 1
+    assert len(replay) == 1
+    assert replay[0].id == 1
     with sessions.begin() as session:
         reader.append_in_session(session, _draft(entity_id="fresh"))
     assert [(row.id, row.entity_id) for row in reader.after(1, NOW, limit=2)] == [

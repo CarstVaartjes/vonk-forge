@@ -119,7 +119,8 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
     database = startup_database
     host = database.engine.url.host
     port = database.engine.url.port
-    assert host is not None and port is not None
+    assert host is not None
+    assert port is not None
     before = _schema(database.engine)
     monkeypatch.setattr(
         connection_owner,
@@ -149,7 +150,9 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
         def repair_before_backoff(wait: float) -> None:
             waits.append(wait)
             assert len(waits) == 1
-            assert handshake_seen.is_set() and disposed and not authenticated
+            assert handshake_seen.is_set()
+            assert disposed
+            assert not authenticated
             # Bound the failed physical connection, independently of normal
             # migration's own statement/transaction budgets after admission.
             # The upper bound tells the 2 s budget from the 30 s default.
@@ -181,7 +184,8 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
                 attempts.assert_released(database.engine)
                 assert attempts.migration_pids
             assert len(waits) == 1
-            assert len(disposed) == 2 and authenticated
+            assert len(disposed) == 2
+            assert authenticated
             assert set(authenticated) == {disposed[-1]}
             assert all(engine.url == same_url for engine in disposed + authenticated)
         finally:

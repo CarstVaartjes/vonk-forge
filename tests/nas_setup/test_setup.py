@@ -53,10 +53,8 @@ def test_fresh_lab_and_secure_remote_keep_secret_answers_private(
         values = parse_environment(bundle / ".env")
         assert values["COMPOSE_PROFILES"] == expected
         assert values["VONK_MANAGEMENT_CIDRS"] == "192.168.1.0/24"
-        assert (
-            "private-hf" not in output.getvalue()
-            and "private-ts" not in output.getvalue()
-        )
+        assert "private-hf" not in output.getvalue()
+        assert "private-ts" not in output.getvalue()
         assert (bundle / "secrets/hf-token").read_text() == "private-hf\n"
         for path in (
             bundle,
@@ -291,7 +289,8 @@ def test_consumed_symlinks_and_hardlinks_never_touch_outside_alias(
     stale.mkdir()
     (stale / "evidence").write_text("preserve")
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
-    assert unrelated.is_symlink() and (stale / "evidence").read_text() == "preserve"
+    assert unrelated.is_symlink()
+    assert (stale / "evidence").read_text() == "preserve"
 
 
 def test_exact_group_list_excludes_private_signer_and_rejects_alias(

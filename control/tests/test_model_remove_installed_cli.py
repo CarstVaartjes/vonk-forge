@@ -315,6 +315,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
                     CatalogDocumentRevision.content_digest == active.content_digest
                 )
             )
-            assert active_head is not None and active_head.state == "active"
+            assert active_head is not None
+            assert active_head.state == "active"
     finally:
         cache.close()

@@ -147,7 +147,8 @@ def test_the_same_image_loads_through_every_gate_whatever_its_provenance(
     with sessions() as session:
         installed = session.scalar(select(RecipeInstallation))
         build = session.get(RecipeBuild, build_id)
-        assert installed is not None and build is not None
+        assert installed is not None
+        assert build is not None
         assert installation_matches_runtime_image(
             installed,
             image_digest=build.image_digest,

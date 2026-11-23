@@ -149,7 +149,8 @@ def test_same_clock_later_intent_fences_older_queued_work(tmp_path: Path) -> Non
     with sessions() as session:
         old = session.get(Job, first.operation_id)
         new = session.get(Job, second.operation_id)
-        assert old is not None and new is not None
+        assert old is not None
+        assert new is not None
         assert old.created_at == new.created_at
         assert old.payload["workload_intent_ordinal"] == 1
         assert new.payload["workload_intent_ordinal"] == 2
@@ -252,7 +253,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     assert service._advance(operation.operation_id) is True
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         assert job.next_action_at is not None
         second_due = job.next_action_at.replace(tzinfo=UTC)
         assert job.result["retry_attempt"] == 3
@@ -261,7 +263,8 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
     assert service._advance(operation.operation_id) is False
     with sessions() as session:
         job = session.get(Job, operation.operation_id)
-        assert job is not None and isinstance(job.result, dict)
+        assert job is not None
+        assert isinstance(job.result, dict)
         assert job.result["retry_attempt"] == 3
     with sessions.begin() as session:
         snapshot = session.scalar(
@@ -409,7 +412,8 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
     assert waiting.state == LifecycleState.OBSERVING
-    assert waiting.result is not None and waiting.next_attempt_at
+    assert waiting.result is not None
+    assert waiting.next_attempt_at
     due = waiting.next_attempt_at
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
@@ -522,7 +526,8 @@ def test_child_activity_change_persists_without_clock_only_writes(
     )
     assert service.tick() is True
     before = _result(service.get(operation.operation_id)).operation
-    assert before is not None and before.activity == "active"
+    assert before is not None
+    assert before.activity == "active"
     assert isinstance(child.result, RunSwitchDistributionChildResult)
     assert child.result.progress.operation is not None
     child.result.progress.operation = child.result.progress.operation.model_copy(
@@ -534,7 +539,8 @@ def test_child_activity_change_persists_without_clock_only_writes(
     )
     assert service.tick() is True
     after = _result(service.get(operation.operation_id)).operation
-    assert after is not None and after.activity == "waiting"
+    assert after is not None
+    assert after.activity == "waiting"
 
 
 def test_due_scheduler_reaches_work_past_a_full_parked_batch(
@@ -657,7 +663,8 @@ def test_malformed_operation_is_reconciled_without_aborting_the_batch(
             assert restored.force_replan
             assert rejected.next_action_at is not None
         advanced = session.get(Job, valid.operation_id)
-        assert advanced is not None and advanced.state == "running"
+        assert advanced is not None
+        assert advanced.state == "running"
         after_index = (advanced.result or {}).get("phase_index")
     # The unrelated due operation still advanced in the same batch.
     assert after_index == 1
@@ -785,7 +792,8 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     plan = service.preview(request, actor="admin")
 
     assert plan.allowed is True
-    assert plan.mapping is not None and plan.mapping.action == "create"
+    assert plan.mapping is not None
+    assert plan.mapping.action == "create"
     assert plan.build.state == "available"
     assert plan.preparation is not None
     # NAS readiness must not wait for copies on the Sparks. The preparation

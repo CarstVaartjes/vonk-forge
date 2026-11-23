@@ -198,7 +198,7 @@ def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    (
+    [
         "../recipe.json",
         "nested/../../recipe.json",
         "/recipe.json",
@@ -206,7 +206,7 @@ def test_truncated_gzip_package_raises_only_the_typed_error() -> None:
         "recipes//recipe.json",
         "./recipe.json",
         ".",
-    ),
+    ],
 )
 def test_rejects_member_paths_that_escape_the_archive_root(
     tmp_path: Any,
@@ -227,7 +227,7 @@ def test_rejects_member_paths_that_escape_the_archive_root(
 
 @pytest.mark.parametrize(
     "member_type",
-    (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE),
+    [tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.FIFOTYPE, tarfile.CHRTYPE],
 )
 def test_rejects_non_regular_members(
     tmp_path: Any,

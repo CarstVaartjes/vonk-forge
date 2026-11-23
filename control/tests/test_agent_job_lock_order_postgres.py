@@ -146,7 +146,7 @@ def test_dual_node_claims_lock_complete_scope_before_identity(queue, postgres_en
     assert len({claim.fence for claim in claims if claim is not None}) == 2
 
 
-@pytest.mark.parametrize("action", ("heartbeat", "succeed"))
+@pytest.mark.parametrize("action", ["heartbeat", "succeed"])
 def test_dual_node_active_attempts_share_the_same_lock_order(
     queue, postgres_engine, action
 ):

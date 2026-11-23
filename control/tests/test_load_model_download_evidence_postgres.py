@@ -207,11 +207,13 @@ def nas(tmp_path: Path, postgres_engine: Engine):
 def test_a_load_downloads_the_model_the_nas_lacks(nas: _Nas) -> None:
     plan = nas.plan_while_missing()
     wanted = plan.storage.artifact_set_sha256
-    assert wanted is not None and not nas.cached(wanted)
+    assert wanted is not None
+    assert not nas.cached(wanted)
 
     operation_id = nas.download_phase(plan)
     child = nas.executor.get(operation_id)
-    assert child is not None and child.state in {"queued", "running"}  # it waits
+    assert child is not None
+    assert child.state in {"queued", "running"}
 
     landed = nas.settle(operation_id)
     _validate_artifact_execution(plan, _PHASE, landed)

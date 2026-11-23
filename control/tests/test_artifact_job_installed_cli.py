@@ -118,13 +118,15 @@ def _artifact_api(tmp_path: Path, postgres_engine, *, output_min_files: int = 1)
     def configure_recipe(document: dict[str, object]) -> None:
         _configure_artifact_recipe(document)
         interfaces = document.get("interfaces")
-        assert isinstance(interfaces, list) and len(interfaces) == 1
+        assert isinstance(interfaces, list)
+        assert len(interfaces) == 1
         interface = interfaces[0]
         assert isinstance(interface, dict)
         output = interface.get("output")
         assert isinstance(output, dict)
         slots = output.get("slots")
-        assert isinstance(slots, list) and len(slots) == 1
+        assert isinstance(slots, list)
+        assert len(slots) == 1
         slot = slots[0]
         assert isinstance(slot, dict)
         slot["min_files"] = output_min_files
@@ -254,7 +256,8 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert isinstance(job_id, str)
         assert draft["preparation"] == "ready"
         uploaded_inputs = draft.get("input_files")
-        assert isinstance(uploaded_inputs, list) and len(uploaded_inputs) == 1
+        assert isinstance(uploaded_inputs, list)
+        assert len(uploaded_inputs) == 1
         assert uploaded_inputs[0]["name"] == "input.png"
         assert uploaded_inputs[0]["size_bytes"] == len(input_content)
         assert uploaded_inputs[0]["sha256"] == hashlib.sha256(input_content).hexdigest()

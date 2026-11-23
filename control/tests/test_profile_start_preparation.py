@@ -144,7 +144,8 @@ def test_starting_an_installed_recipe_waits_for_preparation_then_starts(
     assert loaded.wait is not None
     assert loaded.wait.reason is WaitReason.RECEIPT_MISSING
     assert loaded.wait.next_check > now[0]
-    assert loaded.blockers and all(
+    assert loaded.blockers
+    assert all(
         blocker.code is WaitReason.RECEIPT_MISSING
         and blocker.severity == "info"
         and blocker.operation is not None

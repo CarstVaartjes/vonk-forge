@@ -87,7 +87,7 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("surface,member,method,path", CASES)
+@pytest.mark.parametrize(("surface", "member", "method", "path"), CASES)
 @pytest.mark.parametrize(
     "fault",
     [

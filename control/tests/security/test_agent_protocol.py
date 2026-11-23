@@ -155,7 +155,8 @@ def test_revoked_certificate_cannot_publish_result(service) -> None:
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert attempt is not None and attempt.result is None
+        assert attempt is not None
+        assert attempt.result is None
         certificate = session.get(AgentCertificate, "serial-a")
         assert certificate is not None
         certificate.revoked_at = None

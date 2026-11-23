@@ -230,7 +230,7 @@ def test_agent_wifi_vector_reaches_the_warning_consumer() -> None:
 
 
 @pytest.mark.parametrize(
-    "frequency,band",
+    ("frequency", "band"),
     [(2412, "2.4 GHz"), (5180, "5 GHz"), (6115, "6 GHz"), (58320, "58320 MHz")],
 )
 def test_wifi_frequency_names_the_observed_band(frequency: int, band: str) -> None:

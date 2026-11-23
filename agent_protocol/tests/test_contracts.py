@@ -98,7 +98,8 @@ def apply_vector_changes(
     payload = deepcopy(base)
     for change in changes:
         path = change["path"]
-        assert isinstance(path, list) and path
+        assert isinstance(path, list)
+        assert path
         target: object = payload
         for component in path[:-1]:
             assert isinstance(target, (dict, list))
@@ -185,12 +186,12 @@ def test_protocol_allows_only_exact_versioned_platform_target_identifier() -> No
 
 @pytest.mark.parametrize(
     "target",
-    (
+    [
         "platform-release.json",
         "platform/releases/latest/" + "a" * 64 + ".json",
         "platform/releases/1.2.3/../../escape.json",
         "platform/releases/1.2.3/" + "A" * 64 + ".json",
-    ),
+    ],
 )
 def test_protocol_rejects_client_selected_parameter_path(
     target: str,

@@ -216,7 +216,8 @@ def _refresh_run_plan(session: Session, order: _Order) -> None:
 def _drift_record_digests(session: Session, order: _Order) -> None:
     job = session.get(Job, order.job_id)
     operation = session.get(AgentOperation, order.operation_id)
-    assert job is not None and operation is not None
+    assert job is not None
+    assert operation is not None
     job.payload_digest = operation.payload_digest = "0" * 64
 
 
@@ -429,7 +430,8 @@ def _admit_newer_work(jobs, sessions, clock) -> None:
     payload = canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30))
     order = jobs.enqueue(newer.id, NODE_A, "recipe.start", COMMIT, payload)
     claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None and fenced_operation(sessions, claim).id == order.id
+    assert claim is not None
+    assert fenced_operation(sessions, claim).id == order.id
 
 
 #: Seconds a cleanup order is held after a newer intent: none, and past the
@@ -520,7 +522,8 @@ def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -
         if returned is not None:
             break
         clock.advance(seconds=60)
-    assert returned is not None and returned.fence != first.fence
+    assert returned is not None
+    assert returned.fence != first.fence
     assert fenced_operation(sessions, returned).id == order.id
     jobs.succeed(returned, STOP_RESULT)
     with sessions() as session:
@@ -745,7 +748,8 @@ def test_a_jobrun_stop_removes_its_own_job_container_whatever_drifted(
     assert operations.get(stop.id).state == LifecycleState.SUCCEEDED
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     # Nothing is left holding the Spark: a fresh activation is admitted.
     fresh = operations.preview_run(installation_id, "image-job")

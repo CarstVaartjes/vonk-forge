@@ -427,8 +427,11 @@ def test_ring_buffer_preserves_last_lines_and_reports_loss():
     assert tail.text.endswith("last useful error")
     dropped_bytes = tail.dropped_bytes
     dropped_lines = tail.dropped_lines
-    assert isinstance(dropped_bytes, int) and isinstance(dropped_lines, int)
-    assert tail.truncated and dropped_bytes > 0 and dropped_lines > 0
+    assert isinstance(dropped_bytes, int)
+    assert isinstance(dropped_lines, int)
+    assert tail.truncated
+    assert dropped_bytes > 0
+    assert dropped_lines > 0
     assert len(tail.text.encode()) <= LOG_TAIL_BYTES
     assert len(tail.text.splitlines()) <= 32
 
@@ -679,7 +682,8 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
         NODE_A,
         "serial-a",
     )
-    assert first is not None and fenced_attempt(sessions, first).attempt == 1
+    assert first is not None
+    assert fenced_attempt(sessions, first).attempt == 1
     # The agent's own failure arrives after the lease lapsed.  The Controller
     # keeps it on the expired attempt rather than discarding it.
     clock.advance(seconds=31)
@@ -710,7 +714,8 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
         NODE_A,
         "serial-a",
     )
-    assert second is not None and fenced_attempt(sessions, second).attempt == 2
+    assert second is not None
+    assert fenced_attempt(sessions, second).attempt == 2
     jobs.succeed(second, DISTRIBUTION_SUCCESS)
 
     bundle = evidence.read(operation.id, 1)
@@ -831,7 +836,8 @@ def test_a_failure_whose_diagnostics_were_dropped_says_what_was_lost(
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.result is not None
+        assert stored is not None
+        assert stored.result is not None
         assert stored.result["dropped_evidence"] == [drop.model_dump(mode="json")]
     bundle = evidence.read(operation.id, 1)
     assert (
@@ -886,7 +892,8 @@ def test_a_long_traceback_tail_is_kept_and_still_redacted(durable_evidence):
                 AgentOperationAttempt.operation_id == operation.id
             )
         )
-        assert stored is not None and stored.result is not None
+        assert stored is not None
+        assert stored.result is not None
         assert "dropped_evidence" not in stored.result
     bundle = evidence.read(operation.id, 1)
     assert not any(

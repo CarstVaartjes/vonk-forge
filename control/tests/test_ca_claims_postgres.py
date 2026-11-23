@@ -57,7 +57,7 @@ def enroll(service, node_id):
     return issued
 
 
-@pytest.mark.parametrize("purpose", ("enrollment", "rotation"))
+@pytest.mark.parametrize("purpose", ["enrollment", "rotation"])
 def test_slow_issuer_does_not_hold_an_unrelated_postgres_claim(
     postgres_engine, purpose
 ):
@@ -138,7 +138,8 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
             assert not provider.calls
             with sessions() as observer:
                 original = observer.get(AgentEnrollmentGrant, grant.id)
-                assert original is not None and original.consumed_at is None
+                assert original is not None
+                assert original.consumed_at is None
                 assert observer.scalar(select(AgentEnrollment)) is None
         restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
         issued = restarted.submit(grant.token, request, evidence(request))

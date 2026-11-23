@@ -53,7 +53,8 @@ def test_an_old_artifact_job_table_is_reconciled_in_place(postgres_engine):
         columns = {
             item["name"]: item for item in inspect(connection).get_columns(TABLE)
         }
-        assert "preparation" in columns and "cancel_requested_at" in columns
+        assert "preparation" in columns
+        assert "cancel_requested_at" in columns
         assert columns["state"]["nullable"] is True
         check = next(
             item["sqltext"]

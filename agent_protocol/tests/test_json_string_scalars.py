@@ -57,7 +57,8 @@ def test_a_start_failure_keeps_its_page_cache_drops_in_every_mode(mode: str) -> 
     assert drops is not None
     assert drops.last_problem is not None
     assert drops.last_problem.problem is PageCacheDropProblem.DROP_IN_PROGRESS
-    assert drops.last is not None and drops.last.dropped_at.tzinfo is not None
+    assert drops.last is not None
+    assert drops.last.dropped_at.tzinfo is not None
 
 
 def test_a_report_read_from_its_json_strings_round_trips_unchanged() -> None:

@@ -89,7 +89,9 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         lifecycle.record_node_result(stop_id, node_id, succeeded=True, evidence={})
     with sessions() as session:
         run = session.get(RecipeRun, old.owner_id)
-        assert run is not None and run.state == "stopped" and run.stopped_at is not None
+        assert run is not None
+        assert run.state == "stopped"
+        assert run.stopped_at is not None
     for _ in range(20):
         planner.tick()
         current = planner.get(accepted.operation_id)
@@ -139,11 +141,13 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     waiting_result = planner.get(accepted.operation_id).result
     assert waiting_result is not None
     first_due = planner.get(accepted.operation_id).next_attempt_at
-    assert first_due is not None and first_due > now[0]
+    assert first_due is not None
+    assert first_due > now[0]
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     restarted.tick()
     waiting = restarted.get(accepted.operation_id)
-    assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
+    assert waiting.state == LifecycleState.RUNNING
+    assert waiting.result is not None
     assert waiting.next_attempt_at == first_due
     assert waiting.result.retry_attempt == waiting_result.retry_attempt
     now[0] += timedelta(seconds=6)
@@ -202,7 +206,8 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     replacement = next(job for job in starts if job.id != old.id)
     assert replacement.state == LifecycleState.RUNNING
     current = resumed.get(accepted.operation_id)
-    assert current.result is not None and current.result.retry_reason is None
+    assert current.result is not None
+    assert current.result.retry_reason is None
     # A later observer adopts the committed child, even if physical telemetry
     # subsequently goes stale: it must not acquire another start identity.
     again = _service(

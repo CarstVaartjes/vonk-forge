@@ -77,7 +77,8 @@ def _claimed_job(world: World, orders: AgentJobService, node_id: str):
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
         preflight_fingerprint=fingerprint,
     )
-    assert claim is not None and claim.operation.value == "recipe.job.run.v1"
+    assert claim is not None
+    assert claim.operation.value == "recipe.job.run.v1"
     plan = RecipeJobRunRequest.model_validate_json(canonical_message(claim.payload))
     return claim, plan
 
@@ -366,7 +367,8 @@ def test_a_job_whose_parent_lacks_its_manifest_is_refused_definitely_at_once(
         assert diagnostic in (failed.status_reason or ""), failed.status_reason
         with world.sessions() as session:
             order = session.get(Job, submitted.operation_id)
-            assert order is not None and order.state == "failed"
+            assert order is not None
+            assert order.state == "failed"
         assert (
             claim_agent(
                 orders,

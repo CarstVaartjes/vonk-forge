@@ -177,7 +177,8 @@ def test_recipe_installation_reconcile_review_uses_typed_preview_route(
         client,
     )
 
-    assert status == 0 and result == plan
+    assert status == 0
+    assert result == plan
     assert client.calls == [("POST", path, None, None)]
 
 
@@ -263,7 +264,8 @@ def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity
         client,
     )
 
-    assert status == 0 and result["operation_id"] == operation_id
+    assert status == 0
+    assert result["operation_id"] == operation_id
     assert [(call[0], call[1]) for call in client.calls] == [
         ("GET", "/api/operations"),
         ("GET", operation_path),
@@ -335,7 +337,8 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
         client,
     )
 
-    assert status == 0 and result["operation_id"] == operation_id
+    assert status == 0
+    assert result["operation_id"] == operation_id
     assert client.timeouts == [15.0, 10.0]
 
 
@@ -431,9 +434,11 @@ def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identit
         client,
     )
 
-    assert status == 0 and result["operation_id"] == operation["operation_id"]
+    assert status == 0
+    assert result["operation_id"] == operation["operation_id"]
     posts = [call[2] for call in client.calls if call[0] == "POST" and call[1] == apply]
-    assert len(posts) == 2 and posts[0] == posts[1]
+    assert len(posts) == 2
+    assert posts[0] == posts[1]
     assert posts[0] == {"request_key": key}
 
 
@@ -494,7 +499,8 @@ def test_fleet_activity_passes_all_filters_to_one_canonical_page() -> None:
         client,
     )
 
-    assert status == 0 and payload == response
+    assert status == 0
+    assert payload == response
     assert client.calls == [
         (
             "GET",
@@ -529,7 +535,8 @@ def test_fleet_locks_reads_the_admission_lock_report() -> None:
 
     status, payload = run(("fleet", "locks", "--json"), client)
 
-    assert status == 0 and payload == response
+    assert status == 0
+    assert payload == response
     assert client.calls == [("GET", "/api/fleet/locks", None, None)]
 
 
@@ -549,7 +556,8 @@ def test_fleet_evidence_downloads_the_current_attempt_to_a_private_file(
         ("fleet", "evidence", "op-1", "--output", str(output), "--json"), client
     )
 
-    assert status == 0 and payload["attempt"] == 2
+    assert status == 0
+    assert payload["attempt"] == 2
     assert json.loads(output.read_text()) == bundle
     assert output.stat().st_mode & 0o077 == 0
     assert client.calls[-1][3] == {"attempt": 2}
@@ -581,7 +589,8 @@ def test_fleet_evidence_falls_back_to_the_job_attempt_for_an_unprojected_job(
         ("fleet", "evidence", job_id, "--output", str(output), "--json"), client
     )
 
-    assert status == 0 and payload["attempt"] == 2
+    assert status == 0
+    assert payload["attempt"] == 2
     assert json.loads(output.read_text()) == bundle
 
 
@@ -592,7 +601,8 @@ def test_recipe_sync_status_treats_a_missing_sync_as_never_run() -> None:
 
     status, payload = run(("recipe", "sync-status", "--json"), NeverSynced({}))
 
-    assert status == 0 and payload == {"state": "never-run"}
+    assert status == 0
+    assert payload == {"state": "never-run"}
 
 
 def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None:
@@ -612,7 +622,8 @@ def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None
 
     status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
 
-    assert status == 0 and payload == accepted
+    assert status == 0
+    assert payload == accepted
     assert client.calls == [
         ("POST", f"/api/jobs/{job_id}/resume", {"disposition": "resume"}, None),
     ]
@@ -640,7 +651,8 @@ def test_fleet_resume_asks_in_a_terminal_and_refuses_without_input(monkeypatch) 
     ]
 
     status, _ = run(("--no-input", "fleet", "resume", job_id, "--json"), client)
-    assert status == 2 and len(client.calls) == 1
+    assert status == 2
+    assert len(client.calls) == 1
 
 
 def test_a_confirmed_fleet_resume_posts_the_resume_and_exits_zero() -> None:
@@ -725,7 +737,8 @@ def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
         }
     )
     status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
-    assert status == 0 and payload["id"] == job_id
+    assert status == 0
+    assert payload["id"] == job_id
     assert [call[0] for call in client.calls] == ["POST"]
     assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
 
@@ -798,7 +811,8 @@ def test_model_and_recipe_library_use_final_singular_routes_and_facets() -> None
         ("model", "library", "--usage", "code", "--family", "Qwen", "--json"),
         model,
     )
-    assert status == 0 and payload == {"models": []}
+    assert status == 0
+    assert payload == {"models": []}
     assert model.calls == [
         (
             "GET",
@@ -895,7 +909,8 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
 
     assert status == 2
     observation = payload["observation"]
-    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert isinstance(observation, dict)
+    assert observation["status"] == "timed_out"
     assert payload["result"] == {}
     assert [call[:2] for call in client.calls] == [
         ("POST", path),
@@ -918,7 +933,8 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
         ),
         client,
     )
-    assert status == 0 and result["id"] == repaired["id"]
+    assert status == 0
+    assert result["id"] == repaired["id"]
     assert [call[0] for call in client.calls].count("POST") == 2
 
 
@@ -975,7 +991,8 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
     status, payload = run(("model", "detail", "qwen", "--technical", "--json"), detail)
     technical = payload["identity"]
     assert isinstance(technical, dict)
-    assert status == 0 and technical["content_sha256"] == "digest"
+    assert status == 0
+    assert technical["content_sha256"] == "digest"
     assert detail.calls[0][3] == {"technical": True}
 
 
@@ -1039,7 +1056,8 @@ def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
         ),
         client,
     )
-    assert model_status == 2 and model_receipt["model_content_sha256"] == model_digest
+    assert model_status == 2
+    assert model_receipt["model_content_sha256"] == model_digest
     assert [call[:2] for call in client.calls[:2]] == [
         ("GET", "/api/model/qwen/remove-review"),
         ("POST", "/api/model/qwen/remove"),

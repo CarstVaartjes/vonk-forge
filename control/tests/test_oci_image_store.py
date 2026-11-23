@@ -119,9 +119,8 @@ def test_a_repeated_copy_marks_its_image_fresh_for_collection(tmp_path: Path) ->
     for blob in blobs.iterdir():
         os.utime(blob, (old, old))
     removed = store.collect(lambda: (), grace_seconds=60)
-    assert isinstance(removed, Collection) and removed.blobs_removed == len(
-        image.blob_digests
-    )
+    assert isinstance(removed, Collection)
+    assert removed.blobs_removed == len(image.blob_digests)
     assert store.read(image.manifest_digest) is None
     # The layout's index still names the collected image; storing it again
     # works all the same.

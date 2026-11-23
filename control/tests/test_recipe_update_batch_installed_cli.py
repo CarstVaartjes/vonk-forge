@@ -222,7 +222,8 @@ def test_installed_update_survives_cli_and_worker_death_with_frozen_cache_scope(
         ) not in peer.dropped_responses and time.monotonic() < deadline:
             time.sleep(0.01)
         assert peer.dropped_responses == [("POST", "/api/recipe/update")]
-        assert process.returncode is not None and process.returncode < 0
+        assert process.returncode is not None
+        assert process.returncode < 0
 
     parent = _assert_parent(service.get_operator_request(request_key, actor="operator"))
     parent_id = parent.id

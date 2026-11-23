@@ -490,14 +490,16 @@ def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
 
     monkeypatch.setattr(run, "_run_command", command)
     observed = run._exercise_native_renewal(deadline=elapsed[0] + 10)
-    assert len(rotations) == 1 and len(starts) == 1
+    assert len(rotations) == 1
+    assert len(starts) == 1
     if exhaust:
         assert observed is None
         assert elapsed[0] <= 10
         failing[0] = False
         fresh = run._exercise_native_renewal(deadline=elapsed[0] + 10)
         assert fresh is not None
-        assert len(rotations) == 2 and len(starts) == 2
+        assert len(rotations) == 2
+        assert len(starts) == 2
     else:
         assert observed is not None
         assert (tmp_path / "renewal-scheduling-clock.json").exists()

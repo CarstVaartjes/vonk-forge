@@ -188,7 +188,8 @@ def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
     index = json.loads(fixture.index_bytes)
@@ -590,8 +591,10 @@ def test_a_canary_the_library_withdrew_is_offered_again_and_served(
         lane._run_synthetic_canary(NODE, carry=lambda: None)
 
     # One re-import, and the second attempt downloads under its own request key.
-    assert len(imported) == 2 and imported[0] != imported[1]
-    assert len(downloads) == 2 and downloads[0] != downloads[1]
+    assert len(imported) == 2
+    assert imported[0] != imported[1]
+    assert len(downloads) == 2
+    assert downloads[0] != downloads[1]
     assert len(lane.loads) == 1
 
 
@@ -606,9 +609,11 @@ def test_a_canary_withdrawn_between_preview_and_load_is_offered_again(
     with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
         lane._run_synthetic_canary(NODE, carry=lambda: None)
 
-    assert len(imported) == 2 and len(downloads) == 2
+    assert len(imported) == 2
+    assert len(downloads) == 2
     # The second load has its own request key, and only it was awaited.
-    assert len(lane.loads) == 2 and lane.loads[0] != lane.loads[1]
+    assert len(lane.loads) == 2
+    assert lane.loads[0] != lane.loads[1]
     assert lane.awaited == [True]
 
 
@@ -625,7 +630,8 @@ def test_a_canary_withdrawn_twice_fails_with_the_catalog_sync_status(
     message = str(raised.value)
     assert "withdrew the fixture again" in message
     assert "profile.recipe_unavailable" in message
-    assert '"trigger": "automatic"' in message and '"withdrawn_count": 2' in message
+    assert '"trigger": "automatic"' in message
+    assert '"withdrawn_count": 2' in message
     assert len(imported) == 2
 
 

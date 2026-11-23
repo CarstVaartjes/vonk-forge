@@ -178,7 +178,8 @@ def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> N
     _drain(service, operation.id)
     assert service.get_operation(operation.id).state == "succeeded"
     service.close()
-    assert client is not None and client.is_closed is False
+    assert client is not None
+    assert client.is_closed is False
     client.close()
 
 
@@ -772,7 +773,8 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     _drain(fresh, operation.id)
     assert fresh.get_operation(operation.id).state == "succeeded"
     fresh.close()
-    assert client is not None and fresh_client is not None
+    assert client is not None
+    assert fresh_client is not None
     client.close()
     fresh_client.close()
 
@@ -961,7 +963,8 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
         LifecycleState.BACKOFF,
     }
     failure = service.get_operation(newer.id).failure
-    assert failure is not None and failure["code"] == "access_denied"
+    assert failure is not None
+    assert failure["code"] == "access_denied"
 
     actor = Actor("operator", "administrator")
     app = FastAPI()
@@ -1099,8 +1102,10 @@ def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
     assert ended.failure is not None
     assert ended.failure["retryable"] is False
     detail = str(ended.failure["detail"])
-    assert str(artifact["sha256"]) in detail and "2 consecutive" in detail
-    assert ended.blockers == () and ended.next_attempt_at is None
+    assert str(artifact["sha256"]) in detail
+    assert "2 consecutive" in detail
+    assert ended.blockers == ()
+    assert ended.next_attempt_at is None
     for _ in range(3):
         now[0] += timedelta(seconds=600)
         service.tick()
@@ -1109,7 +1114,8 @@ def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
     serve_pinned[0] = True
     fresh = _start(service, [artifact], "00000000-0000-4000-8000-000000000454")
     done = _drain_until(service, fresh.id, now, {"succeeded", "failed"})
-    assert done.id != ended.id and done.state == "succeeded"
+    assert done.id != ended.id
+    assert done.state == "succeeded"
     service.close()
     assert client is not None
     client.close()
@@ -1149,7 +1155,8 @@ def test_two_files_that_both_keep_mismatching_end_the_download(
     assert first["download_bytes"] == second["download_bytes"]
     operation = _start(service, [first, second], "00000000-0000-4000-8000-000000000456")
     ended = _drain_until(service, operation.id, now, {"succeeded", "failed"})
-    assert ended.state == "failed" and ended.failure is not None
+    assert ended.state == "failed"
+    assert ended.failure is not None
     assert is_security_failure(str(ended.failure["code"]))
     assert ended.failure["retryable"] is False
     assert "2 consecutive" in str(ended.failure["detail"])

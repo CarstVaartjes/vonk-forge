@@ -190,7 +190,8 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     with sessions() as session:
         child = session.get(ModelCacheOperation, child_id)
         accepted_parent = session.get(Job, parent.id)
-        assert child is not None and accepted_parent is not None
+        assert child is not None
+        assert accepted_parent is not None
         assert accepted_parent.request_id == request_key
         assert isinstance(child.payload, dict)
         payload = ModelCacheDownloadPayload.model_validate_json(
@@ -264,7 +265,8 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     service.run_pending(limit=1)
     completed = service.get(parent.id)
     assert completed.state == "succeeded", completed.failure
-    assert completed.model_child is not None and completed.model_child["id"] == child_id
+    assert completed.model_child is not None
+    assert completed.model_child["id"] == child_id
     assert (
         cache.resolve_artifact_set(
             model_content_sha256=single.model_content_sha256

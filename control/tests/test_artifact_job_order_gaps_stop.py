@@ -66,7 +66,8 @@ def _activate_fresh_job_run(sessions, operations, run_id: str) -> None:
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopped"
+        assert run is not None
+        assert run.state == "stopped"
         installation_id = run.installation_id
     fresh = operations.preview_run(installation_id, "image-job")
     activated = operations.activate_job_run(
@@ -80,7 +81,8 @@ def _activate_fresh_job_run(sessions, operations, run_id: str) -> None:
 
 def _order_child(session, artifact_job_id: str):
     artifact = session.get(ArtifactJob, artifact_job_id)
-    assert artifact is not None and artifact.operation_id is not None
+    assert artifact is not None
+    assert artifact.operation_id is not None
     return select(AgentOperation).where(
         AgentOperation.parent_job_id == artifact.operation_id
     )
@@ -186,7 +188,8 @@ def test_a_cancelled_job_whose_spark_goes_silent_is_stopped_exactly(
     stopping = cancelled.stop()
     assert stopping.state not in {"succeeded", "failed", "cancelled"}
     exact = claim_agent(cancelled.agent_jobs, cancelled.node_id, "serial-0")
-    assert exact is not None and exact.fence != cancelled.claim.fence
+    assert exact is not None
+    assert exact.fence != cancelled.claim.fence
     cancelled.agent_jobs.record_result(
         AgentResult(
             fence=exact.fence,
@@ -284,7 +287,8 @@ def test_an_issued_child_off_the_run_holds_the_stop(tmp_path) -> None:
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None
+        assert run.state == "running"
     # The held Stop leaves the run serving: fresh work is still admitted.
     fresh = create_artifact_job(
         service,

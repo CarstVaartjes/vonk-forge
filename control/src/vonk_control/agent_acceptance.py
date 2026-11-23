@@ -246,7 +246,8 @@ def resolve_agent_receipt(
             node = session.get(AgentNode, identity.node_id)
             contact = None if node is None else node.contact
             _require(node is not None and contact is not None)
-            assert node is not None and contact is not None
+            assert node is not None
+            assert contact is not None
             _require(
                 contact.contact_certificate_serial == identity.certificate_serial
                 and contact.last_seen_at is not None

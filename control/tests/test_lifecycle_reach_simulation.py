@@ -248,7 +248,8 @@ def test_a_removal_waits_for_the_installation_using_the_model(
             )
             stored = session.get(ModelCacheOperation, removal.id)
             reason = None if stored is None else stored.last_error
-        assert installations and any(item in str(reason) for item in installations)
+        assert installations
+        assert any(item in str(reason) for item in installations)
         # A fresh load of the model is newer intent: it wins over the removal.
         again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(again) == "succeeded"

@@ -36,7 +36,8 @@ def test_completed_preflight_recovers_and_dispatches_install(
     _clear(switch.sessions)
     switch.drive()
     pending = switch.service.get(switch.operation.operation_id)
-    assert pending.result is not None and pending.result.preflight is not None
+    assert pending.result is not None
+    assert pending.result.preflight is not None
     checkpoint = pending.result.preflight
     node_id = switch.nodes[0]
     assert checkpoint.attempts[node_id] == 1
@@ -57,7 +58,8 @@ def test_completed_preflight_recovers_and_dispatches_install(
 
     switch.drive()
     waiting = switch.service.get(pending.operation_id)
-    assert waiting.result is not None and waiting.result.preflight is not None
+    assert waiting.result is not None
+    assert waiting.result.preflight is not None
     checkpoint = waiting.result.preflight
     assert checkpoint.attempts[node_id] == 1
     assert checkpoint.next_check_at is not None
@@ -65,7 +67,8 @@ def test_completed_preflight_recovers_and_dispatches_install(
     switch.clock.now = checkpoint.next_check_at
     switch.service.tick()
     retry = switch.service.get(pending.operation_id)
-    assert retry.result is not None and retry.result.preflight is not None
+    assert retry.result is not None
+    assert retry.result.preflight is not None
     checkpoint = retry.result.preflight
     assert checkpoint.attempts[node_id] == 2
     assert next(iter(checkpoint.pending_jobs.values()), None) is not None
@@ -85,7 +88,8 @@ def test_completed_preflight_recovers_and_dispatches_install(
     assert installed.result.child_operation_id is not None
     with switch.sessions() as session:
         child = session.get(Job, installed.result.child_operation_id)
-        assert child is not None and child.kind == OperationKind.RECIPE_INSTALL
+        assert child is not None
+        assert child.kind == OperationKind.RECIPE_INSTALL
         orders = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == child.id)

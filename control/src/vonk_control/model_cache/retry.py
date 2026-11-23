@@ -186,7 +186,8 @@ class RetryMixin:
         request_key = _request_key(request_key)
         requested_set = _optional_digest(artifact_set_sha256)
         requested_plan = _optional_digest(plan_digest)
-        assert requested_set is not None and requested_plan is not None
+        assert requested_set is not None
+        assert requested_plan is not None
         auth_codes = set(ModelAccessReason)
         with cache._lock, cache._session(write=True) as session:
             previous = session.get(

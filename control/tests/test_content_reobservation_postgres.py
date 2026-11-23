@@ -129,7 +129,8 @@ def _accepted(service, kind: Kind = Kind.RECIPE_INSTALL):
         with sessions.begin() as session:
             row = session.get(AgentOperation, operation.id)
             job = session.get(Job, owner.id)
-            assert row is not None and job is not None
+            assert row is not None
+            assert job is not None
             attempt = AgentOperationAdapter(session).start_attempt(
                 row,
                 job,
@@ -192,11 +193,13 @@ def test_lost_content_report_adopts_after_lease_without_reexecution_or_renewal(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
         assert attempt is not None
         assert attempt.lease_deadline == deadline
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and contact_row(node).last_seen_at == contact
+        assert node is not None
+        assert contact_row(node).last_seen_at == contact
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 
@@ -211,7 +214,9 @@ def test_late_install_receipt_rejects_changed_authority(service, change):
         row = session.get(AgentOperation, operation.id)
         node = session.get(AgentNode, NODE_A)
         job = session.get(Job, owner.id)
-        assert row is not None and node is not None and job is not None
+        assert row is not None
+        assert node is not None
+        assert job is not None
         if change == "identity":
             row.authority_revision = "f" * 64
         elif change == "revoked":
@@ -228,7 +233,8 @@ def test_late_install_receipt_rejects_changed_authority(service, change):
         assert str(error)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state != LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state != LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("parked", [False, True])
@@ -254,4 +260,5 @@ def test_worker_adopts_retained_install_receipt_without_contact(service, parked)
     assert queue.reconcile_orders()
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED

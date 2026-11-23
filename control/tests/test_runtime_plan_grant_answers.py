@@ -176,7 +176,8 @@ def _reissue_for_current_generation(session: Session) -> None:
     # generation, recorded in its parent's manifest.
     operation = session.get(AgentOperation, _OPERATION_ID)
     job = session.get(Job, _JOB_ID)
-    assert operation is not None and job is not None
+    assert operation is not None
+    assert job is not None
     start = RecipeStartPayload.model_validate_json(
         canonical_message(operation.payload)
     ).model_copy(update={"run_generation": _run(session).run_generation})

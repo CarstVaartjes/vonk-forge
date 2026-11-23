@@ -401,7 +401,8 @@ def test_canonical_dependency_closure_reaches_run_switch(
     primary_digest = document_sha256(primary.model_dump(mode="json"))
     recipe_document = _canonical_recipe(primary_digest)
     models = recipe_document["models"]
-    assert isinstance(models, list) and models
+    assert isinstance(models, list)
+    assert models
     selection = models[0]
     assert isinstance(selection, dict)
     model_reference = selection["model"]

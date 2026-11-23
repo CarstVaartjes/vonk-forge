@@ -117,7 +117,8 @@ def test_a_load_replaces_a_serving_model_with_an_over_max_estimate(
             "Replaces it", [world.assignment(SOLO_B, world.nodes[:1])]
         )
         assert sim.settle(_load(world, second)) == "succeeded"
-        assert len(spark.serving) == 1 and old not in spark.serving
+        assert len(spark.serving) == 1
+        assert old not in spark.serving
     finally:
         world.close()
 

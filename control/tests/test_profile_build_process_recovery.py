@@ -543,10 +543,12 @@ def test_profile_recovers_after_worker_process_death(
             assert not tuple(session.scalars(select(RecipeRun)))
             child_id = None
         else:
-            assert child is not None and child.state == "running"
+            assert child is not None
+            assert child.state == "running"
             child_id = child.id
         parent = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
-        assert parent is not None and parent.result is not None
+        assert parent is not None
+        assert parent.result is not None
         assert parent.result.get("child_operation_id") is None
         for claim_id in claim_ids:
             claim = session.get(ResourceReservation, claim_id)
@@ -564,7 +566,8 @@ def test_profile_recovers_after_worker_process_death(
             last_inventory = session.scalar(
                 select(func.max(NodeInventorySnapshot.observed_at))
             )
-        assert last_commit is not None and last_inventory is not None
+        assert last_commit is not None
+        assert last_inventory is not None
         values = json.loads(config.read_text())
         values["now"] = (
             max(last_commit, last_inventory) + timedelta(seconds=1)
@@ -577,7 +580,8 @@ def test_profile_recovers_after_worker_process_death(
         assert completed.returncode == 0, completed.stderr
         with sessions() as session:
             child = session.get(Job, child_id)
-            assert child is not None and child.state == "succeeded"
+            assert child is not None
+            assert child.state == "succeeded"
         advance_restart_clock()
     if replacement is not None:
         # A refusal of changed consent is observed again until the Run/Switch
@@ -589,7 +593,8 @@ def test_profile_recovers_after_worker_process_death(
             parent = session.scalar(
                 select(Job).where(Job.kind == "recipe.run-switch.v2")
             )
-            assert parent is not None and parent.result is not None
+            assert parent is not None
+            assert parent.result is not None
             parent.result = {
                 **parent.result,
                 "recovery_deadline_at": (
@@ -654,13 +659,13 @@ def test_profile_recovers_after_worker_process_death(
         }
         with sessions() as session:
             running = session.scalar(select(RecipeRun))
-            assert running is not None and running.state == "running"
-            assert (
-                running.route_state == "published"
-                and running.route_generation is not None
-            )
+            assert running is not None
+            assert running.state == "running"
+            assert running.route_state == "published"
+            assert running.route_generation is not None
             installed = session.get(RecipeInstallation, running.installation_id)
-            assert installed is not None and installed.id not in original_installations
+            assert installed is not None
+            assert installed.id not in original_installations
             compiled = parse_stored_installation_plan(
                 installed.plan
             ).compiled_execution_plans
@@ -692,11 +697,14 @@ def test_profile_recovers_after_worker_process_death(
                 )
             for original_id, original_plan in original_installations.items():
                 old = session.get(RecipeInstallation, original_id)
-                assert old is not None and old.plan == original_plan
+                assert old is not None
+                assert old.plan == original_plan
             for claim_id in disk_claim_ids:
                 claim = session.get(ResourceReservation, claim_id)
-                assert claim is not None and claim.owner_id == installed.id
-                assert claim.owner_kind == "installation" and claim.state == "active"
+                assert claim is not None
+                assert claim.owner_id == installed.id
+                assert claim.owner_kind == "installation"
+                assert claim.state == "active"
         return
     assert json.loads(resumed.stdout) == {
         "application_id": application_id,
@@ -735,7 +743,8 @@ def test_profile_recovers_after_worker_process_death(
                 row.id: row.plan for row in session.scalars(select(RecipeInstallation))
             } == original_installations
         runs = tuple(session.scalars(select(RecipeRun)))
-        assert len(runs) == 1 and runs[0].state == "running"
+        assert len(runs) == 1
+        assert runs[0].state == "running"
         assert runs[0].route_state == "published"
         assert runs[0].route_generation is not None
         installations = {
@@ -743,14 +752,13 @@ def test_profile_recovers_after_worker_process_death(
         }
         assert len(installations) == 1 or reused
         application = session.get(FleetProfileApplication, application_id)
-        assert application is not None and application.state == "succeeded"
+        assert application is not None
+        assert application.state == "succeeded"
         for claim_id in claim_ids:
             claim = session.get(ResourceReservation, claim_id)
-            assert (
-                claim is not None
-                and claim.owner_kind == "run"
-                and claim.state == "active"
-            )
+            assert claim is not None
+            assert claim.owner_kind == "run"
+            assert claim.state == "active"
         assert not tuple(
             session.scalars(
                 select(ResourceReservation).where(

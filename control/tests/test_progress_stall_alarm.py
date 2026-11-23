@@ -76,7 +76,8 @@ def _nothing_moves_for_the_window(load) -> None:
     stall = _application(load).progress.stall
     assert stall is not None
     load.now[0] = stall.first_seen_at + PROGRESS_STALL_WINDOW - timedelta(seconds=1)
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
     load.now[0] += timedelta(seconds=1)
 
 
@@ -95,7 +96,8 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
 ) -> None:
     load = _load(tmp_path)
     assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
     with load.sessions.begin() as session:
         for claim in session.scalars(
             select(ResourceReservation).where(ResourceReservation.kind == "disk")
@@ -151,7 +153,8 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     _sparks_report(load, free)  # the disk is freed
     # The next install admission sees the freed disk and the install goes ahead.
     _loop(load, lambda: not _alarm(load), rounds=20)
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
     assert not _platform_stalled(load)
 
@@ -183,10 +186,12 @@ def test_a_load_waiting_only_on_a_missing_child_receipt_is_stalled_with_the_work
     for _ in range(4):  # the child's own wait settles into one dependency
         _loop(load, lambda: False, complete=False, rounds=1)
     progress, wait = _stored(load)
-    assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+    assert wait is not None
+    assert wait.reason is WaitReason.RECEIPT_MISSING
     assert not progress.blockers  # the wait lives only in the persisted wait
     stall = progress.stall
-    assert stall is not None and stall.first_seen_at >= wait.first_blocked_at
+    assert stall is not None
+    assert stall.first_seen_at >= wait.first_blocked_at
 
     # The worker is down: from here only the clock moves until the alarm shows.
     _nothing_moves_for_the_window(load)
@@ -217,7 +222,8 @@ def test_a_load_waiting_only_on_a_missing_child_receipt_is_stalled_with_the_work
     # load succeeds.
     _sparks_report(load)
     _loop(load, lambda: not _alarm(load), rounds=20)
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
 
 
@@ -234,7 +240,8 @@ def test_a_load_already_waiting_unseen_at_upgrade_is_observed_by_its_next_check(
     for _ in range(4):
         _loop(load, lambda: False, complete=False, rounds=1)
     progress, wait = _stored(load)
-    assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
+    assert wait is not None
+    assert wait.reason is WaitReason.RECEIPT_MISSING
     stored = progress.model_dump(mode="json", exclude={"stall"})
     with load.sessions.begin() as session:  # written below the flush hook
         session.execute(
@@ -246,13 +253,16 @@ def test_a_load_already_waiting_unseen_at_upgrade_is_observed_by_its_next_check(
 
     with load.sessions.begin() as session:  # the reconciler's re-check
         row = session.get(FleetProfileApplication, load.application.id)
-        assert row is not None and row.next_action_at is not None
+        assert row is not None
+        assert row.next_action_at is not None
         schedule_wait(row, row.next_action_at + timedelta(seconds=2), now=load.now[0])
     progress, after = _stored(load)
-    assert after is not None and after.reason is WaitReason.RECEIPT_MISSING
+    assert after is not None
+    assert after.reason is WaitReason.RECEIPT_MISSING
     assert progress.stall is not None
     _nothing_moves_for_the_window(load)
-    assert _alarm(load) and _platform_stalled(load)
+    assert _alarm(load)
+    assert _platform_stalled(load)
 
 
 def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
@@ -293,12 +303,14 @@ def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
             resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
         )
     progress, wait = _stored(load)
-    assert wait is not None and wait.reason is WaitReason.STOP_UNCONFIRMED
+    assert wait is not None
+    assert wait.reason is WaitReason.STOP_UNCONFIRMED
     assert not progress.blockers
     assert progress.stall is not None
     assert progress.stall.first_seen_at == load.now[0]  # not the row's old time
     assert progress.stall.detail.startswith(f"{WaitReason.STOP_UNCONFIRMED}: ")
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
 
     _nothing_moves_for_the_window(load)
     (alarm,) = _alarm(load)
@@ -311,8 +323,10 @@ def test_an_unconfirmed_stop_written_only_as_the_wait_is_stalled_then_cleared(
         assert row is not None
         schedule_wait(row, None)
     progress, wait = _stored(load)
-    assert wait is None and progress.stall is None
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert wait is None
+    assert progress.stall is None
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
 
 
 def _copying_load(tmp_path: Path):
@@ -443,7 +457,8 @@ def test_a_re_executed_copy_resumes_without_an_alarm(tmp_path: Path) -> None:
         _sparks_report(load)
         _loop(load, lambda: False, rounds=1)
     child = _application(load).progress.child_progress
-    assert child is not None and child.retry_attempt is None  # one attempt
+    assert child is not None
+    assert child.retry_attempt is None
     for copied in range(10, 500, 10):  # the re-execution, ten bytes a step
         load.now[0] += timedelta(minutes=5)
         report(child_id, copied, key=f"{key}-restarted")
@@ -549,7 +564,8 @@ def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(
     monkeypatch.setattr(adapter, "advance", real_advance)
     _sparks_report(load)
     _loop(load, lambda: not _alarm(load), rounds=10)
-    assert not _alarm(load) and not _platform_stalled(load)
+    assert not _alarm(load)
+    assert not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
 
 
@@ -610,7 +626,8 @@ def test_a_load_waiting_on_a_working_preparation_is_never_stalled(
     # minutes (a long build step says nothing in between).
     for _ in range(12):
         retry_for(timedelta(minutes=10))
-        assert not stalled() and not listed()
+        assert not stalled()
+        assert not listed()
         advanced[0] = now[0]
 
     # It stops advancing but still says it prepares: a whole window later the
@@ -618,14 +635,16 @@ def test_a_load_waiting_on_a_working_preparation_is_never_stalled(
     retry_for(PROGRESS_STALL_WINDOW + timedelta(minutes=2))
     (alarm,) = stalled()
     stall = service.application(application.id).progress.stall
-    assert stall is not None and stall.detail in alarm.detail
+    assert stall is not None
+    assert stall.detail in alarm.detail
     (row,) = listed()
     assert row.application_id == application.id
 
     # The first advance clears it.
     advanced[0] = now[0]
     retry_for(timedelta(minutes=2))
-    assert not stalled() and not listed()
+    assert not stalled()
+    assert not listed()
 
 
 def test_a_backoff_declined_alike_on_every_retry_is_stalled() -> None:
@@ -664,9 +683,11 @@ def test_a_backoff_declined_alike_on_every_retry_is_stalled() -> None:
     assert application.state == "backoff"
     assert any(item.code == ProgressAlarmCode.STALLED for item in application.blockers)
     (row,) = listed()
-    assert row.application_id == first.id and row.state == "backoff"
+    assert row.application_id == first.id
+    assert row.state == "backoff"
     assert row.detail.startswith(f"{ProfileReasonCode.RETRY_CONFLICT}: ")
-    assert row.first_seen_at == stall.first_seen_at and row.repeats > 2
+    assert row.first_seen_at == stall.first_seen_at
+    assert row.repeats > 2
 
     decline(ProfileReasonCode.RETRY_REVIEW_UNAVAILABLE)
     assert not listed()
@@ -711,9 +732,11 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent(monkeypatch) -
         now[0] += timedelta(minutes=1)
         service.tick()
     (wait,) = waiting()
-    assert first.id in wait.detail and wait.node_ids == [_node_id(1)]
+    assert first.id in wait.detail
+    assert wait.node_ids == [_node_id(1)]
     stall = service.application(newer.id).progress.stall
-    assert stall is not None and not listed()
+    assert stall is not None
+    assert not listed()
 
     now[0] = stall.first_seen_at + PROGRESS_STALL_WINDOW
     service.tick()

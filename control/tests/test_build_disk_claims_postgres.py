@@ -225,7 +225,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
         order = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
         )
-        assert order is not None and order.state == LifecycleState.BACKOFF
+        assert order is not None
+        assert order.state == LifecycleState.BACKOFF
         assert order.next_action_at is not None
         assert order.recovery_deadline is not None
         deadline = order.recovery_deadline
@@ -273,7 +274,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     assert claim() is None
     with sessions() as session:
         order = session.get(AgentOperation, order.id)
-        assert order is not None and order.current_attempt == 1
+        assert order is not None
+        assert order.current_attempt == 1
         assert order.state == LifecycleState.BACKOFF
         assert order.status_reason is not None
         assert "disk" in order.status_reason
@@ -314,7 +316,8 @@ def test_retry_reacquires_disk_before_dispatch_and_resumes_when_space_returns(
     clock[0] += timedelta(seconds=3)
     inventory(1024**4)
     second = claim()
-    assert second is not None and second.payload == first.payload
+    assert second is not None
+    assert second.payload == first.payload
     with sessions() as session:
         assert (
             outstanding_disk_reservation_bytes(

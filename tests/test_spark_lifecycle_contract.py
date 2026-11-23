@@ -33,7 +33,8 @@ def _acceptance_module():
     specification = importlib.util.spec_from_file_location(
         "spark_lifecycle_acceptance", ENTRY_POINT
     )
-    assert specification is not None and specification.loader is not None
+    assert specification is not None
+    assert specification.loader is not None
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module

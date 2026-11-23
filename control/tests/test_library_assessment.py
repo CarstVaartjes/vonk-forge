@@ -351,7 +351,8 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
     rows = projection.recipe_library(fits_fleet=True).recipes
     assert len(rows) == 1
     assessment = rows[0].assessment
-    assert assessment is not None and assessment.group is not None
+    assert assessment is not None
+    assert assessment.group is not None
     assert [node.node_id for node in assessment.group.nodes] == [later]
 
 
@@ -392,7 +393,8 @@ def test_a_later_spark_holding_what_the_nas_evicted_is_ready(
 
     assessment = projection.recipe_library(assess=True).recipes[0].assessment
 
-    assert assessment is not None and assessment.group is not None
+    assert assessment is not None
+    assert assessment.group is not None
     assert assessment.cache.state == "blocked"
     assert assessment.fleet_fit.state == "ready"
     assert assessment.readiness.state == "ready", assessment.readiness

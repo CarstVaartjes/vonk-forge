@@ -36,7 +36,8 @@ def test_bounded_attempts_pause_between_repeats_only() -> None:
 
     assert attempts == [0, 1, 2]
     assert len(pauses) == 2
-    assert 0.5 <= pauses[0] <= 1.5 and 1.0 <= pauses[1] <= 3.0
+    assert 0.5 <= pauses[0] <= 1.5
+    assert 1.0 <= pauses[1] <= 3.0
 
 
 def test_the_request_schedule_is_short() -> None:

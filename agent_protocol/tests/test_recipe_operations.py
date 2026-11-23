@@ -125,7 +125,7 @@ def test_exact_stop_does_not_require_a_launchable_plan() -> None:
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    ("field", "value"),
     [
         ("rank", -1),
         ("role", "../other"),

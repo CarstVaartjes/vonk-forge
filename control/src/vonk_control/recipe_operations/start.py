@@ -180,7 +180,9 @@ class StartMixin:
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
-            assert run is not None and revision is not None and installation is not None
+            assert run is not None
+            assert revision is not None
+            assert installation is not None
             loaded_plans = service._stored_compiled_plans(
                 session,
                 installation,

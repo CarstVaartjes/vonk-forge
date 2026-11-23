@@ -155,7 +155,8 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         changed_claim_ids = {
             claim.id for claim in original_claims if claim.node_id == _node_id(2)
         }
-        assert kept_claim_ids and changed_claim_ids
+        assert kept_claim_ids
+        assert changed_claim_ids
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     job_id = str(uuid4())
     with sessions.begin() as session:
@@ -322,7 +323,8 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         assert stored is not None
         assert stored.pending_operation_ids == [issued.id]
         wait = read_wait(row)
-        assert wait is not None and wait.reason is WaitReason.STOP_UNCONFIRMED
+        assert wait is not None
+        assert wait.reason is WaitReason.STOP_UNCONFIRMED
         assert wait.resume_condition is WaitResumeCondition.EFFECT_OBSERVED
         assert wait.dependency_deadline == stored.observation_deadline_at
         assert [b.operation.id for b in wait.blockers if b.operation] == [issued.id]

@@ -182,7 +182,7 @@ def test_payload_build_is_deterministic_and_refuses_to_overwrite(
 
 
 @pytest.mark.parametrize(
-    "mutation", ("service", "image", "include", "bind", "config", "digest")
+    "mutation", ["service", "image", "include", "bind", "config", "digest"]
 )
 def test_payload_build_rejects_noncanonical_compose(
     tmp_path: Path, mutation: str
@@ -226,7 +226,7 @@ def test_payload_build_rejects_symlink_input(tmp_path: Path) -> None:
     assert not (tmp_path / "payload.json").exists()
 
 
-@pytest.mark.parametrize("channel", ("dev", "stable"))
+@pytest.mark.parametrize("channel", ["dev", "stable"])
 def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
     tmp_path: Path, channel: str
 ) -> None:

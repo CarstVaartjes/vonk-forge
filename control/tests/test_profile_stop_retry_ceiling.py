@@ -101,7 +101,8 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
             generation = selection.generation
             selected_id = selection.application_id
             kept = session.get(RecipeRun, run_id)
-            assert kept is not None and kept.state == RunState.RUNNING
+            assert kept is not None
+            assert kept.state == RunState.RUNNING
 
         monkeypatch.undo()
         world.restart()
@@ -126,7 +127,8 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
                     break
         with world.sessions() as session:
             kept = session.get(RecipeRun, run_id)
-            assert kept is not None and kept.state == RunState.STOPPED
+            assert kept is not None
+            assert kept.state == RunState.STOPPED
             selection = session.get(FleetProfileSelection, 1)
             assert selection is not None
             assert (selection.generation, selection.application_id) == (

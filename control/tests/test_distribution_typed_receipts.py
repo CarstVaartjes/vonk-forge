@@ -54,7 +54,8 @@ def test_terminal_handoff_retains_diagnostic_and_verifies_after_restart() -> Non
     evidence = result.evidence[0]
     assert evidence.node_id == NODE
     assert evidence.downloaded_bytes == receipt.downloaded_bytes
-    assert not evidence.uncertain and evidence.error is None
+    assert not evidence.uncertain
+    assert evidence.error is None
     assert evidence.diagnostic == receipt.diagnostic
 
 

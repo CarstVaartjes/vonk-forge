@@ -104,7 +104,8 @@ def test_deep_history_has_no_admission_or_cancellation_barrier(tmp_path, history
     assert service.ensure_preparation("request-revision", actor="operator")
     with sessions() as session:
         current = session.scalar(select(Job).where(Job.request_id == request))
-        assert current is not None and current.state == LifecycleState.QUEUED.value
+        assert current is not None
+        assert current.state == LifecycleState.QUEUED.value
         current_id = current.id
     assert service.cancel_profile_preparation(
         "request-revision", actor="operator", reason="selected application ended"
@@ -189,7 +190,8 @@ def test_same_revision_force_supersedes_old_claim_and_late_effects(tmp_path, iss
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
     assert service.run_pending() == 1
     assert service.get(newer.id).artifact is not None
     fresh = service.start(
@@ -220,7 +222,8 @@ def test_busy_identity_releases_claim_then_reuses_exact_verified_content(tmp_pat
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
         assert row.next_action_at is not None
     # Another request can prepare the content during the contender's backoff.
     unrelated = service.start(
@@ -486,7 +489,8 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
     assert completed.artifact is not None
     assert completed.model_preparation is not None
     assert completed.model_preparation.id == child.id
-    assert len(requests) == 2 and requests[0] == requests[1]
+    assert len(requests) == 2
+    assert requests[0] == requests[1]
     assert transport.calls == 1
     fresh = service.start(
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
@@ -530,7 +534,8 @@ def test_child_observation_fault_cannot_skip_cancellation_deadline_or_healthy_wo
         assert row is not None
         payload = service._payload(row)
         assert isinstance(payload, AvailabilityJobPayload)
-        assert payload.claim_owner is None and payload.claim_until is None
+        assert payload.claim_owner is None
+        assert payload.claim_until is None
     fresh = service.start(
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
     )

@@ -312,7 +312,8 @@ def _sync_slot(tmp_path: Path, engine: Engine, ending: str) -> None:
     assert fresh.completed_at is not None
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, crashed.id)
-        assert row is not None and row.active_slot is None
+        assert row is not None
+        assert row.active_slot is None
 
 
 def _agent_mutation_turn(tmp_path: Path, engine: Engine, ending: str) -> None:
@@ -359,7 +360,8 @@ def _agent_mutation_turn(tmp_path: Path, engine: Engine, ending: str) -> None:
     jobs.reconcile_orders()
 
     claimed = claim_agent(jobs, NODE_A, "serial-a")
-    assert claimed is not None and fenced_operation(sessions, claimed).id == fresh.id
+    assert claimed is not None
+    assert fenced_operation(sessions, claimed).id == fresh.id
 
 
 def _distribution_grant(tmp_path: Path, engine: Engine, ending: str) -> None:
@@ -501,7 +503,8 @@ def _live_port_promise(tmp_path: Path, engine: Engine) -> None:
                 )
             )
         )
-    assert states and states <= set(_HELD)
+    assert states
+    assert states <= set(_HELD)
 
 
 def _live_removal_gate(tmp_path: Path, engine: Engine) -> None:
@@ -575,7 +578,8 @@ def _live_sync_slot(tmp_path: Path, engine: Engine) -> None:
 
     with sessions() as session:
         row = session.get(RecipeLibrarySyncRun, running.id)
-        assert row is not None and row.active_slot == "managed-recipes"
+        assert row is not None
+        assert row.active_slot == "managed-recipes"
 
 
 def _live_agent_mutation_turn(tmp_path: Path, engine: Engine) -> None:

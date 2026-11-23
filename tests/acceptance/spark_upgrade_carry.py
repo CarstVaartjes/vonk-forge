@@ -1020,7 +1020,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _redeploy_controller(self) -> None:
         """Upgrade the Controller the way an operator reruns the installer."""
 
-        assert self.temporary_root is not None and self.bundle is not None
+        assert self.temporary_root is not None
+        assert self.bundle is not None
         self._refusal_window_start = int(time.time())
         os.environ[OVERLAY_VARIABLE] = os.fspath(self.candidate.overlay)
         self.controller_generation = self.candidate.generation
@@ -1131,7 +1132,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         install and start, and must serve inference as the new revision.
         """
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         fixture = self.synthetic_canary_fixture
         successor = _editorial_successor(fixture)
         nodes = self._fleet_snapshot().get("nodes")
@@ -1169,7 +1171,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     ) -> tuple[str, str]:
         """Download, load and serve the editorial successor as the newest revision."""
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         selector = f"{successor.publisher}/{successor.slug}"
         _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
         identity = require_object(
@@ -1278,7 +1281,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     ) -> dict[str, object]:
         """Download, install and start one Recipe, then route and infer."""
 
-        assert self.control is not None and self.browser is not None
+        assert self.control is not None
+        assert self.browser is not None
         selector = f"{fixture.publisher}/{fixture.slug}"
         _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
         identity = require_object(

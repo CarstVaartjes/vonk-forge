@@ -118,7 +118,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -160,7 +161,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
             snapshot.gpu_memory_free_bytes = demand + floor
         runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
         review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-        assert review.status_code == 200 and review.json()["allowed"]
+        assert review.status_code == 200
+        assert review.json()["allowed"]
         assert runtime.allowed
     if runtime.allowed:
         started = lifecycle.start(
@@ -178,7 +180,8 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
                     ResourceReservation.state == "active",
                 )
             )
-            assert claim is not None and claim.amount_bytes == demand
+            assert claim is not None
+            assert claim.amount_bytes == demand
 
 
 @pytest.mark.parametrize(
@@ -306,7 +309,8 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
     assert response.status_code == 202, response.text
     with sessions() as session:
         (parked,) = tuple(session.scalars(select(FleetProfileApplication)))
-        assert parked.state == "queued" and parked.current_operation_id is None
+        assert parked.state == "queued"
+        assert parked.current_operation_id is None
         assert parked.progress["admission_pending"] is True
         (blocker,) = cast(list[dict[str, str]], parked.progress["blockers"])
         # Not the misleading "another change is using a Spark" busy code, and
@@ -382,7 +386,8 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -399,7 +404,8 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
     assessment = review.assessments[0].assessment
     assert {stop.run_id for stop in assessment.stops} == {running.owner_id}
     assert not assessment.fit_current.allowed
-    assert assessment.fit_after_stop is not None and assessment.fit_after_stop.allowed
+    assert assessment.fit_after_stop is not None
+    assert assessment.fit_after_stop.allowed
     assert assessment.post_stop_memory_check is None
     with sessions.begin() as session:
         reservations = tuple(
@@ -572,8 +578,10 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
     with sessions() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         reservation = session.get(ResourceReservation, reservation_id)
-        assert snapshot is not None and snapshot.host_memory_free_bytes > 0
-        assert reservation is not None and reservation.amount_bytes == 0
+        assert snapshot is not None
+        assert snapshot.host_memory_free_bytes > 0
+        assert reservation is not None
+        assert reservation.amount_bytes == 0
 
 
 def test_profile_load_parks_while_shared_node_admission_is_held(
@@ -587,7 +595,8 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     installation = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
@@ -868,7 +877,8 @@ def test_a_waiting_newer_load_does_not_supersede_an_older_due_load(
     with sessions() as session:
         admitted = session.get(FleetProfileApplication, older.id)
         parked = session.get(FleetProfileApplication, newer.id)
-        assert admitted is not None and parked is not None
+        assert admitted is not None
+        assert parked is not None
         assert admitted.state == "queued", admitted.status_reason
         assert admitted.progress["admission_pending"] is False
         assert parked.state == "queued", parked.status_reason
@@ -1168,9 +1178,11 @@ def test_pending_admission_continues_under_platform_authority_after_actor_revoca
         )
         assert set(session.scalars(select(Job.id))) == admitted_jobs
         node = session.get(AgentNode, nodes[0])
-        assert node is not None and node.workload_intent_ordinal == ordinal
+        assert node is not None
+        assert node.workload_intent_ordinal == ordinal
         row = session.get(FleetProfileApplication, pending.id)
-        assert row is not None and row.state == "running"
+        assert row is not None
+        assert row.state == "running"
 
     # The denial leaves no gate against a fresh change by a current administrator.
     changed = api.put(
@@ -1386,13 +1398,15 @@ def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
     )
 
     parked = _only_application(sessions)
-    assert parked.state == "queued" and parked.current_operation_id is None
+    assert parked.state == "queued"
+    assert parked.current_operation_id is None
     assert parked.progress["admission_pending"] is True
     (blocker,) = cast(list[dict[str, object]], parked.progress["blockers"])
     assert blocker["node_ids"] == [nodes[0]]
     assert parked.progress["storage_wait_since"] is not None
     ((node_id, needed, source),) = relief.asked
-    assert (node_id, source) == (nodes[0], "profile-load") and needed > 0
+    assert (node_id, source) == (nodes[0], "profile-load")
+    assert needed > 0
 
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))

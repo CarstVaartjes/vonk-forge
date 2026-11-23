@@ -161,7 +161,8 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         assert service.tick()
         waiting = service.get(operation.operation_id)
         assert waiting.state == "running", waiting.status_reason
-        assert waiting.result is not None and waiting.next_attempt_at is not None
+        assert waiting.result is not None
+        assert waiting.next_attempt_at is not None
         due = waiting.next_attempt_at
         assert now[0] < due <= now[0] + timedelta(seconds=60)
         service = restarted()
@@ -188,7 +189,8 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
     current = service.get(operation.operation_id)
     with sessions() as session:
         row = session.get(Job, operation.operation_id)
-        assert row is not None and row.payload == original
+        assert row is not None
+        assert row.payload == original
     if ending == "recovered":
         assert current.state == "running"
         assert current.result is not None
@@ -246,7 +248,8 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
     assert held.result is not None
     assert held.next_attempt_at is not None
     assert held.next_attempt_at == now[0] + timedelta(seconds=60)
-    assert held.status_reason is not None and dependency in held.status_reason
+    assert held.status_reason is not None
+    assert dependency in held.status_reason
     assert service.tick() is False
     executor.pending = False
     now[0] = held.next_attempt_at
@@ -260,9 +263,8 @@ def test_late_dependency_receipt_resumes_original_checkpoint_after_deadline(
     assert restarted.tick()
     recovered = restarted.get(operation.operation_id)
     assert recovered.state == "running"
-    assert (
-        recovered.result is not None and "transfer" in recovered.result.completed_phases
-    )
+    assert recovered.result is not None
+    assert "transfer" in recovered.result.completed_phases
     assert executor.calls_while_pending == 1
 
 
@@ -321,7 +323,8 @@ def test_stored_run_switch_with_retired_fields_stays_readable_and_new_work_proce
     )
     with sessions.begin() as session:
         job = session.get(Job, old.operation_id)
-        assert job is not None and isinstance(job.payload, dict)
+        assert job is not None
+        assert isinstance(job.payload, dict)
         payload = dict(job.payload)
         plan = dict(cast("dict[str, object]", payload["plan"]))
         # A field a newer Controller retired must not make history unreadable.
@@ -684,7 +687,8 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
     baseline = service.preview(request, actor="admin")
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
-    assert required is not None and floor is not None
+    assert required is not None
+    assert floor is not None
     # The sample still shows the stopped run's memory in use: free is short of
     # the demand plus the reserve, while the total is ample.
     free = required + floor - 52
@@ -843,7 +847,7 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
         engine.dispose()
 
 
-@pytest.mark.parametrize("unused_models", (None, 5))
+@pytest.mark.parametrize("unused_models", [None, 5])
 def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
     tmp_path, unused_models: int | None
 ):
@@ -883,10 +887,10 @@ def test_disk_review_counts_orphan_model_copies_and_scopes_unmeasured_cleanup(
     assert service.preview(request, actor="admin").allowed
 
 
-@pytest.mark.parametrize("memory", ("none", "conditional", "infeasible"))
-@pytest.mark.parametrize("missing_ranks", (0, 1))
-@pytest.mark.parametrize("lifecycle_result", ("allowed", "disallowed", "conflict"))
-@pytest.mark.parametrize("stoppable", (False, True))
+@pytest.mark.parametrize("memory", ["none", "conditional", "infeasible"])
+@pytest.mark.parametrize("missing_ranks", [0, 1])
+@pytest.mark.parametrize("lifecycle_result", ["allowed", "disallowed", "conflict"])
+@pytest.mark.parametrize("stoppable", [False, True])
 def test_planner_entrypoints_return_valid_contracts(
     planner_world: _PlannerWorld,
     monkeypatch: pytest.MonkeyPatch,
@@ -1021,7 +1025,8 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     # nodes[1] was declared missing but is enrolled (revoked_at is None): the
     # real lifecycle reports the changed rank membership as a disallowed Stop.
     plan = planner.preview_profile_stop(run.owner_id, scope, actor="admin")
-    assert not plan.allowed and not plan.stops
+    assert not plan.allowed
+    assert not plan.stops
     assert [reason.code for reason in plan.blockers] == [
         RunSwitchCode.STOP_PLAN_UNAVAILABLE
     ]
@@ -1040,7 +1045,8 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
     assert child.state == LifecycleState.OBSERVING
     assert _result(child).retry_reason == RunSwitchCode.STOP_PLAN_UNAVAILABLE
     assert child.blockers[0].detail == RunSwitchCode.STOP_PLAN_UNAVAILABLE
-    assert child.next_attempt_at is not None and child.next_attempt_at > NOW
+    assert child.next_attempt_at is not None
+    assert child.next_attempt_at > NOW
     assert _result(child).observation_deadline_at is not None
     # A blocked partial Stop must not poison the next workload request on the
     # same Sparks. The switch below replaces this run on both of the child's
@@ -1057,12 +1063,14 @@ def test_profile_partial_stop_waits_with_lifecycle_scope_blocker(
         actor="admin",
     )
     assert fresh.operation_id != child.operation_id
-    assert fresh.state == LifecycleState.QUEUED and not fresh.blockers
+    assert fresh.state == LifecycleState.QUEUED
+    assert not fresh.blockers
     assert sorted(fresh.node_ids) == sorted(nodes)
     with sessions() as session:
         child_job = session.get(Job, child.operation_id)
         fresh_job = session.get(Job, fresh.operation_id)
-        assert child_job is not None and fresh_job is not None
+        assert child_job is not None
+        assert fresh_job is not None
         assert child_job.payload["workload_intent_ordinal"] == 1
         assert fresh_job.payload["workload_intent_ordinal"] == 2
         assert {
@@ -1098,11 +1106,9 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, build_id)
         assert build is not None
-        assert (
-            build.image_digest is not None
-            and build.oci_layout_sha256 is not None
-            and build.image_bytes is not None
-        )
+        assert build.image_digest is not None
+        assert build.oci_layout_sha256 is not None
+        assert build.image_bytes is not None
         expected_image = RuntimeImageIdentity(
             image_digest=build.image_digest,
             oci_layout_sha256=build.oci_layout_sha256,
@@ -1206,10 +1212,8 @@ def test_planner_outputs_validate_across_stop_and_load_topologies(
     )
     if memory_shortfall:
         demand = baseline.fit_current.nodes[0]
-        assert (
-            demand.memory_required_bytes is not None
-            and demand.memory_floor_bytes is not None
-        )
+        assert demand.memory_required_bytes is not None
+        assert demand.memory_floor_bytes is not None
         with sessions.begin() as session:
             snapshot = session.scalar(
                 select(NodeInventorySnapshot).where(
@@ -1269,12 +1273,10 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
         node = session.get(AgentNode, node_id)
         build = session.get(RecipeBuild, build_id)
         snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert (
-            run is not None
-            and node is not None
-            and build is not None
-            and snapshot is not None
-        )
+        assert run is not None
+        assert node is not None
+        assert build is not None
+        assert snapshot is not None
         run.state = LifecycleState.RUNNING
         for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             rank.state = LifecycleState.RUNNING

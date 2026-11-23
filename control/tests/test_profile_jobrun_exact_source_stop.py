@@ -38,7 +38,8 @@ def _damage(sessions, artifact_job_id: str, damage: str) -> str:
 
     with sessions.begin() as session:
         artifact = session.get(ArtifactJob, artifact_job_id)
-        assert artifact is not None and artifact.operation_id is not None
+        assert artifact is not None
+        assert artifact.operation_id is not None
         order = session.get(Job, artifact.operation_id)
         assert order is not None
         (child,) = session.scalars(

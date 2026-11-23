@@ -114,7 +114,8 @@ def runtime_plan_binding(
     with service._sessions() as session:
         parent = session.get(Job, job_id)
         operation = session.get(AgentOperation, operation_id)
-        assert parent is not None and operation is not None
+        assert parent is not None
+        assert operation is not None
         binding = derive_runtime_plan_binding(
             session,
             parent=parent,
@@ -334,7 +335,7 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
     }
 
 
-@pytest.mark.parametrize("seconds", (0, 301, True))
+@pytest.mark.parametrize("seconds", [0, 301, True])
 def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError):
         issuer().issue_grant(
@@ -985,7 +986,8 @@ def test_a_start_grant_binds_the_recipe_content_not_the_revision_row(
         assert installation is not None
         original = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         mapping = session.get(ClusterMapping, installation.mapping_id)
-        assert original is not None and original.content_digest is not None
+        assert original is not None
+        assert original.content_digest is not None
         assert mapping is not None
         sibling = "b1000000-0000-4000-8000-00000000000b"
         session.add(

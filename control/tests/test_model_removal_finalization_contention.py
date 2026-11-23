@@ -130,7 +130,8 @@ def test_finalization_gate_contention_defers_without_blocking_unrelated_removal(
             assert deferred_a.failure is not None
             assert deferred_a.failure.get("artifact_key") == "removal-finalization"
             delay = deferred_a.failure.get("retry_after_seconds")
-            assert isinstance(delay, int) and 0 < delay <= 60
+            assert isinstance(delay, int)
+            assert 0 < delay <= 60
             assert deferred_a.request_key == request_key_a
 
             # A's retry deadline is in the future. B therefore finishes through

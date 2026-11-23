@@ -62,7 +62,8 @@ def test_waiting_install_with_conflicting_image_preparation_replans_and_loads(
         revision = session.get(
             CatalogDocumentRevision, switch.admitted.recipe_revision_id
         )
-        assert build is not None and revision is not None
+        assert build is not None
+        assert revision is not None
         assert build.image_digest is not None
         assert build.oci_layout_sha256 is not None
         assert build.image_bytes is not None

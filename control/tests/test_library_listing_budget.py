@@ -386,7 +386,8 @@ def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
         following = assess(recipes)[0].assessment
     finally:
         release.set()
-    assert overrun is not None and overrun.fleet_fit.state == "unavailable"
+    assert overrun is not None
+    assert overrun.fleet_fit.state == "unavailable"
     assert following is not None
     assert following.fleet_fit.state == "ready", following.model_dump(mode="json")
 
@@ -409,7 +410,8 @@ def test_an_assessment_resolves_each_exact_artifact_set_once(
     assessment = LibraryAssessment(
         sessions, run_switch=service, model_cache=cache, clock=lambda: NOW
     )(recipes)[0].assessment
-    assert assessment is not None and assessment.fleet_fit.state == "ready"
+    assert assessment is not None
+    assert assessment.fleet_fit.state == "ready"
     # Cache, ordering and placement reads ask for the same exact sets more
     # than once; each is resolved once and shared, not re-read per placement.
     assert any(len(manifests) > 1 for manifests in resolved.values()), resolved

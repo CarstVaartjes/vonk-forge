@@ -292,17 +292,20 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
 
     with world.sessions() as session:
         retained = session.get(RecipeInstallation, first)
-        assert retained is not None and read_wait(retained) is not None
+        assert retained is not None
+        assert read_wait(retained) is not None
     collector = _collector(world, lifecycle, now=world.now)
     _report_disk(world.sessions, GIB + 2, at=world.now)
     collector.collect()
     assert calls.count(first) == 1, "unknown outcome retried without backoff"
     world.now += collector._scan_interval
     collector.collect()
-    assert calls.count(first) == 2 and first in lifecycle.removed
+    assert calls.count(first) == 2
+    assert first in lifecycle.removed
     with world.sessions() as session:
         settled = session.get(RecipeInstallation, first)
-        assert settled is not None and read_wait(settled) is None
+        assert settled is not None
+        assert read_wait(settled) is None
 
 
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
@@ -637,7 +640,8 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
                 InstallationNode.installation_id == installation_id
             )
         )
-    assert held is not None and held > 0
+    assert held is not None
+    assert held > 0
     before = _ordinals(sessions)
     collector = _real_collector(sessions, service, nodes)
     collector._demands = StorageDemands(lambda: _REAL_CLOCK)
@@ -755,7 +759,8 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     with sessions() as session:
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "installed"
+        assert installation is not None
+        assert installation.state == "installed"
         assert session.scalar(select(func.count()).select_from(RecipeRun)) == 0
         assert session.scalar(
             select(func.count()).select_from(InstallationNode)

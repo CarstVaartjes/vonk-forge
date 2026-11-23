@@ -247,7 +247,8 @@ def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> No
         [listing] = [
             step for step in steps if "scripts/changed-tests" in step.get("run", "")
         ]
-        assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
+        assert "pull_request" in listing["if"]
+        assert "merge_group" in listing["if"]
         assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
         [run] = [step for step in steps if command in step.get("run", "")]
         assert "--test-budget-enforce" in run["run"]

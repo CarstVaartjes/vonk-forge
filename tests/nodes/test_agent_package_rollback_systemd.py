@@ -166,7 +166,8 @@ def main() -> None:
     parser.add_argument("--helper", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     args = parser.parse_args()
-    assert os.geteuid() == 0 and Path("/run/systemd/system").is_dir()
+    assert os.geteuid() == 0
+    assert Path("/run/systemd/system").is_dir()
     assert run("/usr/bin/dpkg", "--print-architecture").stdout.strip() == "arm64"
     assert (
         run("/usr/bin/dpkg-query", "-W", "vonk-forge-agent", check=False).returncode
@@ -382,10 +383,8 @@ def main() -> None:
                 "vonk-forge-agent.service",
             ).stdout.strip()
             assert sha(Path(f"/proc/{pid}/exe")) == source["binary_sha256"]
-            assert (
-                receipt["source_package_sha256"] == source["package_sha256"]
-                and receipt["node_id"] == NODE
-            )
+            assert receipt["source_package_sha256"] == source["package_sha256"]
+            assert receipt["node_id"] == NODE
             evidence.append({"case": label, **receipt})
             fresh_execution()
 

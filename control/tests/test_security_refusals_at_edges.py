@@ -152,7 +152,8 @@ def test_profile_stop_waits_for_a_briefly_unavailable_owner_then_completes(
     lifecycle.reconcile_pending_service_stops()
     with sessions() as session:
         waiting = session.get(Job, stop_id)
-        assert waiting is not None and waiting.state == LifecycleState.RUNNING.value
+        assert waiting is not None
+        assert waiting.state == LifecycleState.RUNNING.value
     assert _children_of(sessions, stop_id) == []
 
     # The owner is back: the same accepted Stop is dispatched and completes.
@@ -206,7 +207,8 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
     assert changed
     with sessions() as session:
         root = session.get(Job, changed[0])
-        assert root is not None and root.state != LifecycleState.FAILED.value
+        assert root is not None
+        assert root.state != LifecycleState.FAILED.value
         progress = RunSwitchOperationResult.model_validate_json(
             canonical_message(root.result), strict=True
         )
@@ -275,7 +277,8 @@ def test_profile_stop_accepts_a_parent_stored_with_a_retired_plan_field(
     assert _children_of(sessions, stop_id)
     with sessions() as session:
         root = session.get(Job, aged[0])
-        assert root is not None and root.state != LifecycleState.FAILED.value
+        assert root is not None
+        assert root.state != LifecycleState.FAILED.value
 
 
 def test_cache_resolution_shape_is_an_invalid_request_not_a_refusal() -> None:
@@ -297,7 +300,8 @@ def test_grant_for_another_nodes_plan_is_still_refused_closed(tmp_path) -> None:
         child = session.scalars(
             select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
         ).first()
-        assert parent is not None and child is not None
+        assert parent is not None
+        assert child is not None
         own = derive_runtime_plan_binding(
             session,
             parent=parent,

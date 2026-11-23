@@ -43,7 +43,8 @@ def test_direct_load_replans_after_installation_finishes_during_admission(
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
-        assert mapping_id is not None and build_id is not None
+        assert mapping_id is not None
+        assert build_id is not None
     original_queue = FleetProfileService._queue_application
     injected = False
 

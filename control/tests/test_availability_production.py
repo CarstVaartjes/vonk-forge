@@ -1952,7 +1952,8 @@ def test_a_failed_build_step_keeps_its_own_error_lines_and_names_its_spark(
     assert failed.failure["retryable"] is False
     detail = failed.failure["detail"]
     excerpt = failed.failure["log_excerpt"]
-    assert isinstance(detail, str) and isinstance(excerpt, str)
+    assert isinstance(detail, str)
+    assert isinstance(excerpt, str)
     assert "exit code 1" in detail
     assert "ERROR: Failed to build installable wheels (flash-attn)" in detail
     assert detail.endswith("while running runtime: exit status 1")

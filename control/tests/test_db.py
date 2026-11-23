@@ -322,7 +322,8 @@ def test_startup_log_names_a_real_refused_connection(
         capsys,
     )
 
-    assert "127.0.0.1" in log and str(port) in log
+    assert "127.0.0.1" in log
+    assert str(port) in log
     assert "refused" in log.lower()
     assert "s3cretpw" not in log
 
@@ -352,7 +353,8 @@ def test_startup_log_redacts_a_password_inside_the_driver_message(
 
     log = _startup_log(OperationalError("connect", {}, driver), capsys)
 
-    assert "s3cret" not in log and "p@ss" not in log
+    assert "s3cret" not in log
+    assert "p@ss" not in log
     assert "postgres:5432" in log
 
 

@@ -138,7 +138,8 @@ class RetryMixin:
             )
         )
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
-        assert revision is not None and revision.content_digest is not None
+        assert revision is not None
+        assert revision.content_digest is not None
         recipe_digest = revision.content_digest
         compiled_plans = service._stored_compiled_plans(
             session, installation, [node.node_id for node in nodes], now=now

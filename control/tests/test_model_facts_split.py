@@ -371,13 +371,16 @@ def test_a_stored_3x_model_projection_is_rederived_without_the_moved_facts(
         row = session.get(CatalogDocumentRevision, revision_id)
         assert row is not None
         stored = dict(row.projected)
-        assert "capabilities" not in stored and "modalities" not in stored
+        assert "capabilities" not in stored
+        assert "modalities" not in stored
         assert stored["artifact_count"] == len(new_model.files)
-        assert row.document == legacy and row.artifact_key == "1" * 64
+        assert row.document == legacy
+        assert row.artifact_key == "1" * 64
     CatalogEntityService(sessions, clock=lambda: NOW).refresh_model_projections()
     with sessions() as session:
         row = session.get(CatalogDocumentRevision, revision_id)
-        assert row is not None and dict(row.projected) == stored
+        assert row is not None
+        assert dict(row.projected) == stored
 
 
 def test_a_write_refuses_a_model_that_still_carries_its_facts(tmp_path: Path) -> None:

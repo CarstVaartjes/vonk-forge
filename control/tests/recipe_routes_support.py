@@ -602,7 +602,8 @@ def _agents_reached_the_controller(service, at: datetime) -> None:
 
 def _recipe_owner_id(session) -> str:
     owner = session.get(RoutePublicationOwner, 1)
-    assert owner is not None and owner.authority_id is not None
+    assert owner is not None
+    assert owner.authority_id is not None
     return owner.authority_id
 
 

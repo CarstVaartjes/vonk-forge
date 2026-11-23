@@ -280,7 +280,8 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
         terminal=lambda _: True,
         fetch_initial=True,
     )
-    assert result["id"] == "0" and result["request_key"] == "original-request"
+    assert result["id"] == "0"
+    assert result["request_key"] == "original-request"
     assert args.observation.status == "complete"
     assert controller.calls == ["/api/profile/applications/0"]
 
@@ -313,13 +314,15 @@ def test_peer_broken_submission_response_reconciles_the_original_without_replay(
         ),
         client,
     )
-    assert status == 0 and ended["id"] == application
+    assert status == 0
+    assert ended["id"] == application
     assert [call[0] for call in client.calls] == ["POST", "GET"]
     status, fresh = run(
         ("--profile", "1", "profile", "progress", "--request-key", key, "--json"),
         client,
     )
-    assert status == 0 and fresh["id"] == application
+    assert status == 0
+    assert fresh["id"] == application
     assert [call[:2] for call in client.calls] == [
         ("POST", "/api/profile/1/load"),
         ("GET", lookup),
@@ -370,9 +373,11 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
     )
     status, result = run(argv, controller)
     if repair and fault != "missing":
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     else:
-        assert status == 2 and result["result"] == {}
+        assert status == 2
+        assert result["result"] == {}
         observation = result["observation"]
         assert isinstance(observation, dict)
         assert observation["status"] == ("ended" if fault == "missing" else "timed_out")
@@ -381,7 +386,8 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
     assert clock.now <= 0.1
     controller.responses[("GET", path)] = ready
     status, result = run(argv, controller)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[0] == "GET" for call in controller.calls)
 
 
@@ -424,9 +430,11 @@ def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_wor
         assert status == 2
         assert result["http_status"] == 409
     else:
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     status, result = run(argv, client)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[0] == "GET" for call in client.calls)
 
 
@@ -449,7 +457,8 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
     result = _profile(args, cast(ControllerClient, controller), lambda: "fresh")
     assert result["id"] == "0"
-    assert snapshots and all(snapshot.get("id", "0") == "0" for snapshot in snapshots)
+    assert snapshots
+    assert all(snapshot.get("id", "0") == "0" for snapshot in snapshots)
     assert all(
         snapshot.get("request_key", "original-request") == "original-request"
         for snapshot in snapshots
@@ -458,7 +467,8 @@ def test_successor_relationship_is_decided_before_any_watcher_publication(monkey
     controller.finish = True
     controller.different_request = False
     result, observation = _observe(monkeypatch, controller)
-    assert result["id"] == "1" and observation.status == "complete"
+    assert result["id"] == "1"
+    assert observation.status == "complete"
 
 
 def test_profile_list_publishes_no_progress_snapshot():
@@ -537,19 +547,21 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
         "--timeout-seconds",
     )
     status, result = run((*argv, "0"), controller)
-    assert status == 2 and result["result"] == {}
+    assert status == 2
+    assert result["result"] == {}
     observation = result["observation"]
     assert isinstance(observation, dict)
     assert observation["path"] == path
     assert identity in str(observation["reconnect_command"])
     assert controller.calls == []
     status, result = run((*argv, "1"), controller)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert len(controller.calls) == 1
 
 
 @pytest.mark.parametrize(
-    "argv,method,path,ready,attempts",
+    ("argv", "method", "path", "ready", "attempts"),
     [
         (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}, None),
         (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}, None),
@@ -584,8 +596,10 @@ def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
         assert status == 2
         assert result["result"] == {}
     else:
-        assert status == 0 and result == ready
+        assert status == 0
+        assert result == ready
     client.responses[(method, path)] = ready
     status, result = run(argv, client)
-    assert status == 0 and result == ready
+    assert status == 0
+    assert result == ready
     assert all(call[:2] == (method, path) for call in client.calls)

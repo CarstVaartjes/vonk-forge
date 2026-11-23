@@ -657,7 +657,8 @@ def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> Non
     with sessions.begin() as session:
         root = session.get(CatalogDocument, MODEL_DOCUMENT_ID)
         revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
-        assert root is not None and revision is not None
+        assert root is not None
+        assert revision is not None
         session.execute(
             update(CatalogDocument)
             .where(CatalogDocument.id == root.id)
@@ -818,7 +819,8 @@ def test_install_adopts_a_fresh_plan_after_nonblocking_reservation_change(
     assert current.allowed
     current_free = current.nodes[0].free_after_bytes
     preview_free = preview.nodes[0].free_after_bytes
-    assert current_free is not None and preview_free is not None
+    assert current_free is not None
+    assert preview_free is not None
     assert current_free < preview_free
 
     installation_id = service.accept_install(preview, actor="admin", now=refreshed_at)

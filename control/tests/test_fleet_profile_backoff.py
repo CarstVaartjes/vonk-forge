@@ -89,7 +89,8 @@ def test_a_retryable_failure_backs_off_with_its_evidence_and_its_retry_succeeds(
             break
     (retry,) = _others(sessions, first.id)
     ended = service.application(first.id)
-    assert ended.state == "superseded" and ended.superseded_by == retry.id
+    assert ended.state == "superseded"
+    assert ended.superseded_by == retry.id
     assert _CAUSE in (ended.status_reason or "")
 
     for _ in range(6):

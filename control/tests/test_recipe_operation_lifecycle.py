@@ -93,7 +93,8 @@ def test_adopt_maps_every_stored_state_and_the_cancel_request() -> None:
             cancel_requested_at=NOW.isoformat(),
         )
     )
-    assert flagged.cancel_requested_at == NOW and flagged.cancel_request_key == "k"
+    assert flagged.cancel_requested_at == NOW
+    assert flagged.cancel_request_key == "k"
 
 
 def test_a_parent_whose_orders_never_ran_is_cancelled_at_once() -> None:
@@ -101,7 +102,8 @@ def test_a_parent_whose_orders_never_ran_is_cancelled_at_once() -> None:
     row = ADAPTER.request_cancel(
         job, NOW, issued=False, request_key="k", reason="not needed"
     )
-    assert row.state is State.CANCELLED and job.state == "cancelled"
+    assert row.state is State.CANCELLED
+    assert job.state == "cancelled"
     fresh = _job(State.QUEUED)
     assert ADAPTER.adopt(fresh).state is State.QUEUED
     assert fresh.request_id != job.request_id
@@ -110,7 +112,8 @@ def test_a_parent_whose_orders_never_ran_is_cancelled_at_once() -> None:
 def test_a_cancel_of_issued_orders_stays_in_flight_never_waits() -> None:
     job = _job("running")
     row = ADAPTER.request_cancel(job, NOW, issued=True, request_key="k", reason="stop")
-    assert row.state is State.OBSERVING and row.cancel_requested
+    assert row.state is State.OBSERVING
+    assert row.cancel_requested
     assert job.state == "running"  # the orders complete it, bounded by their core
 
 
@@ -135,9 +138,11 @@ def test_a_build_completion_that_raced_its_cancel_keeps_cancelling() -> None:
 
 def test_a_legacy_build_wait_with_a_cancel_heals_and_one_without_is_left() -> None:
     parked = _job("needs-operator", cancel_requested=True)
-    assert ADAPTER.heal(parked, NOW) is True and parked.state == "running"
+    assert ADAPTER.heal(parked, NOW) is True
+    assert parked.state == "running"
     other = _job("needs-operator")
-    assert ADAPTER.heal(other, NOW) is False and other.state != "running"
+    assert ADAPTER.heal(other, NOW) is False
+    assert other.state != "running"
 
 
 def test_a_definite_end_is_absorbed_by_a_parent_that_already_ended() -> None:
@@ -219,7 +224,8 @@ def test_a_waiting_parent_accepts_a_cancel(tmp_path, postgres_engine) -> None:
     with sessions.begin() as session:
         parked = session.get(Job, original.id)
         child = session.get(AgentOperation, child_id)
-        assert parked is not None and child is not None
+        assert parked is not None
+        assert child is not None
         parked.state = "needs-operator"
         child.state = "needs-operator"
     try:
@@ -234,4 +240,5 @@ def test_a_waiting_parent_accepts_a_cancel(tmp_path, postgres_engine) -> None:
     with sessions() as session:
         job = session.get(Job, original.id)
         assert job is not None
-        assert job.result is not None and job.result["cancel_requested"] is True
+        assert job.result is not None
+        assert job.result["cancel_requested"] is True

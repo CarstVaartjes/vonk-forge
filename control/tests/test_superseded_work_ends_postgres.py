@@ -98,7 +98,8 @@ def test_a_superseded_order_of_a_silent_spark_ends_and_fresh_work_runs(
     with sessions() as session:
         order = session.get(AgentOperation, old.id)
         job = session.get(Job, old_parent.id)
-        assert order is not None and job is not None
+        assert order is not None
+        assert job is not None
         assert order.state == "cancelled", order.status_reason
         assert job.state not in {"queued", "running"}, job.status_reason
     # A late report under the lapsed fence never reopens the order.
@@ -109,17 +110,20 @@ def test_a_superseded_order_of_a_silent_spark_ends_and_fresh_work_runs(
         jobs.record_late_result(late)
     with sessions() as session:
         order = session.get(AgentOperation, old.id)
-        assert order is not None and order.state == "cancelled"
+        assert order is not None
+        assert order.state == "cancelled"
     # Fresh work of the newer intent on that Spark is claimed at once.
     fresh_parent = _newer_parent(sessions, clock, 2)
     fresh = jobs.enqueue(fresh_parent.id, NODE_B, "recipe.stop", COMMIT, payload)
     again = claim_agent(jobs, NODE_B, "serial-b")
-    assert again is not None and again.fence != claimed.fence
+    assert again is not None
+    assert again.fence != claimed.fence
     with sessions() as session:
         claimed_order = session.scalar(
             select(AgentOperation).where(AgentOperation.state == "running")
         )
-        assert claimed_order is not None and claimed_order.id == fresh.id
+        assert claimed_order is not None
+        assert claimed_order.id == fresh.id
 
 
 def _ranks(sessions, run_id: str) -> dict[str, str]:

@@ -117,7 +117,8 @@ def _accepted(service, kind: Kind = Kind.RECIPE_START):
         with sessions.begin() as session:
             row = session.get(AgentOperation, operation.id)
             job = session.get(Job, owner.id)
-            assert row is not None and job is not None
+            assert row is not None
+            assert job is not None
             attempt = AgentOperationAdapter(session).start_attempt(
                 row,
                 job,
@@ -168,11 +169,13 @@ def test_lost_runtime_report_adopts_after_lease_without_reexecution_or_renewal(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
         assert attempt is not None
         assert attempt.lease_deadline == deadline
         node = session.get(AgentNode, NODE_A)
-        assert node is not None and contact_row(node).last_seen_at == contact
+        assert node is not None
+        assert contact_row(node).last_seen_at == contact
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 
@@ -195,7 +198,9 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
         row = session.get(AgentOperation, operation.id)
         node = session.get(AgentNode, NODE_A)
         job = session.get(Job, owner.id)
-        assert row is not None and node is not None and job is not None
+        assert row is not None
+        assert node is not None
+        assert job is not None
         if change == "identity":
             row.authority_revision = "f" * 64
         elif change == "revoked":
@@ -212,7 +217,8 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
         assert str(error)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state != LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state != LifecycleState.SUCCEEDED
 
 
 def test_another_runs_load_keeps_a_jobruns_late_receipt(service):
@@ -228,7 +234,8 @@ def test_another_runs_load_keeps_a_jobruns_late_receipt(service):
     assert queue.record_late_result(receipt)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -255,7 +262,8 @@ def test_worker_adopts_retained_runtime_receipt_without_contact(service, kind, p
     assert queue.reconcile_orders()
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state == LifecycleState.SUCCEEDED
+        assert row is not None
+        assert row.state == LifecycleState.SUCCEEDED
 
 
 def test_shared_observer_covers_every_kind():
@@ -345,7 +353,8 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
         ]
     assert stop is not None and stop.operation == Kind.RECIPE_STOP, debug
     assert isinstance(stop.payload, RecipeStopPayload)
-    assert stop.payload.target_runtime_id == job.id and stop.payload.run_id == run_id
+    assert stop.payload.target_runtime_id == job.id
+    assert stop.payload.run_id == run_id
     queue.record_result(
         AgentResult(
             fence=stop.fence,
@@ -357,11 +366,15 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
         artifact = session.get(ArtifactJob, job.id)
         run = session.get(RecipeRun, run_id)
         node = session.get(AgentNode, node_id)
-        assert artifact is not None and artifact.state == LifecycleState.CANCELLED
-        assert run is not None and run.state == RunState.RUNNING
-        assert node is not None and node.workload_intent_ordinal == ordinal
+        assert artifact is not None
+        assert artifact.state == LifecycleState.CANCELLED
+        assert run is not None
+        assert run.state == RunState.RUNNING
+        assert node is not None
+        assert node.workload_intent_ordinal == ordinal
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain is False
+    assert evidence is not None
+    assert evidence.active_scope_may_remain is False
     assert claim_agent(queue, node_id, "serial-0") is None
 
 
@@ -419,13 +432,15 @@ def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_
         from vonk_control.agent_jobs.stored import column_value
 
         request = column_value(row, "payload")
-        assert isinstance(request, RecipeJobRunRequest) and request.output_delivery_only
+        assert isinstance(request, RecipeJobRunRequest)
+        assert request.output_delivery_only
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == claim.fence
             )
         )
-        assert attempt is not None and attempt.lease_deadline == deadline
+        assert attempt is not None
+        assert attempt.lease_deadline == deadline
 
 
 def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
@@ -462,7 +477,8 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     newer_load()
     assert operations.reconcile_pending_service_stops()
     stop = claim_agent(queue, node_id, "serial-0")
-    assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
+    assert stop is not None
+    assert isinstance(stop.payload, RecipeStopPayload)
     assert stop.payload.target_runtime_id == job.id
     request = stop_grant_request(stop.payload, fence=stop.fence)
     newer_load()
@@ -488,7 +504,8 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
         )
     )
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain is False
+    assert evidence is not None
+    assert evidence.active_scope_may_remain is False
 
 
 @pytest.mark.parametrize("change", ["revoked", "identity", "document"])
@@ -514,7 +531,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     )
     assert operations.reconcile_pending_service_stops()
     stop = claim_agent(queue, node_id, "serial-0")
-    assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
+    assert stop is not None
+    assert isinstance(stop.payload, RecipeStopPayload)
     request = stop_grant_request(stop.payload, fence=stop.fence)
     authority = HostRuntimeAuthorityService(
         sessions,
@@ -585,7 +603,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
                 break
     assert operation.state == LifecycleState.CANCELLED
     evidence = artifacts.get(job.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain
+    assert evidence is not None
+    assert evidence.active_scope_may_remain
 
     # A refused historical cleanup does not poison fresh job authoring.
     from .artifact_jobs_support import artifact_create_request, create_artifact_job
@@ -594,7 +613,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
         artifacts,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000999"),
     )
-    assert fresh.id != job.id and fresh.operation_id is None
+    assert fresh.id != job.id
+    assert fresh.operation_id is None
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -640,11 +660,9 @@ def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, re
         assert queue.record_late_result(receipt)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert (
-            row is not None
-            and row.state == LifecycleState.FAILED
-            and row.current_attempt == 1
-        )
+        assert row is not None
+        assert row.state == LifecycleState.FAILED
+        assert row.current_attempt == 1
 
         from vonk_control.agent_jobs.stored import column_value
 
@@ -691,9 +709,8 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
     consumed: list[RecipeJobRunResult] = []
 
     def consume(_session, _operation, _attempt, message):
-        assert isinstance(message, AgentResult) and isinstance(
-            message.result, RecipeJobRunResult
-        )
+        assert isinstance(message, AgentResult)
+        assert isinstance(message.result, RecipeJobRunResult)
         consumed.append(message.result)
 
     queue.set_result_consumer(consume)
@@ -716,9 +733,7 @@ def test_retained_measured_exit_delivers_storage_failure_without_reexecution(
     assert reason_code == FailureStage.JOB_STATE
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert (
-            row is not None
-            and row.state == LifecycleState.FAILED
-            and row.current_attempt == 1
-        )
+        assert row is not None
+        assert row.state == LifecycleState.FAILED
+        assert row.current_attempt == 1
     assert claim_agent(queue, NODE_A, "serial-a") is None

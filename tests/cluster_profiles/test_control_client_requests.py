@@ -750,7 +750,8 @@ def test_generated_transport_rejects_malformed_raw_response(
     def opener(
         request: urllib.request.Request, *, timeout: float
     ) -> ObservationHTTPPeer:
-        assert timeout > 0 and request.get_method() == "GET"
+        assert timeout > 0
+        assert request.get_method() == "GET"
         requests.append(request)
         peer = _fleet_transfer_peer(payload)
         peer.headers["X-Request-ID"] = "canonical-schema-fixture"
@@ -769,7 +770,8 @@ def test_generated_transport_rejects_malformed_raw_response(
     with _not_adopted() as failed:
         client.fleet()
     assert "schema-private-fixture-value" not in str(failed[0])
-    assert len(requests) > 1 and not attrs_calls
+    assert len(requests) > 1
+    assert not attrs_calls
     assert all(peer._body.closed for peer in peers)
     monkeypatch.undo()
     valid = {
@@ -800,7 +802,8 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
     def opener(
         request: urllib.request.Request, *, timeout: float
     ) -> ObservationHTTPPeer:
-        assert timeout > 0 and request.get_method() == "GET"
+        assert timeout > 0
+        assert request.get_method() == "GET"
         requests.append(request)
         return _fleet_transfer_peer(valid)
 

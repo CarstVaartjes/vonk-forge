@@ -59,12 +59,12 @@ def test_private_key_header_is_rejected_without_echoing_content(tmp_path: Path) 
 
 @pytest.mark.parametrize(
     "relative",
-    (
+    [
         "pyproject.toml",
         "src/cluster_profiles/leak.py",
         "tools/stamp_build_identity.py",
         "control/web/vite.config.ts",
-    ),
+    ],
 )
 def test_every_newly_covered_build_input_rejects_injected_secrets(
     tmp_path: Path,
@@ -85,7 +85,7 @@ def test_every_newly_covered_build_input_rejects_injected_secrets(
 
 @pytest.mark.parametrize(
     "excluded_directory",
-    ("node_modules", "dist", "test-results", "playwright-report"),
+    ["node_modules", "dist", "test-results", "playwright-report"],
 )
 def test_dockerignored_web_outputs_are_not_scanned(
     tmp_path: Path,
@@ -124,10 +124,10 @@ def test_secret_in_compressed_wheel_member_is_rejected(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("member", "reason"),
-    (
+    [
         ("../escape.py", "archive-unsafe-path"),
         ("folder\\escape.py", "archive-unsafe-path"),
-    ),
+    ],
 )
 def test_unsafe_wheel_member_is_rejected(
     tmp_path: Path, member: str, reason: str

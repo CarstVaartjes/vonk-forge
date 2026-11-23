@@ -92,7 +92,8 @@ def test_command_order_uses_database_identity_and_retains_clear_until_history_pr
         assert repeating_evidence(session, [NODE_A], clock.now) == {}
         first = session.get(AgentOperation, operations[0].id)
         second = session.get(AgentOperation, operations[1].id)
-        assert first is not None and second is not None
+        assert first is not None
+        assert second is not None
         assert not command_evidence_needed(session, first)
         assert command_evidence_needed(session, second)
     with services.sessions.begin() as session:

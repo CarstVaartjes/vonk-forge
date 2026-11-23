@@ -108,7 +108,7 @@ def test_model_cache_operation_payload_round_trips_through_database_and_reads_ma
 
 
 @pytest.mark.parametrize(
-    "kind,example",
+    ("kind", "example"),
     [("model", "model-definition.json"), ("recipe", "recipe-source-build.json")],
 )
 def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, example):

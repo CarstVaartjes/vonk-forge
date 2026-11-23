@@ -459,7 +459,8 @@ def main() -> None:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--probe", type=Path, required=True)
     args = parser.parse_args()
-    assert os.geteuid() == 0 and Path("/run/systemd/system").is_dir()
+    assert os.geteuid() == 0
+    assert Path("/run/systemd/system").is_dir()
     assert run("/usr/bin/dpkg", "--print-architecture").stdout.strip() == "arm64"
     work = Path(tempfile.mkdtemp(prefix="vonk-transition-", dir="/var/tmp"))
     try:

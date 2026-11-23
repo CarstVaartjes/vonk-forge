@@ -302,7 +302,8 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
     assert [phase.reason for phase in dispositions] == ["installation-not-installed"]
     with sessions() as session:
         installation = session.get(RecipeInstallation, planned)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         assert all(
             node.state == "uninstalled"
             for node in session.scalars(
@@ -642,7 +643,8 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
 
     current = service.application(application.id)
     state = current.progress.switch_adapter
-    assert state is not None and not state.pending_children
+    assert state is not None
+    assert not state.pending_children
     assert current.state == "succeeded", current.status_reason
 
 

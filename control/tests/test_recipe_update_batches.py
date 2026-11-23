@@ -86,7 +86,8 @@ def test_update_commits_parent_and_exact_scope_before_any_child_admission(tmp_pa
     )
     with sessions() as session:
         jobs = list(session.scalars(select(Job)))
-        assert len(jobs) == 1 and jobs[0].kind == "recipe.cache.update.v2"
+        assert len(jobs) == 1
+        assert jobs[0].kind == "recipe.cache.update.v2"
         assert jobs[0].request_id == key
     assert batch.request_id == key
     assert batch.children[0].recipe_revision_id == revision_id
@@ -248,7 +249,8 @@ def test_changed_frozen_revision_is_observed_without_unverified_child_commit(
     service.run_update_claim(service.claim_update(owner="worker"))
     assert service.get_operator_operation(parent.id).state == LifecycleState.FAILED
     admitted = _start(service, [revision_id])
-    assert admitted.id != parent.id and admitted.state == LifecycleState.QUEUED
+    assert admitted.id != parent.id
+    assert admitted.state == LifecycleState.QUEUED
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -451,7 +453,8 @@ def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope
     empty = service.update(
         actor="operator", request_id=empty_key, selectors=[], all=True
     )
-    assert empty.state == "succeeded" and empty.children == []
+    assert empty.state == "succeeded"
+    assert empty.children == []
     base = next(iter(recipes.values()))
     expected = []
     receipts = []
@@ -575,10 +578,12 @@ def test_activity_projects_parent_with_common_ordering_and_state_filter(update_e
     provider = service.update_activity_provider()
     query = OperationQuery(after=None, limit=1, state="queued", node_id=None)
     page = provider.list_operations(query)
-    assert page.total == 2 and operation_item(page.items[0]).id == newer.id
+    assert page.total == 2
+    assert operation_item(page.items[0]).id == newer.id
     item = operation_detail_response(provider.get_operation(newer.id))
     assert item.progress is not None
-    assert item.progress.total_items == 2 and item.node_ids == []
+    assert item.progress.total_items == 2
+    assert item.node_ids == []
     next_page = provider.list_operations(
         OperationQuery(
             after=(newer.created_at, newer.id), limit=1, state="queued", node_id=None
@@ -672,7 +677,8 @@ def test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_pare
         )
         completed = json.loads(capsys.readouterr().out)
         assert status == 0, completed
-        assert completed["id"] == receipt["id"] and completed["state"] == "succeeded"
+        assert completed["id"] == receipt["id"]
+        assert completed["state"] == "succeeded"
         assert completed["children"][0]["operation_id"]
         assert calls == [
             ("POST", "/api/recipe/update"),
@@ -790,7 +796,8 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
         not_admitted = tuple(
             session.scalars(select(Job).where(Job.request_id == second.request_key))
         )
-    assert len(admitted) == 1 and admitted[0].id == first.operation_id
+    assert len(admitted) == 1
+    assert admitted[0].id == first.operation_id
     assert not not_admitted
 
     cancellation_key = str(uuid.uuid4())
@@ -844,7 +851,8 @@ def test_postgres_update_cancel_after_first_child_prevents_later_admission_after
     assert len(child_jobs) == 1
     assert child_jobs[0].id == first.operation_id
     assert child_jobs[0].state == "cancelled"
-    assert stored_parent is not None and stored_parent.state == "cancelled"
+    assert stored_parent is not None
+    assert stored_parent.state == "cancelled"
 
 
 def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer(
@@ -930,21 +938,21 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     first = first_parent.children[0]
     assert first.operation_id is not None
     image_claim = service.claim_pending(limit=1, owner_id="shared-update-child-one")
-    assert len(image_claim) == 1 and image_claim[0].operation_id == first.operation_id
+    assert len(image_claim) == 1
+    assert image_claim[0].operation_id == first.operation_id
     service.run_claim(image_claim[0])
     first_view = service.get(first.operation_id)
     assert isinstance(first_view, RecipeImageAvailabilityView)
-    assert (
-        first_view.state == LifecycleState.BACKOFF
-        and first_view.model_child is not None
-    )
+    assert first_view.state == LifecycleState.BACKOFF
+    assert first_view.model_child is not None
     shared_child_id = str(first_view.model_child["id"])
     shared_child = cache.get_operation(shared_child_id)
     assert shared_child.state == LifecycleState.BACKOFF
     shared_artifact_set = shared_child.artifact_set_sha256
     assert isinstance(shared_artifact_set, str)
     downloaded_bytes = shared_child.progress.get("downloaded_bytes")
-    assert isinstance(downloaded_bytes, int) and downloaded_bytes > 0
+    assert isinstance(downloaded_bytes, int)
+    assert downloaded_bytes > 0
 
     now[0] += timedelta(seconds=3)
     second_claim = service.claim_update(owner="shared-update-second")
@@ -991,7 +999,8 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
 
     partial_path = cache._partial_path(shared_artifact_set, str(artifact["sha256"]))
     partial_bytes = partial_path.read_bytes()
-    assert partial_bytes and content.startswith(partial_bytes)
+    assert partial_bytes
+    assert content.startswith(partial_bytes)
     cancellation_key = str(uuid.uuid4())
     accepted = service.cancel(
         batch.id,
@@ -1023,7 +1032,8 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     assert shared_after_cancel.state == LifecycleState.BACKOFF
     assert shared_after_cancel.cancellation is None
     remaining_bytes = shared_after_cancel.progress.get("downloaded_bytes")
-    assert isinstance(remaining_bytes, int) and remaining_bytes >= downloaded_bytes
+    assert isinstance(remaining_bytes, int)
+    assert remaining_bytes >= downloaded_bytes
     assert partial_path.read_bytes() == partial_bytes
 
     assert cache.run_pending() == 1
@@ -1207,7 +1217,8 @@ def test_scheduler_keeps_image_slot_available_while_parent_admits_another_child(
         assert image_finished.wait(30), "parent consumed the only image execution slot"
         assert service.get(existing.id).state == "succeeded"
         waiting = service.get_operator_operation(parent.id)
-        assert waiting.next_attempt_at is not None and waiting.wait_owner
+        assert waiting.next_attempt_at is not None
+        assert waiting.wait_owner
     finally:
         release_metadata.set()
         scheduler.close()
@@ -1236,7 +1247,8 @@ def test_cancelling_update_before_admission_settles_without_issuing_children(
     assert all(child.operation_id is None for child in observed.children)
     with sessions() as session:
         jobs = list(session.scalars(select(Job)))
-        assert len(jobs) == 1 and jobs[0].id == parent.id
+        assert len(jobs) == 1
+        assert jobs[0].id == parent.id
 
 
 def test_update_cancellation_recovers_child_committed_before_parent_checkpoint(
@@ -1283,7 +1295,8 @@ def test_update_cancellation_recovers_child_committed_before_parent_checkpoint(
         matching = list(
             session.scalars(select(Job).where(Job.request_id == child_request_key))
         )
-        assert len(matching) == 1 and matching[0].id == child.id
+        assert len(matching) == 1
+        assert matching[0].id == child.id
 
 
 def test_update_reconnects_by_exact_child_request_despite_damaged_row_pointer(
@@ -1341,7 +1354,8 @@ def test_invalid_child_observation_repairs_then_has_a_bounded_end_and_fresh_admi
             service.run_update_claim(claim)
     assert service.get_operator_operation(broken.id).state == LifecycleState.FAILED
     admitted = _start(service, [next(iter(recipes))])
-    assert admitted.id != broken.id and admitted.state == LifecycleState.QUEUED
+    assert admitted.id != broken.id
+    assert admitted.state == LifecycleState.QUEUED
 
 
 @pytest.mark.parametrize(
@@ -1429,7 +1443,8 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         service.run_update_claim(service.claim_update(owner="worker"))
         repaired = service.get_operator_operation(parent.id).children[0]
         assert repaired.operation_id == child.operation_id
-        assert repaired.retry_at is None and repaired.failure is None
+        assert repaired.retry_at is None
+        assert repaired.failure is None
     else:
         monkeypatch.setattr(service, "get_operator_request", unreadable)
         # Its child operation is live: past the old fixed budget the batch
@@ -1463,6 +1478,7 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
             fresh=lambda _world: _start(service, [next(iter(recipes))]),
             assert_reason=failure_evidence,
         )
-        assert admitted.id != parent.id and admitted.state == LifecycleState.QUEUED
+        assert admitted.id != parent.id
+        assert admitted.state == LifecycleState.QUEUED
     with sessions() as session:
         assert set(session.scalars(select(Job.id))).issuperset(identities)

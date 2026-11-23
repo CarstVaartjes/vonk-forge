@@ -127,7 +127,8 @@ def test_a_failed_cleanup_is_reissued_until_the_build_ends(tmp_path, postgres_en
     issued = _cleanups(sessions)
     assert len(issued) == 2
     second, second_key, second_state = issued[1]
-    assert second_key != first_key and second_state == "running"
+    assert second_key != first_key
+    assert second_state == "running"
     # A cleanup in flight is never duplicated.
     clock.now += _PAST_RETRY
     assert operations.reconcile_cancelled_builds() is False
@@ -140,7 +141,8 @@ def test_a_failed_cleanup_is_reissued_until_the_build_ends(tmp_path, postgres_en
     assert not _active_claims(sessions, plan.build_id)
     assert operations.reconcile_cancelled_builds() is False
     fresh = _request_build(operations, plan)
-    assert fresh.id != original.id and fresh.owner_id == original.owner_id
+    assert fresh.id != original.id
+    assert fresh.owner_id == original.owner_id
     assert fresh.state in {"queued", "running"}
     assert _active_claims(sessions, plan.build_id)
 

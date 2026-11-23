@@ -102,7 +102,8 @@ def test_upload_storage_failure_preserves_agent_authority(
     monkeypatch.undo()
     descriptor, temporary = _prepare_recipe_image_upload(root, "identity")
     os.close(descriptor)
-    assert temporary.is_file() and not temporary.is_symlink()
+    assert temporary.is_file()
+    assert not temporary.is_symlink()
 
 
 @pytest.mark.parametrize("damage", ["symlink", "fifo"])
@@ -345,7 +346,8 @@ def test_claim_stale_recipe_run_consumer_waits_then_admits(
     assert problem.context.retryable is True
     with services.sessions() as session:
         stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == LifecycleState.RUNNING
+        assert stored is not None
+        assert stored.state == LifecycleState.RUNNING
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
@@ -417,7 +419,8 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     assert int(response.headers["retry-after"]) > 0
     with services.sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
-        assert rank is not None and rank.observation_observed_at is None
+        assert rank is not None
+        assert rank.observation_observed_at is None
     delivered = client.post(
         "/agent/recipe-runs/observations",
         headers=agent_headers(NODE_A, "serial-a"),
@@ -426,7 +429,8 @@ def test_recipe_observation_contention_waits_then_redelivery_commits(
     assert delivered.status_code == 204
     with services.sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.node_id == NODE_A))
-        assert rank is not None and rank.observation_process_running is True
+        assert rank is not None
+        assert rank.observation_process_running is True
         assert rank.observed_run_generation == generation
 
 

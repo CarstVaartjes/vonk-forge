@@ -122,7 +122,8 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
     assert repaired["workers"][0]["source_sha"] == "b" * 40
     with sessions() as session:
         row = session.scalar(select(ControlProcessHeartbeat))
-        assert row is not None and row.source_sha == "b" * 40
+        assert row is not None
+        assert row.source_sha == "b" * 40
     engine.dispose()
 
 

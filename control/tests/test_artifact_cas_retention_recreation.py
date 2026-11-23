@@ -137,7 +137,8 @@ def test_reference_safe_cas_retention_restart_reuploads_and_claims_identical_inp
     assert submitted.operation_id is not None
     assert submitted.submit_request_id == submission_key
     claim = claim_agent(agents, node_id, "serial-0")
-    assert claim is not None and isinstance(claim.payload, RecipeJobRunRequest)
+    assert claim is not None
+    assert isinstance(claim.payload, RecipeJobRunRequest)
     assert claim.payload.job_id == fresh.id
     assert claim.payload.input_total_bytes == len(exclusive)
     assert claim.payload.input_manifest_sha256 == recipe_job_manifest_sha256(
@@ -149,7 +150,8 @@ def test_reference_safe_cas_retention_restart_reuploads_and_claims_identical_inp
         fresh.id, exclusive_digest, node_id=node_id
     )
     assert path.read_bytes() == exclusive
-    assert media_type == "image/png" and size == len(exclusive)
+    assert media_type == "image/png"
+    assert size == len(exclusive)
     assert restarted.get(survivor.id).preparation == "ready"
     assert shared_path.read_bytes() == shared
     with sessions() as session:
@@ -165,8 +167,10 @@ def test_reference_safe_cas_retention_restart_reuploads_and_claims_identical_inp
                 AgentOperationAttempt.attempt == child.current_attempt,
             )
         )
-        assert attempt is not None and attempt.fence == str(claim.fence)
+        assert attempt is not None
+        assert attempt.fence == str(claim.fence)
         assert_no_orphaned_holds(session)
     usage = restarted_store.usage()
-    assert usage.reserved_bytes == 0 and usage.in_flight_uploads == 0
+    assert usage.reserved_bytes == 0
+    assert usage.in_flight_uploads == 0
     assert usage.used_bytes == len(exclusive) + len(shared)

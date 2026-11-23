@@ -92,13 +92,15 @@ def test_distributed_recovery_admits_after_a_start_that_waited_for_its_claim(
                 select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
             )
         )
-        assert job is not None and children
+        assert job is not None
+        assert children
         # The child orders carry their own, later clock reading.
         assert all(child.created_at > job.created_at for child in children)
 
     def claim_and_succeed(node_id: str) -> None:
         claim = claim_agent(jobs, node_id, f"serial-{nodes.index(node_id)}")
-        assert claim is not None and claim.operation.value == "recipe.start"
+        assert claim is not None
+        assert claim.operation.value == "recipe.start"
         jobs.record_result(
             AgentResult.model_validate_json(
                 canonical_message(
@@ -118,7 +120,8 @@ def test_distributed_recovery_admits_after_a_start_that_waited_for_its_claim(
         claim_and_succeed(node_id)
     with sessions() as session:
         job = session.get(Job, started.id)
-        assert job is not None and job.payload.get("start_anchored_at") is not None
+        assert job is not None
+        assert job.payload.get("start_anchored_at") is not None
     claim_and_succeed(nodes[0])
     assert service.get(started.id).state == "succeeded"
     mark_current_exact_observations(sessions, started.owner_id, clock.now)
@@ -170,7 +173,8 @@ def test_distributed_recovery_admits_after_a_start_that_waited_for_its_claim(
                 Job.id != started.id,
             )
         )
-        assert restart is not None and restart.state == "running"
+        assert restart is not None
+        assert restart.state == "running"
         assert tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == restart.id)
@@ -205,7 +209,8 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
                 select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
             )
         )
-        assert advanced_run is not None and advanced_run.run_generation == 2
+        assert advanced_run is not None
+        assert advanced_run.run_generation == 2
         source_generations = {
             operation.node_id: operation.payload["run_generation"]
             for operation in source_starts
@@ -247,7 +252,8 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
     with sessions() as session:
         stored = session.get(Job, restart.id)
         run = session.get(RecipeRun, started.owner_id)
-        assert stored is not None and run is not None
+        assert stored is not None
+        assert run is not None
         assert stored.state == "succeeded"
         assert run.route_state == "published"
         deadline = _recovery_deadline(stored)
@@ -281,7 +287,8 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
     with sessions.begin() as session:
         run = session.get(RecipeRun, started.owner_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         run.recovery_attempts = 5
         run.next_action_at = None
         node.state = "failed"
@@ -293,7 +300,8 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         # Spent issued recoveries pause for the cooldown; the next window is fresh.
-        assert run is not None and run.recovery_attempts == 0
+        assert run is not None
+        assert run.recovery_attempts == 0
         assert run.next_action_at is not None
         assert run.next_action_at.replace(tzinfo=NOW.tzinfo) == NOW + timedelta(
             minutes=5
@@ -305,7 +313,8 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         # Waiting for fresh absence evidence is a wait: it spends no attempt.
-        assert run is not None and run.recovery_attempts == 0
+        assert run is not None
+        assert run.recovery_attempts == 0
         assert run.next_action_at is not None
         due = run.next_action_at.replace(tzinfo=NOW.tzinfo)
         assert now[0] < due <= now[0] + timedelta(seconds=15)
@@ -354,7 +363,8 @@ def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
     # The pending wait scheduled its next check; recovery resumes once due.
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.next_action_at is not None
+        assert run is not None
+        assert run.next_action_at is not None
         now[0] = run.next_action_at.replace(tzinfo=NOW.tzinfo)
 
     assert recovery.tick() is True
@@ -366,7 +376,8 @@ def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
             )
         )
         run = session.get(RecipeRun, started.owner_id)
-        assert stop is not None and run is not None
+        assert stop is not None
+        assert run is not None
         assert run.run_generation == 2
 
 
@@ -431,7 +442,8 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
         assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.next_action_at is not None
+        assert run is not None
+        assert run.next_action_at is not None
         now[0] = run.next_action_at.replace(tzinfo=NOW.tzinfo)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentNode)):
@@ -449,7 +461,8 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
             )
         )
         run = session.get(RecipeRun, started.owner_id)
-        assert stop is not None and run is not None
+        assert stop is not None
+        assert run is not None
         assert run.run_generation == 2
 
 
@@ -466,7 +479,8 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
     with sessions.begin() as session:
         run = session.get(RecipeRun, started.owner_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         plan = dict(run.plan)
         plan["execution_mode"] = "one-shot-jobs"
         run.plan = plan
@@ -479,7 +493,8 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         # No Spark reported the rank gone: lost (stoppable, claims held).
-        assert run is not None and run.state == "lost"
+        assert run is not None
+        assert run.state == "lost"
         assert "one-shot job may have completed external effects" in (
             run.route_error or ""
         )
@@ -510,7 +525,8 @@ def test_a_guard_stopped_rank_is_settled_not_relaunched(tmp_path, guard_stopped)
     with sessions.begin() as session:
         run = session.get(RecipeRun, started.owner_id)
         node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
-        assert run is not None and node is not None
+        assert run is not None
+        assert node is not None
         node.state = "failed"
         node.observation_process_running = False
         node.observed_run_generation = run.run_generation
@@ -606,7 +622,8 @@ def test_recovery_marker_retains_timestamp_spelling_bound_to_request_identity() 
             }
         }
     )
-    assert marker is not None and marker.deadline == deadline
+    assert marker is not None
+    assert marker.deadline == deadline
     assert enforce_recovery_deadline(marker, now=NOW)
     with pytest.raises(Exception) as _ending:
         enforce_recovery_deadline(
@@ -673,7 +690,8 @@ def test_malformed_plan_waits_for_changed_content_without_repeating_decision(
         run = session.get(RecipeRun, started.owner_id)
         assert run is not None
         wait = read_wait(run)
-        assert wait is not None and wait.next_check > NOW
+        assert wait is not None
+        assert wait.next_check > NOW
         assert wait.reason == InvalidRequestReason.MALFORMED
         assert wait.resume_condition == WaitResumeCondition.DEPENDENCY_CHANGED
         assert run.recovery_attempts == DISTRIBUTED_RECOVERY.max_failures
@@ -690,5 +708,6 @@ def test_malformed_plan_waits_for_changed_content_without_repeating_decision(
     with sessions.begin() as session:
         assert coordinator._settle_unreadable_runs(session, later, started.owner_id)
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and read_wait(run) is None
+        assert run is not None
+        assert read_wait(run) is None
     assert len(parsed) == 2

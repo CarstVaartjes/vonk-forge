@@ -1481,7 +1481,9 @@ def test_install_submission_retries_local_receipt_failure_without_poisoning_fres
             )
         except Exception:  # noqa: BLE001 - effects and fresh completion are the oracle
             ended = True
-        assert ended and returned is None and len(calls) == 3
+        assert ended
+        assert returned is None
+        assert len(calls) == 3
         with sessions() as session:
             assert session.scalar(select(RecipeInstallation)) is None
             assert (
@@ -1567,7 +1569,8 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
             submit()
         except Exception:  # noqa: BLE001 - bounded effects, not error taxonomy
             ended = True
-        assert ended and len(calls) == 3
+        assert ended
+        assert len(calls) == 3
         with sessions() as session:
             assert session.scalar(select(RecipeInstallation)) is None
             assert session.scalar(select(ResourceReservation)) is None

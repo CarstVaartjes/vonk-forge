@@ -323,7 +323,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         # The build is the stored image: addressed by its manifest digest,
         # sized by its layers.
         assert (
@@ -337,7 +338,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
 
     # The pulled image is the reusable receipt for these build inputs.
     resolution = builds.resolve(revision_id)
-    assert resolution.cached and resolution.build_id == plan.build_id
+    assert resolution.cached
+    assert resolution.build_id == plan.build_id
 
 
 def test_prebuilt_image_for_old_build_inputs_is_never_reused(tmp_path: Path) -> None:
@@ -376,9 +378,11 @@ def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         assert build.state == "failed"
-        assert build.image_digest is None and build.oci_layout_sha256 is None
+        assert build.image_digest is None
+        assert build.oci_layout_sha256 is None
         assert stored.state == "failed"
 
     # A new request retries the authority-pinned image immediately. A failed
@@ -422,9 +426,11 @@ def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
+        assert build is not None
+        assert stored is not None
         assert stored.state == "cancelled"
-        assert build.state == "failed" and build.image_digest is None
+        assert build.state == "failed"
+        assert build.image_digest is None
 
     # Cancelling is not a failed pull: the next plan uses the image again.
     again = builds.prepare_plan(revision_id, NODE, now=NOW)
@@ -666,8 +672,10 @@ def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         stored = session.get(Job, job.id)
-        assert build is not None and stored is not None
-        assert build.state != "failed" and stored.state == "running"
+        assert build is not None
+        assert stored is not None
+        assert build.state != "failed"
+        assert stored.state == "running"
 
     # The next tick, on any Controller process, takes the pull up at once.
     importer = PrebuiltImageImporter(
@@ -676,7 +684,8 @@ def test_a_busy_store_hands_the_pull_back_instead_of_failing_it(
     assert importer.run_pending() == 1
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None and build.state == "succeeded"
+        assert build is not None
+        assert build.state == "succeeded"
 
 
 def test_a_spark_build_upload_is_converted_into_the_store_after_success(

@@ -97,7 +97,7 @@ def test_an_upload_over_current_capacity_ends_without_blocking_fresh_work(
     assert fresh.path.read_bytes() == b"ok"
 
 
-@pytest.mark.parametrize("boundary", ("reserve", "commit"))
+@pytest.mark.parametrize("boundary", ["reserve", "commit"])
 def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(
     tmp_path, boundary, monkeypatch
 ):
@@ -185,7 +185,7 @@ def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_p
     assert store.usage().in_flight_uploads == 0
 
 
-@pytest.mark.parametrize("boundary", ("reserve", "commit"))
+@pytest.mark.parametrize("boundary", ["reserve", "commit"])
 def test_stream_retries_same_content_without_replaying_iterator(
     tmp_path, monkeypatch, boundary
 ):
@@ -256,7 +256,7 @@ def test_reservation_fsync_failure_releases_claim_and_fresh_upload_fits(
 
 
 @pytest.mark.parametrize(
-    "boundary", ("temporary-unlink", "reservation-unlink", "unlock")
+    "boundary", ["temporary-unlink", "reservation-unlink", "unlock"]
 )
 def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
     tmp_path, monkeypatch, boundary
@@ -302,7 +302,7 @@ def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
     assert not list((tmp_path / "blobs" / ".tmp").iterdir())
 
 
-@pytest.mark.parametrize("boundary", ("mkdir", "quota-open"))
+@pytest.mark.parametrize("boundary", ["mkdir", "quota-open"])
 def test_storage_admission_fault_observes_bound_without_consuming_stream(
     tmp_path, monkeypatch, boundary
 ):

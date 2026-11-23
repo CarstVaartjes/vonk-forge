@@ -71,4 +71,5 @@ def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recove
     assert peers[0]._body.closed
     late[0] = False
     assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
-    assert len(peers) == 2 and all(peer._body.closed for peer in peers)
+    assert len(peers) == 2
+    assert all(peer._body.closed for peer in peers)

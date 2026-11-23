@@ -63,7 +63,8 @@ def test_import_persists_canonical_model_recipe_and_package_identity(
         source_bundle_sha256=item.source_bundle_sha256,
     )
     assert view.schema_version == 2
-    assert view.recipe_id and view.id
+    assert view.recipe_id
+    assert view.id
     with service._sessions() as session:
         recipe = service.get_recipe(view.recipe_id)
         assert recipe.content_sha256 == item.content_sha256
@@ -129,9 +130,9 @@ def test_import_binds_captured_published_documents_before_sql(
     finally:
         event.remove(engine, "before_cursor_execute", mutate_caller)
         client.close()
-    assert (
-        mutated and recipe != captured_recipe and dependencies != captured_dependencies
-    )
+    assert mutated
+    assert recipe != captured_recipe
+    assert dependencies != captured_dependencies
     actual = service.get_recipe(imported.recipe_id)
     assert actual.document == captured_recipe
     assert actual.content_sha256 == expected_digest

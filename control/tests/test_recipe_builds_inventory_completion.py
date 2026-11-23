@@ -121,7 +121,8 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
     stale_session = sessions()
     try:
         stale_build = stale_session.get(RecipeBuild, plan.build_id)
-        assert stale_build is not None and stale_build.image_digest == old_image
+        assert stale_build is not None
+        assert stale_build.image_digest == old_image
         with sessions.begin() as upload_session:
             uploaded = upload_session.get(RecipeBuild, plan.build_id)
             assert uploaded is not None
@@ -360,7 +361,8 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
             == ()
         )
         parent = session.get(Job, queued.id)
-        assert parent is not None and parent.request_id == "source-read-recovery"
+        assert parent is not None
+        assert parent.request_id == "source-read-recovery"
         bound_digest = parent.payload["build_input_sha256"]
     first.close()
     fault[0] = False
@@ -381,7 +383,8 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert len(children) == 1
         assert children[0].payload["plan_digest"] == bound_digest
         parent = session.get(Job, queued.id)
-        assert parent is not None and parent.request_id == "source-read-recovery"
+        assert parent is not None
+        assert parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
     from vonk_agent_protocol.agent_words import Disposition
@@ -514,7 +517,8 @@ def test_succeeded_build_with_lost_result_is_reprepared(
     assert repaired.build_input_sha256 == plan.build_input_sha256
     with sessions() as session:
         build = session.get(RecipeBuild, repaired.build_id)
-        assert build is not None and build.state != LifecycleState.SUCCEEDED
+        assert build is not None
+        assert build.state != LifecycleState.SUCCEEDED
     service.record_success(
         repaired.build_id,
         build_input_sha256=repaired.build_input_sha256,

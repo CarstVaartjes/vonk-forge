@@ -197,7 +197,8 @@ def test_key_receipt_404_after_success_is_retryable() -> None:
 
     refused = _resolve_key(absent)
     assert refused.status_code == 503
-    assert refused.headers and refused.headers["retry-after"]
+    assert refused.headers
+    assert refused.headers["retry-after"]
 
 
 def test_unknown_outcome_owner_is_retryable_not_500() -> None:
@@ -210,4 +211,5 @@ def test_unknown_outcome_owner_is_retryable_not_500() -> None:
 
     refused = _resolve_key(unsure)
     assert refused.status_code == 503
-    assert refused.headers and refused.headers["retry-after"]
+    assert refused.headers
+    assert refused.headers["retry-after"]

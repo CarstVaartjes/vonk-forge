@@ -239,14 +239,16 @@ def test_touched_removal_yields_its_set_to_a_newer_download_of_it(
         assert service.get_operation(removal.id).state == "succeeded"
         with sessions() as session:
             row = session.get(ModelCacheSet, set_a)
-            assert row is not None and row.state != "cached"
+            assert row is not None
+            assert row.state != "cached"
         service.run_pending()
         service.run_pending()
         assert service.get_operation(newer.id).state == "succeeded"
         assert all(_path(service, data).exists() for data in blobs)
         with sessions() as session:
             final = session.get(ModelCacheSet, set_a)
-            assert final is not None and final.state == "cached"
+            assert final is not None
+            assert final.state == "cached"
     finally:
         service.close()
 

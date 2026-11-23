@@ -173,7 +173,8 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
     rolled = client.post("/api/key/ci/roll")
     assert rolled.status_code == 200
     body = rolled.json()
-    assert body["name"] == "ci" and body["models"] == ["qwen"]
+    assert body["name"] == "ci"
+    assert body["models"] == ["qwen"]
     assert body["key"] != first["key"]
     assert [item["name"] for item in client.get("/api/key").json()["keys"]] == ["ci"]
     client.post("/api/key/missing/roll")

@@ -201,8 +201,10 @@ def test_production_scale_drains_in_bounded_passes(world, monkeypatch):
     with sessions() as session:
         for serial in live:
             row = session.get(AgentCertificate, serial)
-            assert row.revoked_at is None and row.ca_revoked_at is None
-            assert row.next_action_at is None and row.wait_evidence is None
+            assert row.revoked_at is None
+            assert row.ca_revoked_at is None
+            assert row.next_action_at is None
+            assert row.wait_evidence is None
     assert not service.reconcile_revocations()
 
 
@@ -220,9 +222,11 @@ def test_budget_stops_the_pass_and_the_cursor_continues(world, monkeypatch):
 
     assert service.reconcile_revocations(limit=3)
     second = calls[len(first) :]
-    assert len(second) == 3 and not set(first) & set(second)
+    assert len(second) == 3
+    assert not set(first) & set(second)
     assert service.reconcile_revocations()
-    assert set(calls) == set(serials) and len(calls) == len(serials)
+    assert set(calls) == set(serials)
+    assert len(calls) == len(serials)
 
 
 def test_ca_unavailable_backs_off_by_blocked_time_and_recovers(
@@ -255,7 +259,8 @@ def test_ca_unavailable_backs_off_by_blocked_time_and_recovers(
         delays.append((wait.next_check - started).total_seconds())
         clock.now = wait.next_check
     assert delays[0] == 5.0
-    assert delays == sorted(delays) and delays[-1] == 300.0
+    assert delays == sorted(delays)
+    assert delays[-1] == 300.0
     assert len(first_blocked) == 1
     assert _journal(sessions) >= set(serials[3:])
     assert not _journal(sessions) & broken
@@ -280,7 +285,8 @@ def test_crash_between_revoke_and_confirm_confirms_after_restart(world, monkeypa
         with pytest.raises(SystemExit):
             service.reconcile_revocations()
     row = _evidence(sessions, serial)
-    assert serial in _journal(sessions) and row.ca_revoked_at is None
+    assert serial in _journal(sessions)
+    assert row.ca_revoked_at is None
     assert row.next_action_at > clock.now
     assert not EnrollmentService(sessions, ca, clock=clock).reconcile_revocations()
 
@@ -304,9 +310,11 @@ def test_crash_before_revoke_is_not_hot_and_retries_when_due(world, monkeypatch)
         service.reconcile_revocations()
     monkeypatch.setattr(ca, "revoke_node", real)
     row = _evidence(sessions, serial)
-    assert serial not in _journal(sessions) and row.ca_revoked_at is None
+    assert serial not in _journal(sessions)
+    assert row.ca_revoked_at is None
     assert row.next_action_at > clock.now
-    assert not service.reconcile_revocations() and not calls
+    assert not service.reconcile_revocations()
+    assert not calls
 
     clock.now = row.next_action_at
     assert service.reconcile_revocations()
@@ -325,7 +333,8 @@ def test_advisory_lock_busy_backs_off_then_confirms(world):
         holder.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
         assert not service.reconcile_revocations()
         row = _evidence(sessions, serial)
-        assert row.ca_revoked_at is None and serial not in _journal(sessions)
+        assert row.ca_revoked_at is None
+        assert serial not in _journal(sessions)
         assert row.next_action_at > clock.now
         holder.rollback()
 
@@ -373,11 +382,13 @@ def test_live_credential_is_never_revoked(world, monkeypatch):
 
     assert service.reconcile_revocations()
 
-    assert not calls and "777001" not in _journal(sessions)
+    assert not calls
+    assert "777001" not in _journal(sessions)
     assert _evidence(sessions, "777001") is None
     with sessions() as session:
         live = session.get(AgentCertificate, "777001")
-        assert live.revoked_at is None and live.state == CertificateRecordState.ACTIVE
+        assert live.revoked_at is None
+        assert live.state == CertificateRecordState.ACTIVE
 
 
 def test_rows_in_current_production_states_are_adopted(world):
@@ -399,7 +410,8 @@ def test_rows_in_current_production_states_are_adopted(world):
     )
     for serial in cleared:
         row = _evidence(sessions, serial)
-        assert row.next_action_at is None and row.wait_evidence is None
+        assert row.next_action_at is None
+        assert row.wait_evidence is None
     for serial in waiting:
         row = _evidence(sessions, serial)
         assert row.wait_evidence.reason == WaitReason.OBSERVATION_UNAVAILABLE

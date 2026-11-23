@@ -50,11 +50,11 @@ from .agent_api_support import (
 
 @pytest.mark.parametrize(
     ("prefix", "suffix"),
-    (
+    [
         (b'{"grant_token":"', b'",]'),
         (b'{"grant_token":"', b'","invalid-utf8":"\xff"}'),
         (b"[" * 1500 + b'{"grant_token":"', b'"}' + b"]" * 1500),
-    ),
+    ],
     ids=("malformed-json", "invalid-utf8", "deep-nesting"),
 )
 def test_invalid_enrollment_json_preserves_identifiable_grant(
@@ -327,11 +327,11 @@ def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None
 
 @pytest.mark.parametrize(
     "missing",
-    (
+    [
         "protocol_version",
         "runtime_identity",
         "wait_seconds",
-    ),
+    ],
 )
 def test_claim_requires_the_current_agent_document(agent_system, missing: str) -> None:
     client, _services, _sessions, _clock = agent_system
@@ -658,7 +658,8 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     report(sample)
     projection = FleetProjection(services.sessions, clock=clock)
     node = next(node for node in projection.read().nodes if node.id == NODE_A)
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert (
         "gpu_clock"
         not in node.model_dump(mode="json", exclude_none=True)["telemetry"]["sample"]
@@ -688,7 +689,8 @@ def test_gpu_clock_failure_evidence_survives_http_storage_and_fleet_detail(
     ]
     assert stored.gpu_clock == observation
     node = next(node for node in projection.read().nodes if node.id == NODE_A)
-    assert node.telemetry is not None and node.telemetry.sample is not None
+    assert node.telemetry is not None
+    assert node.telemetry.sample is not None
     assert node.telemetry.sample.gpu_clock == observation
     render_payload(
         node.model_dump(mode="json", exclude_none=True), "fleet", action="detail"
@@ -994,9 +996,11 @@ def test_unsafe_upload_entry_is_repaired(tmp_path, damage, entry):
     assert destination.read_bytes() == b"verified archive"
     assert outside.read_bytes() == b"untouched"
     if entry == "publish":
-        assert damaged.is_file() and not damaged.is_symlink()
+        assert damaged.is_file()
+        assert not damaged.is_symlink()
     else:
         assert not damaged.exists()
     descriptor, temporary = _prepare_recipe_image_upload(tmp_path, "identity")
     os.close(descriptor)
-    assert temporary.is_file() and not temporary.is_symlink()
+    assert temporary.is_file()
+    assert not temporary.is_symlink()

@@ -60,11 +60,13 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
         assert isinstance(winning.result(timeout=30), Applied)
         committed.set()
         outcome = losing.result(timeout=30)
-    assert isinstance(outcome, Applied) and outcome.value is False
+    assert isinstance(outcome, Applied)
+    assert outcome.value is False
     assert seen == [RunState.RUNNING, RunState.STOPPED]
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == RunState.STOPPED
+        assert run is not None
+        assert run.state == RunState.STOPPED
         assert run.version == 2
         assert set(session.scalars(select(RunNode.state))) == {RunState.RUNNING}
 
@@ -119,7 +121,8 @@ def test_busy_run_yields_typed_wait_and_next_tick_recovers(
             else RouteState.PUBLISHED
         )
         if action == "defer":
-            assert run.next_action_at is not None and run.route_error
+            assert run.next_action_at is not None
+            assert run.route_error
 
 
 def test_startup_adopts_version_and_preserves_running_run(
@@ -143,7 +146,8 @@ def test_startup_adopts_version_and_preserves_running_run(
         verify_schema_is_current(connection)
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.version == 1
+        assert run is not None
+        assert run.version == 1
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.PUBLISHED
         assert (run.run_generation, run.plan_digest, run.route_digest) == identity
@@ -153,7 +157,8 @@ def test_startup_adopts_version_and_preserves_running_run(
     routes.withdraw_run(run_id)
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.version > 1
+        assert run is not None
+        assert run.version > 1
         assert run.route_state == RouteState.WITHDRAWN
 
 
@@ -176,14 +181,16 @@ def test_rank_contention_beyond_publication_budget_waits_then_publishes(
                 assert run is not None
                 assert run.route_state == RouteState.PENDING
                 assert run.route_attempts == 0
-                assert run.next_action_at is not None and run.next_action_at > NOW
+                assert run.next_action_at is not None
+                assert run.next_action_at > NOW
                 assert run.route_error is not None
                 assert run.route_generation is None
         assert applied == []
     assert worker._publish_runs((run_id,))
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
         assert run.route_generation is not None
     assert len(applied) == 1
 
@@ -242,7 +249,8 @@ def test_owner_contention_after_activation_keeps_completion_and_generation(
     assert routes.publish_run(run_id).generation == generation.generation
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
         assert run.route_generation == generation.generation
     assert len(list((tmp_path / "litellm/generations").iterdir())) == 1
     assert applied
@@ -273,8 +281,10 @@ def test_unwrapped_stale_writer_waits_without_spending_publication_budget(
         worker._defer_publication(run_id, caught.value)
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PENDING
-        assert run.route_attempts == 0 and run.next_action_at is not None
+        assert run is not None
+        assert run.route_state == RouteState.PENDING
+        assert run.route_attempts == 0
+        assert run.next_action_at is not None
     assert worker._publish_runs((run_id,))
 
 
@@ -317,13 +327,15 @@ def test_deadline_contention_is_visible_wait_and_heals_next_tick(
     assert all(record.exc_info is None for record in caplog.records)
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PENDING
+        assert run is not None
+        assert run.route_state == RouteState.PENDING
     assert worker.tick() is False  # the logged next-attempt time is enforced
     now[0] += timedelta(seconds=5)
     assert worker.tick() is True
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.WITHDRAWN
+        assert run is not None
+        assert run.route_state == RouteState.WITHDRAWN
         assert run.state == RunState.RUNNING
 
 
@@ -383,14 +395,16 @@ def test_publication_deferral_contention_continues_without_traceback(
     assert worker._publish_runs((run_id,)) is True
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
     fresh = add_running_run(
         routes, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
     )
     assert worker._publish_runs((fresh,)) is True
     with routes.sessions() as session:
         run = session.get(RecipeRun, fresh)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED
 
 
 def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
@@ -552,14 +566,17 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     with sessions() as session:
         first_after = session.get(AgentOperation, first.id)
         later_after = session.get(AgentOperation, later.id)
-        assert first_after is not None and first_after.state in aos.LIVE
-        assert later_after is not None and later_after.state == LifecycleState.SUCCEEDED
+        assert first_after is not None
+        assert first_after.state in aos.LIVE
+        assert later_after is not None
+        assert later_after.state == LifecycleState.SUCCEEDED
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == first.id
             )
         )
-        assert attempt is not None and aos.attempt_lapsed(attempt)
+        assert attempt is not None
+        assert aos.attempt_lapsed(attempt)
         assert attempt.result is not None
     waits = [
         json.loads(record.message)
@@ -580,9 +597,11 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
     assert worker.tick() is True
     with sessions() as session:
         healed = session.get(AgentOperation, first.id)
-        assert healed is not None and healed.state == LifecycleState.SUCCEEDED
+        assert healed is not None
+        assert healed.state == LifecycleState.SUCCEEDED
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.state == RunState.STOPPED
+        assert run is not None
+        assert run.state == RunState.STOPPED
     fresh_plan = operations.preview_run(installation.owner_id, "after-sweep")
     fresh = operations.start(
         fresh_plan,
@@ -655,12 +674,14 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
     assert all(record.exc_info is None for record in caplog.records)
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.PENDING
+        assert run is not None
+        assert run.route_state == RouteState.PENDING
     now[0] += timedelta(seconds=5)
     assert backstop.tick() == 1
     with routes.sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.route_state == RouteState.WITHDRAWN
+        assert run is not None
+        assert run.route_state == RouteState.WITHDRAWN
         assert run.state == RunState.RUNNING
     from .recipe_routes_support import add_running_run
 
@@ -670,4 +691,5 @@ def test_due_route_recovery_contention_is_typed_wait_and_redrives(
     routes.publish_run(fresh)
     with routes.sessions() as session:
         run = session.get(RecipeRun, fresh)
-        assert run is not None and run.route_state == RouteState.PUBLISHED
+        assert run is not None
+        assert run.route_state == RouteState.PUBLISHED

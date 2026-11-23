@@ -45,7 +45,8 @@ def test_a_receipted_unknown_stores_its_stage_and_cause_typed() -> None:
 
 def test_a_receipt_without_an_ending_reads_as_before() -> None:
     receipt = _vector("recipe-job-run-result-v1.json")["result"]
-    assert isinstance(receipt, dict) and "ending" not in receipt
+    assert isinstance(receipt, dict)
+    assert "ending" not in receipt
     read = validate_result_for_operation(
         "recipe.job.run.v1", receipt, state="succeeded"
     )

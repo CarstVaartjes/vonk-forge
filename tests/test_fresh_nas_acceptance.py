@@ -72,7 +72,8 @@ def test_gateway_journal_cleanup_preserves_private_modes_and_siblings(
 
 def _acceptance_module():
     spec = importlib.util.spec_from_file_location("fresh_nas_acceptance", SCRIPT)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

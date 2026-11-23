@@ -53,7 +53,8 @@ def test_generic_adapter_persists_its_wait_clock_and_cause() -> None:
     from vonk_control.persisted_waits import read_wait
 
     wait = read_wait(job)
-    assert wait is not None and wait.reason is WaitReason.SPARK_BUSY
+    assert wait is not None
+    assert wait.reason is WaitReason.SPARK_BUSY
     assert wait.next_check == due
 
 
@@ -105,14 +106,17 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         loaded = session.get(Job, job.id)
         assert loaded is not None
         wait = read_wait(loaded)
-        assert wait is not None and wait.blockers == [blocker]
-        assert wait.next_check == due and wait.reason is WaitReason.SPARK_BUSY
+        assert wait is not None
+        assert wait.blockers == [blocker]
+        assert wait.next_check == due
+        assert wait.reason is WaitReason.SPARK_BUSY
         raw = session.execute(
             text("SELECT wait_evidence FROM jobs WHERE id = :id"), {"id": job.id}
         ).scalar_one()
         assert "next_check" not in raw
         assert "dependency_deadline" in raw
-        assert "last_progress_at" in raw and raw["last_progress_at"] is None
+        assert "last_progress_at" in raw
+        assert raw["last_progress_at"] is None
         assert loaded.result == {"flag": False, "count": 0, "value": None}
         from vonk_control.run_switch_journal_repair.discovery import _fingerprint
 
@@ -130,10 +134,12 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
             supported_actions=[],
         )
         projected = apply_queue_wait(item, wait)
-        assert projected.wait == wait and projected.next_attempt_at == due.isoformat()
+        assert projected.wait == wait
+        assert projected.next_attempt_at == due.isoformat()
         assert projected.wait is not None
         storage = projected.wait.blockers[0].storage
-        assert storage is not None and storage.available_bytes == 0
+        assert storage is not None
+        assert storage.available_bytes == 0
         assert read_wait(loaded) == wait  # observation cannot change custody
     with pytest.raises(RuntimeError), sessions.begin() as session:
         loaded = session.get(Job, job.id)
@@ -143,12 +149,14 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         raise RuntimeError("injected abort before commit")
     with sessions.begin() as session:
         loaded = session.scalar(select(Job).where(Job.id == job.id))
-        assert loaded is not None and loaded.state == LifecycleState.QUEUED
+        assert loaded is not None
+        assert loaded.state == LifecycleState.QUEUED
         assert loaded.next_action_at == due
         previous = read_wait(loaded)
         schedule_wait(loaded, due + timedelta(seconds=30), now=due)
         later = read_wait(loaded)
-        assert later is not None and previous is not None
+        assert later is not None
+        assert previous is not None
         assert later.first_blocked_at == previous.first_blocked_at
         assert later.last_progress_at == previous.last_progress_at
         assert later.dependency_deadline == previous.dependency_deadline
@@ -220,10 +228,12 @@ def test_startup_adds_wait_columns_without_restarting_a_live_attempt(
         attempt = session.scalar(
             select(JobAttempt).where(JobAttempt.job_id == identifier)
         )
-        assert job is not None and attempt is not None
+        assert job is not None
+        assert attempt is not None
         adopted = JobAdapter().lifecycle(job, attempt)
         assert adopted.state is LifecycleState.RUNNING
-        assert adopted.fence == fence and adopted.attempt == 1
+        assert adopted.fence == fence
+        assert adopted.attempt == 1
         assert adopted.lease_deadline == NOW + timedelta(minutes=5)
         assert job.wait_evidence is None
     assert {
@@ -307,7 +317,8 @@ def test_every_durable_wait_owner_has_identity_and_projection() -> None:
             resume_condition=WaitResumeCondition.EFFECT_OBSERVED,
         )
         projected = read_wait(owner)
-        assert projected is not None and projected.owner == identity
+        assert projected is not None
+        assert projected.owner == identity
 
 
 def test_corrupt_wait_does_not_erase_intent_or_hide_another_owner(
@@ -343,14 +354,16 @@ def test_corrupt_wait_does_not_erase_intent_or_hide_another_owner(
     with sessions() as session:
         bad = session.get(Job, damaged.id)
         good = session.get(Job, healthy.id)
-        assert bad is not None and good is not None
-        assert isinstance(bad.wait_evidence, Residue) and read_wait(bad) is None
+        assert bad is not None
+        assert good is not None
+        assert isinstance(bad.wait_evidence, Residue)
+        assert read_wait(bad) is None
         assert adapter.adopt(bad).id == damaged.id
-        assert (
-            bad.request_id == damaged.request_id and bad.state == LifecycleState.QUEUED
-        )
+        assert bad.request_id == damaged.request_id
+        assert bad.state == LifecycleState.QUEUED
         projected = read_wait(good)
-        assert projected is not None and projected.next_check == due
+        assert projected is not None
+        assert projected.next_check == due
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -389,7 +402,8 @@ def test_catalog_wait_survives_reconstruction_and_reuses_exact_observation(
     assert second.id == first.id
     service().record_automatic_wait(30, failed=False, observed_id=second.id)
     latest = service().latest()
-    assert latest is not None and latest.wait is not None
+    assert latest is not None
+    assert latest.wait is not None
     assert latest.wait.next_check == now[0] + timedelta(seconds=30)
     assert latest.wait.first_blocked_at == before.first_blocked_at
     assert latest.wait.last_progress_at is None
@@ -411,7 +425,8 @@ def test_stall_alarm_is_not_a_new_dependency_or_progress() -> None:
     )
     wait = read_wait(job)
     assert wait is not None
-    assert wait.first_blocked_at == NOW and wait.last_progress_at is None
+    assert wait.first_blocked_at == NOW
+    assert wait.last_progress_at is None
 
 
 def test_operator_wait_retains_the_owners_real_action_after_store_load(
@@ -448,4 +463,5 @@ def test_operator_wait_retains_the_owners_real_action_after_store_load(
         loaded = session.get(Job, job.id)
         assert loaded is not None
         wait = read_wait(loaded)
-        assert wait is not None and wait.operator_action is OperatorActionName.RESUME
+        assert wait is not None
+        assert wait.operator_action is OperatorActionName.RESUME

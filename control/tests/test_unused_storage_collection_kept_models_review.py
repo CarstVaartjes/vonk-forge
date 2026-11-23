@@ -201,12 +201,14 @@ def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_
         reserve_fraction=0.0,
     ).collect()
 
-    assert named.exists() and pulled.exists()
+    assert named.exists()
+    assert pulled.exists()
     assert not idle.exists()
     assert _kept(result, "live operation") == 1
 
     result = _collector(world, image_cache_root=tmp_path).collect()
-    assert named.exists() and not pulled.exists()
+    assert named.exists()
+    assert not pulled.exists()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -307,7 +309,8 @@ def test_model_no_recipe_needs_is_removed_when_disk_is_short_through_the_fenced_
         removal = session.scalar(
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
-        assert removal is not None and removal.actor == ACTOR
+        assert removal is not None
+        assert removal.actor == ACTOR
     # Until the cache has deleted the files, free space says nothing new: a
     # queued removal is not yet settling, but the round that freed nothing
     # pauses eviction.
@@ -390,7 +393,8 @@ def test_model_items_under_pressure_read_no_model_object(
         removal = session.scalar(
             select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
         )
-        assert removal is not None and removal.actor == ACTOR
+        assert removal is not None
+        assert removal.actor == ACTOR
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

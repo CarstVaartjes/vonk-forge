@@ -396,14 +396,15 @@ def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     fresh = production.service.start(
         revision.id, actor="operator", request_id=str(uuid.uuid4())
     )
-    assert fresh.state == LifecycleState.QUEUED.value and fresh.id != parent.id
+    assert fresh.state == LifecycleState.QUEUED.value
+    assert fresh.id != parent.id
     assert production.service.run_pending() == 1
     assert production.service.get(fresh.id).artifact is not None
     production.close()
 
 
 @pytest.mark.parametrize(
-    "code,kind",
+    ("code", "kind"),
     [
         (FailureCode.RECIPE_BUILD_FAILED, AgentFailureKind.INVALID_CONTRACT),
         (FailureCode.RECIPE_BUILD_PLATFORM_BLOCKED, None),

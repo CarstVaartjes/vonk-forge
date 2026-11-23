@@ -163,7 +163,8 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         model_digest = model_revision.content_digest
         build = session.get(RecipeBuild, build_plan.build_id)
         revision = session.get(CatalogDocumentRevision, successor.id)
-        assert build is not None and revision is not None
+        assert build is not None
+        assert revision is not None
     mappings = ClusterMappingService(sessions)
     mapping_id = mappings.materialize(
         mappings.preview(successor.id, (node_id,), {}, "admin"),

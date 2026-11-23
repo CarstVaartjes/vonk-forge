@@ -155,7 +155,8 @@ def test_a_start_ended_before_any_claim_stops_its_run_and_frees_it(
         _cancel(world, start)
     with world.sessions() as session:
         ended = session.get(Job, start.id)
-        assert ended is not None and ended.state == "cancelled"
+        assert ended is not None
+        assert ended.state == "cancelled"
     # The ending skipped the projection: the run is still waiting on it.
     assert world.run(run_id).state == "starting"
     assert world.claims(run_id) > 0
@@ -404,5 +405,6 @@ def test_naming_a_run_reads_live_work_only_whatever_history_there_is(
         finally:
             event.remove(session.get_bind(), "before_cursor_execute", record)
     jobs = [text for text in statements if "FROM jobs" in text]
-    assert len(statements) <= 2 and len(jobs) == 1
+    assert len(statements) <= 2
+    assert len(jobs) == 1
     assert "NOT IN" not in jobs[0]

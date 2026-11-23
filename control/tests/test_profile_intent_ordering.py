@@ -212,7 +212,8 @@ def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
     newer_after = _application(sessions, newer.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-    assert node is not None and node.workload_intent_ordinal == 1
+    assert node is not None
+    assert node.workload_intent_ordinal == 1
     from types import SimpleNamespace
 
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
@@ -286,7 +287,8 @@ def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(
     assert newer_after_contention.state == "queued"
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-        assert node is not None and node.workload_intent_ordinal == 1
+        assert node is not None
+        assert node.workload_intent_ordinal == 1
 
     # The first observer deferred the newer receipt on the queue lock and may
     # already have retired the older unbound row while binding its ordinal.
@@ -380,7 +382,8 @@ def test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order(
     higher_after_retry = _application(sessions, higher.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-    assert node is not None and node.workload_intent_ordinal == 1
+    assert node is not None
+    assert node.workload_intent_ordinal == 1
     assert lower_after_retry.progress["workload_intent_ordinal"] is None
     assert lower_after_retry.state == "superseded"
     assert higher_after_retry.state != "superseded"
@@ -435,7 +438,8 @@ def test_clock_rollback_cannot_make_later_accepted_receipt_older(
     later_after = _application(sessions, later.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-        assert node is not None and node.workload_intent_ordinal == 2
+        assert node is not None
+        assert node.workload_intent_ordinal == 2
     assert queued.id == later.id
     assert later_after.progress["workload_intent_ordinal"] == 2
     assert later_after.state == "queued"
@@ -485,7 +489,8 @@ def test_direct_queue_cannot_overtake_later_terminal_receipt(
     newer_after = _application(sessions, newer.id)
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
-    assert node is not None and node.workload_intent_ordinal == 1
+    assert node is not None
+    assert node.workload_intent_ordinal == 1
     assert older_after.progress["workload_intent_ordinal"] is None
     assert older_after.state == "superseded"
     assert newer_after.progress["workload_intent_ordinal"] == 1

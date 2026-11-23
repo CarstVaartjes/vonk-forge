@@ -247,7 +247,8 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
             for row in session.scalars(select(RecipeInstallation))
             if row.state != "uninstalled"
         ]
-        assert len(live) == 1 and live[0].state == "installed"
+        assert len(live) == 1
+        assert live[0].state == "installed"
         claims = {
             row.owner_id
             for row in session.scalars(
@@ -318,7 +319,8 @@ def _planned_left_by_failed_copy(load) -> str:
     load.profiles.tick()  # observe the failed child when the accepted parent is due
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
         planned_id = installation.id
     # Only one attempt's worth of disk remains free: a claim that held
     # admission would keep every later attempt "waiting for capacity".
@@ -361,7 +363,8 @@ def test_a_plan_nobody_adopts_is_released_after_the_adoption_window(
     assert later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         assert all(
             member.state == "uninstalled"
             for member in session.scalars(
@@ -434,7 +437,9 @@ def test_a_plan_the_next_attempt_replaced_is_released_without_the_wait(
             for row in session.scalars(select(RecipeInstallation))
             if row.state != "uninstalled"
         ]
-        assert len(live) == 1 and live[0][0] != old_id and live[0][1] == "installed"
+        assert len(live) == 1
+        assert live[0][0] != old_id
+        assert live[0][1] == "installed"
         assert session.get(RecipeInstallation, old_id).state == "uninstalled"
 
 
@@ -464,7 +469,8 @@ def test_a_plan_with_a_missing_rank_row_is_still_released(tmp_path: Path) -> Non
     assert later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
         assert not session.scalar(
             select(ResourceReservation).where(
                 ResourceReservation.owner_id == planned_id,
@@ -501,7 +507,8 @@ def test_a_plan_where_a_rank_shows_an_effect_is_not_abandoned(tmp_path: Path) ->
     assert not later.tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -580,8 +587,10 @@ def test_a_plan_a_newer_revision_of_the_recipe_replaced_is_released(
     with load.sessions() as session:
         released = session.get(RecipeInstallation, old_id)
         kept = session.get(RecipeInstallation, later_id)
-        assert released is not None and released.state == "uninstalled"
-        assert kept is not None and kept.state == "installed"
+        assert released is not None
+        assert released.state == "uninstalled"
+        assert kept is not None
+        assert kept.state == "installed"
 
 
 def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
@@ -590,7 +599,8 @@ def test_a_record_an_active_attempt_owns_is_left_alone(tmp_path: Path) -> None:
     assert not load.residues.tick()
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> None:
@@ -607,7 +617,8 @@ def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> 
     load.planner.tick()
     with load.sessions() as session:
         installation = session.scalar(select(RecipeInstallation))
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
         installation_id = installation.id
     review = load.planner.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
@@ -630,7 +641,8 @@ def test_reconcile_discards_a_plan_that_never_reached_a_node(tmp_path: Path) -> 
     assert load.planner.get(operation.operation_id).state == "succeeded"
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
 
 
 def test_an_unexpected_advance_failure_is_shown_and_backed_off(
@@ -770,7 +782,8 @@ def test_unknown_residue_cleanup_backs_off_then_resumes(tmp_path, kind):
     assert calls == [installation_id] * 2
     with catalog.sessions() as session:
         row = session.get(RecipeInstallation, installation_id)
-        assert row is not None and row.state == "uninstalled"
+        assert row is not None
+        assert row.state == "uninstalled"
 
 
 @pytest.mark.parametrize(
@@ -887,7 +900,8 @@ def test_a_never_installed_plan_goes_while_other_work_is_live_on_its_sparks(
     assert _reconciler(load, after=ADOPTION_WINDOW + timedelta(seconds=1)).tick()
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "uninstalled"
+        assert installation is not None
+        assert installation.state == "uninstalled"
 
 
 def test_a_plan_adopted_just_before_its_release_is_not_abandoned(
@@ -909,7 +923,8 @@ def test_a_plan_adopted_just_before_its_release_is_not_abandoned(
         )
     with load.sessions() as session:
         installation = session.get(RecipeInstallation, planned_id)
-        assert installation is not None and installation.state == "planned"
+        assert installation is not None
+        assert installation.state == "planned"
 
 
 def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
@@ -983,7 +998,8 @@ def test_a_queued_cleanup_order_keeps_its_installation_from_the_sweep(
     )
     with load.sessions() as session:
         cleanup = session.get(Job, operation.operation_id)
-        assert cleanup is not None and cleanup.kind == "recipe.cleanup.v2"
+        assert cleanup is not None
+        assert cleanup.kind == "recipe.cleanup.v2"
         assert cast(dict, cleanup.payload["plan"])["installation_id"] == installation_id
     _agree(load, installation_id, named=True)  # by its plan
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()

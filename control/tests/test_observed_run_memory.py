@@ -166,7 +166,8 @@ def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> Non
     assert observed == 100
 
     plan = service.plan_run(installation, alias="qwen", now=now)
-    assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    assert plan.allowed
+    assert plan.nodes[0].required_memory_bytes == 225
 
 
 @pytest.mark.parametrize("freed", [0, 64])
@@ -369,11 +370,13 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
     with sessions() as session:
         assert session.scalar(select(NodeTelemetrySample.id)) is not None
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == 100
+        assert rank is not None
+        assert rank.observed_memory_bytes == 100
         events = list(session.scalars(select(FleetStreamEvent.id)))
         last_id = session.scalar(select(FleetEventCursor.last_id))
     assert _run_node_events(sessions) == []
-    assert last_id is not None and last_id > max(events)  # the hole
+    assert last_id is not None
+    assert last_id > max(events)
 
 
 def _batch(sessions, node, start, availables):
@@ -454,7 +457,8 @@ def test_a_failing_attribution_never_refuses_the_samples(
     assert _stored_samples(sessions) == 2
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes is None
+        assert rank is not None
+        assert rank.observed_memory_bytes is None
         assert session.scalars(select(MeasuredRolePeak)).all() == []
     assert _run_node_events(sessions) == []
     assert (
@@ -474,7 +478,8 @@ def test_a_fresh_sample_after_a_non_positive_one_is_still_attributed(
     _report(sessions, node, now + timedelta(seconds=2), _FREE - 120)
     with sessions() as session:
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
-        assert rank is not None and rank.observed_memory_bytes == 120
+        assert rank is not None
+        assert rank.observed_memory_bytes == 120
         assert [
             row.peak_bytes for row in session.scalars(select(MeasuredRolePeak))
         ] == [120]
@@ -565,7 +570,8 @@ def test_a_measurement_over_the_admission_maximum_keeps_the_declared_peak(
     sessions, now, _, installation = setup(tmp_path, free_memory=_FREE)
     service = _publish_measured(sessions, installation, now, 900, exceeds=True)
     plan = service.plan_run(installation, alias="qwen", now=now)
-    assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
+    assert plan.allowed
+    assert plan.nodes[0].required_memory_bytes == 225
     warning = next(
         item
         for item in plan.nodes[0].warnings
@@ -602,7 +608,8 @@ def test_a_delivered_measurement_leaves_a_running_run_untouched(tmp_path) -> Non
         return [rows(model) for model in (RecipeRun, RunNode, ResourceReservation, Job)]
 
     before = state()
-    assert before[0] and before[2]
+    assert before[0]
+    assert before[2]
     service = _publish_measured(sessions, installation, now, 280)
     review = service.plan_run(installation, alias="another", now=now)
     assert review.nodes[0].required_memory_bytes == 280

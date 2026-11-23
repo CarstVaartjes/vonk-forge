@@ -101,7 +101,8 @@ def test_recipe_removal_replay_rejects_malformed_stored_intent(
 
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -139,7 +140,8 @@ def test_recipe_removal_replay_rejects_issuer_drift_in_job_envelope(
 
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -163,7 +165,8 @@ def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpo
     assert service.advance_removals(limit=1) == 1
     with sessions.begin() as session:
         operation = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert operation is not None and operation.result is not None
+        assert operation is not None
+        assert operation.result is not None
         malformed_result = dict(operation.result) | {"with_model": 0}
         session.execute(
             update(Job)
@@ -172,9 +175,11 @@ def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpo
         )
     with sessions() as session:
         operation = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert operation is not None and operation.result is not None
+        assert operation is not None
+        assert operation.result is not None
         stored_choice = operation.result["with_model"]
-        assert isinstance(stored_choice, int) and not isinstance(stored_choice, bool)
+        assert isinstance(stored_choice, int)
+        assert not isinstance(stored_choice, bool)
 
     # The stored result is only a copy of what the owner's checkpoint says: a
     # damaged copy is projected again from that evidence, not a refused replay.
@@ -191,7 +196,8 @@ def test_recipe_removal_replay_rebuilds_a_damaged_stored_result_from_its_checkpo
     assert replayed["operation_id"] == operation.id
     with sessions() as session:
         ended = session.scalar(select(Job).where(Job.request_id == request_id))
-        assert ended is not None and ended.state == "succeeded"
+        assert ended is not None
+        assert ended.state == "succeeded"
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -262,7 +268,8 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
         operation = session.get(Job, queued.id)
         assert operation is not None
         retry = operation.payload["retry"]
-        assert isinstance(retry, dict) and retry["automatic_attempts"] >= 1
+        assert isinstance(retry, dict)
+        assert retry["automatic_attempts"] >= 1
         assert operation.payload.get("claim_owner") is None
         assert operation.payload.get("claim_until") is None
 
@@ -319,7 +326,8 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
     )
     queued = service.start("revision-image", actor="operator", request_id="2" * 36)
     claim = service.claim_pending(owner_id="worker-a")
-    assert claim and claim[0].operation_id == queued.id
+    assert claim
+    assert claim[0].operation_id == queued.id
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
@@ -327,7 +335,8 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
             "claim_until": "2000-01-01T00:00:00+00:00"
         }
     reclaimed = service.claim_pending(owner_id="worker-b")
-    assert reclaimed and reclaimed[0].claim_owner == "worker-b"
+    assert reclaimed
+    assert reclaimed[0].claim_owner == "worker-b"
 
 
 def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
@@ -357,7 +366,8 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
         schedule_wait(operation, (now - timedelta(seconds=1)))
 
     claim = service.claim_pending(owner_id="worker-a")
-    assert claim and claim[0].operation_id == queued.id
+    assert claim
+    assert claim[0].operation_id == queued.id
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
@@ -387,7 +397,8 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
     )
     service.start("revision-identity", actor="operator", request_id="4" * 36)
     claim = service.claim_pending(owner_id="worker-a")
-    assert claim and claim[0].build_input_sha256 == "f" * 64
+    assert claim
+    assert claim[0].build_input_sha256 == "f" * 64
     assert service.claim_pending(owner_id="worker-b") == ()
 
 

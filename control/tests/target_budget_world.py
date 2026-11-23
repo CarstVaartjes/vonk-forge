@@ -355,7 +355,8 @@ def _unrelated_history(
             )
         real = session.get(RecipeInstallation, target_installation)
         real_build = session.get(RecipeBuild, real.recipe_build_id) if real else None
-        assert real is not None and real.model_content_sha256 is not None
+        assert real is not None
+        assert real.model_content_sha256 is not None
         assert real_build is not None
         build_columns = {
             column.name: getattr(real_build, column.name)
@@ -376,7 +377,8 @@ def _unrelated_history(
             )
         }
         target_revision = session.get(CatalogDocumentRevision, real.recipe_revision_id)
-        assert target_revision is not None and target_revision.content_digest
+        assert target_revision is not None
+        assert target_revision.content_digest
         # The target recipe's own measured peaks; every other content has one too.
         session.add_all(
             MeasuredRolePeak(
@@ -544,8 +546,10 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
     with sessions() as session:
         row = session.get(RecipeInstallation, installed.owner_id)
         build = session.get(RecipeBuild, build_id)
-        assert row is not None and row.model_content_sha256 is not None
-        assert build is not None and build.oci_layout_sha256 is not None
+        assert row is not None
+        assert row.model_content_sha256 is not None
+        assert build is not None
+        assert build.oci_layout_sha256 is not None
         target, archive = row.model_content_sha256, build.oci_layout_sha256
         revision = session.get(CatalogDocumentRevision, row.recipe_revision_id)
         assert revision is not None

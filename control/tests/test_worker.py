@@ -678,7 +678,8 @@ def _persisting_fault(tmp_path, now, verdict_error):
             from vonk_control.models.coordinator import CoordinatorFailure
 
             row = session.get(CoordinatorFailure, "source")
-            assert row is not None and row.next_action_at is not None
+            assert row is not None
+            assert row.next_action_at is not None
             return (row.next_action_at.replace(tzinfo=UTC) - now[0]).total_seconds()
 
     return failures, fail, due_in
@@ -903,9 +904,8 @@ def test_coordinator_fault_has_durable_api_custody_and_restart_resume(
     assert not worker.run_once()
     with sessions() as session:
         stored = session.scalar(select(CoordinatorFailure))
-        assert stored is not None and isinstance(
-            stored.failure, CoordinatorFailureEvidence
-        )
+        assert stored is not None
+        assert isinstance(stored.failure, CoordinatorFailureEvidence)
         wait = read_wait(stored)
         assert wait is not None
         assert wait.resume_condition == WaitResumeCondition.RETRY_DUE
@@ -1214,7 +1214,8 @@ def test_slow_step_is_named_but_scheduled_like_any_other(
         if "worker.step_over_budget" in record.getMessage()
     )
     assert name in alarm
-    assert '"budget_seconds":' in alarm and '"elapsed_seconds":' in alarm
+    assert '"budget_seconds":' in alarm
+    assert '"elapsed_seconds":' in alarm
     assert failures.ready(name)
     sessions = sessionmaker(create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}"))
     with sessions() as session:

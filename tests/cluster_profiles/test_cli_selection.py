@@ -77,7 +77,8 @@ def test_recipe_readiness_flags_are_forwarded_to_the_controller(vonkctl_json):
     )
     assert status == 0
     query = client.calls[0][3]["query"]
-    assert query["ready"] is True and query["fits_fleet"] is True
+    assert query["ready"] is True
+    assert query["fits_fleet"] is True
 
 
 def test_recipe_engine_and_creator_filters_are_forwarded():
@@ -224,7 +225,7 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
     assert selection_module._resolve_recipe_selector(client, "Coding") == "one/code"
 
 
-@pytest.mark.parametrize("noun,bad_row", [("recipe", None), ("spark", "invalid")])
+@pytest.mark.parametrize(("noun", "bad_row"), [("recipe", None), ("spark", "invalid")])
 def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
     if noun == "recipe":
         valid = {"recipes": [recipe("one/code", "Coding")]}

@@ -73,7 +73,7 @@ def _sessions():
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "field,value", [("assignments", [{"invalid": "choice"}]), ("labels", [])]
+    ("field", "value"), [("assignments", [{"invalid": "choice"}]), ("labels", [])]
 )
 @pytest.mark.parametrize("action", [*_PROFILE_MUTATIONS.values(), "replay"])
 def test_profile_mutation_routes_isolate_damaged_saved_definition(
@@ -152,7 +152,8 @@ def test_profile_mutation_routes_isolate_damaged_saved_definition(
             assert row.revision == profile.revision + 1
             assert service.definition_number(profile.number).definition == replacement
         else:
-            assert row.revision == profile.revision and getattr(row, field) == value
+            assert row.revision == profile.revision
+            assert getattr(row, field) == value
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -176,7 +177,7 @@ def test_a_profile_with_a_damaged_definition_can_still_be_deleted():
 
 @pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
-    "field,value", [("assignments", [{"invalid": "choice"}]), ("labels", [])]
+    ("field", "value"), [("assignments", [{"invalid": "choice"}]), ("labels", [])]
 )
 def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     field, value, capsys
@@ -203,8 +204,10 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     definition = client.get("/api/profile/1/definition", headers=headers)
     assert definition.status_code == 200, definition.text
     parsed = FleetProfileDefinitionView.model_validate_json(definition.content)
-    assert parsed.id == row_id and parsed.revision == 1
-    assert parsed.definition is None and parsed.projection_issue is not None
+    assert parsed.id == row_id
+    assert parsed.revision == 1
+    assert parsed.definition is None
+    assert parsed.projection_issue is not None
     detail = client.get("/api/profile/1", headers=headers)
     assert detail.status_code == 200, detail.text
     unavailable = UnavailableFleetProfileView.model_validate_json(detail.content)
@@ -215,12 +218,14 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     assert profiles[1].definition is not None
     render_payload(unavailable.model_dump(mode="json"), "profile")
     text = capsys.readouterr().out
-    assert "unknown" in text and "cannot be read" in text
+    assert "unknown" in text
+    assert "cannot be read" in text
     assert "No assignments saved" not in text
     # Observation does not repair, retire or drop the persisted malformed value.
     with sessions() as session:
         row = session.get(FleetProfile, row_id)
-        assert row is not None and getattr(row, field) == value
+        assert row is not None
+        assert getattr(row, field) == value
     assert client.get("/api/profile/1/definition").status_code == 401
     # A stale or unauthorized replacement cannot use damage to bypass admission.
     replacement = {
@@ -253,7 +258,8 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     assert invalid.status_code == 422, invalid.text
     with sessions() as session:
         row = session.get_one(FleetProfile, row_id)
-        assert row.revision == 1 and getattr(row, field) == value
+        assert row.revision == 1
+        assert getattr(row, field) == value
     # A committed repair whose HTTP response is lost reconnects to that same
     # revision on replay; it must neither edit again nor reject the retry.
     with pytest.raises(httpx.ReadError):
@@ -263,15 +269,18 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
     repaired = client.put("/api/profile/1", headers=headers, json=replacement)
     assert repaired.status_code == 200, repaired.text
     saved = FleetProfileView.model_validate_json(repaired.content)
-    assert saved.id == row_id and saved.revision == 2
+    assert saved.id == row_id
+    assert saved.revision == 2
     assert saved.definition.model_dump(mode="json") == {
         key: value for key, value in replacement.items() if key != "expected_revision"
     }
     restored = FleetProfileDefinitionView.model_validate_json(
         client.get("/api/profile/1/definition", headers=headers).content
     )
-    assert restored.id == row_id and restored.revision == 2
-    assert restored.definition == saved.definition and restored.projection_issue is None
+    assert restored.id == row_id
+    assert restored.revision == 2
+    assert restored.definition == saved.definition
+    assert restored.projection_issue is None
     assert (
         FleetProfileView.model_validate_json(
             client.get("/api/profile/1", headers=headers).content
@@ -345,10 +354,10 @@ def test_corrupt_recipe_removal_owner_is_unknown_in_operation_and_issuer_request
         response = client.get(path)
         assert response.status_code == 200, response.text
         observed = RecipeRemovalUnavailableView.model_validate_json(response.content)
-        assert (
-            observed.operation_id == operation_id and observed.request_key == request_id
-        )
-        assert observed.state == "unknown" and observed.progress is None
+        assert observed.operation_id == operation_id
+        assert observed.request_key == request_id
+        assert observed.state == "unknown"
+        assert observed.progress is None
         assert "reclaimed_bytes" not in observed.model_dump(mode="json")
         render_payload(observed.model_dump(mode="json"), "recipe", action="progress")
         assert "cannot be read" in capsys.readouterr().out
@@ -356,8 +365,6 @@ def test_corrupt_recipe_removal_owner_is_unknown_in_operation_and_issuer_request
         service.get_operator_request(request_id, actor="someone-else")
     with sessions() as session:
         row = session.get(Job, operation_id)
-        assert (
-            row is not None
-            and row.state == "succeeded"
-            and row.payload == {"broken": "owner"}
-        )
+        assert row is not None
+        assert row.state == "succeeded"
+        assert row.payload == {"broken": "owner"}

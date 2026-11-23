@@ -131,9 +131,8 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
         assert run.route_error is None
-        assert (
-            run.route_generation is not None and run.route_generation > first.generation
-        )
+        assert run.route_generation is not None
+        assert run.route_generation > first.generation
 
 
 def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
@@ -239,7 +238,8 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     bundle = verify_active_route_bundle(root)
     assert not isinstance(bundle, UnknownError)
     request = _supervisor(monkeypatch, root)._active_request()
-    assert request is not None and request.activation_sha256 == bundle.marker.digest
+    assert request is not None
+    assert request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
@@ -846,7 +846,8 @@ def test_normal_start_optional_recovery_does_not_block_route_publication(
     service.publish_run(second)
     with service.sessions() as session:
         generation = _recipe_run(session, run_id).route_generation
-        assert generation is not None and generation >= first.generation
+        assert generation is not None
+        assert generation >= first.generation
         assert _recipe_run(session, second).route_state == "published"
 
 

@@ -186,7 +186,8 @@ def test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implici
                 InstallationNode.node_id == nodes[1],
             )
         )
-        assert stored_run is not None and stored_installation is not None
+        assert stored_run is not None
+        assert stored_installation is not None
         assert failed_node is not None
         stored_run.state = "stopped"
         stored_installation.state = "partial"
@@ -460,7 +461,7 @@ def test_uninstall_queue_rollback_and_request_key_are_owner_bound(
 
 @pytest.mark.parametrize(
     ("uninstall_state", "blocked"),
-    (("queued", True), ("running", True), ("failed", False), ("succeeded", False)),
+    [("queued", True), ("running", True), ("failed", False), ("succeeded", False)],
 )
 def test_start_fences_only_active_uninstall_operations_after_installation_lock(
     tmp_path: Path, uninstall_state: str, blocked: bool

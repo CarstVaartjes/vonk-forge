@@ -13,7 +13,7 @@ from vonk_control.recipe_operations.service import RecipeOperationService
 
 
 @pytest.mark.parametrize(
-    "method,once,args,kwargs",
+    ("method", "once", "args", "kwargs"),
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
         ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
@@ -87,7 +87,7 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
 
 
 @pytest.mark.parametrize(
-    "method,once,args,kwargs",
+    ("method", "once", "args", "kwargs"),
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
         ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
@@ -152,7 +152,7 @@ def test_request_does_not_retry_an_authority_refusal(
 
 
 @pytest.mark.parametrize(
-    "authority,plan,evidence",
+    ("authority", "plan", "evidence"),
     [
         ("malformed", "a" * 64, "b" * 64),
         ("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", "a" * 64, "b" * 64),

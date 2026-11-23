@@ -444,14 +444,16 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
     assert (services.artifact_root / "image-cache" / digest).read_bytes() == payload
     with services.sessions() as session:
         build = session.get(RecipeBuild, build_id)
-        assert build is not None and build.oci_layout_sha256 is None
+        assert build is not None
+        assert build.oci_layout_sha256 is None
     with pytest.raises(httpx.ReadError):
         TestClient(DropFirstResponse(client.app, path)).put(
             path, headers=headers, content=payload
         )
     replay = _restart(services, codec).put(path, headers=headers, content=payload)
     receipt = _reference(replay)
-    assert receipt.id == build_id and receipt.content_digest == digest
+    assert receipt.id == build_id
+    assert receipt.content_digest == digest
     probe = _restart(services, codec).head(path, headers=headers)
     assert probe.headers["x-vonk-upload-complete"] == "true"
 
@@ -660,7 +662,8 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     receipt = _reference(
         TestClient(application(restarted)).put(path, headers=headers, content=payload)
     )
-    assert receipt.id == job.id and receipt.content_digest == digest
+    assert receipt.id == job.id
+    assert receipt.content_digest == digest
     with sessions() as session:
         assert (
             session.scalar(

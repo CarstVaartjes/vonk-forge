@@ -96,7 +96,8 @@ def _write_parked_wait(sessions, job_id: str, *, cancel_requested: bool) -> None
 
     with sessions.begin() as session:
         job = session.get(ArtifactJob, job_id)
-        assert job is not None and job.operation_id is not None
+        assert job is not None
+        assert job.operation_id is not None
         job.state = "needs-operator"
         job.status_reason = "artifact cancellation could not safely stop the scope"
         job.result_evidence = {
@@ -338,12 +339,14 @@ def test_a_legacy_waiting_job_ends_without_blocking_fresh_intent(tmp_path) -> No
     ended = _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED)
     assert ended in ajs.ENDED
     evidence = service.get(submitted.id).result_evidence
-    assert evidence is not None and evidence.active_scope_may_remain
+    assert evidence is not None
+    assert evidence.active_scope_may_remain
     fresh = create_artifact_job(
         service,
         **artifact_create_request(_run, "00000000-0000-4000-8000-000000000342"),
     )
-    assert fresh.id != submitted.id and fresh.operation_id is None
+    assert fresh.id != submitted.id
+    assert fresh.operation_id is None
 
 
 def test_a_running_job_with_a_live_lease_is_left_alone(tmp_path) -> None:
@@ -370,7 +373,8 @@ def test_a_running_job_with_a_live_lease_is_left_alone(tmp_path) -> None:
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
-        assert order is not None and order.state == "running"
+        assert order is not None
+        assert order.state == "running"
         after = session.scalar(
             select(AgentOperationAttempt.lease_deadline).where(
                 AgentOperationAttempt.operation_id == order.id
@@ -435,7 +439,8 @@ def test_the_job_follows_its_order_without_a_second_state(tmp_path) -> None:
                 AgentOperation.parent_job_id == submitted.operation_id
             )
         )
-        assert order is not None and order.state == "cancelled"
+        assert order is not None
+        assert order.state == "cancelled"
 
 
 def test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt(
@@ -455,7 +460,8 @@ def test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt(
     ) = _issued_job(tmp_path, 380)
     with sessions.begin() as session:
         job = session.get(ArtifactJob, submitted.id)
-        assert job is not None and job.operation_id is not None
+        assert job is not None
+        assert job.operation_id is not None
         job.state = "failed"
         job.status_reason = "artifact job agent lease expired"
         job.result_evidence = {
@@ -602,7 +608,8 @@ def test_an_exact_stop_cancels_a_live_job_with_a_typed_reason(tmp_path) -> None:
     )
     with sessions.begin() as session:
         job = session.get(ArtifactJob, submitted.id)
-        assert job is not None and not ajs.is_ended(job)
+        assert job is not None
+        assert not ajs.is_ended(job)
         assert ArtifactJobAdapter(session).confirm_stopped(
             job, WaitReason.SCOPE_CHANGED, NOW
         )
@@ -618,11 +625,14 @@ def test_an_exact_stop_cancels_a_live_job_with_a_typed_reason(tmp_path) -> None:
 
 def test_a_new_job_is_born_preparing_with_no_state() -> None:
     job = ArtifactJobAdapter.new_job(id="j")
-    assert job.state is None and job.preparation == ajs.DRAFT
+    assert job.state is None
+    assert job.preparation == ajs.DRAFT
     ArtifactJobAdapter.mark_ready(job, NOW)
-    assert job.state is None and job.preparation == ajs.READY
+    assert job.state is None
+    assert job.preparation == ajs.READY
     ArtifactJobAdapter.mark_submitted(job, "op", NOW)
-    assert job.state == ajs.QUEUED and job.preparation is None
+    assert job.state == ajs.QUEUED
+    assert job.preparation is None
 
 
 @pytest.mark.postgres
@@ -701,7 +711,8 @@ def test_damaged_terminal_projection_cannot_veto_current_fenced_stop_receipt(tmp
         return submitted_artifact_job(service, run_id, request_suffix=992)
 
     fresh = submit_fresh_job()
-    assert fresh.id != submitted.id and fresh.operation_id is not None
+    assert fresh.id != submitted.id
+    assert fresh.operation_id is not None
     with sessions() as session:
         issued = list(
             session.scalars(

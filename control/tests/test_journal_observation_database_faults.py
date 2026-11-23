@@ -89,7 +89,8 @@ def test_database_observation_failure_ends_and_accepts_fresh(
         job = session.get(Job, switch)
         assert job is not None
         parent = _run_switch_payload(job)
-        assert parent is not None and isinstance(parent.intent, RunSwitchRunIntent)
+        assert parent is not None
+        assert isinstance(parent.intent, RunSwitchRunIntent)
         request = parent.intent.request
 
     def fresh(_world):

@@ -118,7 +118,8 @@ def test_a_cancel_of_a_rollout_completes_at_once() -> None:
 
 def test_the_superseding_request_is_adopted_as_the_cancel_request() -> None:
     row = AgentUpgradeAdapter().adopt(_job("queued", result={"superseded_by": "x"}))
-    assert row.cancel_requested and row.cancel_request_key == "x"
+    assert row.cancel_requested
+    assert row.cancel_request_key == "x"
     assert row.effect in (Effect.NONE, Effect.ISSUED)
 
 
@@ -175,7 +176,8 @@ def test_a_live_legacy_dispatch_and_a_running_order_are_untouched(tmp_path) -> N
                 AgentOperation.node_id == NODE_A,
             )
         )
-        assert operation.state == "running" and operation.current_attempt == 1
+        assert operation.state == "running"
+        assert operation.current_attempt == 1
         attempt = session.scalar(
             __import__("sqlalchemy")
             .select(JobAttempt)
@@ -272,7 +274,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         )
         with sessions() as session:
             pending = session.get(AgentOperation, stored.id)
-            assert pending is not None and pending.recovery_deadline is not None
+            assert pending is not None
+            assert pending.recovery_deadline is not None
             if original_deadline is None:
                 original_deadline = pending.recovery_deadline
             assert pending.recovery_deadline == original_deadline
@@ -284,7 +287,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         clock.advance(seconds=960)
     with sessions() as session:
         pending = session.get(AgentOperation, original_id)
-        assert pending is not None and pending.recovery_deadline is not None
+        assert pending is not None
+        assert pending.recovery_deadline is not None
         deadline = pending.recovery_deadline.replace(tzinfo=UTC)
     # The persistent time budget, including the package safety fences, ends
     # this request before the failure-count budget can be reached.

@@ -213,7 +213,8 @@ def test_malformed_domain_http_evidence_reobserves_exact_key_then_fresh_request(
         }
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert status == 0 and result == accepted
+    assert status == 0
+    assert result == accepted
     assert [call[0] for call in client.calls] == ["POST", "GET", "GET"]
     fresh = accepted | {"request_key": FRESH, "operation_id": "fresh"}
     client.responses[("POST", post)] = fresh
@@ -350,7 +351,8 @@ def test_cancellation_lookup_reobserves_old_metadata_without_local_conflict():
         "--json",
     )
     status, result = run(argv, client)
-    assert status == 0 and result == accepted
+    assert status == 0
+    assert result == accepted
     assert [call[0] for call in client.calls] == ["POST", "GET", "GET"]
     client.responses[("POST", path + "/cancel")] = accepted | {
         "cancellation": cancellation | {"request_key": FRESH}
