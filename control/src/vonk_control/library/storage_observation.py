@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     ModelCacheUsage,
     ModelStorageObservation,
     ModelStorageObservationReason,

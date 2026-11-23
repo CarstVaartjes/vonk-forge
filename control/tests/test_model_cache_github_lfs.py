@@ -26,13 +26,13 @@ from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
 from vonk_control.model_cache import github_lfs
 from vonk_control.model_cache.artifacts import ArtifactSpec
 from vonk_control.model_cache.constants import _SOURCE_GONE_ATTEMPTS, ProviderKind
+from vonk_control.model_cache.contract import ModelCacheDownloadPayload
 from vonk_control.model_cache.errors import (
     ModelCacheStorageInvalid,
     ModelCacheStorageUnknown,
 )
 from vonk_control.model_cache.provider_contracts import _GitHubLfsBatch
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import ModelCacheDownloadPayload
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.operations.contract import AvailabilityRecoveryAction

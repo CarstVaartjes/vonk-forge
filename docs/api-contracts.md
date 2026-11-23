@@ -808,7 +808,7 @@ before a later operation consumes it:
 | Build policy reports | `StoredBuildPolicyReport` with nested `StoredPolicyFinding` |
 | Catalog model/recipe documents | Public `ModelDefinition` and `RecipeDefinition` |
 | Catalog projections | `catalog/revision_contract.py`, composed from public model/topology and protocol build-option types |
-| Cache manifests, preparation/repair/eviction payloads and results | `model_cache_contract.py`, selected by operation kind |
+| Cache manifests, preparation/repair/eviction payloads and results | `model_cache/contract.py`, selected by operation kind |
 
 A required nullable value remains present; unused optional fields are omitted.
 Malformed stored documents produce a controlled error instead of becoming empty

@@ -34,7 +34,7 @@ from ..gateway.keys import GatewayKeyService, install_gateway_key_routes
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..metrics.prometheus_api import PrometheusReader
 from ..metrics.registry import MetricsRegistry
-from ..model_cache_api import install_model_operator_routes
+from ..model_cache.api import install_model_operator_routes
 from ..observation.platform import (
     PlatformObserver,
     api_only_capture,

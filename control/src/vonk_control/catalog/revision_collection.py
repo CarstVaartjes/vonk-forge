@@ -97,7 +97,7 @@ from vonk_forge_contracts import ModelDefinition
 
 from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..logging import log_event
-from ..model_cache_contract import CacheManifest, CacheOperationKind
+from ..model_cache.contract import CacheManifest, CacheOperationKind
 from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from ..models.catalog import (
     CatalogDocumentHead,

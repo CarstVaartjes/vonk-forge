@@ -832,7 +832,7 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
     """Catches inventory trusting a structurally valid plan whose effects no
     longer match the operator's accepted digest.
     """
-    from vonk_control.model_cache_contract import ModelCacheRemovalPayload
+    from vonk_control.model_cache.contract import ModelCacheRemovalPayload
     from vonk_control.models.cache import ModelCacheOperation
 
     Base.metadata.create_all(postgres_engine)

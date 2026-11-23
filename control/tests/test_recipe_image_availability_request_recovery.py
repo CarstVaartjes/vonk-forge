@@ -384,9 +384,9 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
     """Catch missing-child observations being overridden into permanent failures."""
     from types import SimpleNamespace
 
+    from vonk_control.model_cache.contract import ModelCacheCounters
     from vonk_control.model_cache.errors import ModelCacheNotFound
-    from vonk_control.model_cache_contract import ModelCacheCounters
-    from vonk_control.model_cache_progress import cache_progress, progress_document
+    from vonk_control.model_cache.progress import cache_progress, progress_document
     from vonk_control.models.cache import ModelCacheOperation
 
     from .test_recipe_image_availability import (

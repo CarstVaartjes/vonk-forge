@@ -63,7 +63,7 @@ class SelectorAmbiguityHTTPError(HTTPException):
 
 def _error(error: Exception) -> HTTPException:
     if isinstance(error, ModelCacheError):
-        from ..model_cache_api import model_cache_http_error
+        from ..model_cache.api import model_cache_http_error
 
         return model_cache_http_error(error)
     if isinstance(error, LibrarySelectorAmbiguous):

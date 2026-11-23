@@ -531,7 +531,7 @@ def test_the_cache_writes_backoff_never_partial(cache, tmp_path):
     _edit(sessions, operation.id, state="running")
     service._lifecycle.reopen(_row(sessions, operation.id), datetime.now(UTC))
     assert LifecycleState.BACKOFF.value == "backoff"
-    from vonk_control import model_cache_states
+    from vonk_control.model_cache import states as model_cache_states
 
     assert model_cache_states.BACKOFF == "backoff"
 

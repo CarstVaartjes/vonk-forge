@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
 
 from ..fleet_profile_contract.definitions import FleetProfileAssignmentInput
 from ..jobs import states as job_states
-from ..model_cache_contract import CacheManifest
+from ..model_cache.contract import CacheManifest
 from ..models.cache import ModelCacheSet
 from ..recipe_action_plans import StopPlan
 from ..storage_demands import (

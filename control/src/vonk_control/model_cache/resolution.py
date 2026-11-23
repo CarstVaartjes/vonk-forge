@@ -24,14 +24,6 @@ from ..catalog.revision_contract import (
     CatalogRevisionContractError,
     read_shared_catalog_document,
 )
-from ..model_cache_contract import (
-    UUID_PATTERN,
-    CachedModelResolution,
-    CachedRecipeResolution,
-    CachedResourceEstimate,
-    CacheResolution,
-    ModelCacheSetState,
-)
 from ..models.cache import ModelCacheSet
 from ..models.catalog import CatalogDocumentRevision
 from ..revision_images import RevisionImage, revision_images
@@ -52,6 +44,14 @@ from .catalog_helpers import (
     _recipe_model_file_ids,
 )
 from .constants import _DIGEST_PATTERN
+from .contract import (
+    UUID_PATTERN,
+    CachedModelResolution,
+    CachedRecipeResolution,
+    CachedResourceEstimate,
+    CacheResolution,
+    ModelCacheSetState,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheError,

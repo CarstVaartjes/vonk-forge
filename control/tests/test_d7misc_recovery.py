@@ -13,7 +13,7 @@ from vonk_control.catalog.sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
 )
-from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
+from vonk_control.model_cache.ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages.client import RecipePackageClient
 from vonk_control.recipe_packages.contracts import RecipePackageError
@@ -115,10 +115,10 @@ def test_cache_pagination_uses_authenticated_observation_cursors():
     from unittest.mock import Mock
 
     from vonk_control.auth import CursorCodec, CursorError
-    from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.model_cache_api import (
+    from vonk_control.model_cache.api import (
         ModelCacheOperationProvider,
     )
+    from vonk_control.model_cache.service import ModelCacheService
 
     provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService))
     assert (

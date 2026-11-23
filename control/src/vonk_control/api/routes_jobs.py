@@ -32,7 +32,7 @@ from ..auth import (
 from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..failure_evidence import FailureEvidenceService
 from ..jobs.operator_receipts import JobOperatorReceipt, read_job_operator_receipt
-from ..model_cache_contract import UUID_PATTERN
+from ..model_cache.contract import UUID_PATTERN
 from ..operation_api.contracts import (
     JobDetailResponse,
     JobResumeRequest,

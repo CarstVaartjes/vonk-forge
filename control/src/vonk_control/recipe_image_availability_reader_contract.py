@@ -17,7 +17,7 @@ from vonk_agent_protocol import OperationProgress
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .jobs.documents import AvailabilityJobPayload
-from .model_cache_contract import (
+from .model_cache.contract import (
     ModelCacheCancellation,
     ModelCacheDownloadPreviewResponse,
 )

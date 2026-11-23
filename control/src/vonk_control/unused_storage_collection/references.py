@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import InstallationState, LifecycleState, WaitReason
 
-from .. import model_cache_states
 from ..content_identity import (
     RecipeExecution,
     catalog_reference_membership,
@@ -23,6 +22,7 @@ from ..content_identity import (
 from ..fleet_profile_contract.review import FleetProfilePreview
 from ..fleet_profile_contract.vocabulary import NodeId
 from ..inventory.repository import newest_snapshot_ids
+from ..model_cache import states as model_cache_states
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun

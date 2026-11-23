@@ -11,12 +11,12 @@ from uuid import uuid4
 
 from sqlalchemy import Table, func, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheRemovalPayload,
     ModelCacheRemovalResult,
     parse_model_cache_payload,
 )
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
     ModelCacheOperation,

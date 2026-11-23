@@ -19,8 +19,8 @@ from .fleet_model_removal_contract import (
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .lifecycle.evidence import Residue
 from .logging import log_event
+from .model_cache.contract import CacheOperationKind
 from .model_cache.persistence import _operation_removal
-from .model_cache_contract import CacheOperationKind
 from .models.cache import ArtifactLifecycleGate, ModelCacheOperation, RecipeBuild
 from .models.fleet import FleetProfileApplication
 from .strict_json import read_stored_model

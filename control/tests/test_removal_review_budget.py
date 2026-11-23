@@ -35,9 +35,9 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.catalog import revision_collection as catalog_revision_collection
+from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
     ModelCacheOperation,

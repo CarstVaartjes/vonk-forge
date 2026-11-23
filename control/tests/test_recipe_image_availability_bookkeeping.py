@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
     RecipeImageCode,
 )
 from vonk_control.jobs.documents import AvailabilityJobPayload
-from vonk_control.model_cache_contract import ModelCacheCancellation
+from vonk_control.model_cache.contract import ModelCacheCancellation
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.fleet import User

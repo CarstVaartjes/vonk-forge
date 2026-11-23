@@ -101,7 +101,7 @@ from ..jobs.documents import (
     RunSwitchJobPayload,
 )
 from ..mapping_parameters import MappingParameters
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     CacheManifest,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,

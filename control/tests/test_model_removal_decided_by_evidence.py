@@ -17,13 +17,13 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control import model_cache_states
 from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
 )
+from vonk_control.model_cache import states as model_cache_states
+from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,

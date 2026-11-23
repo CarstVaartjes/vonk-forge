@@ -25,7 +25,7 @@ from ..library.contract import (
     LibraryResourceProjection,
     _utc,
 )
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     CacheManifest,
     ModelStorageSnapshot,
 )

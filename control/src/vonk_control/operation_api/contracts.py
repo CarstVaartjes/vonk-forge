@@ -27,7 +27,7 @@ from ..fleet_profile_contract.applications import (
 )
 from ..fleet_profile_contract.endpoints import FleetProfileEndpointsView
 from ..jobs.operator_receipts import JobOperatorReceipt
-from ..model_cache_contract import ModelCacheCancellation
+from ..model_cache.contract import ModelCacheCancellation
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import (
     OperationEvidenceDownload,

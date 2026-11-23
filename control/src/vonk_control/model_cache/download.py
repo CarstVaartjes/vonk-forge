@@ -30,7 +30,6 @@ from ..artifact_lifecycle import (
 from ..artifact_reference_scan.model_sets import require_model_sets_open
 from ..categorized_faults import OperationInterrupted
 from ..lifecycle.types import State
-from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from ..models.cache import ModelCacheOperation, ModelCacheSet
 from ..operations.contract import AvailabilityRecoveryAction
 from .artifacts import ArtifactSpec
@@ -48,6 +47,7 @@ from .errors import (
 )
 from .provider_waits import hinted_until
 from .providers import provider_for
+from .ranges import cleanup_ranges, download_ranges, range_partial_bytes
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

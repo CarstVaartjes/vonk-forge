@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 from vonk_forge_contracts import RecipeDefinition
 
 if TYPE_CHECKING:
-    from .model_cache_contract import CacheResolution
+    from .model_cache.contract import CacheResolution
 
 
 def cache_resolution_answers_revision(

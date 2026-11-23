@@ -125,7 +125,7 @@ def test_referenced_model_expands_to_protected_content_objects(
     """A model digest is not its files' digest: protect actual content before
     an installation's plan exists on the Spark.
     """
-    from vonk_control.model_cache_contract import CacheManifest
+    from vonk_control.model_cache.contract import CacheManifest
 
     _service, set_digest = cached
     with world.sessions() as session:

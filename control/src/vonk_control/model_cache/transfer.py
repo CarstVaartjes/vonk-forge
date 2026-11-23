@@ -12,20 +12,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, OperationMemberProgress
 
 from ..categorized_faults import OperationInterrupted
-from ..model_cache_contract import (
-    ModelCacheCounters,
-    ModelCacheDownloadPayload,
-    ModelCacheDownloadResult,
-    ModelCacheOperationPhase,
-    ModelCacheOperationProgress,
-    ModelCacheRepairCheckpoint,
-    ModelCacheRepairPayload,
-    ModelCacheSetState,
-    ModelCacheTransfer,
-    ModelCacheTransferArtifact,
-)
-from ..model_cache_progress import PHASES, cache_progress
-from ..model_cache_ranges import range_partial_bytes
 from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..profile_read_observation import observing_profile
 from . import constants
@@ -41,8 +27,22 @@ from .constants import (
     _USE_MANIFEST_BYTES,
     SCHEMA_VERSION,
 )
+from .contract import (
+    ModelCacheCounters,
+    ModelCacheDownloadPayload,
+    ModelCacheDownloadResult,
+    ModelCacheOperationPhase,
+    ModelCacheOperationProgress,
+    ModelCacheRepairCheckpoint,
+    ModelCacheRepairPayload,
+    ModelCacheSetState,
+    ModelCacheTransfer,
+    ModelCacheTransferArtifact,
+)
 from .errors import ModelCacheError, _ArtifactWriterBusy
 from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
+from .progress import PHASES, cache_progress
+from .ranges import range_partial_bytes
 
 if TYPE_CHECKING:
     from .service import ModelCacheService

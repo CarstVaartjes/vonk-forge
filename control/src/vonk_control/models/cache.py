@@ -26,7 +26,7 @@ from ..exact_integer_storage import (
     DecimalIntegerToken,
     ExactNonnegativeInteger,
 )
-from ..model_cache_contract import ModelCacheSetState
+from ..model_cache.contract import ModelCacheSetState
 from ..model_primitives import (
     Base,
     _lower_hex,

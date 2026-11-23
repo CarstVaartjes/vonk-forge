@@ -11,21 +11,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, ModelCacheBlockerCode
 
-from .. import model_cache_states
-from ..model_cache_contract import (
-    CacheOperationKind,
-    ModelCacheDownloadPayload,
-    ModelCacheSetState,
-    ModelCacheTransfer,
-)
 from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands
+from . import states as model_cache_states
 from .artifacts import (
     ArtifactSetManifest,
     _is_hex,
     _unique_artifacts,
 )
 from .constants import _DIGEST_LENGTH
+from .contract import (
+    CacheOperationKind,
+    ModelCacheDownloadPayload,
+    ModelCacheSetState,
+    ModelCacheTransfer,
+)
 from .errors import ModelCacheError
 from .persistence import _manifest_of
 from .views import StorageSummary

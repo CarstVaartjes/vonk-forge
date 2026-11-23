@@ -4,7 +4,7 @@ from threading import Barrier, Event, Semaphore
 
 import httpx2
 import pytest
-from vonk_control.model_cache_ranges import (
+from vonk_control.model_cache.ranges import (
     download_ranges,
     range_partial_bytes,
 )

@@ -26,7 +26,14 @@ from ..lifecycle.evidence import (
 )
 from ..lifecycle.types import State
 from ..logging import redact_text
-from ..model_cache_contract import (
+from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
+from ..operations.contract import AvailabilityOperationFailure
+from ..stored.json_values import read_row_column
+from ..strict_json import read_stored_model, serialize_json_value
+from .artifacts import ArtifactSetManifest, _sha256_json
+from .constants import _CREDENTIAL_FAILURE_PUBLIC_CODES, _LOGGER, SCHEMA_VERSION
+from .contract import (
     ModelCacheCancellation,
     ModelCacheCounters,
     ModelCacheDownloadPayload,
@@ -41,15 +48,8 @@ from ..model_cache_contract import (
     parse_model_cache_payload,
     parse_model_cache_result,
 )
-from ..model_cache_progress import cache_progress
-from ..models.cache import ModelCacheOperation, ModelCacheSet
-from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
-from ..operations.contract import AvailabilityOperationFailure
-from ..stored.json_values import read_row_column
-from ..strict_json import read_stored_model, serialize_json_value
-from .artifacts import ArtifactSetManifest, _sha256_json
-from .constants import _CREDENTIAL_FAILURE_PUBLIC_CODES, _LOGGER, SCHEMA_VERSION
 from .errors import ModelCacheResolutionError, ModelCacheStorageInvalid
+from .progress import cache_progress
 
 
 def _model_removal_intent_digest(

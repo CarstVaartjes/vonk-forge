@@ -12,13 +12,13 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .model_cache_contract import (
+from ..operations.progress import STALE_AFTER_SECONDS, project_progress, sample_progress
+from ..strict_json import read_stored_model
+from .contract import (
     ModelCacheCounters,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
 )
-from .operations.progress import STALE_AFTER_SECONDS, project_progress, sample_progress
-from .strict_json import read_stored_model
 
 #: The measured phase of each operation phase.  Both are words of the contract's
 #: ``ProgressPhase``; the measurement used to say ``download``, ``verify`` and

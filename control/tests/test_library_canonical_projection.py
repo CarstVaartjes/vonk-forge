@@ -23,7 +23,7 @@ from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection.service import LibraryProjection
-from vonk_control.model_cache_contract import ModelCacheOperationProgress
+from vonk_control.model_cache.contract import ModelCacheOperationProgress
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import (

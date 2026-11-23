@@ -10,8 +10,8 @@ import pytest
 from vonk_agent_protocol import LifecycleState, ModelCacheFailureCode
 from vonk_control.model_cache.artifacts import ArtifactSpec
 from vonk_control.model_cache.constants import ProviderKind
-from vonk_control.model_cache_ranges import download_ranges
-from vonk_control.model_cache_streams import (
+from vonk_control.model_cache.ranges import download_ranges
+from vonk_control.model_cache.streams import (
     PLATEAU_HOLD_WINDOWS,
     WINDOW_SECONDS,
     StreamGovernor,

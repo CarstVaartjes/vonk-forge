@@ -41,9 +41,7 @@ from vonk_control.jobs.documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from vonk_control.model_cache.errors import ModelCacheError
-from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CacheManifest,
     ModelCacheCounters,
     ModelCacheDownloadPayload,
@@ -52,7 +50,9 @@ from vonk_control.model_cache_contract import (
     ModelCacheRepairPreviewResponse,
     ModelCacheSetState,
 )
-from vonk_control.model_cache_progress import cache_progress, progress_document
+from vonk_control.model_cache.errors import ModelCacheError
+from vonk_control.model_cache.progress import cache_progress, progress_document
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,

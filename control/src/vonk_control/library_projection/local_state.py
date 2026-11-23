@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
 from ..catalog.queries import active_head_revision
 from ..content_identity import recipe_content_membership
@@ -41,14 +40,15 @@ from ..library.contract import (
 )
 from ..library.image_presence import ImageKey, ImagePresence
 from ..machine_states import INSTALLATION_ACTIVE
-from ..model_cache.errors import ModelCacheError
-from ..model_cache.lineage import verifies_model
-from ..model_cache.resolution import resolve_recipe_set
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     CacheManifest,
     CacheOperationKind,
     ModelCacheOperationProgress,
 )
+from ..model_cache.errors import ModelCacheError
+from ..model_cache.lineage import verifies_model
+from ..model_cache.resolution import resolve_recipe_set
 from ..models.cache import ModelCacheOperation, ModelCacheSet, RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun, RunNode

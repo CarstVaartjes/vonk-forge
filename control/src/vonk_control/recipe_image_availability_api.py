@@ -26,7 +26,7 @@ from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
 from .logging import redact_text
-from .model_cache_contract import UUID_PATTERN, Digest
+from .model_cache.contract import UUID_PATTERN, Digest
 from .operation_api.contracts import bounded_error_responses
 from .operations.blockers import OperationBlocker
 from .operations.contract import (

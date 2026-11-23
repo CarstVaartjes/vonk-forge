@@ -39,12 +39,12 @@ from vonk_control.library.storage_observation import (
     LibraryStorageObserver,
 )
 from vonk_control.library_projection.service import LibraryProjection
-from vonk_control.model_cache.resolution import resolve_recipe_set
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CacheOperationKind,
     ModelCacheUsage,
     ModelStorageObservationReason,
 )
+from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.models.cache import ModelCacheSet, RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
@@ -1073,7 +1073,7 @@ def test_damaged_verified_references_do_not_hide_healthy_cached_model(
 ):
     """One bad manifest must not turn unrelated cached rows into unknown state."""
     from vonk_control.library.contract import LibraryCacheState
-    from vonk_control.model_cache_contract import CacheManifest
+    from vonk_control.model_cache.contract import CacheManifest
     from vonk_control.stored.json_values import write_guard_mode
 
     projection, sessions, *_ = assessed_library

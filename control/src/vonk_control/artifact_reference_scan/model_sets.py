@@ -27,7 +27,7 @@ from ..content_identity import (
     active_recipe_revisions,
     catalog_selector_membership,
 )
-from ..model_cache_contract import CacheManifest
+from ..model_cache.contract import CacheManifest
 from ..models.cache import ModelCacheSet, ModelCacheSetArtifact
 from ..models.catalog import CatalogDocumentRevision
 from ..models.fleet import FleetProfile

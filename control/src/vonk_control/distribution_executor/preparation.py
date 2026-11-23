@@ -17,15 +17,15 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
-from .. import model_cache_states
 from ..content_identity import same_image
 from ..logging import redact_text
-from ..model_cache.errors import ModelCacheNotFound
-from ..model_cache.views import CacheOperationView
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadResult,
 )
+from ..model_cache.errors import ModelCacheNotFound
+from ..model_cache.views import CacheOperationView
 from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..profile_read_observation import profile_read
@@ -469,8 +469,8 @@ class CompositeDistributionPhaseExecutor(
     def _cache_result(
         view: CacheOperationView,
     ) -> RunSwitchModelDownloadResult | RunSwitchModelDownloadPendingResult:
-        from ..model_cache_contract import ModelCacheOperationProgress
-        from ..model_cache_progress import project_cache_progress
+        from ..model_cache.contract import ModelCacheOperationProgress
+        from ..model_cache.progress import project_cache_progress
 
         if view.artifact_set_sha256 is None:
             raise RuntimeError(

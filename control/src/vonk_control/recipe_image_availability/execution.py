@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import model_cache_states
 from ..failure_classification import is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import (
@@ -27,6 +26,7 @@ from ..jobs.documents import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.image_availability import preparation_deadline
+from ..model_cache import states as model_cache_states
 from ..model_cache.errors import ModelCacheNotFound
 from ..models.cache import ModelCacheOperation
 from ..models.catalog import CatalogDocumentRevision

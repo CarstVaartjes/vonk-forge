@@ -15,8 +15,8 @@ from vonk_control.inventory.repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.spark_store_retention import store_retention_request

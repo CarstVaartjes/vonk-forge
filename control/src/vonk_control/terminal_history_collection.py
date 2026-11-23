@@ -60,7 +60,7 @@ from vonk_agent_protocol.state_machines import EnrollmentRecordState, NodeIdenti
 from .catalog.revision_collection import GRACE, INTERVAL, tokens
 from .lifecycle.evidence import Residue
 from .logging import log_event
-from .model_cache_contract import ModelCacheSetState
+from .model_cache.contract import ModelCacheSetState
 from .models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,

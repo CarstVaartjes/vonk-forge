@@ -152,7 +152,7 @@ def test_controller_sessions_end_before_suspension_and_api_reads_buffer():
         "control/src/vonk_control/library_projection/views.py",
         "control/src/vonk_control/library_projection/catalog.py",
         "control/src/vonk_control/library_projection/local_state.py",
-        "control/src/vonk_control/model_cache_api.py",
+        "control/src/vonk_control/model_cache/api.py",
         "control/src/vonk_control/api/example.py",
     ],
 )

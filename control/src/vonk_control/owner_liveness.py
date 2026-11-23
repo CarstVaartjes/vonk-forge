@@ -43,12 +43,13 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.state_machines import EnrollmentRecordState
 
-from . import agent_operation_states, model_cache_states
+from . import agent_operation_states
 from .agent_contacts import last_seen
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
 from .inventory.repository import MAX_INVENTORY_FUTURE_SKEW
 from .jobs import states as job_states
+from .model_cache import states as model_cache_states
 from .models.cache import ModelCacheOperation, RecipeBuild, RecipeLibrarySyncRun
 from .models.execution import (
     STOPPABLE_RUN_STATES,

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, model_validator
 from vonk_agent_protocol import RecipeImageCode
 
-from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
+from .model_cache.contract import DIGEST_PATTERN, UUID_PATTERN
 from .operations.contract import AvailabilityOperationFailure
 from .strict_json import StrictJSONModel
 

@@ -33,18 +33,17 @@ from ..fleet_model_removal_contract import (
     FleetModelRemovalCheckpoint,
 )
 from ..lifecycle.model_cache import ModelCacheAdapter
-from ..model_cache_contract import (
+from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
+from ..operations.contract import AvailabilityRecoveryAction
+from ..strict_json import serialize_json_value
+from .constants import SCHEMA_VERSION, SOURCE_POLICY
+from .contract import (
     ModelCacheCounters,
     ModelCacheOperationPhase,
     ModelCacheOperationProgress,
     ModelCacheRemovalPayload,
     ModelCacheRetry,
 )
-from ..model_cache_progress import cache_progress, progress_document
-from ..models.cache import ArtifactLifecycleGate, ModelCacheOperation
-from ..operations.contract import AvailabilityRecoveryAction
-from ..strict_json import serialize_json_value
-from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheStorageRefused,
@@ -56,6 +55,7 @@ from .persistence import (
     _model_removal_intent_digest,
     _write_operation_payload,
 )
+from .progress import cache_progress, progress_document
 from .split_transfer import HELD_PARTIALS_OWNERS, REPAIR_PARTIALS_PREFIX
 from .views import CacheOperationView, ModelCacheRemovalScope
 

@@ -44,12 +44,12 @@ from vonk_control.exact_integer_storage import (
     ExactNonnegativeInteger,
 )
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
-from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CacheEntryResponse,
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
 )
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation, ModelCacheSet
 from vonk_control.models.catalog import CatalogDocumentRevision

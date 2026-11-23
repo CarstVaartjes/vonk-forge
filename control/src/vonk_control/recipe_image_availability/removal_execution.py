@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -34,11 +33,12 @@ from ..categorized_errors import InvalidValue
 from ..failure_classification import error_code
 from ..jobs import states as job_states
 from ..logging import log_event
+from ..model_cache import states as model_cache_states
 from ..model_cache.constants import REMOVAL_BATCH_SECONDS
-from ..model_cache.errors import ModelCacheError, ModelCacheNotFound
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     ModelCacheRemovalResult,
 )
+from ..model_cache.errors import ModelCacheError, ModelCacheNotFound
 from ..models.jobs import Job
 from ..operations.contract import (
     AvailabilityOperationFailure,

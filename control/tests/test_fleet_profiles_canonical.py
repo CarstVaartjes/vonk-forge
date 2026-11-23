@@ -28,7 +28,7 @@ from vonk_control.fleet_profile_contract.definitions import (
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.fleet_profiles.service import FleetProfileService
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CachedModelResolution,
     CachedRecipeResolution,
     CachedResourceEstimate,

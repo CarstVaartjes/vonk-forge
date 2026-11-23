@@ -17,19 +17,30 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .api_availability import AVAILABILITY_ERRORS
-from .auth import MUTATION_ROLES, Actor, CursorCodec
-from .bounded_json import require_integer, require_sequence
-from .cache_removal_review import CacheRemovalReview
-from .model_cache.errors import (
-    ModelCacheConflict,
-    ModelCacheError,
-    ModelCacheNotFound,
-    ModelCacheResolutionError,
-    ModelCacheSelectorAmbiguous,
+from ..api_availability import AVAILABILITY_ERRORS
+from ..auth import MUTATION_ROLES, Actor, CursorCodec
+from ..bounded_json import require_integer, require_sequence
+from ..cache_removal_review import CacheRemovalReview
+from ..operation_api.contracts import (
+    OperationApiServices,
+    OperationListPage,
+    OperationProvider,
+    OperationQuery,
+    bounded_error_responses,
 )
-from .model_cache.service import ModelCacheService
-from .model_cache_contract import (
+from ..operations.contract import AvailabilityOperationFailure
+from ..operations.item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
+from ..operator_acceptance import (
+    OperatorReceiptResolver,
+    ReceiptPolicy,
+    operator_acceptance,
+)
+from ..strict_json import read_stored_model
+from .contract import (
     UUID_PATTERN,
     CacheOperationKind,
     ModelCacheCancellationRequest,
@@ -39,26 +50,15 @@ from .model_cache_contract import (
     ModelCacheRemovalRequest,
     ModelCacheRemovalResult,
 )
-from .model_cache_progress import project_cache_progress
-from .operation_api.contracts import (
-    OperationApiServices,
-    OperationListPage,
-    OperationProvider,
-    OperationQuery,
-    bounded_error_responses,
+from .errors import (
+    ModelCacheConflict,
+    ModelCacheError,
+    ModelCacheNotFound,
+    ModelCacheResolutionError,
+    ModelCacheSelectorAmbiguous,
 )
-from .operations.contract import AvailabilityOperationFailure
-from .operations.item_contract import (
-    OperationItem,
-    OperationOwnerReference,
-    OperationResultFacts,
-)
-from .operator_acceptance import (
-    OperatorReceiptResolver,
-    ReceiptPolicy,
-    operator_acceptance,
-)
-from .strict_json import read_stored_model
+from .progress import project_cache_progress
+from .service import ModelCacheService
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/model/operations/{operation_id}"): "getModelOperation",
@@ -128,8 +128,8 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         # answer (503, Retry-After, error code) says to ask again.
         raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
-        from .library.api import SelectorAmbiguityHTTPError
-        from .library_projection.common import LibrarySelectorAmbiguous
+        from ..library.api import SelectorAmbiguityHTTPError
+        from ..library_projection.common import LibrarySelectorAmbiguous
 
         return SelectorAmbiguityHTTPError(
             LibrarySelectorAmbiguous("model", error.candidates),
@@ -172,7 +172,7 @@ def install_model_operator_routes(
     Replays bind the actor, request identity, action, selector, and digest.
     """
 
-    from .operation_api.constants import _ADMIN_OPERATION_IDS
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS.update(MODEL_CACHE_OPERATION_IDS)
 
@@ -419,7 +419,7 @@ class ModelCacheOperationProvider:
         self, service: ModelCacheService, cursors: CursorCodec | None = None
     ) -> None:
         self._service = service
-        from .operation_api.providers import observation_cursors
+        from ..operation_api.providers import observation_cursors
 
         self._cursors = cursors or observation_cursors()
 

@@ -22,8 +22,8 @@ from vonk_control.compiled_execution_plan import (
 from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
+from vonk_control.model_cache.contract import ModelCacheDownloadPayload
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import ModelCacheDownloadPayload
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.jobs import Job

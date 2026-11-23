@@ -64,7 +64,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..machine_states import RUN_LIVE
-from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models.cache import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
@@ -84,6 +83,7 @@ from ..unused_storage_collection.references import (
     _installation_kept,
     _installation_pointing,
 )
+from .contract import CacheManifest, CacheOperationKind
 from .errors import ModelCacheConflictInvalid
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal, _store_operation_payload

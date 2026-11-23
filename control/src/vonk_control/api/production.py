@@ -38,8 +38,8 @@ from ..library.assessment import LibraryAssessment
 from ..library_projection.service import LibraryProjection
 from ..logging import configure_controller_logging
 from ..metrics.registry import MetricsRegistry, read_runnable_job_ages
+from ..model_cache.api import register_model_cache_operation_provider
 from ..model_cache.service import ModelCacheService
-from ..model_cache_api import register_model_cache_operation_provider
 from ..observation.platform import PlatformObserver
 from ..operator_projection_api.wiring import build_fleet_operator_services
 from ..recipe_builds.service import RecipeBuildService

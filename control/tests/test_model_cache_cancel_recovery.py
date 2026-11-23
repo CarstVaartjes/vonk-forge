@@ -14,10 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor
+from vonk_control.model_cache.api import install_model_operator_routes
+from vonk_control.model_cache.contract import ModelCacheDownloadResult
 from vonk_control.model_cache.errors import ModelCacheConflict
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_api import install_model_operator_routes
-from vonk_control.model_cache_contract import ModelCacheDownloadResult
 from vonk_control.model_primitives import Base
 
 OPERATION_REQUEST = "00000000-0000-4000-8000-000000000041"

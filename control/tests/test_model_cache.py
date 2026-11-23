@@ -27,8 +27,18 @@ from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
 from vonk_control.jobs.queue import JobService
+from vonk_control.model_cache.api import (
+    ModelCacheOperationProvider,
+    install_model_operator_routes,
+    model_cache_operation_provider,
+)
 from vonk_control.model_cache.artifacts import ArtifactSetManifest, ArtifactSpec
 from vonk_control.model_cache.constants import _CHUNK_BYTES, _SOURCE_GONE_ATTEMPTS
+from vonk_control.model_cache.contract import (
+    ModelCacheCounters,
+    ModelCacheDownloadResult,
+    ModelCacheRemovalResult,
+)
 from vonk_control.model_cache.errors import (
     ModelCacheConflict,
     ModelCacheNotFoundInvalid,
@@ -38,16 +48,6 @@ from vonk_control.model_cache.errors import (
     _retry_after_seconds,
 )
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_api import (
-    ModelCacheOperationProvider,
-    install_model_operator_routes,
-    model_cache_operation_provider,
-)
-from vonk_control.model_cache_contract import (
-    ModelCacheCounters,
-    ModelCacheDownloadResult,
-    ModelCacheRemovalResult,
-)
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (
     ArtifactLifecycleGate,
@@ -2537,7 +2537,7 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
-    from vonk_control.model_cache_progress import cache_progress, progress_document
+    from vonk_control.model_cache.progress import cache_progress, progress_document
 
     value = progress_document(
         cache_progress(
@@ -2802,7 +2802,7 @@ def test_repair_capacity_admission_preserves_verified_object(
 
 
 def test_repair_checkpoint_requires_exact_nested_contract():
-    from vonk_control.model_cache_contract import ModelCacheRepairCheckpoint
+    from vonk_control.model_cache.contract import ModelCacheRepairCheckpoint
 
     valid = {"transfer_id": "a" * 32, "completed_objects": ["b" * 64]}
     assert (
@@ -2823,7 +2823,7 @@ def test_sampled_progress_writes_once_per_interval_and_rate_survives_restart(
     cache, tmp_path
 ):
     from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
-    from vonk_control.model_cache_progress import project_cache_progress
+    from vonk_control.model_cache.progress import project_cache_progress
 
     service, sessions = cache
     clock = [datetime.now(UTC)]
@@ -2992,7 +2992,7 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
 
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
-    from vonk_control.model_cache_progress import cache_progress, project_cache_progress
+    from vonk_control.model_cache.progress import cache_progress, project_cache_progress
 
     def snapshot(count: int, total: int | None = 100) -> ModelCacheCounters:
         return ModelCacheCounters(

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from vonk_control.model_cache.api import model_cache_http_error
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
-from vonk_control.model_cache_api import model_cache_http_error
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.control_client.common import (

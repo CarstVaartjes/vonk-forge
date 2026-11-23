@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from ..artifact_lifecycle import ArtifactIdentity, lock_reference_gates
 from ..lifecycle.model_cache import ModelCacheAdapter
-from ..model_cache_contract import CacheOperationKind
 from ..models.cache import ModelCacheOperation
+from .contract import CacheOperationKind
 from .views import CacheOperationView
 
 if TYPE_CHECKING:

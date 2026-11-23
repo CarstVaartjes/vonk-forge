@@ -25,14 +25,14 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts.model import ModelReference
 
-from .cursor_contract import MAX_CURSOR_LENGTH
-from .machine_states import ModelFileStateField
-from .operations.blockers import OperationBlocker
-from .operations.contract import AvailabilityOperationFailure, OperationProgress
-from .recipe_image_availability_clocks_contract import readable_or_none
-from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
-from .strict_json import StrictJSONModel, StrictModel, read_stored_model
-from .wait_contract import QueueWait
+from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..machine_states import ModelFileStateField
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import AvailabilityOperationFailure, OperationProgress
+from ..recipe_image_availability_clocks_contract import readable_or_none
+from ..settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
+from ..strict_json import StrictJSONModel, StrictModel, read_stored_model
+from ..wait_contract import QueueWait
 
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
@@ -406,7 +406,7 @@ class ModelCacheRepairPayload(ModelCacheDownloadPayload):
     repair_checkpoint: ModelCacheRepairCheckpoint
 
 
-from .fleet_model_removal_contract import FleetModelRemovalCheckpoint
+from ..fleet_model_removal_contract import FleetModelRemovalCheckpoint
 
 
 class ModelCacheRemovalPayload(_ModelCacheOperationPayload):

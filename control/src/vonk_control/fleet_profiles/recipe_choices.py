@@ -27,7 +27,7 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileNode,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache_contract import CacheResolution
+from ..model_cache.contract import CacheResolution
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.fleet import FleetProfile
 from ..profile_read_observation import observe_storage

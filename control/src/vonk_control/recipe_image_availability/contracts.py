@@ -51,10 +51,10 @@ from ..categorized_faults import security_reason
 from ..failure_classification import disposition, error_code, is_security_failure
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityRuntime
-from ..model_cache.views import ModelCacheRemovalScope
-from ..model_cache_contract import (
+from ..model_cache.contract import (
     ModelCacheOperationProgress,
 )
+from ..model_cache.views import ModelCacheRemovalScope
 from ..models.jobs import Job
 from ..operations.blockers import OperationBlocker
 from ..operations.contract import AvailabilityOperationFailure

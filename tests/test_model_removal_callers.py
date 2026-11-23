@@ -23,7 +23,7 @@ CALLERS = {
         "model_cache/removal_review.py",
     },
     r"accept_unused_\w+": {"unused_storage_collection/removal.py"},
-    r"remove_model_selector|remove_fleet_model_selector": {"model_cache_api.py"},
+    r"remove_model_selector|remove_fleet_model_selector": {"model_cache/api.py"},
     r"accept_recipe_removal_child_in_session": {
         "recipe_image_availability/removal_acceptance.py"
     },

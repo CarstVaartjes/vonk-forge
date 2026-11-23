@@ -8,8 +8,8 @@ from vonk_agent_protocol import ModelAccessReason, OperationProgress
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
+from vonk_control.model_cache.contract import ModelCacheOperationProgress
 from vonk_control.model_cache.views import CacheOperationView
-from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.operations.blockers import make_blocker
 from vonk_control.run_switch_contract.phase_results import (
     RunSwitchModelDownloadPendingResult,

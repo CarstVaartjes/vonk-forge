@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..categorized_errors import InvalidValue
 from ..lifecycle.model_cache import ModelCacheAdapter, ModelCacheStore
 from ..lifecycle.reconciler import Reconciler
-from ..model_cache_streams import StreamGovernor
 from ..recipe_operations.service import RecipeOperationService
 from ..settings import FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION
 from ..storage_demands import StorageDemands
@@ -53,6 +52,7 @@ from .revisions import RevisionsMixin
 from .scheduler import SchedulerMixin
 from .split_transfer import SplitTransferMixin
 from .storage import StorageMixin
+from .streams import StreamGovernor
 from .transfer import TransferMixin
 from .updates import UpdatesMixin
 from .views import _BackgroundTransfer

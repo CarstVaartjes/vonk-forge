@@ -48,13 +48,13 @@ from vonk_control.jobs.documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
 )
-from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_api import model_cache_operation_provider
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.api import model_cache_operation_provider
+from vonk_control.model_cache.contract import (
     ModelCacheCounters,
     ModelCacheDownloadResult,
 )
-from vonk_control.model_cache_progress import cache_progress, progress_document
+from vonk_control.model_cache.progress import cache_progress, progress_document
+from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision

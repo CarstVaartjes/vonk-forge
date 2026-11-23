@@ -90,7 +90,7 @@ def typescript_vocabulary() -> str:
         FleetRemovalDisposition,
         FleetRemovalReason,
     )
-    from vonk_control.model_cache_contract import (
+    from vonk_control.model_cache.contract import (
         CacheOperationKind,
         ModelStorageObservationReason,
     )

@@ -17,7 +17,7 @@ from vonk_agent_protocol.agent_words import AgentClientDecision
 from vonk_agent_protocol.error_response import BoundedErrorResponse
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     ModelCacheCancellationRequest,
     ModelCacheOperatorRequest,
 )

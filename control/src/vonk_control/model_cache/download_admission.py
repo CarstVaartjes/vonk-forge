@@ -23,14 +23,6 @@ from ..artifact_lifecycle import (
     has_pending_removal,
 )
 from ..bounded_json import require_sequence
-from ..model_cache_contract import (
-    CacheOperationKind,
-    ModelCacheDownloadPayload,
-    ModelCacheRetry,
-    ModelCacheTransfer,
-    ModelCacheTransferArtifact,
-)
-from ..model_cache_progress import progress_document
 from ..models.cache import ModelCacheOperation
 from ..profile_read_observation import observe_storage, observing_profile
 from ..settings import DATABASE_WAIT_BUDGETS
@@ -43,11 +35,19 @@ from .artifacts import (
     _unique_artifacts,
 )
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
+from .contract import (
+    CacheOperationKind,
+    ModelCacheDownloadPayload,
+    ModelCacheRetry,
+    ModelCacheTransfer,
+    ModelCacheTransferArtifact,
+)
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
 from .persistence import _cache_failure, _write_operation_payload
+from .progress import progress_document
 from .source_helpers import _model_selector, _request_key
 from .transfer_admission import admit_transfer
 from .views import CacheOperationView

@@ -66,9 +66,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
 from ..agent_operation_facts import aware
-from ..model_cache_contract import (
+from ..model_cache import states as model_cache_states
+from ..model_cache.contract import (
     ModelCacheCancellationObservation,
     ModelCacheOperationPayload,
     StoredCacheClocks,

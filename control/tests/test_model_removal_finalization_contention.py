@@ -10,9 +10,9 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.model_cache.contract import ModelCacheRemovalResult
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
-from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models.cache import ModelCacheSet
 from vonk_forge_contracts import ModelDefinition, document_sha256
 

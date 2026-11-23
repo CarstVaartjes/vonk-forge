@@ -14,11 +14,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, event, select
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
-from vonk_control import model_cache_states
 from vonk_control.artifact_lifecycle import (
     ArtifactLifecycleError,
     ArtifactLifecycleGate,
 )
+from vonk_control.model_cache import states as model_cache_states
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import (

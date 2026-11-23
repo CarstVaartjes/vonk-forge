@@ -28,7 +28,7 @@ from ..fleet_profile_contract.definitions import (
     FleetProfileView,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..model_cache_contract import CachedResourceEstimate
+from ..model_cache.contract import CachedResourceEstimate
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
 from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice

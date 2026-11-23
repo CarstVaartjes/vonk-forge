@@ -23,7 +23,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.library.contract import LibraryLocalState
 from vonk_control.library_projection import local_state
 from vonk_control.library_projection.service import LibraryProjection
-from vonk_control.model_cache_contract import (
+from vonk_control.model_cache.contract import (
     CacheManifest,
     CacheOperationKind,
     ModelCacheOperationProgress,

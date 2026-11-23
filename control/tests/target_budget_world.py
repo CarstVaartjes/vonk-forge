@@ -30,8 +30,8 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
+from vonk_control.model_cache.contract import CacheManifest
 from vonk_control.model_cache.service import ModelCacheService
-from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact, RecipeBuild
 from vonk_control.models.catalog import (
     CatalogDocument,

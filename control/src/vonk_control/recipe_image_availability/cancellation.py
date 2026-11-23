@@ -17,10 +17,10 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from .. import model_cache_states
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..jobs import states as job_states
 from ..jobs.documents import AvailabilityJobPayload, RecipeBuildParent
+from ..model_cache import states as model_cache_states
 from ..models.cache import ModelCacheOperation, RecipeBuild
 from ..models.jobs import Job
 from ..recipe_builds.cancellation import (
