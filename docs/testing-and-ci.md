@@ -609,8 +609,9 @@ Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
 wait lacks an action and no admission is stuck. It is run by hand after
 lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
 
-TypeScript uses pinned Biome for formatting and focused correctness lint rules; every control/web CSS file (`src/**/*.css`) is formatted by Biome too.
-The commit hook and pull-request CI check changed authored TypeScript files.
+TypeScript uses pinned Biome (`control/web/biome.json`: the recommended rules, minus `noNonNullAssertion`, `noDescendingSpecificity` and `noImportantStyles`) for linting and formatting; every control/web CSS file (`src/**/*.css`) is checked by Biome too.
+CI runs `npm run lint` (`biome ci .`, the whole tree, on pull requests and main alike); the commit hook runs the same `biome ci` on the staged files. A `biome-ignore` comment states its reason.
+`tsconfig.json` carries the strict flag set (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly`, `verbatimModuleSyntax` and the rest); fix a finding in the code.
 `npm run typecheck --prefix control/web` checks both the application and browser
 tests/configuration; `npm run build` also checks application types. Generated
 contracts remain owned by their generators. Rust hooks run pinned formatting and
