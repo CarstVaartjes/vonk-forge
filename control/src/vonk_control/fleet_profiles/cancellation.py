@@ -22,7 +22,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
 
-from .. import fleet_profile_states
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.applications import (
     FleetProfileApplicationCancellationIntent,
@@ -45,6 +44,7 @@ from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import stall_deadline
 from ..strict_json import read_stored_model
 from ..workload_intent import take_workload_intent
+from . import states as fleet_profile_states
 from .assessment_support import (
     _deferral_code,
     _preview_blockers,

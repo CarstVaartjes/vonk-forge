@@ -9,7 +9,6 @@ from uuid import NAMESPACE_OID, uuid5
 from sqlalchemy import delete, select, update
 from vonk_agent_protocol import InvalidRequestReason
 
-from .. import fleet_profile_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.definitions import FleetProfileDeletion
@@ -20,6 +19,7 @@ from ..models.fleet import (
     FleetProfileRecipe,
     FleetProfileSelection,
 )
+from . import states as fleet_profile_states
 from .contracts import FleetProfileInvalid, FleetProfileRevisionConflict
 
 if TYPE_CHECKING:

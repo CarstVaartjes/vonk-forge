@@ -32,30 +32,30 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
-from . import fleet_profile_states
 from .content_identity import same_image
-from .fleet_profile_capacity_repair import (
-    capacity_document as _capacity_document,
-)
-from .fleet_profile_capacity_repair import (
-    memory_claim as _memory_claim,
-)
-from .fleet_profile_capacity_repair import (
-    memory_claim_id as _memory_claim_id,
-)
 from .fleet_profile_contract.applications import FleetProfileApplicationProgress
 from .fleet_profile_contract.assessment import FleetProfileResourceRequirement
 from .fleet_profile_contract.definitions import FleetProfileAssignment
 from .fleet_profile_contract.effects import FleetProfileEffects
 from .fleet_profile_contract.review import FleetProfilePreview
 from .fleet_profile_contract.vocabulary import FLEET_PROFILE_ENDED_STATES
+from .fleet_profiles import states as fleet_profile_states
+from .fleet_profiles.capacity_repair import (
+    capacity_document as _capacity_document,
+)
+from .fleet_profiles.capacity_repair import (
+    memory_claim as _memory_claim,
+)
+from .fleet_profiles.capacity_repair import (
+    memory_claim_id as _memory_claim_id,
+)
+from .fleet_profiles.port_promises import clear_port_promises
 from .jobs import states as job_states
 from .models.cache import RecipeBuild
 from .models.execution import RecipeRun, ResourceReservation
 from .models.fleet import AgentNode, FleetProfileApplication
 from .models.jobs import Job
 from .preparation_contract import RuntimeImageIdentity
-from .profile_port_promises import clear_port_promises
 from .resource_planning.memory_kinds import memory_reservation_kind
 from .run_switch_contract.evidence import StopImpact
 from .run_switch_contract.operations import RunSwitchOperationResult

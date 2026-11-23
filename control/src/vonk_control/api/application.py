@@ -29,7 +29,10 @@ from ..catalog.api import install_catalog_routes
 from ..catalog.service import CatalogService
 from ..failure_evidence import FailureEvidenceService
 from ..failure_evidence_api import install_failure_evidence_routes
-from ..fleet_profile_api import install_fleet_profile_routes
+from ..fleet_profiles.api import install_fleet_profile_routes
+from ..fleet_profiles.application_cancel_api import (
+    install_profile_application_cancel_route,
+)
 from ..gateway.keys import GatewayKeyService, install_gateway_key_routes
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..metrics.prometheus_api import PrometheusReader
@@ -44,7 +47,6 @@ from ..operator_acceptance import (
     OperatorReceiptResolver,
 )
 from ..operator_projection_api.services import FleetOperatorServices
-from ..profile_application_cancel_api import install_profile_application_cancel_route
 from ..recipe_operations.service import RecipeOperationService
 from ..run_switch_operations.service import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute

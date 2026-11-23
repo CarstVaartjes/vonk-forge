@@ -160,9 +160,9 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
 def test_profile_observation_cannot_turn_statement_reads_into_writes(postgres_engine):
     """Catches a new projection writer silently committing in autocommit mode."""
     from sqlalchemy.orm import sessionmaker
+    from vonk_control.fleet_profiles.read_observation import profile_read
     from vonk_control.model_primitives import Base
     from vonk_control.models.fleet import AgentNode, AgentNodeContact
-    from vonk_control.profile_read_observation import profile_read
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
@@ -190,7 +190,7 @@ def test_build_resolution_is_memoized_within_a_read_but_fresh_for_the_next(
     """Catches retaining a revision's old receipt after a new build completes."""
     from dataclasses import replace
 
-    from vonk_control.profile_read_observation import profile_read
+    from vonk_control.fleet_profiles.read_observation import profile_read
     from vonk_control.recipe_builds.common import RecipeBuildResolution
     from vonk_control.source_bundles import SourceBundleStore
 

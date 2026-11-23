@@ -52,7 +52,6 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.fleet import AgentNode, FleetProfile, FleetProfileApplication
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs, sibling_runs
-from ..profile_read_observation import profile_read
 from ..recipe_runtime_specs import recipe_topology
 from ..run_switch_contract.plans import RunSwitchAssessment
 from .assessment_support import (
@@ -75,6 +74,7 @@ from .projection_support import (
     _profile_document,
     _review_effects_digest,
 )
+from .read_observation import profile_read
 
 if TYPE_CHECKING:
     from .service import FleetProfileService

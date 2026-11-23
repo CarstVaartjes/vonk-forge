@@ -23,7 +23,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
 from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
 from ..evidence_repeats import load_subject, note_repeat, note_success
@@ -35,6 +34,7 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import OperationBlocker, bound_blockers, make_blocker
 from ..persisted_waits import schedule_wait
+from . import states as fleet_profile_states
 from .assessment_support import (
     _preview_blockers,
     _progress_with_blockers,

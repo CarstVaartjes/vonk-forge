@@ -173,7 +173,7 @@ def test_database_errors_never_leak_sqlalchemy_documentation_codes() -> None:
     error is a contract reason, never the library's own word."""
     from vonk_agent_protocol import ControllerErrorCode
     from vonk_control.failure_classification import disposition, error_code
-    from vonk_control.profile_error_summary import _error_summary
+    from vonk_control.fleet_profiles.error_summary import _error_summary
 
     for error in _database_errors():
         assert getattr(error, "code", None), "SQLAlchemy errors carry a docs code"

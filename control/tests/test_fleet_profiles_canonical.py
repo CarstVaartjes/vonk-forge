@@ -1488,8 +1488,8 @@ def test_profile_read_observes_distinct_content_once(
         revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/latency-{index}")
+    from vonk_control.fleet_profiles.read_observation import observe_storage
     from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.profile_read_observation import observe_storage
     from vonk_control.runtime_image_preparation.storage import (
         FilesystemRuntimeImageStorage,
     )
@@ -1543,7 +1543,7 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
-    from vonk_control import profile_read_observation as observation
+    from vonk_control.fleet_profiles import read_observation as observation
 
     submissions = []
     submit = observation._POOL.submit
@@ -1761,8 +1761,11 @@ def test_profile_storage_wait_is_bounded_and_recovers(
 
     from vonk_agent_protocol import ProfileReasonCode
     from vonk_control.categorized_errors import BookkeepingUnknown
+    from vonk_control.fleet_profiles.read_observation import (
+        observe_storage,
+        profile_read,
+    )
     from vonk_control.model_cache.service import ModelCacheService
-    from vonk_control.profile_read_observation import observe_storage, profile_read
     from vonk_control.runtime_image_preparation.storage import (
         FilesystemRuntimeImageStorage,
     )
@@ -1832,7 +1835,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             return service.preview(saved.id)
         return service.read_number(1)
 
-    from vonk_control import profile_read_observation
+    from vonk_control.fleet_profiles import read_observation as profile_read_observation
 
     from .pass_budget_clocks import completing_wait, expiring_wait
 
@@ -1893,7 +1896,7 @@ def test_profile_observation_reuses_only_fresh_results(monkeypatch):
     from threading import Event
     from types import SimpleNamespace
 
-    from vonk_control import profile_read_observation as observation
+    from vonk_control.fleet_profiles import read_observation as observation
 
     now = [0.0]
     monkeypatch.setattr(observation, "time", SimpleNamespace(monotonic=lambda: now[0]))

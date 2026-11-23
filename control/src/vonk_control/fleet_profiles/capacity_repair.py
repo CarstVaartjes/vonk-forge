@@ -6,11 +6,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState, UnknownOutcomeError, WaitReason
 
-from .fleet_profile_contract.assessment import FleetProfileResourceRequirement
-from .models.execution import ResourceReservation
-from .models.fleet import FleetProfileApplication
-from .resource_planning.memory_kinds import memory_reservation_kind
-from .strict_json import read_stored_model
+from ..fleet_profile_contract.assessment import FleetProfileResourceRequirement
+from ..models.execution import ResourceReservation
+from ..models.fleet import FleetProfileApplication
+from ..resource_planning.memory_kinds import memory_reservation_kind
+from ..strict_json import read_stored_model
 
 
 def memory_claim_id(application_id: str, assignment_id: str, node_id: str) -> str:

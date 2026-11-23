@@ -42,7 +42,6 @@ from ..models.fleet import FleetProfileApplication
 from ..models.telemetry import NodeInventorySnapshot
 from ..preparation_contract import RuntimeImageIdentity
 from ..profile_capacity import plan_kept_runs
-from ..profile_error_summary import _error_summary, _normalized_failure_text
 from ..recipe_runtime_specs import resolve_recipe_entities
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.plans import RunSwitchAssessment
@@ -64,6 +63,7 @@ from .contracts import (
     FleetProfileResourceRecheckUnavailable,
 )
 from .dependencies import _LOGGER
+from .error_summary import _error_summary, _normalized_failure_text
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,

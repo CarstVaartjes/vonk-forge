@@ -24,7 +24,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..failure_classification import disposition
@@ -62,6 +61,7 @@ from ..recipe_builds.cancellation import (
 )
 from ..run_route_name import rename_run
 from ..workload_intent import allocate_workload_intent, raise_workload_intent
+from . import states as fleet_profile_states
 from .assessment_support import (
     _require_recovery_preparations,
 )

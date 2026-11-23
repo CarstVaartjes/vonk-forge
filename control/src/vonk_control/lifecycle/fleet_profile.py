@@ -60,7 +60,6 @@ from vonk_agent_protocol import (
     WaitOwnerKind,
 )
 
-from .. import fleet_profile_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
 from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
 from ..fleet_profile_contract.switch_state import (
@@ -71,6 +70,7 @@ from ..fleet_profile_contract.vocabulary import (
     FleetProfileCancellationState,
     FleetProfileOperationState,
 )
+from ..fleet_profiles import states as fleet_profile_states
 from ..jobs import states as job_states
 from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job

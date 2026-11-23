@@ -42,6 +42,7 @@ from .admission_locking import (
 )
 from .catalog.revision_contract import published_steady_peaks
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
+from .fleet_profiles.port_promises import port_binds
 from .gpu.health import gpu_health_reason
 from .install_admission.contracts import AdmissionReason, reason_documents
 from .inventory.repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
@@ -70,7 +71,6 @@ from .profile_capacity import (
     reservation_visible,
     sibling_profile_ports,
 )
-from .profile_port_promises import port_binds
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     run_plan_document,

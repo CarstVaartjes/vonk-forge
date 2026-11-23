@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from ..content_identity import same_image
+from ..fleet_profiles.read_observation import profile_read
 from ..logging import redact_text
 from ..model_cache import states as model_cache_states
 from ..model_cache.contract import (
@@ -28,7 +29,6 @@ from ..model_cache.errors import ModelCacheNotFound
 from ..model_cache.views import CacheOperationView
 from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
-from ..profile_read_observation import profile_read
 from ..run_switch_contract.evidence import RunSwitchPhase
 from ..run_switch_contract.observation import RuntimeImageBuildInput
 from ..run_switch_contract.operations import RunSwitchOperationResult

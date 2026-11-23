@@ -1612,11 +1612,11 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
         FleetProfileAssignmentInput,
         FleetProfileInput,
     )
+    from vonk_control.fleet_profiles.read_observation import profile_read
     from vonk_control.fleet_profiles.run_switch_adapter import (
         RunSwitchFleetProfileAdapter,
     )
     from vonk_control.fleet_profiles.service import FleetProfileService
-    from vonk_control.profile_read_observation import profile_read
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     request = _request(sessions, nodes[0])

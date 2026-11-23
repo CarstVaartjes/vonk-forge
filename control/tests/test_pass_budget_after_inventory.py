@@ -89,7 +89,7 @@ CLASSIFIED = {
     "vonk_control.library_projection.local_state": "request budget, not a collector",
     "vonk_control.library.assessment": "probe budget, not a collector",
     "vonk_control.library.image_presence": "probe budget, not a collector",
-    "vonk_control.profile_read_observation": "read budget, not a collector",
+    "vonk_control.fleet_profiles.read_observation": "read budget, not a collector",
     "vonk_control.model_cache.observation": "checkpoint cadence, not a deadline",
 }
 

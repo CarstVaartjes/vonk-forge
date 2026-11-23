@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
-from .. import fleet_profile_states
 from ..fleet_profile_contract.review import (
     FleetProfileApplicationView,
     FleetProfilePreview,
@@ -25,15 +24,16 @@ from ..fleet_profile_contract.review import (
 from ..lifecycle.evidence import Residue
 from ..models.fleet import FleetProfileApplication
 from ..operations.blockers import OperationBlocker, make_blocker
-from ..profile_claim_restore import restore_released_profile_claims
 from ..stall_window import latest_progress
 from ..storage_demands import StorageRelief
+from . import states as fleet_profile_states
 from .assessment_support import (
     _assignments_needing_preparation,
     _disk_shortfalls,
     _progress_with_blockers,
     _relief_blocker,
 )
+from .claim_restore import restore_released_profile_claims
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,

@@ -30,7 +30,6 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..model_cache.contract import CacheResolution
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.fleet import FleetProfile
-from ..profile_read_observation import observe_storage
 from ..recipe_runtime_specs import recipe_topology
 from ..stored.states import CatalogRevisionState
 from .contracts import (
@@ -45,6 +44,7 @@ from .projection_support import (
     _expanded_roles,
     _profile_document,
 )
+from .read_observation import observe_storage
 
 if TYPE_CHECKING:
     from .service import FleetProfileService

@@ -23,8 +23,8 @@ from ..artifact_jobs.lifecycle import (
     has_pending_removal,
 )
 from ..bounded_json import require_sequence
+from ..fleet_profiles.read_observation import observe_storage, observing_profile
 from ..models.cache import ModelCacheOperation
-from ..profile_read_observation import observe_storage, observing_profile
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value
 from .artifacts import (

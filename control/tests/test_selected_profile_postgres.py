@@ -12,6 +12,7 @@ from vonk_agent_protocol import SupersedeCode
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.contracts import FleetProfileAdmissionEffectBusy
+from vonk_control.fleet_profiles.port_promises import PortPromiseTaken
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentRevision
@@ -23,7 +24,6 @@ from vonk_control.models.fleet import (
     User,
 )
 from vonk_control.models.jobs import Job
-from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 

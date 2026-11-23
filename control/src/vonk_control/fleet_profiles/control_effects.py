@@ -20,7 +20,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states
 from ..fleet_profile_contract.assessment import FleetProfileReason
 from ..fleet_profile_contract.definitions import FleetProfileAssignment
 from ..fleet_profile_contract.effects import (
@@ -42,6 +41,7 @@ from ..run_switch_contract.requests import (
     SparkGroupNode,
 )
 from ..strict_json import warn_unreadable_once
+from . import states as fleet_profile_states
 from .contracts import (
     _ProfileControlEffects,
 )

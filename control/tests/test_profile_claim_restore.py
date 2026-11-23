@@ -13,13 +13,13 @@ from vonk_control.admission_locking import (
     node_admission_key,
     patient_admission,
 )
-from vonk_control.models.execution import ResourceReservation
-from vonk_control.models.fleet import FleetProfileApplication
-from vonk_control.models.telemetry import NodeInventorySnapshot
-from vonk_control.profile_claim_restore import (
+from vonk_control.fleet_profiles.claim_restore import (
     ProfileClaimCapacityShort,
     restore_released_profile_claims,
 )
+from vonk_control.models.execution import ResourceReservation
+from vonk_control.models.fleet import FleetProfileApplication
+from vonk_control.models.telemetry import NodeInventorySnapshot
 
 from .test_profile_port_claims import _ready_profile
 

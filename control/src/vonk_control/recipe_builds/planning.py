@@ -20,6 +20,7 @@ from vonk_forge_contracts import PrebuiltImage
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
+from ..fleet_profiles.read_observation import observe_selection
 from ..gpu.health import gpu_health_reason
 from ..inventory.items import runtime_value
 from ..models.catalog import CatalogDocumentRevision
@@ -31,7 +32,6 @@ from ..prebuilt_images import (
     PrebuiltDecision,
     executable_build_key,
 )
-from ..profile_read_observation import observe_selection
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,

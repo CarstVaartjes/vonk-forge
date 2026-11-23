@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, OperationMemberProgress
 
 from ..categorized_faults import OperationInterrupted
+from ..fleet_profiles.read_observation import observing_profile
 from ..models.cache import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from ..profile_read_observation import observing_profile
 from . import constants
 from .artifacts import (
     ArtifactPart,

@@ -22,11 +22,11 @@ from vonk_agent_protocol import (
     ReservationState,
 )
 
-from . import fleet_profile_states
-from .admission_locking import ConstraintReplan
-from .models.execution import ResourceReservation
-from .models.fleet import FleetProfileApplication
-from .owner_liveness import profile_claim_consumable
+from ..admission_locking import ConstraintReplan
+from ..models.execution import ResourceReservation
+from ..models.fleet import FleetProfileApplication
+from ..owner_liveness import profile_claim_consumable
+from . import states as fleet_profile_states
 
 #: The unique index behind "one live promise per Spark port".
 PORT_PROMISE_CONSTRAINT = "uq_promised_node_port"

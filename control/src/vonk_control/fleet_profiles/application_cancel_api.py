@@ -6,20 +6,20 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 
-from .api_availability import AVAILABILITY_ERRORS
-from .auth import MUTATION_ROLES, Actor
-from .fleet_profile_api import raise_profile_conflict
-from .fleet_profile_contract.review import (
+from ..api_availability import AVAILABILITY_ERRORS
+from ..auth import MUTATION_ROLES, Actor
+from ..fleet_profile_contract.review import (
     FleetProfileApplicationCancelRequest,
     FleetProfileApplicationView,
 )
-from .fleet_profiles.contracts import FleetProfileConflict, FleetProfilePermissionDenied
-from .operation_api.contracts import bounded_error_responses
-from .operator_acceptance import (
+from ..operation_api.contracts import bounded_error_responses
+from ..operator_acceptance import (
     OperatorReceiptResolver,
     ReceiptPolicy,
     operator_acceptance,
 )
+from .api import raise_profile_conflict
+from .contracts import FleetProfileConflict, FleetProfilePermissionDenied
 
 _CANCEL_PATH = "/api/profile/applications/{application_id}/cancel"
 _CANCEL_RECEIPT_PATH = (
@@ -34,7 +34,7 @@ def install_profile_application_cancel_route(
     actor_dependency: Any,
     profiles: Any | None,
 ) -> None:
-    from .operation_api.constants import _ADMIN_OPERATION_IDS
+    from ..operation_api.constants import _ADMIN_OPERATION_IDS
 
     _ADMIN_OPERATION_IDS[("post", _CANCEL_PATH)] = "cancelProfileApplication"
     _ADMIN_OPERATION_IDS[("get", _CANCEL_RECEIPT_PATH)] = (

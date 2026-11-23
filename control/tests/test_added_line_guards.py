@@ -3800,7 +3800,7 @@ def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:
 @pytest.mark.parametrize(
     "owner",
     [
-        "control/src/vonk_control/fleet_profile_states.py",
+        "control/src/vonk_control/fleet_profiles/states.py",
         "control/src/vonk_control/model_cache/contract.py",
         "control/src/vonk_control/run_switch_contract/vocabulary.py",
     ],

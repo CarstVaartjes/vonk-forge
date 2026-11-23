@@ -18,8 +18,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
-from vonk_control import profile_read_observation
 from vonk_control.categorized_errors import BookkeepingUnknown
+from vonk_control.fleet_profiles import read_observation as profile_read_observation
+from vonk_control.fleet_profiles.read_observation import profile_read
 from vonk_control.model_cache import observation
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.model_cache.contract import (
@@ -31,7 +32,6 @@ from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ModelCacheSet
 from vonk_control.models.catalog import CatalogDocument, CatalogDocumentRevision
-from vonk_control.profile_read_observation import profile_read
 from vonk_control.run_switch_operations.artifact_inspection import (
     DatabaseRunSwitchArtifactInspector,
 )
@@ -415,7 +415,7 @@ def test_restart_resumes_checkpoint_without_reobserving_completed_objects(
 
 def test_nested_observation_outlives_request_deadline(monkeypatch, frozen_pass_budgets):
     """Fails on main: nested probes stop at the expired parent request budget."""
-    from vonk_control.profile_read_observation import observe_storage
+    from vonk_control.fleet_profiles.read_observation import observe_storage
 
     entered, release, finished = Event(), Event(), Event()
     calls = []

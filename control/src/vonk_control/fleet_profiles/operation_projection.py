@@ -24,7 +24,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileReportedPhase,
 )
 
-from .. import fleet_profile_states
 from ..auth import MUTATION_ROLES
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.applications import FleetProfileApplicationProgress
@@ -44,6 +43,7 @@ from ..operations.item_contract import (
 )
 from ..persisted_waits import read_wait
 from ..strict_json import warn_unreadable_once
+from . import states as fleet_profile_states
 from .activity import (
     _profile_activity_state,
     _profile_activity_state_expression,

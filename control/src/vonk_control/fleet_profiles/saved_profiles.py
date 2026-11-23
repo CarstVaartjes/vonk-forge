@@ -39,7 +39,6 @@ from ..models.fleet import (
     FleetProfile,
     FleetProfileApplication,
 )
-from ..profile_read_observation import profile_read
 from .contracts import (
     FleetProfileDefinitionUnavailable,
     FleetProfileInvalid,
@@ -51,6 +50,7 @@ from .projection_support import (
     _profile_definition,
     _with_save_notes,
 )
+from .read_observation import profile_read
 
 if TYPE_CHECKING:
     from .profile_projection import _ProfilePageReads
