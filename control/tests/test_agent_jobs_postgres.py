@@ -1215,18 +1215,23 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         AgentJobService(sessions, clock=clock),
         AgentJobService(sessions, clock=clock),
     )
-    barrier = Rendezvous(2)
 
-    def claim_from(service):
-        barrier.wait()
-        return claim_agent(
-            service,
-            NODE_A,
-            "serial-a",
-        )
+    def claim_together():
+        # One rendezvous per round: each round's pool starts new threads.
+        barrier = Rendezvous(2)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(claim_from, services)) == [None, None]
+        def claim_from(service):
+            barrier.wait()
+            return claim_agent(
+                service,
+                NODE_A,
+                "serial-a",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            return list(pool.map(claim_from, services))
+
+    assert claim_together() == [None, None]
     with sessions() as session:
         ended = session.get(AgentOperation, operation.id)
         assert ended is not None and ended.state == LifecycleState.FAILED.value
@@ -1239,8 +1244,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         COMMIT,
         STOP_PAYLOAD,
     )
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(claim_from, services))
+    outcomes = claim_together()
     resumed = [claim for claim in outcomes if claim is not None]
     assert len(resumed) == 1
     assert fenced_attempt(sessions, resumed[0]).attempt == 1
