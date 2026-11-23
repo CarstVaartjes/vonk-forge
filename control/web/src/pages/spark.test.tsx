@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SparkPage } from "./spark";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import type { ControlApi } from "../api/types";
@@ -303,11 +303,14 @@ test("Serving names the run, its rank and partner as a link; Storage lists model
     },
     { ...node, id: "spk_2", display_name: "Garage" },
   ];
-  render(<SparkPage api={apiOf()} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
+  const api = apiOf();
+  render(<SparkPage api={api} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
   const serving = screen.getByRole("region", { name: "Serving" });
   expect(serving).toHaveTextContent("coder");
   expect(serving).toHaveTextContent("Rank 0 of 2, one unit with Garage");
-  // No speed is reported for the alias, so none is shown.
+  // Once the metric reads have resolved (here they fail), no speed value is shown.
+  await waitFor(() => expect(api.metricsSeries).toHaveBeenCalled());
+  await act(async () => {});
   expect(serving).not.toHaveTextContent("tok/s");
   fireEvent.click(screen.getByRole("link", { name: "Garage" }));
   expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/sparks/spk_2");

@@ -28,7 +28,7 @@ number belongs to the document kind, not to the vonkctl release.
 | `fleet` | `fleet` | `FleetSnapshot` | 1 | `fleet-v1.schema.json` |
 | `profile-list` | `profile list` | `FleetProfileList` | 1 | `profile-list-v1.schema.json` |
 | `profile` | `profile --profile N` | `FleetProfileReadView` | 1 | `profile-v1.schema.json` |
-| `profile-review` | `profile load --review` | `FleetProfilePreviewResponse` | 3 | `profile-review-v3.schema.json` |
+| `profile-review` | `profile load --review`, and `profile load` when nothing changes | `FleetProfilePreviewResponse` | 3 | `profile-review-v3.schema.json` |
 | `profile-application` | `profile load`, `progress`, `cancel` | `FleetProfileApplicationView` | 1 | `profile-application-v1.schema.json` |
 | `profile-endpoints` | `profile endpoint` | `FleetProfileEndpointsView` | 1 | `profile-endpoints-v1.schema.json` |
 | `recipe-library` | `recipe`, `recipe library` | `RecipeLibraryResponse` | 4 | `recipe-library-v4.schema.json` |

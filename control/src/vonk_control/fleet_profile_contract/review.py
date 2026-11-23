@@ -166,12 +166,14 @@ class FleetProfilePreviewResponse(FleetProfilePreview):
 
     @classmethod
     def of(cls, preview: FleetProfilePreview) -> FleetProfilePreviewResponse:
-        return cls(
+        # The stored plan is already valid: copy its fields, add the derived answer.
+        return cls.model_construct(
             **{
                 name: getattr(preview, name)
                 for name in FleetProfilePreview.model_fields
                 if name != "schema_version"
             },
+            schema_version=3,
             next_action=profile_load_action(preview),
         )
 
