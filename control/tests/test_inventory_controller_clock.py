@@ -14,10 +14,10 @@ from vonk_control.recipe_builds.service import RecipeBuildService
 from vonk_control.run_switch_operations.planning_helpers import PlanInventory
 from vonk_control.unused_storage_collection.references import _latest_snapshots
 
-from .test_agent_api import NODE_A, agent_headers, make_agent_system
+from .agent_api_support import NODE_A, agent_headers, make_agent_system
+from .recipe_builds_support import setup as build_setup
 from .test_install_admission import _service
 from .test_install_admission import setup as install_setup
-from .test_recipe_builds import setup as build_setup
 
 MAX_AGE = 300
 

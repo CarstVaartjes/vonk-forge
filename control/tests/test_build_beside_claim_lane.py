@@ -33,11 +33,11 @@ from vonk_control.persisted_waits import read_wait
 from vonk_control.wait_contract import QueueWait
 
 from .agent_fences import fenced_operation
+from .agent_jobs_support import COMMIT, NODE_A, NODE_B, parent
+from .agent_jobs_support import service as service  # noqa: PLC0414 -- fixture export
 from .package_upgrade_fixtures import source_transport
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import COMMIT, NODE_A, NODE_B, parent
-from .test_agent_jobs import service as service  # noqa: PLC0414 -- fixture export
 
 _PROTOCOL = Path(__file__).parents[2] / "agent_protocol"
 _PREFLIGHT = {

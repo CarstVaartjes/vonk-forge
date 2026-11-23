@@ -15,8 +15,8 @@ from vonk_control.models.cache import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .model_cache_support import _artifact, _download, _remove_model
 from .removal_settle import advance_until_ended
-from .test_model_cache import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
     _force_model_request,
     _one_model,

@@ -30,6 +30,9 @@ from ..distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopJob,
+)
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,
@@ -51,9 +54,6 @@ from ..operations.progress import (
     member_progress,
     project_progress_for_state,
     stored_progress,
-)
-from ..profile_stop_authority import (
-    ProfileJobRunStopJob,
 )
 from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
 from ..stored.states import CatalogRevisionState

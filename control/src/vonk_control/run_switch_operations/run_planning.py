@@ -18,16 +18,16 @@ from ..categorized_errors import (
     MissingRecord,
 )
 from ..content_identity import differing_image_fields
-from ..models.cache import RecipeBuild
-from ..prebuilt_images import policy_prebuilt_reference
-from ..preparation_contract import (
-    RuntimeImageIdentity,
-)
-from ..profile_capacity import (
+from ..fleet_profiles.capacity import (
     accepted_profile_runtime_image,
     profile_replaced_runs,
     sibling_profile_ports,
     sibling_profile_runs,
+)
+from ..models.cache import RecipeBuild
+from ..prebuilt_images import policy_prebuilt_reference
+from ..preparation_contract import (
+    RuntimeImageIdentity,
 )
 from ..recipe_operations.errors import RecipeOperationConflict
 from ..recipe_operations.execution_contract import (

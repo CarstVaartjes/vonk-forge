@@ -43,15 +43,15 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
 from ..distribution_assignment import NodeDistributionAssignment
-from ..lifecycle.evidence import BookkeepingReason
-from ..mapping_parameters import EngineArgumentValue
-from ..operations.blockers import OperationBlocker
-from ..operations.contract import AvailabilityOperationFailure
-from ..profile_stop_authority import (
+from ..fleet_profiles.stop_authority import (
     JobRunStopScope,
     OfflineStopIntent,
     ProfileStopOwnerBinding,
 )
+from ..lifecycle.evidence import BookkeepingReason
+from ..mapping_parameters import EngineArgumentValue
+from ..operations.blockers import OperationBlocker
+from ..operations.contract import AvailabilityOperationFailure
 from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..recipe_image_availability.availability_contract import (
     RecipeImageAvailabilityArtifact,

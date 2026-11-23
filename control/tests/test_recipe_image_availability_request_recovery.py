@@ -30,7 +30,7 @@ from vonk_control.recipe_image_availability.contracts import (
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
-from .test_recipe_image_availability import (
+from .recipe_image_availability_support import (
     Transport,
     _add_revision,
     _availability_payload,
@@ -389,7 +389,7 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
     from vonk_control.model_cache.progress import cache_progress, progress_document
     from vonk_control.models.cache import ModelCacheOperation
 
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         _download_preview,
         _manifest,
         _persist_fake_model_cache_child,

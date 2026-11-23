@@ -1546,7 +1546,7 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     repository = Path(__file__).resolve().parents[2]
     monkeypatch.setattr(tests, "__path__", [*tests.__path__, str(repository / "tests")])
     monkeypatch.setattr(sys, "path", list(sys.path))
-    lifecycle = import_module("tests.test_spark_lifecycle_runner")._module()
+    lifecycle = import_module("tests.spark_lifecycle_runner_support")._module()
     fixture = lifecycle._artifact_job_fixture(lifecycle._canonical_canary_fixture(ROOT))
     specification = importlib.util.spec_from_file_location(
         "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT

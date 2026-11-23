@@ -22,11 +22,11 @@ from ..artifact_jobs.lifecycle import (
     require_reference_open,
 )
 from ..content_identity import ImageContent, differing_image_fields
-from ..jobs import states as job_states
-from ..models.fleet import AgentNode
-from ..profile_capacity import (
+from ..fleet_profiles.capacity import (
     accepted_profile_runtime_image,
 )
+from ..jobs import states as job_states
+from ..models.fleet import AgentNode
 from ..run_switch_contract.evidence import RunSwitchPhase
 from ..run_switch_contract.observation import (
     RunSwitchObservedImageIdentity,

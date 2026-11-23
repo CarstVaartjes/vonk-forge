@@ -17,6 +17,12 @@ from vonk_agent_protocol import (
 )
 
 from .. import agent_operation_states as aos
+from ..fleet_profiles.stop_authority import (
+    JobRunStopScope,
+    ProfileJobRunStopTarget,
+    issued_order_link,
+    jobrun_stop_key,
+)
 from ..jobs import states as job_states
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -31,12 +37,6 @@ from ..models.execution import ArtifactJob, RunNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..offline_stops import deferred_stop_nodes
-from ..profile_stop_authority import (
-    JobRunStopScope,
-    ProfileJobRunStopTarget,
-    issued_order_link,
-    jobrun_stop_key,
-)
 from ..stored.json_values import read_row_column
 from .progress import _parent_execution_mode
 from .rank_authority import _profile_jobrun_parent

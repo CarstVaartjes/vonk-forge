@@ -9,6 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
+)
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -35,20 +38,17 @@ from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import read_recipe
 
 from cluster_profiles.control_client import validate_control_document
-from cluster_profiles.generated_control.models.artifact_job_contract_response import (
-    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
-)
 
-from .test_agent_api import Jobs
-from .test_artifact_job_uncompilable_contract import (
-    _required_input_without_required_slot,
-)
-from .test_artifact_jobs import (
+from .agent_api_support import Jobs
+from .artifact_jobs_support import (
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
 )
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .recipe_operations_support import NOW, installed_recipe, setup_services
+from .test_artifact_job_uncompilable_contract import (
+    _required_input_without_required_slot,
+)
 
 UNKNOWN = "00000000-0000-4000-8000-0000000000ff"
 

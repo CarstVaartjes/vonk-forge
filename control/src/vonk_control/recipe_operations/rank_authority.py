@@ -20,6 +20,9 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import RecipeDefinition
 
+from ..fleet_profiles.stop_authority import (
+    ProfileJobRunStopJob,
+)
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
@@ -31,9 +34,6 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.jobs import Job
 from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..profile_stop_authority import (
-    ProfileJobRunStopJob,
-)
 from ..stored.json_values import read_row_column
 from ..strict_json import read_stored_model
 from .execution_contract import (

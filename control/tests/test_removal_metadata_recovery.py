@@ -24,10 +24,10 @@ from vonk_control.models.cache import ModelCacheSet, ModelCacheSetArtifact
 from vonk_control.models.execution import ArtifactJobBlob
 from vonk_control.models.jobs import Job
 
+from .artifact_jobs_support import running_artifact_service
+from .model_cache_support import _download, cache  # noqa: F401
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
-from .test_artifact_jobs import running_artifact_service
-from .test_model_cache import _download, cache  # noqa: F401
 from .test_model_cache_lifecycle import _clock_at, _queue
 
 
@@ -209,9 +209,7 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
         FilesystemRuntimeImageStorage,
     )
 
-    from .recipe_removal_review_support import remove_after_review
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
@@ -221,6 +219,8 @@ def test_recipe_scan_unknown_is_accepted_and_never_blocks_fresh_preparation(
         _runtime,
         _service,
     )
+    from .recipe_removal_review_support import remove_after_review
+    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -539,8 +539,7 @@ def test_recipe_receipt_observation_is_request_owned(
         FilesystemRuntimeImageStorage,
     )
 
-    from .runtime_image_fixtures import place_test_image
-    from .test_recipe_image_availability import (
+    from .recipe_image_availability_support import (
         ARCHIVE,
         ARCHIVE_SHA,
         _add_head,
@@ -550,6 +549,7 @@ def test_recipe_receipt_observation_is_request_owned(
         _runtime,
         _service,
     )
+    from .runtime_image_fixtures import place_test_image
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -29,21 +29,21 @@ from vonk_control.run_switch_contract.operations import RunSwitchOperation
 from vonk_control.run_switch_contract.requests import RunSwitchApplyRequest
 
 from .agent_fences import fenced_operation
+from .fleet_profiles_support import _uuid
 from .node_contacts import contact_row
 from .non_blocking import assert_ended_without_blocking
-from .test_fleet_profiles import _uuid
-from .test_profile_continuity_postgres import (
-    _assessment_with_promises,
-    _SQLCancellationAdapter,
-)
-from .test_recipe_operations import (
+from .recipe_operations_support import (
     NOW,
     _issue_exact_stop_grant,
     installed_recipe,
     setup_services,
     started_recipe,
 )
-from .test_run_switch_operations import RecordingArtifactExecutor, _request, _service
+from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
+from .test_profile_continuity_postgres import (
+    _assessment_with_promises,
+    _SQLCancellationAdapter,
+)
 
 
 @pytest.mark.parametrize("through_profile", [False, True])

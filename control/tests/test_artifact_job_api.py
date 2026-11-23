@@ -9,6 +9,9 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import cast
 
+from cluster_profiles.generated_control.models.artifact_job_response import (
+    ArtifactJobResponse as ClientArtifactJobResponse,
+)
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -28,10 +31,6 @@ from vonk_control.auth import Actor
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
 from vonk_control.strict_json import ControllerAPIRoute
-
-from cluster_profiles.generated_control.models.artifact_job_response import (
-    ArtifactJobResponse as ClientArtifactJobResponse,
-)
 
 JOB_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000002"
@@ -340,7 +339,7 @@ def test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion(
 def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     tmp_path: Path,
 ) -> None:
-    from .test_artifact_jobs import artifact_create_request, running_artifact_service
+    from .artifact_jobs_support import artifact_create_request, running_artifact_service
 
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
@@ -482,7 +481,7 @@ def test_capacity_unknown_releases_upload_and_fresh_draft_is_admitted(tmp_path):
     """Catches translating storage shortage into a conflict at the HTTP boundary."""
     from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         artifact_create_request,
         create_artifact_job,
         running_artifact_service,
@@ -547,7 +546,7 @@ def test_library_upload_reobserves_capacity_after_releasing_holds(
     from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
     from vonk_control.bounded_retry import bounded_attempts
 
-    from .test_artifact_jobs import (
+    from .artifact_jobs_support import (
         artifact_create_request,
         create_artifact_job,
         running_artifact_service,

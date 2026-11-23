@@ -399,7 +399,7 @@ def _profile_stop_covers_jobrun_mutations(
     ):
         return False
     try:
-        from ..profile_stop_authority import (
+        from ..fleet_profiles.stop_authority import (
             ProfileJobRunStopJob,
             ProfileStopAuthorityError,
             jobrun_stop_key,

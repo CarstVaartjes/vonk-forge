@@ -244,8 +244,8 @@ def _backing_off_load(postgres_engine, pool, *, hold):
     from vonk_control.fleet_profiles.service import FleetProfileService
     from vonk_control.model_primitives import Base
 
-    from .test_fleet_profiles import NOW as START
-    from .test_fleet_profiles import _node_id, _seed, _uuid
+    from .fleet_profiles_support import NOW as START
+    from .fleet_profiles_support import _node_id, _seed, _uuid
     from .test_profile_continuity_postgres import (
         _assessment_with_promises,
         _SQLCancellationAdapter,
@@ -296,7 +296,7 @@ def _backing_off_load(postgres_engine, pool, *, hold):
 def test_a_retry_resumes_the_live_child_when_the_released_memory_is_free(
     postgres_engine, pool
 ) -> None:
-    from .test_fleet_profiles import _uuid
+    from .fleet_profiles_support import _uuid
 
     sessions, profiles, original_id = _backing_off_load(
         postgres_engine, pool, hold=None
@@ -312,7 +312,7 @@ def test_a_retry_resumes_the_live_child_when_the_released_memory_is_free(
 def test_a_retry_plans_again_when_another_workload_took_the_released_memory(
     postgres_engine, pool
 ) -> None:
-    from .test_fleet_profiles import _uuid
+    from .fleet_profiles_support import _uuid
 
     # Almost the whole Spark is promised elsewhere: the load's own 100 bytes do
     # not fit any more, so resuming its plan would overcommit.

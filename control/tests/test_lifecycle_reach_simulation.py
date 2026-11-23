@@ -80,7 +80,7 @@ _LOST_RUN_STOP_REFUSED = (
     "When a two-Spark run is lost, a newer load that must stop it is refused"
     " on every retry with 'current profile Stop identity is stale': the profile Stop"
     " authority accepts a lost run only under a run-switch parent, not under"
-    " the recipe.stop.v2 parent this Stop has (profile_stop_authority.py). A"
+    " the recipe.stop.v2 parent this Stop has (fleet_profiles/stop_authority.py). A"
     " load that goes on retrying then meets 'Profile child Stop exceeds its"
     " current authorized scope' in a loop (seed 8 of a long run)."
 )
