@@ -381,7 +381,7 @@ class AtomicRouteBundlePublisher:
                 output.write(content)
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, target)
+            temporary.replace(target)
             directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory)

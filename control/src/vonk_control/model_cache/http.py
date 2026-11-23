@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -419,5 +418,5 @@ class HttpMixin:
         # Atomic overwrite preserves both the pathname and already-open
         # readers until the verified replacement is ready. Moving the old
         # object aside first creates an availability gap (and a crash window).
-        os.replace(verified, target)
+        verified.replace(target)
         _fsync_directory(target.parent)

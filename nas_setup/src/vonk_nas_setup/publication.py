@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import (
@@ -112,13 +111,13 @@ def remember_verified(payload: NasInstallTemplate, bundle: Path) -> None:
         sync_tree(snapshot)
         verified = bundle / VERIFIED
         if metadata(verified):
-            os.replace(verified, previous)
-        os.replace(snapshot, verified)
+            verified.replace(previous)
+        snapshot.replace(verified)
         sync_directory(bundle)
         complete = True
     except BaseException:
         if metadata(previous) is not None and metadata(bundle / VERIFIED) is None:
-            os.replace(previous, bundle / VERIFIED)
+            previous.replace(bundle / VERIFIED)
             sync_directory(bundle)
         raise
     finally:
@@ -174,7 +173,7 @@ def complete_replay(bundle: Path) -> None:
     atomic_replace(bundle / ".env", render_environment(environment))
     remember_verified(payload, bundle)
     retired = staging_directory(bundle)
-    os.replace(intent, retired / "published")
+    intent.replace(retired / "published")
     sync_directory(bundle)
     discard(retired)
 
@@ -212,7 +211,7 @@ def replay(bundle: Path) -> None:
         intent = bundle / INTENT
         if metadata(intent) is not None:
             retired = staging_directory(bundle)
-            os.replace(intent, retired / "retained-intent")
+            intent.replace(retired / "retained-intent")
             sync_directory(bundle)
             payload = previous_template(bundle)
             if payload is None:
@@ -223,7 +222,7 @@ def replay(bundle: Path) -> None:
                 raise ObservationUnavailable from None
             validate_members(payload, environment, retained)
             staging = stage_intent(payload, bundle, retained, environment)
-            os.replace(staging, intent)
+            staging.replace(intent)
             sync_directory(bundle)
             complete_replay(bundle)
         raise ObservationUnavailable from None
@@ -237,6 +236,6 @@ def publish(
 ) -> None:
     validate_members(payload, environment, members)
     staging = stage_intent(payload, bundle, members, environment)
-    os.replace(staging, bundle / INTENT)
+    staging.replace(bundle / INTENT)
     sync_directory(bundle)
     replay(bundle)

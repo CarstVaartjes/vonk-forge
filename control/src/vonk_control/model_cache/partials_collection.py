@@ -200,7 +200,7 @@ class ModelPartialsCollector:
         for root, _directories, files in os.walk(self._partials / name):
             for file in files:
                 try:
-                    total += os.lstat(os.path.join(root, file)).st_size
+                    total += Path(root, file).lstat().st_size
                 except OSError:
                     continue
         return total

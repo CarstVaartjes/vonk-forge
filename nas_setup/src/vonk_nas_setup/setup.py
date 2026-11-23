@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import stat
 import sys
@@ -127,7 +126,7 @@ def fresh(
         permission_note(payload, staging / "secrets", prompt)
         publication.remember_verified(payload, staging)
         publication.sync_tree(staging)
-        os.replace(staging, bundle)
+        staging.replace(bundle)
         sync_directory(bundle.parent)
         return SetupOutcome(bundle)
     except BaseException:

@@ -640,7 +640,7 @@ class RecipePackageClient:
                 os.fsync(output.fileno())
             if hasher.hexdigest() != digest:
                 return False
-            os.replace(temporary, target)
+            temporary.replace(target)
             return True
         finally:
             temporary.unlink(missing_ok=True)
@@ -832,7 +832,7 @@ class RecipePackageClient:
             temporary = Path(name)
             with os.fdopen(fd, "wb") as output:
                 output.write(candidate)
-            os.replace(temporary, self._snapshot_path)
+            temporary.replace(self._snapshot_path)
             temporary = None
         except OSError as error:
             # The candidate stays in memory, so the next prepare writes it
@@ -1251,7 +1251,7 @@ class RecipePackageClient:
             marker_path = temporary / ".complete"
             marker_path.write_text(digest, encoding="ascii")
             with contextlib.suppress(FileExistsError):
-                os.replace(temporary, target)
+                temporary.replace(target)
         finally:
             if temporary.exists():
                 for path in sorted(temporary.rglob("*"), reverse=True):

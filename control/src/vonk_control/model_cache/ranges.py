@@ -295,7 +295,7 @@ def download_ranges(
                             on_assembled_bytes(chunk)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(assembly, target)
+        assembly.replace(target)
     finally:
         assembly.unlink(missing_ok=True)
     cleanup_ranges(target, expected_bytes, workers=workers)

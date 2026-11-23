@@ -33,13 +33,13 @@ from vonk_nas_setup.filesystem import acquire_owner
 root, ready, boundary = map(Path, sys.argv[1:])
 bundle = root / "vonk-forge"
 if str(boundary) == "snapshot":
-    original = publication.os.replace
+    original = os.replace
     def interrupted(source, target):
         original(source, target)
         if source == bundle / publication.VERIFIED:
             ready.write_text("snapshot-swapped")
             time.sleep(10)
-    publication.os.replace = interrupted
+    os.replace = interrupted
 else:
     original = publication.write_member
     def interrupted(target, name, content):

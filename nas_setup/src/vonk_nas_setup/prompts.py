@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import sys
 import termios
+from pathlib import Path
 from typing import TextIO
 
 from vonk_agent_protocol.installer_setup import (
@@ -48,7 +49,7 @@ class PromptIo:
         if self.reader is None:
             # Echo control is mandatory. A terminal/provider failure cannot
             # fall back to echoing stdin on headless hosts.
-            with open("/dev/tty", "r+", encoding="utf-8") as terminal:
+            with Path("/dev/tty").open("r+", encoding="utf-8") as terminal:
                 if secret:
                     original = termios.tcgetattr(terminal.fileno())
                     hidden = original.copy()

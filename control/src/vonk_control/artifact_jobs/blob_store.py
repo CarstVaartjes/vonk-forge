@@ -608,7 +608,7 @@ class ArtifactBlobStore:
                     "artifact storage quota is exhausted",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            os.replace(temporary, destination)
+            temporary.replace(destination)
             self._fsync_directory(directory)
         return StoredArtifactBlob(sha256, size_bytes, storage_key, destination)
 

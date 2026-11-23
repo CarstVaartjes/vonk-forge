@@ -146,7 +146,7 @@ def write_private(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        temporary.replace(path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

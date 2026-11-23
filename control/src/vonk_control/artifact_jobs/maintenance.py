@@ -197,7 +197,7 @@ class ArtifactMaintenanceCadence:
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             directory = os.open(self._state_root, os.O_RDONLY)
             try:
                 os.fsync(directory)

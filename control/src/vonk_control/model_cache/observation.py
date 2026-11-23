@@ -124,7 +124,7 @@ class StorageObserver:
                 handle.write(canonical_message(value))
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             _fsync_directory(path.parent)
             self._publish(manifest, value)
         finally:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -179,7 +178,7 @@ def _nas_filesystems(
     by_device: dict[int, list[tuple[Path, str]]] = defaultdict(list)
     for root, kind in roots:
         try:
-            by_device[os.stat(root).st_dev].append((root, kind))
+            by_device[root.stat().st_dev].append((root, kind))
         except OSError:
             continue
     result: list[tuple[str, Path, frozenset[str]]] = []

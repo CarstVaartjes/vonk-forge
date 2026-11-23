@@ -89,7 +89,7 @@ def staging_directory(parent: Path) -> Path:
 
 def preserve(path: Path) -> None:
     retained = staging_directory(path.parent)
-    os.replace(path, retained / "preserved")
+    path.replace(retained / "preserved")
     sync_directory(path.parent)
 
 
@@ -179,7 +179,7 @@ def atomic_replace(path: Path, content: bytes, mode: int = 0o600) -> None:
                 stream.write(content)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             sync_directory(path.parent)
         finally:
             temporary.unlink(missing_ok=True)

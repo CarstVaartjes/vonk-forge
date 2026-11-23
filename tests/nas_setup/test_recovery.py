@@ -176,14 +176,14 @@ def test_verified_snapshot_survives_failed_generation_swap(
 ) -> None:
     """Catch deleting the last verified group in a failed publication's cleanup."""
     before = publication.load_members(installed / publication.VERIFIED, template)
-    replace = publication.os.replace
+    replace = os.replace
 
     def fail_new_generation(source: Path, target: Path) -> None:
         if target == installed / publication.VERIFIED and source.name == "secrets":
             raise OSError("injected NAS rename fault")
         replace(source, target)
 
-    monkeypatch.setattr(publication.os, "replace", fail_new_generation)
+    monkeypatch.setattr(os, "replace", fail_new_generation)
     with pytest.raises(OSError, match="injected NAS rename fault"):
         publication.remember_verified(template, installed)
     assert (

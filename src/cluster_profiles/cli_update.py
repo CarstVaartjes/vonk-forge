@@ -608,7 +608,7 @@ def _write_notice(cache: Path, record: dict[str, object]) -> None:
         ) as handle:
             json.dump(record, handle)
             temporary = Path(handle.name)
-        os.chmod(temporary, 0o600)
+        temporary.chmod(0o600)
         temporary.replace(cache)
     except OSError:
         pass

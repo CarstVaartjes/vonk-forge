@@ -571,8 +571,8 @@ def _commit_recipe_image_upload(
         else:
             # Only ingress-verified bytes reach this publisher. Atomic replace
             # repairs a damaged regular object without a missing-entry window.
-            os.chmod(temporary, 0o640)
-            os.replace(temporary, destination)
+            temporary.chmod(0o640)
+            temporary.replace(destination)
         directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
@@ -643,7 +643,7 @@ def _owned_artifact(
         if delay:
             time.sleep(delay)
         try:
-            metadata = os.stat(path, follow_symlinks=False)
+            metadata = path.stat(follow_symlinks=False)
         except PermissionError:
             _LOGGER.warning(
                 "Controller storage needs operator attention: access denied %s", path

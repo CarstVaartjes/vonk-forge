@@ -182,7 +182,7 @@ def _publish_verification(path: Path, manifest: SourceBundleManifest) -> None:
             stream.write(canonical_message(receipt))
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path.with_suffix(".verified.json"))
+        temporary.replace(path.with_suffix(".verified.json"))
         descriptor = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(descriptor)
@@ -257,7 +257,7 @@ class SourceBundleStore:
                 stream.write(archive)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, destination)
+            temporary.replace(destination)
             directory_descriptor = os.open(directory, os.O_RDONLY)
             try:
                 os.fsync(directory_descriptor)

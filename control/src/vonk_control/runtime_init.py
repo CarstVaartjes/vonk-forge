@@ -135,7 +135,7 @@ def _stage_runtime_file_once(
             parent.mkdir(mode=0o750, parents=True, exist_ok=True)
             if os.geteuid() == 0:
                 os.chown(parent, 0, 10001)
-            os.chmod(parent, 0o755)
+            parent.chmod(0o755)
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
@@ -157,7 +157,7 @@ def _stage_runtime_file_once(
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-        os.replace(temporary, destination)
+        temporary.replace(destination)
         return destination
     except OSError as error:
         with contextlib.suppress(OSError):
@@ -235,7 +235,7 @@ def _write_runtime_asset_inventory_once(source_root: Path) -> None:
     temporary = source_root / ".inventory.json.new"
     try:
         temporary.write_text(inventory.model_dump_json())
-        os.replace(temporary, source_root / ".inventory.json")
+        temporary.replace(source_root / ".inventory.json")
     finally:
         with contextlib.suppress(OSError):
             temporary.unlink(missing_ok=True)
@@ -599,7 +599,7 @@ def _disable_copy_on_write_below(root: Path) -> None:
         return
     for child in children:
         _disable_copy_on_write(Path(child))
-        if os.path.basename(child) == "partials":
+        if Path(child).name == "partials":
             try:
                 downloads = [
                     entry.path

@@ -456,7 +456,7 @@ class ControlClient(HTTPControlClient):
                     )
             with _local_filesystem(destination):
                 if overwrite:
-                    os.replace(temporary, destination)
+                    temporary.replace(destination)
                 else:
                     os.link(temporary, destination, follow_symlinks=False)
                     temporary.unlink()
