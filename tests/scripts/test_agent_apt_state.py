@@ -5,7 +5,6 @@ import io
 import re
 import sys
 import tarfile
-import threading
 from collections.abc import Callable
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -13,6 +12,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from control.tests.insert_collision_support import Rendezvous
 
 pytestmark = [pytest.mark.linux_only, pytest.mark.needs_dpkg_deb]
 
@@ -135,11 +136,11 @@ class FakeR2:
 class ConcurrentBundleR2(FakeR2):
     def __init__(self, name: str, operations: list[str]) -> None:
         super().__init__(name, operations)
-        self.bundle_barrier = threading.Barrier(2)
+        self.bundle_barrier = Rendezvous(2, timeout=30)  # wall-clock: hang guard
 
     def write(self, key: str, data: bytes) -> None:
         if key.endswith(("/aptly-state.tar.gz", "/public-tree.tar.gz")):
-            self.bundle_barrier.wait(timeout=30)
+            self.bundle_barrier.wait()
         super().write(key, data)
 
 
@@ -149,28 +150,30 @@ class ConcurrentReadR2(FakeR2):
     ) -> None:
         super().__init__(name, operations)
         self.concurrent_reads: set[str] = set()
-        self.read_barrier = threading.Barrier(concurrent_read_count)
+        self.read_barrier = Rendezvous(
+            concurrent_read_count, timeout=30
+        )  # wall-clock: hang guard
 
     def read(self, key: str) -> bytes:
         if key in self.concurrent_reads:
-            self.read_barrier.wait(timeout=30)
+            self.read_barrier.wait()
         return super().read(key)
 
 
 class ConcurrentPublicR2(FakeR2):
     def __init__(self, name: str, operations: list[str]) -> None:
         super().__init__(name, operations)
-        self.ordinary_barrier = threading.Barrier(2)
-        self.release_barrier = threading.Barrier(2)
+        self.ordinary_barrier = Rendezvous(2, timeout=30)  # wall-clock: hang guard
+        self.release_barrier = Rendezvous(2, timeout=30)  # wall-clock: hang guard
 
     def write(self, key: str, data: bytes) -> None:
         if key in {
             "dists/dev/main/binary-arm64/Packages",
             "vonk-forge-dev-archive-keyring.gpg",
         }:
-            self.ordinary_barrier.wait(timeout=30)
+            self.ordinary_barrier.wait()
         if key in {"dists/dev/Release", "dists/dev/Release.gpg"}:
-            self.release_barrier.wait(timeout=30)
+            self.release_barrier.wait()
         super().write(key, data)
 
 
