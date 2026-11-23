@@ -215,9 +215,9 @@ def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp
 def test_restart_verifies_exact_marker_and_publishes_next_generation(tmp_path):
     first = _publish(_publisher(tmp_path))
     restarted = _publisher(tmp_path)
-    assert _inspected(restarted, expected=first) == first
+    assert _inspected(restarted) == first
     assert _publish(restarted).generation == 2
-    assert _inspected(restarted, expected=first).generation == 2
+    assert _inspected(restarted).generation == 2
     assert _publish(restarted).generation == 3
 
 

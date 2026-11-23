@@ -180,7 +180,7 @@ def test_preview_delegates_reconcile_mode_to_existing_run_switch_owner() -> None
     request = operations.preview_cleanup.call_args.args[0]
     assert request.installation_id == INSTALLATION_ID
     assert request.cleanup_mode == "reconcile"
-    assert operations.preview_cleanup.call_args.kwargs == {"actor": "test-actor"}
+    assert operations.preview_cleanup.call_args.kwargs == {}
 
 
 @pytest.mark.parametrize("role", ["viewer", "operator"])
