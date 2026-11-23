@@ -898,7 +898,7 @@ test("shows canonical profile failure, attempt, phase and uncertain recovery dir
   render(<ActivityPage api={client} now={NOW} />);
   expect(await screen.findByText("Profile load failed")).toBeVisible();
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
-  expect(screen.getByText("Attempt 1 · Prepare")).toBeVisible();
+  expect(screen.getByText(/^Attempt 1/)).toBeVisible();
   expect(screen.getByText(/Outcome uncertain/)).toBeVisible();
   expect(client.job).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Table" }));

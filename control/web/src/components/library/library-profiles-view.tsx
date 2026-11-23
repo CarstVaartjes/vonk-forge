@@ -294,16 +294,9 @@ function ProfileProgress({
   notice?: ReactNode;
 }) {
   const progress = applicationProgressRecord(application);
-  // The child's measured operation carries bytes, rate, ETA and a bar per Spark; a child
-  // that only reports its own byte counts is shown through the same renderer.
-  const measured = availabilityProgress(
-    progress.operation ?? {
-      phase: progress.phase,
-      completed_bytes: progress.bytes,
-      total_bytes: progress.total_bytes,
-      total_bytes_known: isWireNumber(progress.total_bytes),
-    },
-  );
+  // The child's measured operation carries bytes, rate, ETA and a bar per Spark. The child's
+  // own byte counts are the whole-load budget, a different quantity, so they are not shown here.
+  const measured = availabilityProgress(progress.operation ?? { phase: progress.phase });
   const nodeIds = Array.isArray(progress.node_ids)
     ? progress.node_ids.filter((id): id is string => typeof id === "string")
     : [];

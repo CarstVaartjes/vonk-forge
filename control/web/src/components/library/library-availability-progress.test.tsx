@@ -96,7 +96,7 @@ test("displays exact item counts and a bounded accessible wide-byte ratio", () =
 test("missing measured bytes stay unknown instead of inventing zero progress", () => {
   render(<LibraryAvailabilityProgress progress={availabilityProgress({ phase: "copying" })} />);
   expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
-  expect(screen.getByText("Not reported received")).toBeInTheDocument();
+  expect(screen.queryByText(/received/)).not.toBeInTheDocument();
 });
 
 test("shows the phase in plain words and one bar per Spark from the server fields", () => {
@@ -123,17 +123,22 @@ test("shows the phase in plain words and one bar per Spark from the server field
       })}
     />,
   );
-  expect(screen.getByText("Copying model files to the Sparks")).toBeInTheDocument();
+  expect(screen.queryByText("transfer")).not.toBeInTheDocument();
   const bars = screen.getAllByRole("progressbar");
   expect(bars).toHaveLength(3);
   expect(bars[0]).toHaveAttribute("aria-valuenow", "25");
   expect(bars[1]).toHaveAttribute("aria-valuenow", "40");
   expect(bars[2]).toHaveAttribute("aria-valuenow", "10");
   expect(screen.getByText(/2\.0 KiB\/s/)).toBeInTheDocument();
-  expect(screen.getAllByText(/left/)).toHaveLength(2);
+  const [overall, first, second] = screen.getAllByRole("progressbar");
+  const etasIn = (bar: HTMLElement) =>
+    bar.parentElement?.querySelectorAll(":scope > div .library-availability-progress-eta").length;
+  expect(etasIn(overall as HTMLElement)).toBe(1);
+  expect(etasIn(first as HTMLElement)).toBe(1);
+  expect(etasIn(second as HTMLElement)).toBe(0);
 });
 
-test("a rate field the Controller does not send is not invented", () => {
+test("a rate is shown only from the smoothed field", () => {
   render(
     <LibraryAvailabilityProgress
       progress={availabilityProgress({

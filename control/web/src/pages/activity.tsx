@@ -1164,7 +1164,6 @@ function CanonicalOperationDetails({
       ))}
       <p className="activity-job-attempt" style={{ margin: 0 }}>
         Attempt {formatWire(detail.attempt)}
-        {detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}
         {active ? " · Updates automatically" : ""}
       </p>
       {detail.recovery?.uncertain ||

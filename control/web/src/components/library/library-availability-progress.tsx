@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { BYTE_PHASES } from "../../api/vocabulary.generated";
 import { formatBytes } from "../../lib/fleet";
 import { phaseWords } from "../../lib/phase-words";
+import { useLibraryNodeName } from "./library-node-names";
 import { Time } from "../ui/time";
 
 export type AvailabilityMember = {
@@ -52,12 +53,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function meter(raw: Record<string, unknown>) {
-  const totalBytes =
-    raw.total_bytes_known === false
-      ? undefined
-      : nonnegativeWire(raw.total_bytes ?? raw.expected_bytes);
+  const totalBytes = raw.total_bytes_known === false ? undefined : nonnegativeWire(raw.total_bytes);
   return {
-    completedBytes: nonnegativeWire(raw.completed_bytes ?? raw.downloaded_bytes),
+    completedBytes: nonnegativeWire(raw.completed_bytes),
     totalBytes,
     // Rate and ETA are the Controller's own figures; nothing is derived here.
     bytesPerSecond: finiteNumber(raw.smoothed_bytes_per_second),
@@ -81,12 +79,8 @@ function memberProgress(value: unknown, phase: string): AvailabilityMember[] {
 }
 
 export function availabilityProgress(value: unknown): AvailabilityProgress {
-  const outer =
-    typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  const raw =
-    typeof outer.operation === "object" && outer.operation !== null
-      ? (outer.operation as Record<string, unknown>)
-      : outer;
+  const outer = asRecord(value) ?? {};
+  const raw = asRecord(outer.operation) ?? outer;
   const phase = typeof raw.phase === "string" && raw.phase ? raw.phase : "preparing";
   const step =
     typeof raw.step === "string"
@@ -123,6 +117,7 @@ function eta(value: number): string {
 
 /** One Spark's own bar: bytes, percent, and the Controller's rate and ETA when given. */
 function MemberBar({ member }: { member: AvailabilityMember }) {
+  const memberName = useLibraryNodeName();
   const percent =
     member.completedBytes !== undefined &&
     member.totalBytes !== undefined &&
@@ -138,12 +133,14 @@ function MemberBar({ member }: { member: AvailabilityMember }) {
   return (
     <li className="library-availability-progress-member">
       <div className="library-availability-progress-heading">
-        <strong>{member.memberId}</strong>
+        <strong>{memberName(member.memberId)}</strong>
         <span>
           {sizes}
           {percent !== undefined && ` · ${Math.floor(percent)}%`}
           {member.bytesPerSecond !== undefined && ` · ${formatBytes(member.bytesPerSecond)}/s`}
-          {member.etaSeconds !== undefined && ` · ${eta(member.etaSeconds)}`}
+          {member.etaSeconds !== undefined && (
+            <span className="library-availability-progress-eta"> · {eta(member.etaSeconds)}</span>
+          )}
         </span>
       </div>
       <div
@@ -152,7 +149,7 @@ function MemberBar({ member }: { member: AvailabilityMember }) {
         aria-valuemin={0}
         aria-valuemax={percent === undefined ? undefined : 100}
         aria-valuenow={percent}
-        aria-label={`${member.memberId} ${phaseWords(member.phase)}`}
+        aria-label={`${memberName(member.memberId)} ${phaseWords(member.phase)}`}
       >
         {percent !== undefined && <span style={{ width: `${percent}%` }} />}
       </div>
@@ -176,9 +173,11 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
   const measured =
     transferring && progress.activity !== "waiting" && progress.activity !== "possibly_stalled";
   const transfer =
-    progress.totalBytes === undefined
-      ? `${formatBytes(progress.completedBytes)} received`
-      : `${formatBytes(progress.completedBytes)} / ${formatBytes(progress.totalBytes)}`;
+    progress.completedBytes === undefined
+      ? undefined
+      : progress.totalBytes === undefined
+        ? `${formatBytes(progress.completedBytes)} received`
+        : `${formatBytes(progress.completedBytes)} / ${formatBytes(progress.totalBytes)}`;
   return (
     <section
       className="library-availability-progress"
@@ -192,7 +191,9 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
           {measured &&
             progress.bytesPerSecond !== undefined &&
             ` · ${formatBytes(progress.bytesPerSecond)}/s`}
-          {measured && progress.etaSeconds !== undefined && ` · ${eta(progress.etaSeconds)}`}
+          {measured && progress.etaSeconds !== undefined && (
+            <span className="library-availability-progress-eta"> · {eta(progress.etaSeconds)}</span>
+          )}
         </span>
       </div>
       <div
