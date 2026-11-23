@@ -1,8 +1,7 @@
 """Select the test files a patch touches: ``scripts/test changed``.
 
 Reads a unified diff (stdin or a file) and prints ``<suite> <test file>`` lines,
-suite being ``control``, ``repository``, ``agent_protocol`` or ``compose`` (the test
-tree's owner). A test file is selected when the patch edits it, or when
+suite being ``control``, ``repository``, ``agent_protocol`` or ``compose``. A test file is selected when the patch edits it, or when
 it imports, directly or through test support modules and conftests, a module the
 patch touches. Importing a package or submodule executes the package
 ``__init__`` files above it, so a touched ``__init__.py`` selects every
@@ -15,17 +14,19 @@ test files that name its repository path, or its quoted file name.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from collections import defaultdict
 from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEST_TREES = ("tests", "control/tests", "agent_protocol/tests")
+TEST_TREES = ("tests", "control/tests", "agent_protocol/tests", "deploy/compose/tests")
 SUITE_OF = {
     "control/tests": "control",
     "tests": "repository",
-    "agent_protocol/tests": "repository",
+    "agent_protocol/tests": "agent_protocol",
+    "deploy/compose/tests": "compose",
 }
 # Directories dotted imports resolve against, besides the importing file's own.
 IMPORT_BASES = (
@@ -149,9 +150,13 @@ def select(touched: list[str], root: Path = ROOT) -> list[tuple[str, str]]:
         if is_test_file(path):
             continue
         name = Path(path).name
+        # A quoted bare word such as "test" names nothing in particular.
+        distinctive = "/" in path and any(mark in name for mark in ".-_")
+        # Whole path tokens only: scripts/test must not match scripts/test-local.
+        named = re.compile(rf"(?<![\w/.-]){re.escape(path)}(?![\w.-])")
         for candidate, source in sources.items():
             if is_test_file(candidate) and (
-                path in source or ("/" in path and f'"{name}"' in source)
+                named.search(source) or (distinctive and f'"{name}"' in source)
             ):
                 selected.add(candidate)
     seen: set[str] = set()
