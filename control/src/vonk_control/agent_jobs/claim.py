@@ -30,6 +30,7 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import fencing_intent
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
 from ..inventory.items import inventory_items, runtime_value
@@ -47,12 +48,7 @@ from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
 from .claim_authority import dispatch_wait, recipe_build_disk_wait
 from .claim_reconcile import _first_claimable_id
-from .contracts import (
-    _MUTATING_OPERATIONS,
-    CLAIM_LEASE_SECONDS,
-    fencing_intent,
-    mutations_conflict,
-)
+from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS, mutations_conflict
 from .endings import end_unobserved_order
 from .evidence import (
     _exact_service_stop_receipt_covers_start,

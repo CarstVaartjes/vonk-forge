@@ -54,9 +54,12 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import started_recipe

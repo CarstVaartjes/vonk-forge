@@ -77,7 +77,7 @@ from vonk_control.recipe_operations.execution_contract import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.spark_store_retention import store_retention_request
-from vonk_control.unused_storage_collection.common import spark_eviction_capacity
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 from .recipe_image_availability_support import _runtime
 from .runtime_image_fixtures import place_test_image

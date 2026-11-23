@@ -22,9 +22,8 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeEvidence, OutcomeFailed
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_operation_facts import attempt_is_live
+from vonk_control.agent_operation_facts import JOB_PRE_LAUNCH_STAGES, attempt_is_live
 from vonk_control.lifecycle.core import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET
 from vonk_control.lifecycle.types import State
 from vonk_control.recovery_policy import RecoveryPolicy

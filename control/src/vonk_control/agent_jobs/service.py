@@ -35,6 +35,7 @@ from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from .. import agent_operation_states
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import fencing_intent
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..categorized_errors import InvalidType, InvalidValue
@@ -85,7 +86,6 @@ from .contracts import (
     AgentResultRefused,
     ResultConsumer,
     SupersededAgentEffect,
-    fencing_intent,
 )
 from .endings import end_unobserved_order
 from .evidence import sanitized_failure_report

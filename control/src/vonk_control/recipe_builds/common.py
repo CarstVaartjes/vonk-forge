@@ -31,6 +31,7 @@ from vonk_agent_protocol.outcome import (
     SecurityRefusalError,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.reason_codes.images import PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
@@ -55,7 +56,6 @@ from ..models.cache import RecipeBuild
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeRun, ResourceReservation, RunNode
 from ..models.fleet import AgentNode
-from ..prebuilt_images import PrebuiltDecision
 from ..recipe_operations.runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from ..resource_planning.memory import memory_capacity_snapshot
 from ..runtime.adapters import (
@@ -769,3 +769,24 @@ def _digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+# Why a plan did or did not use the catalog's prebuilt image.  The codes are
+# stable: they are stored with the build, logged, and shown as operation
+# blockers, so an operator can tell a Spark build from an image pull.
+PREBUILT_USED = PrebuiltImageCode.USED
+
+
+@dataclass(frozen=True, slots=True)
+class PrebuiltDecision:
+    """The named outcome of choosing between a prebuilt image and a Spark build."""
+
+    code: str
+    detail: str
+
+    @property
+    def used(self) -> bool:
+        return self.code == PREBUILT_USED
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.detail}"

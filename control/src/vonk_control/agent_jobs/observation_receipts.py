@@ -29,7 +29,11 @@ from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states as aos
-from ..agent_operation_facts import aware, job_output_retention_expiry
+from ..agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    aware,
+    job_output_retention_expiry,
+)
 from ..agent_outcome import agent_outcome
 from ..agent_upgrades.dispatch import DispatchMixin
 from ..agent_upgrades.stored import _stored_package
@@ -42,7 +46,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..package_activation import matches_receipt
-from .contracts import _ENDED_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
+from .contracts import _ENDED_PARENT_STATES
 from .stored import column_field, column_value
 
 if TYPE_CHECKING:

@@ -15,7 +15,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
-from ..agent_operation_facts import attempt_is_live
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, attempt_is_live
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
@@ -30,12 +30,7 @@ from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
-    _WORKLOAD_INTENT_OPERATIONS,
-    OFF_LANE_OPERATIONS,
-    ClaimOrder,
-    mutations_conflict,
-)
+from .contracts import OFF_LANE_OPERATIONS, ClaimOrder, mutations_conflict
 from .evidence import (
     _failure_result,
     _is_refusal_reason,

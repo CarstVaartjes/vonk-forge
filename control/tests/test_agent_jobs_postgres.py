@@ -48,10 +48,7 @@ from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_operation_facts import (
-    AGENT_ORDER_RECOVERY_BUDGET,
-    order_recovery_deadline,
-)
+from vonk_control.agent_operation_facts import AGENT_ORDER_RECOVERY_BUDGET
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.service import EnrollmentService
@@ -66,6 +63,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.operations.progress import stored_progress
+from vonk_control.owner_liveness import order_recovery_deadline
 from vonk_control.pki import IssuedCertificate
 from vonk_control.recovery_policy import RECOVERY
 

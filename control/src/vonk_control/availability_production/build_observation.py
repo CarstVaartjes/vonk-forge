@@ -23,8 +23,7 @@ from ..jobs import states as job_states
 from ..models.cache import RecipeBuild
 from ..models.operations import AgentOperation, AgentOperationAttempt
 from ..operations.blockers import OperationBlocker, make_blocker
-from ..prebuilt_images import PrebuiltDecision
-from ..recipe_builds.common import _valid_succeeded_receipt
+from ..recipe_builds.common import PrebuiltDecision, _valid_succeeded_receipt
 from ..recipe_image_availability.contracts import (
     BuildUnsettled,
     RecipeImageAvailabilityError,

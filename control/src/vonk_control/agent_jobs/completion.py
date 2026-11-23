@@ -24,7 +24,10 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_operation_facts import aware as _aware
-from ..agent_operation_facts import job_output_retention_expiry
+from ..agent_operation_facts import (
+    job_attempt_did_not_launch,
+    job_output_retention_expiry,
+)
 from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
@@ -36,7 +39,7 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
-from .retry import job_attempt_did_not_launch, result_disposition
+from .retry import result_disposition
 
 
 def _report_event(

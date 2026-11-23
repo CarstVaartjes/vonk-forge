@@ -18,6 +18,7 @@ from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_agent_protocol.wire_model import OperationProgress
 
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
@@ -35,14 +36,7 @@ from ..operations.progress import (
 )
 from ..own_cleanup import CLEANUP_KINDS
 from ..stall_window import progress_advanced
-from .contracts import (
-    _LOGGER,
-    _WORKLOAD_INTENT_OPERATIONS,
-    PROGRESSING_LEASE,
-    AgentFence,
-    cancelled_job_run,
-    fencing_intent,
-)
+from .contracts import _LOGGER, PROGRESSING_LEASE, AgentFence, cancelled_job_run
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
 from .stored import column_field, column_is_document, column_value

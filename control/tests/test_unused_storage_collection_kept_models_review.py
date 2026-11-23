@@ -43,7 +43,8 @@ from vonk_control.storage_demands import (
     StorageDemands,
     spark_scope,
 )
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
+from vonk_control.unused_storage_collection.service import spark_eviction_capacity
 
 from .model_cache_support import _artifact, _download
 from .test_catalog_revision_collection import NODE, NOW, Catalog
