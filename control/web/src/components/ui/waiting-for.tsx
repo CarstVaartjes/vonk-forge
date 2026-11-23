@@ -12,12 +12,12 @@ export function WaitingFor({
   dependencyDeadline,
   resumeCondition,
 }: {
-  blockers?: readonly Blocker[] | null;
-  nextAttemptAt?: string | null;
+  blockers?: readonly Blocker[] | null | undefined;
+  nextAttemptAt?: string | null | undefined;
   /** `dependency_deadline` of the wait contract, shown as received. */
-  dependencyDeadline?: string | null;
+  dependencyDeadline?: string | null | undefined;
   /** `resume_condition` of the wait contract, shown as received. */
-  resumeCondition?: string | null;
+  resumeCondition?: string | null | undefined;
 }) {
   if (!blockers?.length && !nextAttemptAt && !dependencyDeadline && !resumeCondition) return null;
   return (

@@ -22,7 +22,7 @@ export function ClusterUnit({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
 }) {
   // A rank means something only when one workload spans several Sparks.
   const [only] = cluster.units;
@@ -59,7 +59,7 @@ export function WorkloadUnits({
   reads: WorkloadReads;
   now: Date;
   live: boolean;
-  onOpen?(id: string): void;
+  onOpen?: ((id: string) => void) | undefined;
 }) {
   const { clusters, idle } = groupByWorkload(nodes);
   const order = new Map(nodes.map((node, index) => [node.id, index]));

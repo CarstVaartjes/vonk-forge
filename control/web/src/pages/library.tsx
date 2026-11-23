@@ -224,9 +224,9 @@ export function LibraryPage({
 }: {
   api: ControlApi;
   path: string;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
 }) {
   const [snapshot, setSnapshot] = useState<LibraryViewSnapshot>();
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();

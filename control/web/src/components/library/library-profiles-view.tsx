@@ -179,24 +179,28 @@ function inputFromDraft(
     name: draft.name,
     description: draft.description,
     expected_revision: draft.revision ?? 0,
-    installation_policy: draft.installationPolicy,
-    labels: draft.labels,
+    ...(draft.installationPolicy ? { installation_policy: draft.installationPolicy } : {}),
+    ...(draft.labels ? { labels: draft.labels } : {}),
     favorite: draft.favorite,
-    assignments: draft.assignments.map((assignment) => ({
-      recipe_selector: assignment.recipeSelector.trim(),
-      spark_ids: [...new Set(assignment.sparkIds)].sort(),
-      assignment_name: assignment.assignmentName.trim() || undefined,
-      model_variant: assignment.modelVariant.trim() || undefined,
-      desired_state: assignment.desiredState,
-      ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
-      // Every option the recipe declares is sent explicitly, defaults included.
-      option_choices: optionsBySelector[assignment.recipeSelector.trim()]
-        ? effectiveChoices(
-            optionsBySelector[assignment.recipeSelector.trim()],
-            assignment.optionChoices,
-          )
-        : assignment.optionChoices,
-    })),
+    assignments: draft.assignments.map((assignment) => {
+      const selectorOptions = optionsBySelector[assignment.recipeSelector.trim()];
+      return {
+        recipe_selector: assignment.recipeSelector.trim(),
+        spark_ids: [...new Set(assignment.sparkIds)].sort(),
+        ...(assignment.assignmentName.trim()
+          ? { assignment_name: assignment.assignmentName.trim() }
+          : {}),
+        ...(assignment.modelVariant.trim()
+          ? { model_variant: assignment.modelVariant.trim() }
+          : {}),
+        ...(assignment.desiredState ? { desired_state: assignment.desiredState } : {}),
+        ...(assignment.gpuClock ? { gpu_clock: assignment.gpuClock } : {}),
+        // Every option the recipe declares is sent explicitly, defaults included.
+        option_choices: selectorOptions
+          ? effectiveChoices(selectorOptions, assignment.optionChoices)
+          : assignment.optionChoices,
+      };
+    }),
   };
   return input;
 }
@@ -282,7 +286,7 @@ function ProfileProgress({
   notice,
 }: {
   application: FleetProfileApplicationView;
-  cancel?(requestKey: string): Promise<unknown>;
+  cancel?: ((requestKey: string) => Promise<unknown>) | undefined;
   notice?: ReactNode;
 }) {
   const progress = applicationProgressRecord(application);
@@ -494,9 +498,9 @@ export function LibraryProfilesView({
 }: {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   initialCreate?: boolean;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onNavigate: Navigate;
 }) {
   const [profiles, setProfiles] = useState<FleetProfileRead[]>([]);

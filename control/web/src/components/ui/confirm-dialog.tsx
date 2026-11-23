@@ -8,9 +8,9 @@ type ConfirmDialogProps = {
   consequence: string;
   confirmLabel: string;
   /** Irreversible actions ask the operator to type this name first. */
-  typeName?: string;
+  typeName?: string | undefined;
   /** The `vonkctl` equivalent, shown copyable. */
-  command?: string;
+  command?: string | undefined;
   busy?: boolean;
   onConfirm(): void;
   onCancel(): void;

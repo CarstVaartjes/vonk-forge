@@ -26,7 +26,7 @@ export function CacheRemovalProgress({
   api: ControlApi;
   intent: CacheRemovalIntent;
   initial: CacheRemovalReceipt | null;
-  initialError?: string;
+  initialError?: string | undefined;
   onComplete(): void;
   onDismiss(): void;
   onRejected(message: string): void;

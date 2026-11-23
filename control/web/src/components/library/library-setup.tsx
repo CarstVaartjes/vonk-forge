@@ -152,7 +152,7 @@ export function LibrarySetupStrip({
   onFiltersChange,
   onQueryChange,
 }: {
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   records: LibraryRecipeRecord[];
   filters: LibraryWorkcellFilters;
   query: string;

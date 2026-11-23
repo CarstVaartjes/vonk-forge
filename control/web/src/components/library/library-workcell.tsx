@@ -429,7 +429,7 @@ export function EmptyLibrary({
   filters: LibraryWorkcellFilters;
   query: string;
   onClear(): void;
-  onRefresh?(): void;
+  onRefresh?: (() => void) | undefined;
   noun?: string;
 }) {
   const filtered = activeFilterSummary(filters, query).length > 0;
@@ -499,10 +499,10 @@ export function LibraryWorkcell({
   snapshot,
 }: {
   api: ControlApi;
-  detail?: LibraryViewRecipeDetail;
+  detail?: LibraryViewRecipeDetail | undefined;
   detailError?: string;
   detailLoading?: boolean;
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   fleetError?: string;
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;

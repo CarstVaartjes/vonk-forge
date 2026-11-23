@@ -43,12 +43,12 @@ export function AreaChart({
   start: number;
   end: number;
   format: (value: number) => string;
-  threshold?: { value: number; label: string };
+  threshold?: { value: number; label: string } | undefined;
   /** The newest reading is live: the end dot gets a halo (off under reduced motion). */
   live?: boolean;
   emptyText?: string;
   /** Charts of one page share a cursor time: the page holds it, each chart snaps to its own nearest sample. */
-  crosshair?: { at: number | null; onChange(at: number | null): void };
+  crosshair?: { at: number | null; onChange(at: number | null): void } | undefined;
 }) {
   const gradient = useId();
   const [ownAt, setOwnAt] = useState<number | null>(null);

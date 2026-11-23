@@ -14,14 +14,14 @@ export type AvailabilityFailure = {
   detail: string;
   recovery: string[];
   recoveryCodes: string[];
-  retryAt?: string;
-  retryAfterSeconds?: WireNumber;
-  operationId?: string;
-  preserved?: string;
-  logExcerpt?: string;
-  requiredBytes?: WireNumber;
-  freeBytes?: WireNumber;
-  shortfallBytes?: WireNumber;
+  retryAt?: string | undefined;
+  retryAfterSeconds?: WireNumber | undefined;
+  operationId?: string | undefined;
+  preserved?: string | undefined;
+  logExcerpt?: string | undefined;
+  requiredBytes?: WireNumber | undefined;
+  freeBytes?: WireNumber | undefined;
+  shortfallBytes?: WireNumber | undefined;
 };
 
 type RecoveryAction = NonNullable<AvailabilityOperationFailure["recovery_actions"]>[number];

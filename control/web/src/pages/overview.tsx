@@ -30,10 +30,10 @@ export function OverviewPage({
   onOpenSpark,
 }: {
   api: ControlApi;
-  onBusyChange?(busy: boolean): void;
-  onLive?(status: LiveStatus | null): void;
-  onNavigate?(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onOpenSpark?(id: string): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
+  onLive?: ((status: LiveStatus | null) => void) | undefined;
+  onNavigate?: ((event: MouseEvent<HTMLAnchorElement>, path: string) => void) | undefined;
+  onOpenSpark?: ((id: string) => void) | undefined;
 }) {
   const fleet = useFleetStream(api);
   const tokens = useMetricSeries(api, "output_token_rate", "24h");

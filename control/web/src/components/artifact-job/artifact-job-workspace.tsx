@@ -312,8 +312,8 @@ function JobHistory({
   onPrepareRetry,
 }: {
   api: LibraryApi;
-  busyJobId?: string;
-  cancelCandidate?: string;
+  busyJobId?: string | undefined;
+  cancelCandidate?: string | undefined;
   job: ArtifactJob;
   onCancel(jobId?: string): void;
   onConfirmCancel(job: ArtifactJob): void;
@@ -442,7 +442,7 @@ export function ArtifactJobWorkspace({
 }: {
   api: LibraryApi;
   detail: LibraryViewRecipeDetail;
-  onBusyChange?(busy: boolean): void;
+  onBusyChange?: ((busy: boolean) => void) | undefined;
 }) {
   type ActiveRun = { run_id: string; state: string };
   const document = detail.definition;

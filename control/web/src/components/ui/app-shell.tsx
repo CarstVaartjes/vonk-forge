@@ -30,14 +30,14 @@ type Operator = {
 };
 
 type AppShellProps = {
-  activeRoute?: AppRoute;
+  activeRoute?: AppRoute | undefined;
   children: ReactNode;
   footer?: ReactNode;
   live?: LiveStatus | null;
   navigationKey?: string;
   navigationLocked?: boolean;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
-  operator?: Operator;
+  operator?: Operator | undefined;
 };
 
 export function AppShell({

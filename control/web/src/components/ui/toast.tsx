@@ -16,7 +16,7 @@ type ToastKind = "success" | "error" | "info";
 export type ToastLink = {
   label: string;
   href: string;
-  onClick?(event: MouseEvent<HTMLAnchorElement>): void;
+  onClick?: ((event: MouseEvent<HTMLAnchorElement>) => void) | undefined;
 };
 type ToastItem = { id: number; kind: ToastKind; message: string; link?: ToastLink };
 type Toasts = {

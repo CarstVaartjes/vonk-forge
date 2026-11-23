@@ -43,7 +43,7 @@ export function WorkloadHero({
   live,
 }: {
   /** Reads the recipe and jobs of a job workload; without it the workload shows as a model. */
-  api?: Partial<JobWorkloadApi>;
+  api?: Partial<JobWorkloadApi> | undefined;
   unit: WorkloadGroup;
   reads: WorkloadReads;
   live: boolean;

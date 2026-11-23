@@ -41,13 +41,13 @@ type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
 type ActivitySummary = { request_id: string; actor: string; action: string; targets: string[] };
 type ActivityRecord = ActivitySummary & {
-  occurred_at?: string | null;
+  occurred_at?: string | null | undefined;
   source: "job" | "operation";
   target_names?: string[];
   operation?: OperationDetail;
   /** The Controller's plain phrase for the event, and the workload it acts on. */
   summary?: string;
-  subject?: string | null;
+  subject?: string | null | undefined;
 };
 type ActivityApi = Pick<
   ControlApi,
@@ -235,7 +235,7 @@ function EventTime({ event, now }: { event: ActivityRecord; now: Date }) {
   );
 }
 
-function CopyableValue({ label, value }: { label: string; value?: string | null }) {
+function CopyableValue({ label, value }: { label: string; value?: string | null | undefined }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const statusId = useId();
   if (!value)

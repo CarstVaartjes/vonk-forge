@@ -28,12 +28,12 @@ import {
 type LibraryModelsViewProps = {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: VisualFleetSnapshot;
+  fleet?: VisualFleetSnapshot | undefined;
   modelInventory?: LibraryViewSnapshot["models"];
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
-  onNavigatePath?(path: string, replace?: boolean): void;
+  onNavigatePath?: ((path: string, replace?: boolean) => void) | undefined;
   onQueryChange(value: string): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   path: string;
