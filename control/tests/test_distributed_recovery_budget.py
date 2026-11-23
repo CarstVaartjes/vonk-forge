@@ -215,7 +215,7 @@ def test_slow_distributed_restart_retains_accepted_startup_budget(
             operation.node_id: operation.payload["run_generation"]
             for operation in source_starts
         }
-        assert source_generations == {node_id: 1 for node_id in nodes}
+        assert source_generations == dict.fromkeys(nodes, 1)
     assert [payload.run_generation for payload in stop_payloads] == [1] * len(nodes)
     for node_id in nodes:
         service.record_node_result(stop.id, node_id, succeeded=True, evidence={})

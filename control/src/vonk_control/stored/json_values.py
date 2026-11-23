@@ -161,7 +161,7 @@ def bind(
     if isinstance(contract, Mapping):
         if discriminator is None:
             raise ValueError(f"{key} binds one contract per kind and names no kind")
-        contracts = {kind: item for kind, item in contract.items()}
+        contracts = dict(contract.items())
     else:
         contracts = {None: contract}
     binding = JsonColumn(

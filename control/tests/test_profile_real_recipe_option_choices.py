@@ -45,7 +45,7 @@ def test_every_library_recipe_replaces_stale_choices_with_its_defaults() -> None
         assert notes == []
         assert set(defaults) == set(declared)
 
-        stale = {name: "value-the-recipe-never-offered" for name in declared}
+        stale = dict.fromkeys(declared, "value-the-recipe-never-offered")
         stale["option-the-recipe-never-declared"] = "x"
         effective, notes = _effective_option_choices(recipe, stale)
 

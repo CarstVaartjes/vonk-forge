@@ -100,7 +100,7 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
     assert repository.latest((NODE_A,))[NODE_A].observed_at == START + timedelta(
         seconds=5
     )
-    assert [observed_at for observed_at in _stored(sessions)] == [
+    assert list(_stored(sessions)) == [
         START + timedelta(seconds=4),
         START + timedelta(seconds=5),
     ]
@@ -136,7 +136,7 @@ def test_new_boot_only_newer_observation_advances_latest(
     assert latest[NODE_A].boot_id == str(BOOT_B)
     assert latest[NODE_A].observed_at == START + timedelta(seconds=10)
     assert NODE_B not in latest
-    assert [observed_at for observed_at in _stored(sessions)] == [
+    assert list(_stored(sessions)) == [
         START + timedelta(seconds=8),
         START + timedelta(seconds=9),
         START + timedelta(seconds=10),

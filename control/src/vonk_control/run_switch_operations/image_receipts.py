@@ -46,7 +46,7 @@ def _planned_transfer_bytes(
 
     node_ids = list(_plan_target_node_ids(plan))
     if plan.action == "stop":
-        return 0, {node_id: 0 for node_id in node_ids}
+        return 0, dict.fromkeys(node_ids, 0)
     model_download_bytes = _planned_model_download_bytes(plan)
     model_bytes = plan.storage.missing_spark_bytes
     image_bytes = plan.runtime_storage.missing_image_distribution_bytes

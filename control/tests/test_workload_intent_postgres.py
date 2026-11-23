@@ -119,7 +119,7 @@ def test_intent_reads_do_not_wait_for_a_held_agent_node_row(sessions, postgres_e
 
 def test_a_numbering_that_lost_the_race_changes_nothing(sessions):
     with sessions.begin() as session:
-        seen = {node: 3 for node in NODES}
+        seen: dict[str, int] = dict.fromkeys(NODES, 3)
         newer = allocate_workload_intent(session, NODES[:1])
     assert newer == 4
     with sessions.begin() as session:
@@ -160,7 +160,7 @@ def test_a_revoked_spark_is_a_definite_refusal_not_a_wait(sessions):
         error = refused.value
         assert disposition(error) is not Disposition.WAIT
         assert error.typed_reason is InvalidRequestReason.CONFLICT
-        _, taken = take_workload_intent(session, {node: 3 for node in NODES})
+        _, taken = take_workload_intent(session, dict.fromkeys(NODES, 3))
         assert taken == (NODES[0],)
 
 

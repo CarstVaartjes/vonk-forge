@@ -173,15 +173,14 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
         # No re-download: the new Model head has the old artifact key.
         legacy_model_row = session.get(CatalogDocumentRevision, legacy_model_id)
         assert legacy_model_row is not None
-        new_model_rows = [
-            row
-            for row in session.scalars(
+        new_model_rows = list(
+            session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.document_id == legacy_model_row.document_id,
                     CatalogDocumentRevision.id != legacy_model_id,
                 )
             )
-        ]
+        )
         assert [row.artifact_key for row in new_model_rows] == [model_key]
         assert new_model_rows[0].content_digest == document_sha256(entry.published)
 

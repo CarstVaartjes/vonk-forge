@@ -240,9 +240,9 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
     # Every job the gate knows is green; only the lane is not selected.
     results = {job: "success" for jobs in gate["AREA_JOBS"].values() for job in jobs}
     results.update(
-        {job: "success" for job in ("lint", "supply-chain", "repository-guards")}
-        | {job: "success" for job in ("consumer-probe", "rust-quality", "rust-tests")}
-        | {job: "success" for job in ("control-image-build", "controller-spark-wire")}
+        dict.fromkeys(("lint", "supply-chain", "repository-guards"), "success")
+        | dict.fromkeys(("consumer-probe", "rust-quality", "rust-tests"), "success")
+        | dict.fromkeys(("control-image-build", "controller-spark-wire"), "success")
         | {"member-web": "skipped", "lane-proof": "skipped"}
     )
     assert gate["verify"]("success", selected, results) == []
@@ -266,7 +266,7 @@ def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
     assert module.select(["scripts/select-ci-areas"], "merge_group") == module.select(
         ["scripts/select-ci-areas"], "pull_request"
     )
-    assert module.select([], "merge_group") == {area: True for area in module.AREAS}
+    assert module.select([], "merge_group") == dict.fromkeys(module.AREAS, True)
     assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is True
 
 

@@ -267,15 +267,9 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
             "knobs.count": 0,
             "knobs.label": "",
         },
-        "change_effects": {
-            name: "rebuild"
-            for name in (
-                "knobs.compiler",
-                "knobs.enabled",
-                "knobs.count",
-                "knobs.label",
-            )
-        },
+        "change_effects": dict.fromkeys(
+            ("knobs.compiler", "knobs.enabled", "knobs.count", "knobs.label"), "rebuild"
+        ),
     }
     assert (
         service.plan(selected.id, node_id, now=now).build_input_sha256

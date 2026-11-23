@@ -204,7 +204,7 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
         lambda *_args, **_kwargs: (
             None,
             "assignment",
-            {node: 10 for node in claims},
+            dict.fromkeys(claims, 10),
             claims,
         ),
     )

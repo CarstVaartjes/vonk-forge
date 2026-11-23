@@ -60,9 +60,8 @@ def release_covered_installation_claims(
     ).all()
     if not rows:
         return ()
-    newest = {
-        node_id: observed_at
-        for node_id, observed_at in session.execute(
+    newest = dict(
+        session.execute(
             select(
                 NodeInventorySnapshot.node_id, NodeInventorySnapshot.observed_at
             ).where(
@@ -71,7 +70,7 @@ def release_covered_installation_claims(
                 )
             )
         )
-    }
+    )
     for reservation, installation, node in rows:
         observed = newest.get(reservation.node_id)
         if observed is None or _aware(observed) <= (

@@ -194,7 +194,7 @@ class FleetProjection:
                     node_id: intent.range for node_id, intent in clocks.items()
                 }
             except ValueError:
-                clock_desired = {node_id: None for node_id in node_ids}
+                clock_desired = dict.fromkeys(node_ids)
             from ..swap import selected_swaps
 
             swap_desired = selected_swaps(session, node_ids)

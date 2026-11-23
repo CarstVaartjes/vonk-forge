@@ -71,7 +71,7 @@ class ObservationResponseContract:
             not isinstance(key, str) for key in value
         ):
             raise ContractSkew(f"{self.label} observation is not an object")
-        return {key: item for key, item in value.items()}
+        return dict(value.items())
 
     def decode(
         self,

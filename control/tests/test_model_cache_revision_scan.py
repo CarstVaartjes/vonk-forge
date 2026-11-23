@@ -314,16 +314,16 @@ def test_unreadable_heads_are_resolved_once_per_scan_and_settled(
             return list(calls)
 
         first = scan()
-        assert {digest: first.count(digest) for digest in unreadable} == {
-            digest: 1 for digest in unreadable
-        }
+        assert {digest: first.count(digest) for digest in unreadable} == dict.fromkeys(
+            unreadable, 1
+        )
         now[0] += PAST_BACKOFF
         assert scan() == []
         now[0] += PAST_SETTLED
         again = scan()
-        assert {digest: again.count(digest) for digest in unreadable} == {
-            digest: 1 for digest in unreadable
-        }
+        assert {digest: again.count(digest) for digest in unreadable} == dict.fromkeys(
+            unreadable, 1
+        )
     finally:
         service.close()
         engine.dispose()

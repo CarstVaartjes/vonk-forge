@@ -501,7 +501,7 @@ def _read_objects(store: ObjectStore, keys: list[str]) -> dict[str, bytes]:
     if len(keys) != len(set(keys)):
         raise StateError("object read set is invalid")
     return _bounded_object_operations(
-        {key: b"" for key in keys},
+        dict.fromkeys(keys, b""),
         lambda key, _raw: store.read(key),
     )
 

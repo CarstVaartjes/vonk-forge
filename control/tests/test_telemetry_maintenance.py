@@ -316,12 +316,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
             await generator.aclose()
 
     frame = asyncio.run(read_reset())
-    fields = {
-        key: value
-        for key, value in (
-            line.split(": ", 1) for line in frame.splitlines() if ": " in line
-        )
-    }
+    fields = dict(line.split(": ", 1) for line in frame.splitlines() if ": " in line)
     notice = FleetRefreshEvent.model_validate_json(fields["data"])
     assert fields["id"] == "1"
     assert fields["event"] == "fleet-refresh"

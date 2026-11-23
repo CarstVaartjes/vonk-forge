@@ -384,9 +384,9 @@ class ActionPlansMixin:
                 BookkeepingReason.PERSISTED_STATE_DAMAGED,
                 "no provable model identity; the model is kept",
             )
-            dependent_recipe_ids_by_node = {
-                node_id: (revision.document_id,) for node_id in sorted(node_ids)
-            }
+            dependent_recipe_ids_by_node = dict.fromkeys(
+                sorted(node_ids), (revision.document_id,)
+            )
         return uninstall_plan(
             installation_id=installation.id,
             recipe_id=revision.document_id,

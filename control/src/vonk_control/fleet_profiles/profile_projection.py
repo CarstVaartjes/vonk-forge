@@ -78,14 +78,13 @@ class FleetProfileService:
                 .order_by(AgentNode.node_id)
             )
         )
-        display_names = {
-            node_id: display_name
-            for node_id, display_name in session.execute(
+        display_names = dict(
+            session.execute(
                 select(AgentNodeProfile.node_id, AgentNodeProfile.display_name).where(
                     AgentNodeProfile.node_id.in_(node_ids)
                 )
             )
-        }
+        )
         return _ProfilePageReads(
             selection=self._selected_profile_snapshot(session),
             roster=tuple(
@@ -532,9 +531,7 @@ class FleetProfileService:
             )
         if not references:
             return {}
-        titles: dict[tuple[str, str, str], str | None] = {
-            key: None for key in references
-        }
+        titles: dict[tuple[str, str, str], str | None] = dict.fromkeys(references)
         for publisher, slug, digest, title in session.execute(
             select(
                 CatalogDocumentRevision.publisher,

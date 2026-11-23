@@ -409,14 +409,13 @@ def _operation_revision_archives(
     if not revision_ids or not selected:
         return {}
     runnable = revision_images(session, revision_ids)
-    documents = {
-        revision_id: document_id
-        for revision_id, document_id in session.execute(
+    documents = dict(
+        session.execute(
             select(
                 CatalogDocumentRevision.id, CatalogDocumentRevision.document_id
             ).where(CatalogDocumentRevision.id.in_(sorted(revision_ids)))
         )
-    }
+    )
     held: dict[str, set[str]] = {}
     for archive, document_id in session.execute(
         select(RecipeBuild.oci_layout_sha256, CatalogDocumentRevision.document_id)

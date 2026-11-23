@@ -133,9 +133,8 @@ class StartMixin:
             )
             if replay is not None:
                 return replay
-            presences = {
-                node_id: address
-                for node_id, address in session.execute(
+            presences = dict(
+                session.execute(
                     select(
                         AgentNodeContact.node_id, AgentNodeContact.management_address
                     ).where(
@@ -145,7 +144,7 @@ class StartMixin:
                         AgentNodeContact.management_address.is_not(None),
                     )
                 )
-            }
+            )
             absent = sorted({node.node_id for node in plan.nodes} - set(presences))
             if absent:
                 # A Spark reports its address when it next contacts the Controller.

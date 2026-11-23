@@ -711,7 +711,7 @@ class Reconciler:
         running, when the network lists no endpoint for it. A pending repair
         also owes the networks it disconnected and has not yet seen attached.
         """
-        owed = [n for n in (pending.networks if pending else {})]
+        owed = list(pending.networks if pending else {})
         declared = self.topology.declared(self.project, container.service)
         names = dict.fromkeys([*container.networks, *owed, *declared])
         broken = []

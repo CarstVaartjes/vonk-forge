@@ -157,7 +157,7 @@ def test_an_unconfirmed_stop_is_lost_with_its_claims_until_a_newer_stop(tmp_path
     assert service.get(stop.id).state == "succeeded"
     assert _states(sessions, run_id) == (
         RunState.STOPPED,
-        {node: RunState.STOPPED for node in nodes},
+        dict.fromkeys(nodes, RunState.STOPPED),
     )
     assert _claims(sessions, run_id) == 0
     _fresh_load(sessions, service, installation_id, "n" * 36)

@@ -368,7 +368,7 @@ def _acceptance_receipt(
         receipt,
         {
             "channel": plan["channel"],
-            "gates": {name: True for name in sorted(ACCEPTANCE_GATES)},
+            "gates": dict.fromkeys(sorted(ACCEPTANCE_GATES), True),
             "generation": generation or plan["generation"],
             "issued_at": int(time.time()),
             "run_id": 123456,

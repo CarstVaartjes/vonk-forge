@@ -33,10 +33,7 @@ def _load(sim: Simulation, name: str, assignments: list[dict[str, object]]) -> s
 
 def _states(sim: Simulation) -> dict[str, str]:
     with sim.world.sessions() as session:
-        return {
-            run_id: state
-            for run_id, state in session.execute(select(RecipeRun.id, RecipeRun.state))
-        }
+        return dict(session.execute(select(RecipeRun.id, RecipeRun.state)))
 
 
 @pytest.mark.slow(40)

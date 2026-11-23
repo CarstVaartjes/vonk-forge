@@ -1154,7 +1154,7 @@ def accept(arguments: argparse.Namespace) -> None:
 
     receipt = {
         "channel": arguments.channel,
-        "gates": {gate: True for gate in sorted(observed)},
+        "gates": dict.fromkeys(sorted(observed), True),
         "generation": arguments.generation,
         "issued_at": int(time.time()),
         "run_id": arguments.run_id,

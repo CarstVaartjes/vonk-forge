@@ -199,7 +199,7 @@ def _build_effective_settings(value: object | None) -> dict[str, object] | None:
         }
     )
     return (
-        {"values": selected, "change_effects": {name: "rebuild" for name in selected}}
+        {"values": selected, "change_effects": dict.fromkeys(selected, "rebuild")}
         if selected
         else None
     )
