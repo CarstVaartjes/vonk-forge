@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import create_engine, select
 
 from cluster_profiles.control_client.schema import validate_control_document
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, ResourceBlockerCode
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
@@ -1074,10 +1074,13 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
             monkeypatch.setattr(executor, "execute", crash_after_install)
 
-        with pytest.raises(SystemExit):
+        def expected_failure():
             for _ in range(12):
                 planner.tick()
                 service.tick()
+
+        with pytest.raises(SystemExit):
+            expected_failure()
         assert crashed
 
         if boundary == "preparation-checkpoint":
@@ -1097,6 +1100,7 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
         if completed_before_restart:
             # The already-authorized child can finish while its parent is down.
+            install = None
             for _ in range(8):
                 planner.tick()
                 with sessions() as session:
@@ -1581,6 +1585,7 @@ def test_live_copy_on_other_spark_does_not_prevent_eviction_and_load(
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.observed_at = snapshot.received_at = later
             snapshot.disk_free_bytes = 10000
+    install = None
     for _ in range(8):
         _tick_profile_when_due(service, planner, lifecycle, accepted.id)
         with sessions() as session:

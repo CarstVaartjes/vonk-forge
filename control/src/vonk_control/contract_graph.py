@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import sessionmaker
 from starlette.routing import Mount, Route
 
+from .api.application import create_app
 from .auth import TokenCodec
 from .browser_auth import BrowserAuthService
 from .jobs.queue import JobService
@@ -36,19 +37,7 @@ def _declared_parameters(dependant: Dependant, location: str):
         pending.extend(current.dependencies)
 
 
-def raw_json_body(model: type[BaseModel]):
-    """Bind a bounded raw reader to its existing canonical request model."""
-
-    def decorate(endpoint):
-        endpoint.__vonk_raw_json_model__ = model
-        return endpoint
-
-    return decorate
-
-
 def schema_application(*, browser_auth: bool = True) -> FastAPI:
-
-    from .api.application import create_app
 
     key = b"schema-test-signing-key-32-bytes!"
     return create_app(

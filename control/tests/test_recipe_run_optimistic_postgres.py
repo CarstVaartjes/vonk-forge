@@ -15,8 +15,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -28,6 +28,7 @@ from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeErro
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_control import agent_operation_states as aos
+from vonk_control.agent_jobs import reconcile as sweep
 from vonk_control.agent_jobs import results as ingress
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import verify_schema_is_current
@@ -45,6 +46,7 @@ from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import COMMIT, parent
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .recipe_operations_support import NOW as OPERATION_NOW
 from .recipe_operations_support import (
@@ -64,14 +66,14 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
     """Catches lost run updates and child-only effects escaping a stale decision."""
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     sessions = routes.sessions
-    read = threading.Barrier(2)
+    read = Rendezvous(2)
     committed = threading.Event()
     seen: list[str] = []
 
     def winner(session: Session) -> None:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        read.wait(timeout=30)
+        read.wait()
         run.state = RunState.STOPPED
 
     def loser(session: Session) -> bool:
@@ -80,7 +82,7 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
         seen.append(run.state)
         if run.state == RunState.STOPPED:
             return False
-        read.wait(timeout=30)
+        read.wait()
         assert committed.wait(timeout=30)
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
         assert rank is not None
@@ -406,7 +408,6 @@ def test_publication_deferral_contention_continues_without_traceback(
     assert all(record.exc_info is None for record in caplog.records)
     monkeypatch.setattr(routes, "publish_run", publish)
     assert worker._publish_runs((run_id,)) is False
-    from datetime import timedelta
 
     now[0] += timedelta(seconds=5)
     assert worker._publish_runs((run_id,)) is True
@@ -526,8 +527,6 @@ def test_order_sweep_conflict_rolls_back_continues_and_resweeps(
             with ThreadPoolExecutor(max_workers=1) as pool:
                 pool.submit(winner).result(timeout=10)
         consume(session, operation, attempt, message)
-
-    from vonk_control.agent_jobs import reconcile as sweep
 
     completed = []
     refresh = sweep.refresh_queue_waits

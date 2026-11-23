@@ -10,13 +10,12 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureResult,
     AgentInstallResult,
     RecipeStartResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
 from vonk_agent_protocol.reason_codes.runs import SupersedeCode
@@ -25,6 +24,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
 )
 from vonk_agent_protocol.state_machines import InstallationNodeState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -53,7 +53,7 @@ from ..models.operations import AgentOperation
 from ..offline_stops import deferred_stop_nodes
 from ..persisted_waits import schedule_wait
 from ..recipe_builds.cancellation import build_cancellation
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import RecipeBuildState
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS, _WORKLOAD_INTENT_KINDS

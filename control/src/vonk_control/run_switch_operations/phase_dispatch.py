@@ -61,10 +61,11 @@ from ..run_switch_contract.progress_view import (
     RECOVERY_STALL_WINDOW,
     _complete_phase_progress,
     _merge_progress_evidence,
+    _observe_progress,
 )
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
 from ..stall_window import Verdict, stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _ARTIFACT_WAIT_CODES,
@@ -91,7 +92,7 @@ from .observation_window import checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
 from .provider import _ADAPTER
-from .result_helpers import _observe_progress, _phase_result, _read_progress
+from .result_helpers import _phase_result, _read_progress
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService

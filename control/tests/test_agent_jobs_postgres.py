@@ -14,17 +14,17 @@ from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
-    AgentResult,
     ArtifactDistributionResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Operation
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.helper_response import HostHelperResponse
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
@@ -38,16 +38,17 @@ from vonk_agent_protocol.reason_codes.helpers import HelperErrorCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
-from vonk_agent_protocol.wire_model import OperationCheckpoint, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationCheckpoint,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.retry import abandon_idempotent_job_in_session
 from vonk_control.agent_jobs.service import AgentJobService
-from vonk_control.agent_operation_facts import (
-    AGENT_ORDER_RECOVERY_BUDGET,
-    order_recovery_deadline,
-)
+from vonk_control.agent_operation_facts import AGENT_ORDER_RECOVERY_BUDGET
 from vonk_control.auth import TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment.service import EnrollmentService
@@ -62,6 +63,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.operations.progress import stored_progress
+from vonk_control.owner_liveness import order_recovery_deadline
 from vonk_control.pki import IssuedCertificate
 from vonk_control.recovery_policy import RECOVERY
 
@@ -72,6 +74,7 @@ from .agent_jobs_support import (
     superseded_order_payload,
 )
 from .ca_test_authority import FixtureCertificateAuthority
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
@@ -128,7 +131,7 @@ def agent_queue_world(postgres_engine):
     clock = Clock()
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
-        for node_id, serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
+        for node_id, _serial in ((NODE_A, "serial-a"), (NODE_B, "serial-b")):
             session.add(
                 AgentNode(
                     node_id=node_id,
@@ -206,7 +209,7 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
         clock=clock,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
     )
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def resume(services) -> str:
         barrier.wait()
@@ -410,7 +413,7 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     operation = first_service.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def claim(service):
         barrier.wait()
@@ -1214,18 +1217,23 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         AgentJobService(sessions, clock=clock),
         AgentJobService(sessions, clock=clock),
     )
-    barrier = threading.Barrier(2)
 
-    def claim_from(service):
-        barrier.wait(timeout=30)
-        return claim_agent(
-            service,
-            NODE_A,
-            "serial-a",
-        )
+    def claim_together():
+        # One rendezvous per round: each round's pool starts new threads.
+        barrier = Rendezvous(2)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(claim_from, services)) == [None, None]
+        def claim_from(service):
+            barrier.wait()
+            return claim_agent(
+                service,
+                NODE_A,
+                "serial-a",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            return list(pool.map(claim_from, services))
+
+    assert claim_together() == [None, None]
     with sessions() as session:
         ended = session.get(AgentOperation, operation.id)
         assert ended is not None and ended.state == LifecycleState.FAILED.value
@@ -1238,8 +1246,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         COMMIT,
         STOP_PAYLOAD,
     )
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(claim_from, services))
+    outcomes = claim_together()
     resumed = [claim for claim in outcomes if claim is not None]
     assert len(resumed) == 1
     assert fenced_attempt(sessions, resumed[0]).attempt == 1
@@ -1473,7 +1480,7 @@ def test_postgres_abandon_and_a_concurrent_claim_never_wait_and_both_settle(
     for _ in range(12):
         owner = parent(sessions, clock)
         probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
-        start = threading.Barrier(2)
+        start = Rendezvous(2)
 
         def claim(start=start):
             start.wait()
@@ -1516,7 +1523,7 @@ def test_postgres_abandon_and_a_concurrent_late_result_never_wait_and_settle(
         probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
         claimed = claim_agent(jobs, NODE_A, "serial-a")
         assert claimed is not None
-        start = threading.Barrier(2)
+        start = Rendezvous(2)
 
         def report(claimed=claimed, start=start):
             start.wait()

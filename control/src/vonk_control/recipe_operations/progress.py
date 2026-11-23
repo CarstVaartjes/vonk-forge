@@ -7,7 +7,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
+from ..agent_operation_facts import job_start_deadline
 from .errors import RecipeRequestInvalid
+from .interfaces import _TERMINAL_JOB_STATES
+from .observation_helpers import _RECIPE_PARENT_READERS, RecipeWirePayload, _aware
+from .results import _recorded_result
 
 if TYPE_CHECKING:
     from .observation_helpers import RecipeParent, _PhaseGroups
@@ -17,8 +21,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
 from vonk_forge_contracts import RecipeDefinition, read_model, read_recipe
 
-from vonk_agent_protocol.build_import import RecipeBuildCleanupRequest
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.build_import import (
+    RecipeBuildCleanupRequest,
+    RecipeBuildRequest,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeReconcilePayload,
@@ -26,15 +34,17 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeUninstallPayload,
 )
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
 )
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     RecipeBuildParent,
@@ -67,7 +77,6 @@ from .runtime_specs import recipe_topology
 
 
 def _parse_recipe_parent(job: Job) -> RecipeParent:
-    from .observation_helpers import _RECIPE_PARENT_READERS
 
     parent = _RECIPE_PARENT_READERS[job.kind].validate_json(
         canonical_message(job.payload)
@@ -90,8 +99,6 @@ def _parent_identity(
     job: Job, key: Literal["owner_id", "owner_kind", "plan_digest"]
 ) -> str | None:
     """Identity from the canonical parent, or unknown for damaged bookkeeping."""
-    from .rank_authority import _RECIPE_WIRE_PAYLOAD_MODELS
-
     parent = _recorded_parent(job)
     if isinstance(parent, Residue):
         # Phase history is bookkeeping. Rebuild only the exact affected owner
@@ -170,7 +177,6 @@ def _parent_reconciliation(job: Job) -> RunSwitchReconciliationAuthority | None:
 
 
 def _cancel_requested(job: Job) -> bool:
-    from .results import _recorded_result
 
     return isinstance(
         _recorded_result(job.kind, job.result, subject=job.id),
@@ -287,8 +293,6 @@ def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
 
     Progress its orders report extends the budget: only a stalled start ends.
     """
-    from ..agent_operation_facts import job_start_deadline
-    from .observation_helpers import _aware
 
     if job.kind != "recipe.start":
         return None
@@ -331,7 +335,6 @@ def _role_phases(
 
 def _stored_phases(job: Job) -> _PhaseGroups | Residue:
     """Read the canonical parent and its typed phase payloads; damage is unknown."""
-    from .observation_helpers import RecipeWirePayload
 
     def read() -> _PhaseGroups | Damaged:
         parent = _parse_recipe_parent(job)
@@ -411,8 +414,6 @@ def _project_recipe_operation_progress(
     session: Session, job: Job, *, now: datetime
 ) -> OperationProgress | None:
     """Read exact current-attempt samples without advancing a child or its parent."""
-    from .interfaces import _TERMINAL_JOB_STATES
-    from .observation_helpers import RecipeWirePayload
 
     with session.no_autoflush:
         rows = tuple(
@@ -557,3 +558,15 @@ def _project_recipe_operation_progress(
         )
     projected = aggregate_progress(summary)
     return projected.model_copy(update={"members": members})
+
+
+_RECIPE_WIRE_PAYLOAD_MODELS = {
+    WireAgentOperation.RECIPE_BUILD.value: RecipeBuildRequest,
+    WireAgentOperation.RECIPE_JOB_RUN.value: RecipeJobRunRequest,
+    WireAgentOperation.RECIPE_BUILD_CLEANUP.value: RecipeBuildCleanupRequest,
+    WireAgentOperation.RECIPE_INSTALL.value: RecipeInstallPayload,
+    WireAgentOperation.RECIPE_RECONCILE.value: RecipeReconcilePayload,
+    WireAgentOperation.RECIPE_START.value: RecipeStartPayload,
+    WireAgentOperation.RECIPE_STOP.value: RecipeStopPayload,
+    WireAgentOperation.RECIPE_UNINSTALL.value: RecipeUninstallPayload,
+}

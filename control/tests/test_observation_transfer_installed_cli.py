@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +27,7 @@ from vonk_control.strict_json import serialize_json_value
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
-def _fleet_document(text: str) -> dict:
+def _fleet_document(text: str) -> dict[str, Any]:
     """The Controller snapshot inside ``vonkctl fleet --json`` (document + stamp)."""
 
     document = json.loads(text)

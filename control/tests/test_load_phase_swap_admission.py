@@ -12,7 +12,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select, update
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import HostSettings
 from vonk_agent_protocol.lifecycle_vocabulary import (
     ResourceBlockerCode,
@@ -27,6 +26,7 @@ from vonk_agent_protocol.swap import (
     usable_swap_bytes,
 )
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAssignmentAssessment,
 )

@@ -11,8 +11,8 @@ from dataclasses import dataclass, field, replace
 from pydantic import ValidationError
 from vonk_forge_contracts.model import ModelReference
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..bounded_json import require_integer, require_mapping
 from ..strict_json import serialize_json_value
@@ -32,7 +32,8 @@ from .contract import (
     CacheManifestArtifactPart,
 )
 from .errors import ModelCacheResolutionInvalid
-from .source_helpers import _valid_relative_path
+from .providers import PROVIDERS
+from .source_helpers import _valid_relative_path, _validate_source
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,8 +335,6 @@ def _optional_digest(value: object) -> str | None:
 
 
 def _validate_artifact(value: ArtifactSpec) -> None:
-    from .catalog_helpers import _validate_source
-    from .providers import PROVIDERS
 
     if (
         not value.key
@@ -390,8 +389,6 @@ def _validate_artifact(value: ArtifactSpec) -> None:
 
 
 def _validate_parts(value: ArtifactSpec) -> None:
-    from .catalog_helpers import _validate_source
-    from .providers import PROVIDERS
 
     parts = value.parts
     assert parts is not None

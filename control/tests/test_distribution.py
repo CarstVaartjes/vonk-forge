@@ -492,10 +492,14 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
     ask = {"node_id": NODE_A, "plan_digest": assignment.plan_digest, "digest": model}
 
     # Many range requests of one transfer resolve the stored object once.
+    location = None
+    spec = None
     for _ in range(5):
         _assignment_value, spec, location = service.locate_object(**ask)
     assert source.opened == 1
+    assert spec is not None
     assert spec.sha256 == model
+    assert location is not None
     assert location.path == source.root / model
 
     # A file that disappeared is looked up again as a recoverable miss.

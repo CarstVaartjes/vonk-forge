@@ -10,18 +10,19 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import (
+    AgentFailureKind,
+    AgentFailureResult,
+    RecipeStartResult,
+)
+from vonk_agent_protocol.agent_operations import AgentOperation as Kind
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentFailureKind,
-    AgentFailureResult,
     AgentPayload,
     AgentResult,
     AgentResultPayload,
-    RecipeStartResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as Kind
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -45,8 +46,13 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_agent_protocol.recipe_operations import (
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeStopResult,
+)
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 from vonk_control.agent_jobs.service import AgentJobService
@@ -63,7 +69,8 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 
 from . import test_agent_jobs_postgres as fixtures
-from .agent_grant_requests import stop_grant_request
+from .agent_grant_requests import own_stop_payload, stop_grant_request
+from .agent_jobs_support import canonical_start_payload
 from .artifact_jobs_support import (
     MutableClock,
     artifact_create_request,
@@ -74,7 +81,7 @@ from .artifact_jobs_support import (
 from .node_contacts import contact_row
 from .recipe_operations_support import NOW
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs_postgres import COMMIT, NODE_A, parent
+from .test_agent_jobs_postgres import COMMIT, NODE_A, Clock, parent
 
 
 @pytest.fixture
@@ -92,11 +99,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
     ).read_bytes()
     claim = AgentClaim.model_validate_json(raw)
     if kind is Kind.RECIPE_START:
-        from vonk_agent_protocol.recipe_operations import RecipeStartPayload
-
-        from .agent_jobs_support import canonical_start_payload
-        from .test_agent_jobs_postgres import Clock
-
         return RecipeStartPayload.model_validate_json(
             canonical_message(
                 canonical_start_payload(
@@ -106,7 +108,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
         ), RecipeStartResult()
     if kind is Kind.RECIPE_STOP:
         assert isinstance(claim.payload, RecipeJobRunRequest)
-        from .agent_grant_requests import own_stop_payload
 
         return own_stop_payload(
             claim.payload, cancel_pending_start=True
@@ -125,8 +126,6 @@ def _runtime(kind: Kind) -> tuple[AgentPayload, AgentResultPayload]:
                 manifest_sha256=recipe_job_manifest_sha256(()),
             ),
         )
-    if kind is Kind.RECIPE_START:
-        return claim.payload, RecipeStartResult()
     return claim.payload, RecipeStopResult()
 
 
@@ -242,10 +241,12 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
             job.state = LifecycleState.CANCELLED
         else:
             node.workload_intent_ordinal += 1
+    refusal: StaleAgentFence | None = None
     try:
         queue.record_late_result(receipt)
     except StaleAgentFence as error:
-        assert str(error)
+        refusal = error
+    assert refusal is None or str(refusal)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
@@ -369,7 +370,8 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
             (row.kind, row.state, row.status_reason)
             for row in session.scalars(select(AgentOperation))
         ]
-    assert stop is not None and stop.operation == Kind.RECIPE_STOP, debug
+    assert stop is not None, debug
+    assert stop.operation == Kind.RECIPE_STOP, debug
     assert isinstance(stop.payload, RecipeStopPayload)
     assert stop.payload.target_runtime_id == job.id
     assert stop.payload.run_id == run_id
@@ -445,7 +447,6 @@ def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
-        from vonk_control.agent_jobs.stored import column_value
 
         request = column_value(row, "payload")
         assert isinstance(request, RecipeJobRunRequest)
@@ -544,6 +545,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
 
     assert isinstance(grant.claims.operation, ExecuteContainerRuntimeRequestOperation)
     assert grant.claims.operation.runtime_target_id == stop.payload.target_runtime_id
+    operation = None
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
@@ -592,6 +594,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             assert operation is not None
             if operation.state == LifecycleState.CANCELLED:
                 break
+    assert operation is not None
     assert operation.state == LifecycleState.CANCELLED
     evidence = artifacts.get(job.id).result_evidence
     assert evidence is not None
@@ -651,8 +654,6 @@ def test_definite_runtime_exit_or_refusal_survives_lost_report(service, kind, re
         assert row is not None
         assert row.state == LifecycleState.FAILED
         assert row.current_attempt == 1
-
-        from vonk_control.agent_jobs.stored import column_value
 
         attempt = session.scalar(
             select(AgentOperationAttempt).where(

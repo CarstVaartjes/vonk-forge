@@ -15,7 +15,6 @@ from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import Field, ValidationError
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -28,7 +27,7 @@ from vonk_agent_protocol.outcome import (
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.wire_model import Digest, WireModel
+from vonk_agent_protocol.wire_model import Digest, WireModel, canonical_message
 
 from ..categorized_faults import security_reason
 

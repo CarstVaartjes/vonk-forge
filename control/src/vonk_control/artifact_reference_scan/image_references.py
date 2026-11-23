@@ -7,9 +7,9 @@ from collections.abc import Iterable, Mapping
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
@@ -21,6 +21,7 @@ from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfile, FleetProfileApplication
 from ..models.jobs import Job
 from ..models.operations import ArtifactDistributionAssignment
+from ..recipe_image_availability.contracts import OPERATION_KIND
 from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
@@ -268,8 +269,6 @@ def runtime_image_reference_findings(
                 )
             )
 
-    from ..recipe_image_availability.contracts import OPERATION_KIND
-
     operations_active = (
         Job.kind == OPERATION_KIND,
         Job.state.in_(_ACTIVE_ARTIFACT_JOBS),
@@ -414,7 +413,7 @@ def _operation_revision_archives(
             select(
                 CatalogDocumentRevision.id, CatalogDocumentRevision.document_id
             ).where(CatalogDocumentRevision.id.in_(sorted(revision_ids)))
-        )
+        ).all()
     )
     held: dict[str, set[str]] = {}
     for archive, document_id in session.execute(

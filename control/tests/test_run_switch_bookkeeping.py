@@ -99,9 +99,9 @@ def test_an_inspector_without_model_cache_binding_does_not_fail_composition(
     tmp_path: Path,
 ) -> None:
     service = _accepted(tmp_path).service
-    service._artifacts = object()  # type: ignore[assignment]
+    service._artifacts = object()
 
-    service.bind_model_cache(object())  # type: ignore[arg-type]
+    service.bind_model_cache(object())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

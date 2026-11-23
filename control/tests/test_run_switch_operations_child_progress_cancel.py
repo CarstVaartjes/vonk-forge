@@ -6,6 +6,7 @@ import errno
 import hashlib
 import json
 import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -326,11 +327,19 @@ class _CountingPreviewLifecycle(RecipeOperationService):
         installation_id: str,
         alias: str,
         *,
+        released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
+        excluded_profile_application_ids: Sequence[str] = (),
     ):
         self.previews += 1
         return self._inner.preview_run(
-            installation_id, alias, profile_application_id=profile_application_id
+            installation_id,
+            alias,
+            released_run_ids=released_run_ids,
+            kept_run_ids=kept_run_ids,
+            profile_application_id=profile_application_id,
+            excluded_profile_application_ids=excluded_profile_application_ids,
         )
 
     def __getattr__(self, name: str):
@@ -1042,7 +1051,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
 
     # Cancellation is committed only together with an accepted Stop: a Stop
     # that cannot be admitted leaves the operation active and cancellable.
-    service.apply_stop = unavailable_stop  # type: ignore[method-assign]
+    service.apply_stop = unavailable_stop
     with pytest.raises(Exception) as _ending:
         service.cancel(
             active.operation_id,
@@ -1051,7 +1060,7 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
             reason="Stop running",
         )
     assert service.get(active.operation_id).state != "cancelled"
-    service.apply_stop = original_apply_stop  # type: ignore[method-assign]
+    service.apply_stop = original_apply_stop
     stopped = service.cancel(
         active.operation_id,
         actor="admin",

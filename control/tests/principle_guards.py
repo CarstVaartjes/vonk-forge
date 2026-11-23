@@ -882,7 +882,8 @@ def scan_source(
             self.get, self.context = old_get, old_context
             self.receiver = old_receiver
 
-        visit_AsyncFunctionDef = visit_FunctionDef
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            return self.visit_FunctionDef(node)
 
         def visit_ExceptHandler(self, node: ast.ExceptHandler):
             old = self.resource_refusal
@@ -902,7 +903,8 @@ def scan_source(
             self.generic_visit(node)
             self.deadline_caught = old
 
-        visit_TryStar = visit_Try
+        def visit_TryStar(self, node: ast.TryStar):
+            return self.visit_Try(node)
 
         def visit_While(self, node: ast.While):
             helper_bound = (

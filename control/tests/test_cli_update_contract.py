@@ -9,7 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from cluster_profiles import runtime_identity
-from vonk_agent_protocol.contracts import canonical_message
+from tests.observation_transfer_peer import observation_document
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -139,7 +140,6 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     assert repaired_platform.status_code == 200
     # The same failed observation re-captures its complete membership after the
     # exact stored-row repair; a healthy sibling route is not repair evidence.
-    from tests.observation_transfer_peer import observation_document
 
     repaired_observation = PlatformObservation.model_validate_json(
         canonical_message(observation_document(repaired_platform)), strict=True

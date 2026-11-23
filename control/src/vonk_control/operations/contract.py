@@ -10,7 +10,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentFailureResult
 from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
 from vonk_agent_protocol.wire_model import ERROR_CODE_PATTERN, OperationProgress
 

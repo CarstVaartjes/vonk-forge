@@ -6,7 +6,6 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -14,6 +13,7 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (

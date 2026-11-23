@@ -20,6 +20,7 @@ from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.jobs.queue import JobService
 from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+from vonk_control.lifecycle.types import Effect, Observed
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.jobs import Job
@@ -103,7 +104,6 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     with sessions.begin() as session:
         row = session.get(Job, original.id)
         assert row is not None
-        from vonk_control.lifecycle.types import Effect, Observed
 
         service._lifecycle._drive(row, Observed(Effect.UNKNOWN), now)
     failed = service.get(original.id)

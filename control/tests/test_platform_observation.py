@@ -19,6 +19,7 @@ from vonk_control import build_identity
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.build_identity import RuntimeBuildIdentity
+from vonk_control.cli_update_contract import summarize_cli_update_contract
 from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import ControlProcessHeartbeat
 from vonk_control.observation import platform as platform_observation
@@ -170,8 +171,6 @@ def test_platform_names_the_slow_step_while_the_heartbeat_is_stale(
     assert observation.workers is not None
     assert observation.workers[0].running_step == "catalog-sync"
     assert observation.workers[0].step_started_at == started
-
-    from vonk_control.cli_update_contract import summarize_cli_update_contract
 
     contract = summarize_cli_update_contract(observer.capture())
     assert contract.worker_issue == "worker-observation-unavailable"

@@ -12,15 +12,14 @@ from pydantic import ConfigDict, Field, model_validator
 
 from .claims import AgentRuntimeIdentity
 from .host_helper import (
-    UUID4_PATTERN,
     ContainerRuntimeAction,
     ContainerRuntimeActionName,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
 )
 from .integer_domains import MAX_DATABASE_BIGINT
 from .package_upgrade import PackageActivationReceipt
-from .wire_model import StrictJSONModel
+from .recipe_operations import RecipeReconciliationIdentity
+from .wire_model import UUID4_PATTERN, StrictJSONModel
 
 
 class _AgentGrantRequest(StrictJSONModel):

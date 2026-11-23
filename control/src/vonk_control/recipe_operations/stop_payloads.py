@@ -8,17 +8,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.outcome import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..categorized_errors import BookkeepingUnknown
 from ..lifecycle.evidence import Residue
 from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun, RunNode
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .execution_contract import (
     RecipeExecutionContractError,

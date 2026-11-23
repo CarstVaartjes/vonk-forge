@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs.service import AgentJobService
@@ -21,6 +21,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -34,7 +35,7 @@ def queue(postgres_engine):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
-        for index, node in enumerate(NODES):
+        for node in NODES:
             session.add(
                 AgentNode(
                     node_id=node,
@@ -101,7 +102,7 @@ def _concurrent_node_lock_calls(engine, calls):
     Agent contact paths read the nodes and lock the parent Job first; workers
     lock the nodes first. Either way both must serialize, not cross.
     """
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
     seen = set()
     guard = threading.Lock()
 
@@ -114,7 +115,7 @@ def _concurrent_node_lock_calls(engine, calls):
                 return
             seen.add(identity)
         context.first_test_node_lock = True
-        barrier.wait(timeout=30)
+        barrier.wait()
 
     def after(_conn, _cursor, _statement, _parameters, context, _many):
         if getattr(context, "first_test_node_lock", False):
@@ -199,8 +200,8 @@ def test_dual_node_reconcile_passes_share_the_claim_lock_order(queue, postgres_e
     _concurrent_node_lock_calls(
         postgres_engine,
         [
-            lambda: services[0].reconcile_orders(),
-            lambda: services[1].reconcile_orders(),
+            services[0].reconcile_orders,
+            services[1].reconcile_orders,
         ],
     )
 
@@ -227,7 +228,7 @@ def test_a_reconcile_pass_and_a_claim_on_the_other_node_do_not_deadlock(
 
     results = _concurrent_node_lock_calls(
         postgres_engine,
-        [lambda: services[0].reconcile_orders(), lambda: _claim(services[1], 1)],
+        [services[0].reconcile_orders, lambda: _claim(services[1], 1)],
     )
 
     # The claim on the other node still succeeds. A claim no longer waits on
@@ -253,16 +254,14 @@ class _Clock:
 def _before_first_parent_lock(engine, mutation):
     """Mutate between a claim's unlocked hint and its parent Job lock."""
 
+    done = False
+
     def before(_conn, _cursor, statement, _parameters, _context, _many):
-        if (
-            "FROM jobs" in statement
-            and "FOR UPDATE OF jobs" in statement
-            and not before.done
-        ):
-            before.done = True
+        nonlocal done
+        if "FROM jobs" in statement and "FOR UPDATE OF jobs" in statement and not done:
+            done = True
             mutation()
 
-    before.done = False
     event.listen(engine, "before_cursor_execute", before)
     return before
 

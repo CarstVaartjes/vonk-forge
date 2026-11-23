@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.jobs import Job
@@ -53,6 +53,7 @@ def test_damaged_final_verify_reobserves_the_run_without_starting_another(
             fault = {"item_index": True}
         row.result = {**row.result, **fault}
     routes.publish_run(run_id)
+    view = None
     for _ in range(24):
         service.tick()
         view = service.get(operation.operation_id)
@@ -63,6 +64,7 @@ def test_damaged_final_verify_reobserves_the_run_without_starting_another(
             due = view.next_attempt_at
             service._clock = lambda due=due: due
     else:
+        assert view is not None
         pytest.fail(view.model_dump_json())
     with sessions() as session:
         assert (

@@ -20,7 +20,6 @@ from collections.abc import Callable
 import pytest
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -33,6 +32,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import host_helper_authority
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,

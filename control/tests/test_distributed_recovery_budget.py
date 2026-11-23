@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     WaitResumeCondition,
 )
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distributed_recovery import common
 from vonk_control.distributed_recovery.common import (
@@ -507,7 +509,7 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
         assert "submit a new authorized run" in (run.route_error or "")
 
 
-def _guard_diagnostics() -> dict:
+def _guard_diagnostics() -> dict[str, Any]:
     return guard_diagnostics(NOW.isoformat()).model_dump(mode="json")
 
 

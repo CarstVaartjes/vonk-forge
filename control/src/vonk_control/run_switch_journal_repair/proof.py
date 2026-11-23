@@ -9,10 +9,15 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..content_identity import same_image
+from ..fleet_profiles.continuing_effects import (
+    _adopted_application_scope,
+    _application_is_current_selection,
+)
+from ..fleet_profiles.persistence import _stored_progress
 from ..jobs.documents import RecipeInstallParent
 from ..lifecycle.evidence import Residue
 from ..models.fleet import AgentCertificate, FleetProfileApplication
@@ -32,7 +37,20 @@ from ..run_switch_contract.phase_results import (
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchVerifyResult,
 )
-from ..stored.json_values import read_row_column
+from ..run_switch_operations.artifact_validation import _validate_artifact_execution
+from ..run_switch_operations.contracts import ScopeIntentStatus
+from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
+from ..run_switch_operations.image_receipts import (
+    _plan_target_node_ids,
+    _planned_transfer_parts,
+)
+from ..run_switch_operations.observation_helpers import _phase_request_key
+from ..run_switch_operations.planning_helpers import (
+    _digest,
+    _run_switch_payload,
+    _scope_intent_status,
+)
+from ..stored.rows import read_row_column
 
 
 def _prove(
@@ -43,17 +61,6 @@ def _prove(
     purpose: JournalRepairPurpose,
 ) -> list[NativeProgressWitness] | None:
     # Import the sole owner predicates, not a second plan/authority interpreter.
-    from ..fleet_profiles.persistence import _stored_progress
-    from ..fleet_profiles.service import FleetProfileService
-    from ..run_switch_operations.artifact_validation import _validate_artifact_execution
-    from ..run_switch_operations.executor import RecipeLifecyclePhaseExecutor
-    from ..run_switch_operations.image_receipts import (
-        _plan_target_node_ids,
-        _planned_transfer_parts,
-    )
-    from ..run_switch_operations.observation_helpers import _phase_request_key
-    from ..run_switch_operations.planning_helpers import _digest, _run_switch_payload
-    from ..run_switch_operations.service import RunSwitchOperationService
 
     parent = _run_switch_payload(job)
     plan = parent.plan if parent is not None else None
@@ -79,8 +86,7 @@ def _prove(
         or progress.item_index != 0
         or (
             purpose == JournalRepairPurpose.MEASUREMENT
-            and RunSwitchOperationService._scope_intent_status(session, job)
-            != "current"
+            and _scope_intent_status(session, job) != ScopeIntentStatus.CURRENT
         )
     ):
         return None
@@ -160,12 +166,12 @@ def _prove(
         application_progress = _stored_progress(application)
         if isinstance(application_progress, Residue):
             return None
-        adopted = FleetProfileService._adopted_application_scope(session, application)
+        adopted = _adopted_application_scope(session, application)
         journal = application_progress.switch_adapter
         if (
             (
                 purpose == JournalRepairPurpose.MEASUREMENT
-                and not FleetProfileService._application_is_current_selection(
+                and not _application_is_current_selection(
                     session, application, application_progress
                 )
             )

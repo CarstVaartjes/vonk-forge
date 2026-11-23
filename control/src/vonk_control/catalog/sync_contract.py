@@ -8,7 +8,8 @@ from pydantic import BeforeValidator, Field, field_validator
 from vonk_agent_protocol.state_machines import CatalogSyncState, machine_adopter
 from vonk_agent_protocol.wire_model import WireEnum
 
-from ..library.contract import UuidId
+from ..identifiers import UuidId
+from ..recipe_library_types import _snapshot_content
 from ..strict_json import StrictModel
 
 if TYPE_CHECKING:
@@ -42,7 +43,6 @@ class ManagedCatalogSyncRequest(StrictModel):
 
 def reviewed_catalog_content(snapshot: "RecipeLibrarySnapshot") -> str:
     """Bind content, accepting identical publication under another commit."""
-    from ..recipe_packages.contracts import _snapshot_content
 
     return hashlib.sha256(_snapshot_content(snapshot)).hexdigest()
 

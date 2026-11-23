@@ -6,7 +6,8 @@ from typing import Any
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import inspect, text
+from alembic.operations.ops import AddConstraintOp
+from sqlalchemy import DefaultClause, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -122,8 +123,6 @@ def reconcile_schema(connection: Connection) -> None:
                     column.name,
                 )
             else:
-                from sqlalchemy import DefaultClause
-
                 column.server_default = DefaultClause(text(default_sql))
         # A column that cannot be added is never skipped: the error propagates
         # to startup, which rolls the transaction back and retries (55P03) or
@@ -378,8 +377,6 @@ def reconcile_schema(connection: Connection) -> None:
             if kind == "check":
                 continue
             try:
-                from alembic.operations.ops import AddConstraintOp
-
                 with connection.begin_nested():
                     ops.invoke(AddConstraintOp.from_constraint(constraint))
                 _LOGGER.info(

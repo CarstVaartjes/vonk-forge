@@ -62,13 +62,9 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentOperation,
-    AgentResultPayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -77,7 +73,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     adopt_state,
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 
 from .. import agent_operation_states
 from .. import agent_operation_states as aos
@@ -92,20 +88,21 @@ from ..agent_operation_facts import (
     attempt_is_live,
     aware,
     operation_start_deadline,
-    order_recovery_deadline,
     stalled_interruptions,
     start_deadline,
 )
 from ..categorized_errors import InvalidValue
+from ..evidence_repeats import note_success
 from ..jobs import states as job_states
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..operations.progress import progress_document
+from ..owner_liveness import order_recovery_deadline
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .adapter import Dispatch
 from .core import transition
 from .evidence import keep_recorded_outcome
@@ -585,7 +582,6 @@ class AgentOperationAdapter:
         if after.state is State.SUCCEEDED and before.state is not State.SUCCEEDED:
             # Identity reconciliation can settle an upgrade without a new agent
             # result. Clear its old warning at the common successful write.
-            from ..evidence_repeats import note_success
 
             assert self._session is not None
             note_success(

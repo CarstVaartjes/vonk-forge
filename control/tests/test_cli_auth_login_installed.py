@@ -90,7 +90,7 @@ def test_installed_login_keeps_only_a_private_token_that_later_commands_use(
             minted.append(response.headers["X-Vonk-Token-Expires-At"])
         return response
 
-    api.request = spy  # type: ignore[method-assign]
+    api.request = spy
     with _https_api_peer(tmp_path, api, {}) as (url, certificate, _peer):
         environment = _process_environment(
             tmp_path, url, certificate, {"Authorization": "Bearer unused"}

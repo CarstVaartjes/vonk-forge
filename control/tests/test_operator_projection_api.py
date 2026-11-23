@@ -21,9 +21,11 @@ from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment.contract import EnrollmentRevocationStatus
 from vonk_control.enrollment.types import EnrollmentDenied, RemoteRevocationUncertain
 from vonk_control.fleet_projection.common import FleetNode, FleetSnapshot
-from vonk_control.library.api import SelectorAmbiguityHTTPError
 from vonk_control.library.api import _error as library_error
-from vonk_control.library_projection.common import LibrarySelectorAmbiguous
+from vonk_control.library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
 from vonk_control.operator_projection_api.contracts import FleetActionResponse
 from vonk_control.operator_projection_api.errors import _node, _operator_error
 from vonk_control.operator_projection_api.routes import (
@@ -252,6 +254,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
     refusals.
     """
 
+    stored = None
     try:
         EnrollmentGrantResponse.model_validate({})
     except ValidationError as corrupt:
@@ -262,6 +265,7 @@ def test_only_an_explicit_request_fault_is_reported_as_the_callers_error() -> No
         assert mapper(CursorError("model library cursor is invalid")).status_code == 422
         assert mapper(KeyError("missing")).status_code == 404
         # Deterministic server faults reach the central typed 500 boundary.
+        assert stored is not None
         with pytest.raises(ValidationError):
             mapper(stored)
         with pytest.raises(RuntimeError):

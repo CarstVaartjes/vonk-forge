@@ -10,12 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import SecurityRefusalError, UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeImageCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
-from vonk_agent_protocol.wire_model import OperationMemberProgress, OperationProgress
+from vonk_agent_protocol.wire_model import (
+    OperationMemberProgress,
+    OperationProgress,
+    canonical_message,
+)
 from vonk_control.lifecycle.evidence import Residue
 
 from ..failure_classification import is_definite, is_redownload
@@ -33,7 +36,7 @@ from ..operations.contract import (
 )
 from ..operations.progress import aggregate_progress
 from ..persisted_waits import read_wait, schedule_wait
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,
@@ -53,6 +56,7 @@ from .contracts import (
 from .reader_contract import (
     StoredAvailabilityIdentity,
 )
+from .scheduling import _expire_preparation
 from .view_contract import (
     RecipeImageAvailabilityView,
 )
@@ -149,8 +153,6 @@ def _fail(
             operation.created_at, payload.progress_advanced_at
         )
         if now >= deadline and operation.current_attempt > 0:
-            from .scheduling import _expire_preparation
-
             _expire_preparation(self, session, operation, payload, now)
             return
         # A preparation that stopped progressing ends at its stall deadline

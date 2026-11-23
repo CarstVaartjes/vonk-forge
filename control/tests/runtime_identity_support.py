@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.inventory.items import inventory_items
 from vonk_control.inventory.items_contract import AgentInventoryItems

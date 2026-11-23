@@ -8,13 +8,16 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Path, Query
 from vonk_forge_contracts import CatalogVocabulary
 
-from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import CursorError
 from ..cursor_contract import MAX_CURSOR_LENGTH
-from ..library_projection.common import LibrarySelectorAmbiguous
+from ..library_projection.common import (
+    LibrarySelectorAmbiguous,
+    SelectorAmbiguityHTTPError,
+)
+from ..model_cache.api import model_cache_http_error
 from ..model_cache.errors import ModelCacheError
 from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..operation_api.contracts import bounded_error_responses
@@ -40,32 +43,8 @@ LIBRARY_OPERATION_IDS = {
 }
 
 
-class SelectorAmbiguityHTTPError(HTTPException):
-    """Carry canonical choices separately from bounded, redacted error copy."""
-
-    def __init__(
-        self,
-        error: LibrarySelectorAmbiguous,
-        *,
-        status_code: int = 422,
-        code: str | None = None,
-    ) -> None:
-        self.problem = RequestValidationProblem(
-            detail="selector is ambiguous; choose an exact canonical candidate",
-            issues=[],
-            candidates=list(error.candidates),
-        )
-        super().__init__(
-            status_code=status_code,
-            detail=self.problem.detail,
-            headers={"x-vonk-error-code": code} if code is not None else None,
-        )
-
-
 def _error(error: Exception) -> HTTPException:
     if isinstance(error, ModelCacheError):
-        from ..model_cache.api import model_cache_http_error
-
         return model_cache_http_error(error)
     if isinstance(error, LibrarySelectorAmbiguous):
         return SelectorAmbiguityHTTPError(error)

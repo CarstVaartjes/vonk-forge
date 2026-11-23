@@ -35,10 +35,10 @@ from vonk_forge_contracts.qualification_status import (
 )
 from vonk_forge_contracts.unrecognised import read_context
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, RecipePackageCode
 from vonk_agent_protocol.state_machines import CatalogSyncState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog.service import CatalogService
@@ -1373,6 +1373,7 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
     )
     try:
         notes = []
+        snapshot = None
         for _tick in range(2):  # the second tick answers 304
             snapshot = client.list()
             assert snapshot.items
@@ -1382,6 +1383,7 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
             == [[f"contract v{MAJOR + 1} is published; this Controller reads v{MAJOR}"]]
             * 2
         )
+        assert snapshot is not None
         assert not snapshot.problems
 
         newer.clear()

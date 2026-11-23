@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
@@ -20,12 +22,12 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileSwitchChildKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..catalog.revision_contract import RecipeRevisionProjection
 from ..fleet_profile_contract.applications import (
@@ -53,7 +55,7 @@ from ..fleet_profile_contract.vocabulary import MAX_PROFILE_WARNINGS
 from ..lifecycle.evidence import Residue
 from ..models.execution import InstallationNode
 from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .contracts import (
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,
@@ -319,9 +321,9 @@ def _set_selected_profile(
     table = FleetProfileSelection.__table__
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
+        insert = postgresql_insert
     elif dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert
+        insert = sqlite_insert
     else:
         raise FleetProfileUnsupportedStore(
             "Fleet profile selection requires PostgreSQL or SQLite",

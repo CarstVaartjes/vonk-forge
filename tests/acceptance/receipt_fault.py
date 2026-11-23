@@ -14,8 +14,15 @@ from pathlib import Path
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
+from vonk_agent_protocol.contracts import RESULT_MODELS, AgentResult
 from vonk_agent_protocol.outcome import OutcomeDone, outcome_body
+
+# The previous release's Controller runs this program too: it names only the
+# entry points both releases ship, so the Start result model comes from the
+# operation registry (its keys are str enum members) rather than its own module.
+_START_RESULT = next(
+    model for operation, model in RESULT_MODELS.items() if operation == "recipe.start"
+)
 
 _FENCE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 _MAXIMUM_BYTES = 64 * 1024
@@ -46,14 +53,17 @@ def _start_receipt(raw: bytes) -> dict[str, str] | None:
     if not isinstance(document.result, OutcomeDone):
         return None
     result = outcome_body(document.result)
+    if not isinstance(result, _START_RESULT):
+        return None
+    # The registry types its models as BaseModel; the Start body is one field.
+    endpoint = result.model_dump()["endpoint"]
     if (
-        not isinstance(result, RecipeStartResult)
-        or _FENCE.fullmatch(document.fence) is None
-        or result.endpoint is None
-        or not 1 <= len(result.endpoint) <= 512
+        _FENCE.fullmatch(document.fence) is None
+        or endpoint is None
+        or not 1 <= len(endpoint) <= 512
     ):
         return None
-    return {"fence": document.fence, "endpoint": result.endpoint}
+    return {"fence": document.fence, "endpoint": endpoint}
 
 
 class LostStartReceipt:

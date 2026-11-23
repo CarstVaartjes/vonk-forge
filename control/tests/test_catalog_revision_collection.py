@@ -35,20 +35,22 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 from vonk_agent_protocol.build_import import RecipeBuildRequest
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.catalog import revision_collection as catalog_revision_collection
-from vonk_control.catalog.entities import recipe_document_projection
 from vonk_control.catalog.revision_collection import (
     GRACE,
     INTERVAL,
     SWEEP_BUDGET_SECONDS,
     CatalogRevisionCollector,
 )
-from vonk_control.catalog.revision_contract import ModelRevisionProjection
+from vonk_control.catalog.revision_contract import (
+    ModelRevisionProjection,
+    recipe_document_projection,
+)
 from vonk_control.jobs.documents import RecipeStopParent
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild

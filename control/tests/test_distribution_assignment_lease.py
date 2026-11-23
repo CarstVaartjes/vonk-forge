@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from threading import Barrier
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -37,6 +36,7 @@ from .agent_api_support import (  # noqa: F401
     agent_system,
     make_agent_system,
 )
+from .insert_collision_support import Rendezvous
 from .test_distribution_executor import _phase, _plan
 
 
@@ -61,7 +61,7 @@ def _register_grant_independently(database_url, mapping, now, start):
             clock=lambda: datetime.fromisoformat(now),
             sessions=sessionmaker(engine),
         )
-        start.wait(timeout=15)
+        start.wait()
         service.register(assignment)
         return service.authorize(
             node_id=assignment.node_id, plan_digest=assignment.plan_digest
@@ -105,7 +105,7 @@ def test_concurrent_workers_reclaim_a_grant_without_mutating_its_identity(
         postgres_engine.url.render_as_string(hide_password=False),
         successor.to_mapping(),
         transfer.clock.now.isoformat(),
-        Barrier(2),
+        Rendezvous(2, timeout=15),
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
         attempts = [
@@ -144,7 +144,7 @@ def _transfer(agent_system):  # noqa: F811
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
 
     class Executor(DurableDistributionPhaseExecutor):
-        def _model_objects(self, _plan, _progress):
+        def _model_objects(self, plan, progress):
             return (MODEL,), "d" * 64, 10
 
         def _archive(self, **_kwargs):

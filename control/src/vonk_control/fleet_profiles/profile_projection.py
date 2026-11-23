@@ -35,7 +35,7 @@ from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
 from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice
 from ..stored.states import CatalogRevisionState
-from .assignment_assessment import _AssignmentRows
+from .assignment_assessment import _assignment_rows, _assignment_state, _AssignmentRows
 from .contracts import _SelectedProfileSnapshot
 from .dependencies import (
     _INSTALLATION_POLICY_ADAPTER,
@@ -48,6 +48,7 @@ from .projection_support import (
     _effective_option_choices,
     _profile_document,
 )
+from .saved_profiles import _definition
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -83,7 +84,7 @@ class FleetProfileService:
                 select(AgentNodeProfile.node_id, AgentNodeProfile.display_name).where(
                     AgentNodeProfile.node_id.in_(node_ids)
                 )
-            )
+            ).all()
         )
         return _ProfilePageReads(
             selection=self._selected_profile_snapshot(session),
@@ -109,7 +110,7 @@ class FleetProfileService:
         # The saved definition is read once and serves the choices, the
         # document digest and the view.
         if profile_definition is None:
-            profile_definition = self._definition(row)
+            profile_definition = _definition(row)
         choices = tuple(profile_definition.assignments)
         if page is None:
             page = self._page_reads(session, choices)
@@ -130,7 +131,7 @@ class FleetProfileService:
             else None
         )
         assignment_rows = (
-            self._assignment_rows(session, loaded_assignments)
+            _assignment_rows(session, loaded_assignments)
             if observe and loaded_assignments
             else None
         )
@@ -463,7 +464,7 @@ class FleetProfileService:
         if loaded is None:
             return "Not loaded"
         return _OBSERVED_ASSIGNMENT_LABELS[
-            cls._assignment_state(session, loaded, rows=rows).current_state
+            _assignment_state(session, loaded, rows=rows).current_state
         ]
 
     def _attention_assignment(

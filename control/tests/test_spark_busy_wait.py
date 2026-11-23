@@ -17,10 +17,9 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles.cli_render.progress import progress_line
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -28,7 +27,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits

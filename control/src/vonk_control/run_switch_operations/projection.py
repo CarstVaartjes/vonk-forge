@@ -10,22 +10,25 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, OutcomeKind
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
 
 from ..jobs import states as job_states
+from ..journal_models import RunSwitchJournalRepairPending
 from ..models.jobs import Job
 from ..operations.blockers import make_blocker
 from ..persisted_waits import read_wait, wait_due
+from ..run_switch_contract.journal import RunSwitchJournalRepairPendingState
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.progress_view import (
+    _progress_operation_state,
     _progress_view,
 )
-from ..stored.json_values import read_row_column
+from ..run_switch_journal_repair.discovery import (
+    REPAIR_WAIT,
+    is_zero_transfer_journal_fault,
+)
+from ..stored.rows import read_row_column
 from .constants import _OPERATION_KIND_ADAPTER
 from .plan_persistence import _view_identity
 from .planning_helpers import _stored_job_plan
-from .result_helpers import (
-    _parse_persisted_result,
-    _progress_operation_state,
-    _read_progress,
-)
+from .result_helpers import _parse_persisted_result, _read_progress
 
 
 class ProjectionMixin:
@@ -66,10 +69,6 @@ class ProjectionMixin:
         if (wait := read_wait(job)) is not None:
             blockers = list(wait.blockers)
         repair_due: datetime | None = None
-        from ..run_switch_journal_repair.discovery import (
-            REPAIR_WAIT,
-            is_zero_transfer_journal_fault,
-        )
 
         if (
             persisted_result is None
@@ -81,9 +80,6 @@ class ProjectionMixin:
             }
             and is_zero_transfer_journal_fault(job)
         ):
-            from ..journal_models import RunSwitchJournalRepairPending
-            from ..run_switch_contract.journal import RunSwitchJournalRepairPendingState
-
             view_session = object_session(job)
             pending = (
                 view_session.get(RunSwitchJournalRepairPending, job.id)

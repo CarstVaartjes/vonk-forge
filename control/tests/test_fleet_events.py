@@ -10,10 +10,10 @@ import pytest
 from sqlalchemy import create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.telemetry import TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.db.connections import session_factory
 from vonk_control.fleet_event_contract import (
@@ -49,6 +49,8 @@ from vonk_control.models.telemetry import (
 from vonk_control.operation_api.durable import durable_operation_services
 from vonk_control.stored.json_values import write_guard_mode
 from vonk_control.telemetry.samples import TelemetryRepository
+
+from .runtime_identity_support import set_inventory_hostname
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 
@@ -342,13 +344,16 @@ def test_sqlite_ids_follow_commit_order_not_append_order(tmp_path) -> None:
 def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
+    def expected_failure(session):
+        session.add(_job("job-rollback"))
+        repository.append_in_session(session, _draft(entity_id="job-rollback"))
+        raise RuntimeError("forced rollback")
+
     with (
         pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
         sessions.begin() as session,
     ):
-        session.add(_job("job-rollback"))
-        repository.append_in_session(session, _draft(entity_id="job-rollback"))
-        raise RuntimeError("forced rollback")
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -375,9 +380,12 @@ def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -
 def test_invalid_draft_fails_the_source_transaction(sessions, draft) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
-    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure(session):
         session.add(_job("job-invalid"))
         repository.append_in_session(session, draft)
+
+    with pytest.raises(Exception), sessions.begin() as session:  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure(session)
 
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 0
@@ -610,8 +618,6 @@ def test_recorder_emits_bounded_profile_events_when_agent_hostname_changes(
             )
         )
     with sessions.begin() as session:
-        from .runtime_identity_support import set_inventory_hostname
-
         set_inventory_hostname(session, node_id, "spark-3542")
 
     rows = _event_rows(sessions)
@@ -773,14 +779,17 @@ def test_recorder_source_flush_and_event_are_rolled_back_together(sessions) -> N
         session.add(_job("job-1"))
     assert len(_event_rows(sessions)) == 1
 
-    with (
-        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         job = session.get(Job, "job-1")
         job.state = "running"
         session.flush()
         raise RuntimeError("forced rollback")
+
+    with (
+        pytest.raises(Exception),  # noqa: B017 -- observable effects and recovery establish the rejection
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
 
     with sessions() as session:
         assert session.get(Job, "job-1").state == "queued"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -19,13 +18,13 @@ from vonk_forge_contracts import (
     document_sha256,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import (
     RecipeInstallPayload,
     RecipeStartPayload,
     RecipeStopPayload,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import ConstraintReplay
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -48,6 +47,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationResult,
 )
 
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import (
     NOW,
     FailingQueue,
@@ -329,7 +329,7 @@ def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
         request_id="4" * 35 + "f",
     )
     plan = service.preview_stop(run.owner_id)
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
     request_key = "4" * 35 + "0"
 
     def stop() -> str:

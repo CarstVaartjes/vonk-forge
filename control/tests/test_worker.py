@@ -34,6 +34,8 @@ from vonk_control.persisted_waits import read_wait
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.telemetry import maintenance as telemetry_maintenance
+from vonk_control.worker import __main__ as worker_main
+from vonk_control.worker import loop as worker_loop
 from vonk_control.worker.assembly import assemble_production_worker
 from vonk_control.worker.liveness import (
     _READINESS_BEAT_SECONDS,
@@ -79,8 +81,6 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
     tmp_path, monkeypatch
 ):
     """Catches abandoning remaining executors after one checkpoint is busy."""
-    from vonk_control.worker import loop as module
-
     calls = []
 
     def busy():
@@ -89,7 +89,7 @@ def test_shutdown_retries_unknown_closer_and_continues_other_services(
             "checkpoint unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
         )
 
-    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(worker_loop, "bounded_attempts", lambda: iter(range(3)))
     worker = Worker(
         _service(tmp_path),
         "worker",
@@ -686,7 +686,6 @@ def test_every_registered_source_recovers_after_its_fault_clears(tmp_path, monke
     fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
     worker.run_once()
     assert set(calls) == labels
-    from vonk_control.models.coordinator import CoordinatorFailure
 
     with failures._sessions() as session:
         assert session.scalar(select(CoordinatorFailure)) is None
@@ -702,8 +701,6 @@ def _persisting_fault(tmp_path, now, verdict_error):
     def due_in() -> float:
         engine = create_engine(f"sqlite:///{tmp_path / 'worker.sqlite'}")
         with sessionmaker(engine)() as session:
-            from vonk_control.models.coordinator import CoordinatorFailure
-
             row = session.get(CoordinatorFailure, "source")
             assert row is not None
             assert row.next_action_at is not None
@@ -851,15 +848,13 @@ def test_shutdown_fault_is_bounded_and_other_owners_and_fresh_work_continue(
     tmp_path, monkeypatch, fault
 ):
     """Catches unexpected closer errors suppressing every later shutdown owner."""
-    from vonk_control.worker import loop as module
-
     calls = []
 
     def broken():
         calls.append("broken")
         raise fault
 
-    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(worker_loop, "bounded_attempts", lambda: iter(range(3)))
     jobs = _service(tmp_path)
     Worker(
         jobs,
@@ -978,7 +973,7 @@ def test_jobs_lane_resumes_in_a_restarted_worker_process_with_the_same_digest(
             raise ValueError("malformed persisted row")
         return claim(*args, **kwargs)
 
-    jobs.claim = faulty_claim  # type: ignore[method-assign]
+    jobs.claim = faulty_claim
 
     def worker(name: str) -> Worker:
         return Worker(
@@ -1272,9 +1267,7 @@ def test_production_worker_beats_the_watchdog_it_is_watched_by() -> None:
     """Catches the production loop not handing the watchdog's beat to the
     worker (the watchdog would again bound a whole pass)."""
 
-    from vonk_control.worker import __main__ as module
-
-    tree = ast.parse(inspect.getsource(module))
+    tree = ast.parse(inspect.getsource(worker_main))
     main = next(
         node
         for node in tree.body
@@ -1345,8 +1338,6 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
     """Catches a new step that bypasses the step timing: it would hide from the
     over-budget alarm and from the watchdog's per-step bound."""
 
-    from vonk_control.worker import loop as module
-
     # Everything the pass methods may call outside a lambda (a lambda builds a
     # step that _timed runs later): the timing wrapper, failure custody,
     # logging and plain value helpers. Any other call is work outside _timed.
@@ -1374,7 +1365,7 @@ def test_every_worker_step_runs_through_the_one_timing_wrapper() -> None:
         "len",
         "range",
     }
-    tree = ast.parse(inspect.getsource(module))
+    tree = ast.parse(inspect.getsource(worker_loop))
     methods = [
         node
         for node in ast.walk(tree)

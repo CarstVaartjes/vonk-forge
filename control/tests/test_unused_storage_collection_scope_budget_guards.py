@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.capability_reply import ControllerCapability
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.state_machines import RunState
 from vonk_control.capabilities import CapabilityRegistry
@@ -46,6 +46,7 @@ from vonk_control.models.fleet import (
     FleetProfileSelection,
 )
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.errors import RecipeRetryLater
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
@@ -54,9 +55,12 @@ from vonk_control.storage_demands import (
     spark_scope,
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
-from vonk_control.unused_storage_collection.common import ACTOR, spark_eviction_capacity
+from vonk_control.unused_storage_collection.common import ACTOR
 from vonk_control.unused_storage_collection.evidence import _Evidence
-from vonk_control.unused_storage_collection.service import UnusedStorageCollector
+from vonk_control.unused_storage_collection.service import (
+    UnusedStorageCollector,
+    spark_eviction_capacity,
+)
 
 from .model_cache_support import _artifact, _download
 from .recipe_operations_support import started_recipe
@@ -294,7 +298,6 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
     result = collector.collect()
     assert lifecycle.removed == [second]
     assert _kept(result, "deferred") == 1
-    from vonk_control.persisted_waits import read_wait
 
     with world.sessions() as session:
         retained = session.get(RecipeInstallation, first)
@@ -406,7 +409,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return measure(digest)
 
-        service.unused_set_bytes = slow_bytes  # type: ignore[method-assign]
+        service.unused_set_bytes = slow_bytes
     else:
         images = collector._image_items
 
@@ -414,7 +417,7 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
             frozen_pass_budgets.advance(_PASS_BUDGET + 1)
             return images(*args, **kwargs)
 
-        collector._image_items = slow_images  # type: ignore[method-assign]
+        collector._image_items = slow_images
 
     result = collector.collect()
 
@@ -455,7 +458,7 @@ def test_a_slow_inventory_step_still_attempts_an_installation_removal(
             UnusedStorageCollector, "_spark_items", staticmethod(slowed(original))
         )
     else:
-        collector._image_items = slowed(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slowed(collector._image_items)
 
     result = collector.collect()
 
@@ -540,7 +543,7 @@ def test_many_scopes_share_one_attempt_budget_and_each_attempts_its_first_item(
             "_spark_items",
             staticmethod(slow(UnusedStorageCollector._spark_items)),
         )
-        collector._image_items = slow(collector._image_items)  # type: ignore[method-assign]
+        collector._image_items = slow(collector._image_items)
         before = frozen_pass_budgets.seconds
         result = collector.collect()
     finally:
@@ -669,7 +672,8 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
 
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, first.scopes
+        assert stop is not None, first.scopes
+        assert stop.actor == ACTOR, first.scopes
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
     # The pass measures the load's gap, the one relief told the load.
@@ -888,7 +892,8 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     assert "error" not in outcome, outcome
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR, outcome
+        assert stop is not None, outcome
+        assert stop.actor == ACTOR, outcome
 
 
 def test_the_sweep_reads_its_evidence_on_postgres(
@@ -937,7 +942,7 @@ def test_receipt_no_recipe_needs_is_removed_when_disk_is_short_and_recent_ones_l
     path = _receipt(tmp_path, AN_IMAGE)
     recent = _receipt(tmp_path, "e" * 64, age=timedelta(hours=2))
     blobs = SimpleNamespace(calls=0)
-    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)  # type: ignore[attr-defined]
+    blobs.collect = lambda: setattr(blobs, "calls", blobs.calls + 1)
     exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
 
     # One byte short of the 100 GiB low line: the idle receipt covers it.

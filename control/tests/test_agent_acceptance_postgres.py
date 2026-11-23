@@ -15,19 +15,15 @@ from sqlalchemy import event, func, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
-from vonk_control import agent_acceptance
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import operator_acceptance
 from vonk_control.agent_api.common import AgentApiServices
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.api.application import create_app
@@ -60,7 +56,10 @@ from .agent_api_support import (
     valid_enrollment_body,
 )
 from .artifact_jobs_support import running_artifact_service, submitted_artifact_job
+from .recipe_operations_support import NOW as OPERATIONS_NOW
 from .stored_documents_support import valid_policy_report
+from .test_auth_api import ADMIN_PASSWORD, ADMIN_VERIFIER, ORIGIN
+from .test_auth_api import NOW as AUTH_NOW
 from .test_catalog_revision_collection import Catalog
 from .test_operator_acceptance_postgres import DropFirstResponse
 
@@ -474,8 +473,6 @@ def test_image_upload_commits_binding_after_publication_and_recovers(
 def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_engine):
     """Catches applying generic request replay to credential issuance at the security edge."""
 
-    from .test_auth_api import ADMIN_PASSWORD, ADMIN_VERIFIER, NOW, ORIGIN
-
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
@@ -490,9 +487,9 @@ def test_lost_login_response_requires_fresh_authentication(tmp_path, postgres_en
         return create_app(
             jobs=Jobs(),
             tokens=TokenCodec(key),
-            now=lambda: int(NOW.timestamp()),
+            now=lambda: int(AUTH_NOW.timestamp()),
             browser_auth=BrowserAuthService(
-                sessions, token_signing_key=key, clock=lambda: NOW
+                sessions, token_signing_key=key, clock=lambda: AUTH_NOW
             ),
         )
 
@@ -574,8 +571,6 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
 ):
     """Catches acknowledging a published blob before its exact job/file attachment commits."""
 
-    from .recipe_operations_support import NOW
-
     sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
     )
@@ -583,11 +578,13 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
     codec = TokenCodec(b"artifact-output-receipt-test-key32")
     services = AgentApiServices(
         enrollment=None,
-        operations=AgentJobService(sessions, clock=lambda: NOW),
+        operations=AgentJobService(sessions, clock=lambda: OPERATIONS_NOW),
         sessions=sessions,
-        clock=lambda: NOW,
+        clock=lambda: OPERATIONS_NOW,
         presence=AgentPresenceService(
-            sessions, ManagementAddressPolicy.parse("192.168.1.0/24"), clock=lambda: NOW
+            sessions,
+            ManagementAddressPolicy.parse("192.168.1.0/24"),
+            clock=lambda: OPERATIONS_NOW,
         ),
         artifact_root=tmp_path / "agent-artifacts",
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
@@ -653,7 +650,7 @@ def test_artifact_output_commit_fault_and_lost_response_reuse_attachment(
         sessions,
         recipe_operations=operations,
         blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
-        clock=lambda: NOW,
+        clock=lambda: OPERATIONS_NOW,
     )
     receipt = _reference(
         TestClient(application(restarted)).put(path, headers=headers, content=payload)
@@ -705,14 +702,14 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
     client, services, _, clock = make_agent_system(tmp_path, engine=postgres_engine)
     headers = agent_headers(NODE_A, "serial-a")
     body = _inventory(clock)
-    original = agent_acceptance.resolve_agent_receipt
+    original = operator_acceptance.resolve_agent_receipt
 
     def unknown_owner(*args, **kwargs):
         raise UnknownOutcomeError(
             "injected owner observation loss", reason=WaitReason.OBSERVATION_UNAVAILABLE
         )
 
-    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", unknown_owner)
+    monkeypatch.setattr(operator_acceptance, "resolve_agent_receipt", unknown_owner)
     failed = client.post("/agent/inventory", json=body, headers=headers)
     assert failed.status_code == 503
     assert failed.headers["x-vonk-error-code"] == ReceiptCode.UNAVAILABLE
@@ -722,7 +719,7 @@ def test_unknown_receipt_read_after_commit_preserves_owner_and_retry(
         assert (
             session.scalar(select(func.count()).select_from(NodeInventorySnapshot)) == 1
         )
-    monkeypatch.setattr(agent_acceptance, "resolve_agent_receipt", original)
+    monkeypatch.setattr(operator_acceptance, "resolve_agent_receipt", original)
     _reference(client.post("/agent/inventory", json=body, headers=headers))
     with services.sessions() as session:
         assert (

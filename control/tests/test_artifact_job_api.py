@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
@@ -23,7 +23,13 @@ from vonk_control.artifact_jobs.api import (
     install_artifact_job_routes,
 )
 from vonk_control.artifact_jobs.blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs.contracts import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs.contracts import (
+    ArtifactFileDeclaration,
+    ArtifactJobResponse,
+    ArtifactJobView,
+    ArtifactOutputFile,
+    OutputLimits,
+)
 from vonk_control.artifact_jobs.evidence import (
     ArtifactJobResultEvidence,
     dump_result_evidence,
@@ -34,7 +40,7 @@ from vonk_control.auth import Actor
 from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.compiled_artifact_contract import CompiledArtifactContract
 from vonk_control.models.execution import ArtifactJobBlob, ArtifactJobFile
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 from .artifact_jobs_support import (
     artifact_create_request,
@@ -99,18 +105,18 @@ class _ArtifactJobView(ArtifactJobView):
     )
     input_manifest_sha256: str = "b" * 64
     input_total_bytes: int = 0
-    input_declarations: tuple[dict[str, object], ...] = ()
-    input_files: tuple[dict[str, object], ...] = ()
-    output_limits: dict[str, object] = field(
-        default_factory=lambda: {
-            "max_files": 1,
-            "max_file_bytes": 1024,
-            "max_total_bytes": 1024,
-            "allowed_media_types": ["image/png"],
-        }
+    input_declarations: tuple[ArtifactFileDeclaration, ...] = ()
+    input_files: tuple[ArtifactFileDeclaration, ...] = ()
+    output_limits: OutputLimits | None = field(
+        default_factory=lambda: OutputLimits(
+            max_files=1,
+            max_file_bytes=1024,
+            max_total_bytes=1024,
+            allowed_media_types=["image/png"],
+        )
     )
     output_manifest_sha256: str | None = None
-    output_files: tuple[dict[str, object], ...] = ()
+    output_files: tuple[ArtifactOutputFile, ...] = ()
     result_evidence: ArtifactJobResultEvidence | None = None
     status_reason: str | None = None
     timeout_seconds: int = 60
@@ -427,7 +433,8 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
     )
     assert uploaded.status_code == 200
     assert uploaded.json()["input_files"] == [
-        {**item, "media_type": "image/png"} for item in cast(list, body["inputs"])
+        {**item, "media_type": "image/png"}
+        for item in cast(list[dict[str, Any]], body["inputs"])
     ]
     finalized = client.post(f"/api/artifact-jobs/{draft_id}/finalize")
     assert finalized.status_code == 200

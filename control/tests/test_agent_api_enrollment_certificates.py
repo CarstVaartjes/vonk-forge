@@ -8,14 +8,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from pathlib import Path
+from typing import SupportsIndex, overload
 
 import pytest
 from sqlalchemy import select
 from starlette.types import Message
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.authority import RESULT_REFUSALS
 from vonk_control.agent_api.common import (
     AgentApiServices,
@@ -65,7 +67,13 @@ class CopyBoundedChunk(bytes):
         instance.largest_slice = 0
         return instance
 
-    def __getitem__(self, key):
+    @overload
+    def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> bytes: ...
+
+    def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
         if isinstance(key, slice):
             start = key.start or 0
             stop = len(self) if key.stop is None else key.stop
@@ -210,9 +218,6 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         },
     }
     if with_diagnostics:
-        import json
-        from pathlib import Path
-
         fixture = (
             Path(__file__).parents[2]
             / "agent_protocol/src/vonk_agent_protocol/vectors/failure-diagnostics-v1.json"
@@ -238,8 +243,6 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert attempt.result["status"] == "failed"
         assert attempt.result["error_code"] == result["result"]["error_code"]
         if with_diagnostics:
-            from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
@@ -252,8 +255,6 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert operation.next_action_at is not None
         clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     if with_diagnostics:
-        from vonk_control.failure_evidence import FailureEvidenceService
-
         evidence = FailureEvidenceService(services.sessions, clock=clock)
         fenced = fenced_attempt(services.sessions, claim["fence"])
         bundle = evidence.read(fenced.operation_id, fenced.attempt)

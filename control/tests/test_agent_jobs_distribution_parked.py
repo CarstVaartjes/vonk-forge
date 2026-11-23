@@ -10,12 +10,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    AgentResult,
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
 )
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
@@ -31,7 +30,11 @@ from vonk_control.lifecycle.agent_operation import (
 )
 from vonk_control.models.fleet import AgentCertificate
 from vonk_control.models.jobs import Job
-from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
+from vonk_control.models.operations import (
+    AgentOperation,
+    AgentOperationAttempt,
+    ArtifactDistributionAssignment,
+)
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .agent_jobs_support import (
@@ -697,6 +700,7 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
     )
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     delays: list[float] = []
+    reason = None
     for attempt_number in range(1, 6):
         claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
         assert claim is not None
@@ -716,6 +720,7 @@ def test_attempts_that_lapse_without_progress_slow_down_and_say_why(
     assert max(delays[:2]) <= 5
     assert delays[3] >= 30
     assert delays[4] >= 60
+    assert reason is not None
     assert "interrupted 5 times in a row" in reason
 
 
@@ -779,8 +784,6 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service) -> None:
     # The first claim renewed the grant. Expire that retained grant while the
     # accepted recovery budget remains open, as a shorter ingress lease can.
     with sessions.begin() as session:
-        from vonk_control.models.operations import ArtifactDistributionAssignment
-
         assignment = session.scalar(select(ArtifactDistributionAssignment))
         assert assignment is not None
         assignment.expires_at = clock.now + timedelta(seconds=60)

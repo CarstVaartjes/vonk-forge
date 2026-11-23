@@ -81,7 +81,7 @@ def _slot(model: type[BaseModel], name: str, part: str) -> TypeAdapter[Any]:
     if part == "value":
         annotation = field.annotation
         if field.metadata:
-            annotation = Annotated[(annotation, *field.metadata)]  # type: ignore[valid-type]
+            annotation = Annotated[(annotation, *field.metadata)]
         return TypeAdapter(annotation)
     container = _without_none(field.annotation)
     return TypeAdapter(get_args(container)[0])

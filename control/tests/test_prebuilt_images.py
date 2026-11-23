@@ -12,11 +12,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
 from tests.recipe_builds_support import RecordingQueue
@@ -24,10 +25,11 @@ from tests.recipe_library_source import recipe_library_root
 from tests.runtime_image_fixtures import place_test_image
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.images import ImageStoreCode, PrebuiltImageCode
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control import prebuilt_images
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -58,7 +60,6 @@ from vonk_control.prebuilt_images import (
     PrebuiltImageImporter,
     write_library_image_plan,
 )
-from vonk_control.recipe_builds import common as recipe_builds
 from vonk_control.recipe_builds.cancellation import request_build_cancellation
 from vonk_control.recipe_builds.common import RecipeBuildUnknown
 from vonk_control.recipe_builds.service import RecipeBuildService
@@ -104,7 +105,7 @@ class _Reader:
 
 def _published_library(
     tmp_path: Path, *, build_key: str | None = None
-) -> tuple[sessionmaker, str]:
+) -> tuple[sessionmaker[Session], str]:
     """Sync a one-recipe signed library whose index pins a prebuilt image.
 
     The key comes from the CI planner run over the real package, exactly as
@@ -195,7 +196,7 @@ def _published_library(
         return sessions, revision.id
 
 
-def _services(sessions: sessionmaker, tmp_path: Path):
+def _services(sessions: sessionmaker[Session], tmp_path: Path):
     builds = RecipeBuildService(
         sessions,
         bundles=SourceBundleStore(tmp_path / "bundles"),
@@ -284,7 +285,7 @@ def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
         )
         return SourcePolicyReport(False, bundle.sha256, "Dockerfile", (finding,))
 
-    monkeypatch.setattr(recipe_builds, "inspect_package_source_policy", refuse)
+    monkeypatch.setattr(prebuilt_images, "inspect_package_source_policy", refuse)
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
     library = tmp_path / "library"
@@ -336,7 +337,8 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
             build.image_bytes,
         ) == ("succeeded", REFERENCE.rsplit("@", 1)[1], ADDRESS, IMAGE_BYTES)
         assert stored.state == "succeeded"
-        assert stored.result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
+        result = cast(dict[str, Any], stored.result)
+        assert result["node_evidence"][NODE]["oci_layout_sha256"] == ADDRESS
 
     # The pulled image is the reusable receipt for these build inputs.
     resolution = builds.resolve(revision_id)
@@ -586,7 +588,7 @@ def test_prebuilt_key_mismatch_builds_fresh_instead_of_reusing_old_image(
         (build,) = session.scalars(select(RecipeBuild)).all()
         assert build.policy_report.get("prebuilt_image") is None
         assert (
-            build.policy_report["prebuilt_decision"]["code"]
+            cast(dict[str, Any], build.policy_report)["prebuilt_decision"]["code"]
             == PrebuiltImageCode.BUILD_KEY_MISMATCH
         )
         assert tuple(session.scalars(select(AgentOperation)))
@@ -647,10 +649,13 @@ def test_failed_prebuilt_pull_retries_the_same_pinned_content(
     )
     assert recovered.run_pending() == 1
     with sessions() as session:
-        assert any(
-            session.get(Job, job.id).state == LifecycleState.SUCCEEDED
-            for job in prebuilt_jobs
-        )
+
+        def state(job_id: str) -> str:
+            row = session.get(Job, job_id)
+            assert row is not None
+            return row.state
+
+        assert any(state(job.id) == LifecycleState.SUCCEEDED for job in prebuilt_jobs)
 
     production.close()
 

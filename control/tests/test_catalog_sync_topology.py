@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
-from vonk_forge_contracts import document_sha256
+from vonk_forge_contracts import ModelDisplay, RecipeDisplay, document_sha256
 
 from vonk_control.catalog import sync as catalog_sync
 from vonk_control.catalog.service import RecipeCatalogLocalRevision
@@ -79,7 +79,9 @@ class _Catalog:
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 
-    def apply_displays(self, displays) -> list:
+    def apply_displays(
+        self, displays
+    ) -> list[tuple[RecipeDisplay | ModelDisplay, Exception]]:
         return []
 
     def retract_absent_from(self, published):

@@ -7,8 +7,10 @@ import hashlib
 import io
 import json
 import os
+import stat
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import timedelta
 from email.message import Message as EmailMessage
 from threading import Event
@@ -23,15 +25,14 @@ from sqlalchemy import delete
 from cluster_profiles import cli
 from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.control_client.transfers import ControlClient
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
     AgentProgress,
     AgentResult,
-    canonical_message,
 )
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     EnrollmentObservationReply,
     EnrollmentSubmitRequest,
@@ -47,7 +48,7 @@ from vonk_agent_protocol.telemetry import (
     TelemetryRequest,
     TelemetrySample,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_api import routes
 from vonk_control.agent_api.common import (
     EnrollmentRateLimiter,
@@ -311,7 +312,7 @@ def test_protected_agent_routes_gate_untrusted_invalid_bodies_before_parsing(
 def test_revoked_identity_is_gated_before_invalid_json_is_parsed(agent_system) -> None:
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
     assert (
         client.post(
             "/agent/result",
@@ -842,14 +843,10 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
         real_sync(descriptor)
 
     monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", sync)
-    try:
+    with suppress(Exception):  # no unverified effect and fresh publication decide
         _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
-    except Exception:  # noqa: BLE001, S110 -- no unverified effect and fresh publication decide
-        pass
     assert outside.read_bytes() == payload
     if damage != "directory-sync":
-        import stat
-
         assert stat.S_ISREG(destination.lstat().st_mode)
         assert not destination.is_symlink()
         assert destination.read_bytes() == payload
@@ -858,8 +855,6 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
     assert not destination.is_symlink()
     assert destination.read_bytes() == payload
-    import stat
-
     assert any(stat.S_ISDIR(mode) for mode in synced)
 
 

@@ -45,7 +45,7 @@ from ..operations.contract import (
     sanitize_failure_evidence,
 )
 from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import (
     _LOGGER,

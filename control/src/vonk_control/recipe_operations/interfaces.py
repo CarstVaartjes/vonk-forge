@@ -8,7 +8,7 @@ from typing import Literal, Protocol
 
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.wire_model import OperationProgress
 
@@ -122,6 +122,12 @@ class RecipeRunStatus:
     exact_ranks: bool
     #: The run only hosts one-shot jobs: no service container, no route.
     one_shot: bool
+
+
+class RecipeRunStatusReader(Protocol):
+    """The one lifecycle read Run/Switch observation needs: a run's status."""
+
+    def run_status(self, run_id: str) -> RecipeRunStatus: ...
 
 
 new_recipe_job = RecipeOperationAdapter.new_job

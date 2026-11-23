@@ -12,10 +12,9 @@ from sqlalchemy import select
 
 from cluster_profiles.cli_render.dispatch import render_payload
 from cluster_profiles.control_client.schema import validate_control_document
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -23,7 +22,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitResumeCondition,
 )
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.execution_plan_service import (
@@ -232,6 +231,7 @@ def _follow_saved_due(sessions, service, application_id, clock):
 
 
 def _drive_install(sessions, service, planner, application_id, clock, count):
+    identities = None
     for _ in range(24):
         _follow_saved_due(sessions, service, application_id, clock)
         planner.tick()
@@ -260,6 +260,7 @@ def _drive_install(sessions, service, planner, application_id, clock, count):
                     "request_key": operation.request_key,
                 }
             )
+    assert identities is not None
     raise AssertionError(
         f"Expected {count} exact native installs, found {identities}; "
         f"now={clock[0]}, state={observed.state}, "

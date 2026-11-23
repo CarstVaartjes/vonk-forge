@@ -10,9 +10,9 @@ from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.recipes import RecipeUpdateCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
 from ..categorized_errors import InvalidValue
@@ -23,8 +23,12 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_image_availability.contracts import (
+    RecipeImageAvailabilityError,
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
+)
+from ..recipe_image_availability.view_contract import (
+    RecipeImageAvailabilityView,
 )
 from ..recipe_operations.availability_intent import RecipeRevisionIntent
 from ..stall_window import progress_deadline
@@ -55,7 +59,6 @@ class ExecutionMixin:
         self, owner: str, requested_id: str | None = None
     ) -> RecipeUpdateClaim | None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
 
         if not owner or len(owner) > 95:
             raise InvalidValue("update worker owner must contain 1 to 95 characters")
@@ -201,10 +204,6 @@ class ExecutionMixin:
 
     def _run_once(self, claim: RecipeUpdateClaim) -> None:
         service = cast("RecipeUpdateBatches", self)
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
-        from ..recipe_image_availability.view_contract import (
-            RecipeImageAvailabilityView,
-        )
 
         now = _now(service.owner._clock())
         with service.sessions.begin() as session:

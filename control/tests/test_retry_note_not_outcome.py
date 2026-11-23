@@ -10,13 +10,13 @@ the job ended carrying the stale retry note, so the run-switch reported
 
 from __future__ import annotations
 
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireOperation
+from typing import Any
+
+from vonk_agent_protocol.agent_operations import AgentFailureKind
+from vonk_agent_protocol.agent_operations import AgentOperation as WireOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.models.operations import AgentOperation
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
 
@@ -29,7 +29,7 @@ _OOM_REASON = (
 _RETRY_AFTER_SECONDS = 5
 
 
-def _failed(claim, result: dict) -> AgentResult:
+def _failed(claim, result: dict[str, Any]) -> AgentResult:
     return AgentResult.model_validate_json(
         canonical_message(
             {"fence": claim.fence, "state": LifecycleState.FAILED, "result": result}

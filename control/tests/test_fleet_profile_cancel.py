@@ -167,6 +167,7 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         request_key=_uuid(116),
     )
 
+    stop = None
     for _ in range(8):
         profiles.tick()
         run_switch.tick()
@@ -242,10 +243,12 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-    assert (
-        stop_claim is not None
-        and fenced_operation(sessions, stop_claim).parent_job_id == stop.id
-    ), f"profile Stop child is not claimable: {stop_children!r}"
+    assert stop_claim is not None, (
+        f"profile Stop child is not claimable: {stop_children!r}"
+    )
+    assert fenced_operation(sessions, stop_claim).parent_job_id == stop.id, (
+        f"profile Stop child is not claimable: {stop_children!r}"
+    )
     if stop_receipt_state == "succeeded":
         # A duplicate of the profile Stop reads it as pending; the exact receipt
         # then finishes it before the duplicate takes its lock. The duplicate

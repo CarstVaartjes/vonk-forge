@@ -11,7 +11,7 @@ import copy
 import json
 from datetime import UTC, datetime
 from importlib import resources
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -24,7 +24,6 @@ from vonk_control.catalog.entities import (
     CatalogEntityService,
     CatalogValidationError,
     _parse,
-    recipe_document_projection,
 )
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
@@ -32,6 +31,7 @@ from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    recipe_document_projection,
 )
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base
@@ -67,11 +67,11 @@ _PREBUILT = {
 }
 
 
-def _example(name: str) -> dict:
+def _example(name: str) -> dict[str, Any]:
     return json.loads((_EXAMPLES / name).read_text(encoding="utf-8"))
 
 
-def _legacy_model() -> dict:
+def _legacy_model() -> dict[str, Any]:
     """The Model document as contracts 2.x published it, display inside."""
     document = _example("model-definition.json")
     identity = document["identity"]
@@ -92,7 +92,7 @@ def _legacy_model() -> dict:
     return document
 
 
-def _legacy_recipe() -> dict:
+def _legacy_recipe() -> dict[str, Any]:
     document = _example("recipe-source-build.json")
     document["metadata"] = {
         "title": "Synthetic Tiny build",
@@ -102,7 +102,7 @@ def _legacy_recipe() -> dict:
     return document
 
 
-def _legacy_projection(document: dict, kind: str) -> dict:
+def _legacy_projection(document: dict[str, Any], kind: str) -> dict[str, Any]:
     """The projection a 2.x Controller stored, with what its sync recorded."""
     if kind == "model":
         model = read_model(document)
@@ -140,7 +140,9 @@ def sessions():
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _store(sessions, document: dict, kind: str, *, projected: dict) -> str:
+def _store(
+    sessions, document: dict[str, Any], kind: str, *, projected: dict[str, Any]
+) -> str:
     """Insert a revision exactly as a 2.x Controller wrote it."""
     with sessions.begin() as session:
         root = CatalogDocument(
@@ -288,7 +290,8 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
     with pytest.raises(CatalogValidationError) as revised:
         entities.revise(seed.document_id, document, actor="test")
     assert revised.value.code == CatalogCode.DOCUMENT_INVALID
-    with pytest.raises(CatalogValidationError) as imported:
+
+    def expected_failure():
         if document["kind"] == "model":
             service.import_catalog_models("test", [document])
         else:
@@ -299,6 +302,9 @@ def test_no_write_path_stores_a_2x_shape(sessions, legacy) -> None:
                 document=document,
                 expected_content_sha256=document_sha256(document),
             )
+
+    with pytest.raises(CatalogValidationError) as imported:
+        expected_failure()
     assert imported.value.code in {
         CatalogCode.DOCUMENT_INVALID,
         CatalogCode.MODEL_DOCUMENT_INVALID,

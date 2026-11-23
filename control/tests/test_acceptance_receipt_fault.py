@@ -12,14 +12,14 @@ from pathlib import Path
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from vonk_agent_protocol.contracts import (
-    AgentResult,
+from vonk_agent_protocol.agent_operations import (
     ArtifactDistributionResult,
     RecipeStartResult,
-    canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, OutcomeKind
 from vonk_agent_protocol.outcome import OutcomeDone
+from vonk_agent_protocol.wire_model import canonical_message
 
 ROOT = Path(__file__).resolve().parents[2]
 

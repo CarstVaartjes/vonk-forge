@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -176,7 +177,9 @@ def test_ended_run_without_an_exact_stop_is_not_reopened(
     assert _state(services, run_id) == before
 
 
-def _body(clock, run_id: str, *, ahead: int = 0, running: bool = True) -> dict:
+def _body(
+    clock, run_id: str, *, ahead: int = 0, running: bool = True
+) -> dict[str, Any]:
     return {
         "observed_at": (clock.now + timedelta(seconds=ahead)).isoformat(),
         "runs": [
@@ -190,7 +193,7 @@ def _body(clock, run_id: str, *, ahead: int = 0, running: bool = True) -> dict:
     }
 
 
-def _post(client, path: str, body: dict):
+def _post(client, path: str, body: dict[str, Any]):
     return client.post(path, headers=agent_headers(NODE_A, "serial-a"), json=body)
 
 

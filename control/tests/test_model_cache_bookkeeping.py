@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from vonk_control.model_cache.catalog_helpers import _validate_source
+from vonk_control.model_cache.source_helpers import _validate_source
 from vonk_control.models.cache import (
     ModelCacheOperation,
     ModelCacheSet,
@@ -62,7 +62,7 @@ def test_a_vanished_operation_is_skipped_not_raised(cache):
     service._schedule_background_download(missing, force=False)
     service._set_operation_progress(
         missing,
-        None,  # type: ignore[arg-type] - never reached for a vanished operation
+        None,
         phase="downloading",
         completed_artifacts=0,
         downloaded_bytes=0,

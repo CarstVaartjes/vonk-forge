@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from importlib import resources
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 import httpx2
@@ -44,6 +45,7 @@ from vonk_control.distributed_recovery.coordinator import DistributedRecoveryCoo
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
@@ -251,8 +253,10 @@ class ReachWorld(World):
         )
         # Installations compile against what the NAS really holds.
         compile_installation = template._install_admission._compiled_plan_provider
-        assert compile_installation is not None
-        compile_installation.__self__._model_cache = cache
+        assert isinstance(compile_installation, MethodType)
+        compiler = compile_installation.__self__
+        assert isinstance(compiler, ControllerExecutionPlanService)
+        compiler._model_cache = cache
         orders = AgentJobService(self.sessions, clock=clock)
         routes = RecipeRouteService(
             self.sessions,

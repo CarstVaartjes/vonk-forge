@@ -5,11 +5,17 @@ from uuid import uuid4
 
 import pytest
 from psycopg.errors import SerializationFailure
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import RunSwitchRunIntent
-from vonk_control.journal_models import RunSwitchJournalRepairPending
+from vonk_control.journal_models import (
+    RunSwitchJournalRepair,
+    RunSwitchJournalRepairPending,
+)
+from vonk_control.models.jobs import Job
+from vonk_control.models.operations import AgentOperationAttempt
 from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     RunSwitchJournalRepairPendingState,
@@ -19,6 +25,7 @@ from vonk_control.run_switch_journal_repair import observation as repair
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
 
 from .non_blocking import assert_ended_without_blocking
+from .test_profile_child_progress_projection import _measured_profile_service
 from .test_run_switch_zero_transfer_journal_repair_postgres import (
     faulty_install,  # noqa: F401
 )
@@ -51,14 +58,9 @@ def test_database_observation_failure_ends_and_accepts_fresh(
         )
         deadline = state.deadline_at
         assert state.attempts == 1
-    from .test_profile_child_progress_projection import _measured_profile_service
 
     _, restarted = _measured_profile_service(sessions, lifecycle)
     with sessions() as session:
-        from sqlalchemy import select
-
-        from vonk_control.models.operations import AgentOperationAttempt
-
         # The repair clock waits on the child's live owner: it runs out only
         # once that owner stopped renewing and its progressing lease passed.
         lease = session.scalar(
@@ -82,8 +84,6 @@ def test_database_observation_failure_ends_and_accepts_fresh(
         return restarted.get(switch)
 
     with sessions() as session:
-        from vonk_control.models.jobs import Job
-
         job = session.get(Job, switch)
         assert job is not None
         parent = _run_switch_payload(job)
@@ -108,8 +108,6 @@ def test_database_observation_failure_ends_and_accepts_fresh(
         # independent operation projection and immutable repair evidence.
         assert receipt.blockers
         with sessions() as session:
-            from vonk_control.journal_models import RunSwitchJournalRepair
-
             assert (
                 session.query(RunSwitchJournalRepair).filter_by(job_id=switch).count()
             )

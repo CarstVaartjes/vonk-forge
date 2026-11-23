@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
-from pytest import CaptureFixture
+import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -30,7 +30,7 @@ from .test_model_cache_cancel_recovery import _api
 
 
 def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_old_owner(
-    tmp_path: Path, postgres_engine: Engine, capsys: CaptureFixture[str]
+    tmp_path: Path, postgres_engine: Engine, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Catch a terminal cancel retaining claims or accepting its late executor."""
     Base.metadata.create_all(postgres_engine)

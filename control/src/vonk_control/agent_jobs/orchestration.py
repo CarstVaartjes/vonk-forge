@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentClaim, AgentOperation, canonical_payload
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentClaim, canonical_payload
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 
 from ..admission_locking import acquire_admission_keys, node_admission_key
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models.fleet import AgentNode
@@ -25,10 +27,10 @@ from .contracts import (
     _CONTROL_OPERATIONS,
     _RECIPE_CAPABILITIES,
     _TERMINAL_PARENT_STATES,
-    _WORKLOAD_INTENT_OPERATIONS,
 )
 from .predicates import _document
 from .stored import column_field, column_value
+from .waits import record_queue_waits
 
 if TYPE_CHECKING:
     from .service import AgentJobService
@@ -184,7 +186,6 @@ def enqueue_in_session(
         updated_at=now,
     )
     session.add(stored)
-    from .waits import record_queue_waits
 
     record_queue_waits(session, [stored], now)
     session.flush()

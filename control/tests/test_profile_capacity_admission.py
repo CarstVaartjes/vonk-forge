@@ -13,9 +13,9 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 
 from cluster_profiles.cli_render.dispatch import render_payload
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.resources import StorageDemandCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
@@ -31,6 +31,7 @@ from vonk_control.fleet_profiles.contracts import FleetProfileStalePlanConflict
 from vonk_control.fleet_profiles.dependencies import (
     _MAX_PARKED_APPLICATION_OBSERVATIONS,
 )
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models.cache import RecipeBuild
@@ -107,7 +108,8 @@ def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
     api, codec = _client(sessions, profiles=profiles)
     headers = _headers(codec, "administrator")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     return sessions, profiles, planner, profile, api, headers, review.json(), nodes
 
 
@@ -326,6 +328,7 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
     monkeypatch.setattr(
         RunSwitchOperationService, "recheck_resources_in_session", original
     )
+    admitted = None
     for _ in range(6):
         profiles.tick()
         with sessions() as session:
@@ -333,6 +336,7 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
             assert admitted is not None
             if admitted.current_operation_id is not None:
                 break
+    assert admitted is not None
     assert admitted.current_operation_id is not None, admitted.status_reason
 
 
@@ -561,10 +565,8 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
         )
         try:
             assert checked.wait(30)
-            with (
-                pytest.raises(OperationalError) as refused,
-                sessions.begin() as session,
-            ):
+
+            def expected_failure(session):
                 session.execute(text("SET LOCAL lock_timeout = '100ms'"))
                 if writer == "inventory":
                     row = session.scalar(select(NodeInventorySnapshot))
@@ -575,6 +577,12 @@ def test_capacity_writer_is_excluded_until_profile_acceptance_commits(
                     assert reservation is not None
                     reservation.amount_bytes = 1_000_000
                 session.flush()
+
+            with (
+                pytest.raises(OperationalError) as refused,
+                sessions.begin() as session,
+            ):
+                expected_failure(session)
             assert getattr(refused.value.orig, "sqlstate", None) == "55P03"
         finally:
             release.set()
@@ -606,7 +614,8 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert review.status_code == 200 and review.json()["allowed"], review.text
+    assert review.status_code == 200, review.text
+    assert review.json()["allowed"], review.text
     run_plan = lifecycle.preview_run(installation.owner_id, "shared-node-admission")
     assert run_plan.allowed, run_plan.nodes
     request_key = str(uuid4())
@@ -626,17 +635,13 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
     def hold_after_run_admission_key(
         _connection, _cursor, statement, parameters, _context, _many
     ):
-        if "pg_try_advisory_xact_lock" in statement:
-            values = parameters if isinstance(parameters, dict) else {}
-            thread_id = threading.get_ident()
-            key = values.get("key")
-            observed_keys.append((thread_id, key))
-        if (
-            "pg_try_advisory_xact_lock" in statement
-            and key == expected_key
-            and run_thread_ids
-            and thread_id == run_thread_ids[0]
-        ):
+        if "pg_try_advisory_xact_lock" not in statement:
+            return
+        values = parameters if isinstance(parameters, dict) else {}
+        thread_id = threading.get_ident()
+        key = values.get("key")
+        observed_keys.append((thread_id, key))
+        if key == expected_key and run_thread_ids and thread_id == run_thread_ids[0]:
             run_key_acquired.set()
             assert release_run.wait(timeout=10), (
                 "test did not release the run admission"
@@ -1036,7 +1041,7 @@ def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
         assert recovered.request_key == request_key
         assert recovered.plan_digest == pending_plan_digest
         assert recovered.progress["admission_pending"] is False
-        intended = restarted._intended_profile(recovered, session=session)
+        intended = _intended_profile(recovered, session=session)
         assert not isinstance(intended, Residue)
         assert intended.reviewed_plan_digest == review["plan_digest"]
         switch_state = FleetProfileSwitchAdapterState.model_validate_json(
@@ -1082,7 +1087,7 @@ def test_queued_admission_survives_submitter_death_before_first_attempt(
         assert row is not None
         assert row.progress["admission_pending"] is False
         assert row.plan_digest == pending.plan_digest
-        restarted_intent = restarted._intended_profile(row, session=session)
+        restarted_intent = _intended_profile(row, session=session)
         assert not isinstance(restarted_intent, Residue)
         assert restarted_intent.reviewed_plan_digest == review.plan_digest
         assert row.state == "running", row.status_reason
@@ -1341,10 +1346,6 @@ def _load_short_of_disk(tmp_path, monkeypatch, relief: _Relief | None, engine=No
         _capacity_profile(tmp_path, engine)
     )
     if relief is None:
-        from vonk_control.unused_storage_collection.service import (
-            UnusedStorageCollector,
-        )
-
         lifecycle = planner._lifecycle
         assert lifecycle is not None
         planner._clock = lambda: profiles._clock()

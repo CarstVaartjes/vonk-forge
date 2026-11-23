@@ -21,10 +21,15 @@ from ..models.jobs import Job
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
+from .contracts import ScopeIntentStatus
 from .errors import RunSwitchRetryLater, _RunSwitchBuildParentChanged
 from .observation_helpers import _phase_request_key
-from .planning_helpers import _run_switch_payload, _stored_job_plan
+from .planning_helpers import (
+    _run_switch_payload,
+    _scope_intent_status,
+    _stored_job_plan,
+)
 from .provider import _ADAPTER
 from .result_helpers import _bound_workload_intent, _read_progress
 
@@ -119,7 +124,6 @@ def _lock_current_build_parent(
     parent, before the lifecycle service locks the build. All acquisition is
     nonblocking and the caller retains these locks through its SQL commit.
     """
-    from .retry_holds import RetryHoldsMixin
 
     if not 0 <= phase_index < len(plan.phases) or (
         plan.phases[phase_index].kind,
@@ -178,7 +182,7 @@ def _lock_current_build_parent(
     if (
         not _checkpoint_matches(job, current, phase_index, item_index, child_id)
         or current.cancellation != cancellation
-        or RetryHoldsMixin._scope_intent_status(session, job) != "current"
+        or _scope_intent_status(session, job) != ScopeIntentStatus.CURRENT
     ):
         raise _RunSwitchBuildParentChanged(RunSwitchCode.CONTAINER_BUILD_PARENT_CHANGED)
     return job
@@ -198,6 +202,3 @@ def _checkpoint_matches(
         and progress.item_index == item_index
         and progress.child_operation_id == child_id
     )
-
-
-_UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32

@@ -128,9 +128,12 @@ def test_contended_row_lock_ends_and_next_transaction_acquires(sessions) -> None
 
 
 def test_admission_rollback_releases_keys_for_the_next_request(sessions) -> None:
-    with pytest.raises(RuntimeError), sessions.begin() as failed:
+    def expected_failure(failed):
         acquire_admission_keys(failed, (node_admission_key(NODE),))
         raise RuntimeError("injected failure after admission")
+
+    with pytest.raises(RuntimeError), sessions.begin() as failed:
+        expected_failure(failed)
     with sessions.begin() as fresh:
         acquire_admission_keys(fresh, (node_admission_key(NODE),))
 

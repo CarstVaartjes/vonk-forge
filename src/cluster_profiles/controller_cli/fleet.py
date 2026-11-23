@@ -30,8 +30,10 @@ from ..control_client.errors import (
     ControlUnauthorized,
 )
 from ..control_client.schema import validate_control_document
+from ..generated_control.models.job_resume_request import JobResumeRequest
 from .common import (
     ControllerClient,
+    _known_http_refusal_status,
     _log_since,
     _profile_number,
     _query,
@@ -48,7 +50,7 @@ from .observation import (
 )
 from .profile_load import _submit_fleet_upgrade
 from .selection import _resolve_spark_selectors, _selection_remaining
-from .submission import _known_http_refusal_status, _submit_idempotent_request
+from .submission import _submit_idempotent_request
 
 
 def _overview(
@@ -387,8 +389,6 @@ def _fleet(
             "output": str(args.output.absolute()),
         }
     if action == "resume":
-        from ..generated_control.models.job_resume_request import JobResumeRequest
-
         job_id = args.operation_id
         path = f"/api/jobs/{_quoted(job_id)}"
         deadline = time.monotonic() + _bounded_timeout(args)

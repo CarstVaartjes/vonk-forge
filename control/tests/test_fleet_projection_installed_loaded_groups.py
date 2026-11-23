@@ -13,8 +13,8 @@ from sqlalchemy.pool import StaticPool
 from cluster_profiles.cli_render.dispatch import render_payload
 from tests.observation_transfer_peer import observation_document
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.common import (
     FleetSnapshot,
 )

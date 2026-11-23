@@ -13,10 +13,10 @@ from __future__ import annotations
 import fcntl
 import time
 import uuid
-from collections import namedtuple
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import select
@@ -504,8 +504,13 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
 ):
 
     service, sessions = cache
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _: usage(100, 100, 0))
+
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _: DiskUsage(100, 100, 0))
     operation, artifact = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a060", b"needs space"
     )
@@ -520,7 +525,7 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     assert not service._object_path(str(artifact["sha256"])).exists()
     monkeypatch.setattr(
         "shutil.disk_usage",
-        lambda _: usage(10**12, 0, 10**12),
+        lambda _: DiskUsage(10**12, 0, 10**12),
     )
     assert service.run_pending() == 1
     assert service.get_operation(operation.id).state == "succeeded"

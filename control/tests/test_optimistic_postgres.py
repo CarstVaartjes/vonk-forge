@@ -25,6 +25,8 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.jobs import Job, JobAttempt
 from vonk_control.optimistic import Applied, Stale, transition
 
+from .insert_collision_support import Rendezvous
+
 
 def _queue(engine):
     Base.metadata.create_all(engine)
@@ -37,14 +39,14 @@ def _queue(engine):
 def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
     """Catches lost updates, stale-plan replay, and child effects surviving rollback."""
     sessions, jobs, job = _queue(postgres_engine)
-    read = threading.Barrier(2)
+    read = Rendezvous(2)
     winner_committed = threading.Event()
     seen: list[str] = []
 
     def winner(session: Session) -> None:
         row = session.get(Job, job.id)
         assert row is not None
-        read.wait(timeout=30)
+        read.wait()
         row.state = LifecycleState.CANCELLED
 
     def loser(session: Session) -> bool:
@@ -53,7 +55,7 @@ def test_two_decisions_replan_from_committed_winner(postgres_engine) -> None:
         seen.append(row.state)
         if row.state == LifecycleState.CANCELLED:
             return False
-        read.wait(timeout=30)
+        read.wait()
         assert winner_committed.wait(timeout=30)
         row.state = LifecycleState.SUCCEEDED
         session.add(

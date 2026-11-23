@@ -9,6 +9,7 @@ import os
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx2
 import pytest
@@ -23,14 +24,14 @@ from vonk_control.capabilities import CapabilityRegistry, CapabilityUnavailableE
 from vonk_control.capability_contract import CapabilityAvailability
 from vonk_control.gateway import keys as gateway_keys
 from vonk_control.gateway.keys import (
-    GatewayKeyCreated,
     GatewayKeyError,
     GatewayKeyService,
     install_gateway_key_routes,
     keep_default_key,
 )
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.route_grants import GatewayInferenceRoute
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 from .observed_actions import observe_action
 
@@ -58,7 +59,7 @@ class FakeLiteLlm:
     """LiteLLM's /key/* routes, keyed by alias, requiring the master key."""
 
     def __init__(self) -> None:
-        self.keys: dict[str, dict] = {}
+        self.keys: dict[str, dict[str, Any]] = {}
         self.counter = 0
         self.fail_generate_after: int | None = None
 
@@ -500,8 +501,6 @@ def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replace
 
     def unavailable_rename(method, path, **kwargs):
         if path == "/key/update":
-            from vonk_control.gateway.keys import GatewayKeyError
-
             raise GatewayKeyError("injected rename loss")
         return original_request(method, path, **kwargs)
 
@@ -1224,7 +1223,7 @@ def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
     assert "forbidden" not in litellm.keys
 
 
-def _entry(index: int) -> dict:
+def _entry(index: int) -> dict[str, Any]:
     return {
         "key": f"sk-listed-{index:032d}",
         "key_alias": f"key-{index:04d}",

@@ -268,7 +268,8 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
             "operation_id": child_id,
         }
         assert build is not None and build.state == "failed"
-        assert build.image_digest is None and build.oci_layout_sha256 is None
+        assert build.image_digest is None
+        assert build.oci_layout_sha256 is None
     assert _active_claims(sessions, plan.build_id) == claim_ids
 
     restarted = run("reconcile")
@@ -308,7 +309,8 @@ def test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_deat
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None and build.state == "failed"
-        assert build.image_digest is None and build.oci_layout_sha256 is None
+        assert build.image_digest is None
+        assert build.oci_layout_sha256 is None
     # Re-enter through a fresh worker after the late result. It must discover
     # the same pending cleanup rather than release or duplicate it.
     restarted_after_result = run("reconcile")

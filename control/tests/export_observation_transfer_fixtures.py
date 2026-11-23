@@ -36,8 +36,12 @@ from vonk_control.telemetry.samples import TelemetryRepository
 
 async def _collect(response: ObservationTransferResponse) -> str:
     pieces: list[bytes] = []
-    async for part in response.body_iterator:
-        pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+    pieces.extend(
+        [
+            part.encode() if isinstance(part, str) else bytes(part)
+            async for part in response.body_iterator
+        ]
+    )
     return b"".join(pieces).decode("utf-8", errors="strict")
 
 

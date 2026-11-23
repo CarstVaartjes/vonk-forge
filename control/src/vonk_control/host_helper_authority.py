@@ -17,13 +17,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentOperation,
-    AgentProtocolError,
-    AgentUpgradePayload,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
@@ -37,7 +33,6 @@ from vonk_agent_protocol.host_helper import (
     HostOperationKind,
     HostRuntimeRequest,
     InstallVonkDebOperation,
-    RecipeReconciliationIdentity,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
@@ -50,12 +45,15 @@ from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeReconcilePayload,
+    RecipeReconciliationIdentity,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 
 from . import agent_operation_states
-from .agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
+from .agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS
+from .gpu.clock import selected_gpu_clock
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -74,6 +72,7 @@ from .own_cleanup import CLEANUP_ACTIONS
 from .owner_liveness import run_has_live_operation
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
+from .swap import selected_swap
 from .untracked_installations import run_wanted_here
 
 _LOGGER = logging.getLogger("vonk_control.host_helper_authority")
@@ -368,7 +367,6 @@ class HostRuntimeAuthorityService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def gpu_clock_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .gpu.clock import selected_gpu_clock
 
         with self._sessions() as session:
             desired = selected_gpu_clock(session, node_id)
@@ -379,7 +377,6 @@ class HostRuntimeAuthorityService:
         )
 
     def swap_grant(self, node_id: str) -> SignedHostHelperGrant:
-        from .swap import selected_swap
 
         with self._sessions() as session:
             desired = selected_swap(session, node_id)

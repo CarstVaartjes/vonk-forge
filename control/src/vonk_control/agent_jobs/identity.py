@@ -11,23 +11,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentClaim,
-    AgentProgress,
-    AgentResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentClaim, AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
     SecurityRefusalReason,
 )
 from vonk_agent_protocol.state_machines import CertificateRecordState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..agent_contacts import record_contact
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import lapsed_renewal_allowed as _lapsed_renewal_allowed
 from ..auth import AgentSource
+from ..cancelled_runtime import cancellation_stop_current
 from ..categorized_errors import InvalidValue
 from ..inventory.items import record_runtime
 from ..jobs import states as job_states
@@ -38,13 +36,7 @@ from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..offline_stops import is_deferred_stop
 from ..own_cleanup import CLEANUP_KINDS
-from .contracts import (
-    _WORKLOAD_INTENT_OPERATIONS,
-    AgentContactIdentityMismatch,
-    AgentFence,
-    StaleAgentFence,
-    fencing_intent,
-)
+from .contracts import AgentContactIdentityMismatch, AgentFence, StaleAgentFence
 from .stored import column_field, column_is_document, column_value
 
 if TYPE_CHECKING:
@@ -60,7 +52,6 @@ def _active(
     allow_superseded_cancellation: bool = False,
     allow_lapsed_renewal: bool = False,
 ) -> tuple[StoredOperation, AgentOperationAttempt]:
-    from ..cancelled_runtime import cancellation_stop_current
 
     token = self._fence_token(fence)
     identity_hint = session.execute(

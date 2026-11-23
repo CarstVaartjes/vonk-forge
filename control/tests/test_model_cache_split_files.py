@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections import namedtuple
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx2
 import pytest
@@ -319,8 +319,12 @@ def test_a_cached_whole_file_skips_every_part_download(service, hub) -> None:
 
 
 def _free_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr("shutil.disk_usage", lambda _path: usage(10**12, 0, free))
+    class DiskUsage(NamedTuple):
+        total: int
+        used: int
+        free: int
+
+    monkeypatch.setattr("shutil.disk_usage", lambda _path: DiskUsage(10**12, 0, free))
 
 
 def test_preview_counts_the_largest_part_as_transient_disk(
@@ -550,8 +554,8 @@ def test_cache_entry_and_inventory_views_accept_a_split_set(service, hub) -> Non
     entry = service.get_entry(set_digest)
     assert entry["state"] == "cached"
     assert entry["verified_bytes"] == len(whole)
-    (listed,) = entry["artifacts"]  # type: ignore[misc]
-    assert listed["sha256"] == artifact["sha256"]  # type: ignore[index]
+    (listed,) = entry["artifacts"]
+    assert listed["sha256"] == artifact["sha256"]
     assert (
         service.read_verified_artifact(
             set_digest, str(artifact["sha256"]), "model-00005.safetensors"

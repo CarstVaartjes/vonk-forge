@@ -33,6 +33,8 @@ from vonk_control.workload_intent import (
     take_workload_intent,
 )
 
+from .insert_collision_support import Rendezvous
+
 NODES = ("spk_" + "a" * 32, "spk_" + "b" * 32)
 INTENTS = 8
 
@@ -73,12 +75,12 @@ def test_concurrent_intents_on_one_node_get_distinct_increasing_ordinals(
     event.listen(postgres_engine, "before_cursor_execute", record)
     taken: list[int] = []
     guard = threading.Lock()
-    start = threading.Barrier(INTENTS)
+    start = Rendezvous(INTENTS)
     errors: list[BaseException] = []
 
     def allocate() -> None:
         try:
-            start.wait(timeout=30)
+            start.wait()
             with sessions.begin() as session:
                 session.execute(text("SET LOCAL lock_timeout = '20s'"))
                 ordinal = allocate_workload_intent(session, NODES[:1])

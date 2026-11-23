@@ -11,7 +11,9 @@ from threading import Event
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.contracts import AgentProgress, AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -752,12 +754,11 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         )
         assert stored is not None and stored.state == "failed"
         assert parent_row is not None and parent_row.state == "failed"
-        assert (
-            node is not None
-            and runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
-        )
+        assert node is not None
+        assert runtime_value(node, lambda identity: identity.binary_digest) == "e" * 64
         assert build is not None and build.state == "failed"
-        assert reservation is not None and reservation.state == "released"
+        assert reservation is not None
+        assert reservation.state == "released"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -910,7 +911,7 @@ def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> Non
         first_poll.set()
         return result
 
-    jobs._claim_once = observed_claim_once  # type: ignore[method-assign]
+    jobs._claim_once = observed_claim_once
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         waiting = pool.submit(claim_agent, jobs, NODE_A, "serial-a", 2.0)

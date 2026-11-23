@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -35,8 +36,9 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopPayload,
     RecipeStopResult,
 )
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.contracts import (
+    StaleAgentFence,
     controller_result_consumer,
 )
 from vonk_control.agent_jobs.service import AgentJobService
@@ -244,8 +246,6 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     os.utime(seeded.path, (0, 0))
 
     if contended:
-        import fcntl
-
         with (root / ".quota.lock").open("a+b") as quota:
             fcntl.flock(quota.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             with pytest.raises(Exception):  # noqa: B017 -- ending witness; durable evidence asserted below
@@ -546,8 +546,6 @@ def test_undelivered_job_outputs_resume_without_repeating_the_process(
     if reconcile:
         jobs.reconcile_orders()
     if lease_lapses:
-        from vonk_control.agent_jobs.contracts import StaleAgentFence
-
         with pytest.raises(StaleAgentFence):
             jobs.record_result(undelivered(first))
         # The HTTP ingress reconciles a stale result through this same path.
@@ -938,11 +936,6 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
         tmp_path, 200 + 10 * ["cancelled", "exits-zero", "fails"].index(companion_ends)
     )
     if owner_outcome == "succeeded":
-        from vonk_agent_protocol.recipe_jobs import (
-            RecipeJobEvidence,
-            RecipeJobOutputManifest,
-        )
-
         content = b"image"
         output = RecipeJobFile(
             name="output.png",
@@ -1030,11 +1023,6 @@ def test_a_running_companion_is_told_to_stop_when_the_owner_ends(
             )
         )
     else:
-        from vonk_agent_protocol.recipe_jobs import (
-            RecipeJobEvidence,
-            RecipeJobOutputManifest,
-        )
-
         agent_jobs.succeed(
             companion,
             RecipeJobRunResult(

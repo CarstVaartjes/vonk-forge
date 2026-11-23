@@ -40,6 +40,7 @@ from ..catalog.revision_contract import (
     RecipeRevisionProjection,
 )
 from ..cursor_contract import MAX_CURSOR_LENGTH
+from ..identifiers import UuidId
 from ..inventory.repository import INVENTORY_MAX_AGE_SECONDS
 from ..machine_states import InstallationStateField, RouteStateField, RunStateField
 from ..model_cache.contract import (
@@ -52,10 +53,6 @@ from ..run_switch_contract.evidence import RunSwitchReason, SparkFit
 from ..run_switch_contract.requests import SparkGroup
 from ..strict_json import StrictModel
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
@@ -72,7 +69,6 @@ _MAX_NODE_ARTIFACTS_PER_NODE = 512
 _MAX_PROJECTED_CAPABILITIES = 64
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 ImageDigest = Annotated[str, StringConstraints(pattern=_IMAGE_DIGEST_PATTERN)]

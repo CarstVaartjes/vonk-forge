@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.contracts import (
-    AgentOperation,
     AgentResult,
     AgentResultPayload,
-    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -25,10 +24,12 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
 from ..admission_locking import admission_attempts
 from ..agent_contacts import record_contact
+from ..agent_operation_facts import _WORKLOAD_INTENT_OPERATIONS, fencing_intent
 from ..agent_operation_facts import aware as _aware
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
@@ -44,12 +45,10 @@ from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
     _ENDED_PARENT_STATES,
-    _WORKLOAD_INTENT_OPERATIONS,
     AgentFence,
     StaleAgentFence,
     StaleAgentRequest,
     cancelled_job_run,
-    fencing_intent,
 )
 from .evidence import (
     _failure_result,

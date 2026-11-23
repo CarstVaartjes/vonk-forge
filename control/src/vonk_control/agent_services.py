@@ -14,6 +14,8 @@ from vonk_control import local_ca
 from .agent_api.common import AgentApiServices
 from .agent_jobs.service import AgentJobService
 from .capabilities import CapabilityRegistry
+from .distribution.service import DistributionService
+from .distribution.wiring import build_distribution_service_from_components
 from .enrollment.bootstrap import EnrollmentBootstrapConfig
 from .enrollment.service import EnrollmentService
 from .host_helper_authority import (
@@ -62,9 +64,6 @@ def build_agent_services(
 
     registry = capabilities or CapabilityRegistry()
     if distribution is None and model_cache is not None:
-        from .distribution.service import DistributionService
-        from .distribution.wiring import build_distribution_service_from_components
-
         distribution = registry.guard(
             ControllerCapability.DISTRIBUTION,
             DistributionService,

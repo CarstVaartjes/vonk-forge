@@ -36,7 +36,6 @@ from vonk_control.fleet_profile_contract.assessment import (
     FleetProfileAdmissionDecision,
 )
 from vonk_control.harnesses.canonical import validate_runtime_policy
-from vonk_control.library import contract
 from vonk_control.model_primitives import Base
 from vonk_control.recipe_operations.start_payloads import (
     RecipeStartPlacement,
@@ -463,7 +462,7 @@ def _canary_lane_under_withdrawal(
         recipe={},
     )
     monkeypatch.setattr(
-        contract,
+        lifecycle,
         "LibraryRecipeIdentity",
         SimpleNamespace(
             model_validate_json=lambda _value: SimpleNamespace(

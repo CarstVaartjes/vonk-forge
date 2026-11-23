@@ -9,11 +9,16 @@ import pytest
 from sqlalchemy import select
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import AgentOperation, canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
+from vonk_control.artifact_jobs.lifecycle import (
+    ArtifactIdentity,
+    require_reference_open,
+)
 from vonk_control.cache_removal_review import CacheAssetDisposition
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -33,6 +38,7 @@ from vonk_control.inventory.repository import (
 )
 from vonk_control.model_cache.contract import ModelCacheRemovalPayload
 from vonk_control.model_cache.errors import ModelCacheConflictInvalid
+from vonk_control.model_cache.persistence import _store_operation_payload
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import ArtifactLifecycleGate, ModelCacheOperation
@@ -65,6 +71,7 @@ from .test_model_removal_reference_lifecycle import (
     _removal_service,
 )
 from .test_model_removal_worker_postgres import _prepare_removal_target
+from .unused_storage_collection_support import _profile
 
 
 def submit_model_download(cache: ModelCacheService, tmp_path: Path) -> None:
@@ -533,8 +540,6 @@ def test_profile_or_running_workload_retains_model_and_installation(
         assert revision is not None
         recipe_selector = f"{revision.publisher}/{revision.slug}"
     if saved_profile:
-        from .unused_storage_collection_support import _profile
-
         world = object.__new__(Catalog)
         world.sessions = sessions
         _profile(world, recipe_selector, list(nodes))
@@ -821,14 +826,10 @@ def test_lost_owner_authority_expires_before_fresh_reference(
             assert gate is None, (
                 now[0],
                 None if row is None else (row.state, row.updated_at, row.completed_at),
-                None if gate is None else gate.removal_authority_expires_at,
+                gate.removal_authority_expires_at,
             )
         # Reacquire the exact content reference, rather than proving only that
         # unrelated work can proceed after the failed request.
-        from vonk_control.artifact_jobs.lifecycle import (
-            ArtifactIdentity,
-            require_reference_open,
-        )
 
         with world.sessions.begin() as session:
             require_reference_open(
@@ -880,7 +881,6 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
         with world.sessions.begin() as session:
             row = session.get(ModelCacheOperation, receipt.id)
             assert row is not None
-            from vonk_control.strict_json import read_stored_model
 
             plan = read_stored_model(
                 ModelCacheRemovalPayload, row.payload, from_json=True
@@ -889,7 +889,6 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
             plan.fleet.effects.targets[0].objects[0].object = ModelStoreObject(
                 sha256="f" * 64, bytes=1
             )
-            from vonk_control.model_cache.persistence import _store_operation_payload
 
             _store_operation_payload(row, "remove", plan)
         with world.sessions() as session:

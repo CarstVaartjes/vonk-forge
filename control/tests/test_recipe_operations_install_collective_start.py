@@ -12,15 +12,13 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import (
-    AgentInstallResult,
-    AgentResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentInstallResult
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.execution import (
     RecipeInstallation,

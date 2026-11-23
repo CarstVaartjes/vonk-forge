@@ -20,7 +20,7 @@ from vonk_forge_contracts import (
 )
 
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog import entities
+from vonk_control.catalog import entities, revision_contract
 from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
@@ -186,7 +186,8 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
         return compile_policy(recipe)
 
     with monkeypatch.context() as patch:
-        patch.setattr(entities, "build_policy_projection", compile_with_fault)
+        for consumer in (entities, revision_contract):
+            patch.setattr(consumer, "build_policy_projection", compile_with_fault)
         deferred = catalog.refresh_build_policy()
         assert len(deferred) == 1
         assert views[0].content_sha256 is not None

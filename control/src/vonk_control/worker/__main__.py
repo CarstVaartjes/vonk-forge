@@ -17,13 +17,13 @@ from ..logging import log_event, redact_text
 if TYPE_CHECKING:
     from ..catalog.sync import ManagedRecipeCatalogSyncService
     from ..enrollment.service import EnrollmentService
+from ..worker_healthcheck import current_worker_instance_id
 from .assembly import assemble_production_worker
 from .liveness import (
     _LOGGER,
     _WORKER_WATCHDOG_TIMEOUT_SECONDS,
     WorkerHeartbeatRecorder,
     WorkerWatchdog,
-    current_worker_instance_id,
     watch_worker,
 )
 

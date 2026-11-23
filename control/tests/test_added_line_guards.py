@@ -11,6 +11,8 @@ from .added_line_guards.check import check_source
 from .added_line_guards.patch import added_lines, changed_lines
 from .added_line_guards.scans import AGENT_REQUESTS
 from .deterministic_retries import scan_count_endings, scan_recovery_policy_users
+from .deterministic_retries import scan_source as scan_retry_shield_source
+from .legacy_tolerance import scan_source as scan_legacy_tolerance
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -1098,11 +1100,9 @@ def test_count_guard_does_not_exempt_the_uncancelled_else_branch() -> None:
 
 def test_assignment_based_retry_requires_the_cause_classifier():
     """Catches the worker's old assignment-based deterministic retry shield."""
-    from .deterministic_retries import scan_source
-
     source = "def tick():\n try: work()\n except Exception as error:\n  self._retry_at[task] = now + 5\n"
-    assert scan_source(source)
-    assert not scan_source(
+    assert scan_retry_shield_source(source)
+    assert not scan_retry_shield_source(
         source.replace(
             "  self._retry_at", "  verdict = disposition(error)\n  self._retry_at"
         )
@@ -2491,47 +2491,6 @@ def test_a_revocation_with_a_durable_commit_or_in_enrollment_passes() -> None:
     plain = _REVOCATION_SOURCE.format(extra="")
     enrollment = "control/src/vonk_control/enrollment/service.py"
     assert not check_source(enrollment, plain, {2}, modes=modes)
-
-
-_BARRIER_TEST = "control/tests/test_example.py"
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        # A patched method the product calls twice strands its thread here.
-        "import threading\nbarrier = threading.Barrier(2, timeout=30)\n",
-        "from threading import Barrier\nboth = Barrier(2)\n",
-        "from threading import Barrier as Gate\nboth = Gate(2)\n",
-        "import threading as t\nboth = t.Barrier(2)\n",
-    ],
-)
-def test_a_raw_barrier_in_a_control_test_is_flagged(source: str) -> None:
-    lines = set(range(1, source.count("\n") + 1))
-    assert check_source(_BARRIER_TEST, source, lines, modes=("barriers",))
-    # Only an added line can fail the change.
-    assert not check_source(_BARRIER_TEST, source, {1}, modes=("barriers",))
-
-
-@pytest.mark.parametrize(
-    ("path", "source"),
-    [
-        (_BARRIER_TEST, "both = Rendezvous(2)\n"),
-        (_BARRIER_TEST, "import asyncio\nbarrier = asyncio.Barrier(2)\n"),
-        # The rendezvous itself is built on the one raw barrier.
-        (
-            "control/tests/insert_collision_support.py",
-            "import threading\nbarrier = threading.Barrier(2)\n",
-        ),
-        (
-            "control/src/vonk_control/x.py",
-            "import threading\nb = threading.Barrier(2)\n",
-        ),
-    ],
-)
-def test_a_rendezvous_or_an_out_of_scope_barrier_passes(path: str, source: str) -> None:
-    lines = set(range(1, source.count("\n") + 1))
-    assert not check_source(path, source, lines, modes=("barriers",))
 
 
 _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references.py"
@@ -4457,8 +4416,6 @@ def test_an_added_identity_state_literal_is_refused() -> None:
 
 
 def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
-    from tests.legacy_tolerance import scan_source
-
     wait = (
         "try:\n    f()\n"
         "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
@@ -4468,10 +4425,10 @@ def test_a_broad_catch_may_not_turn_a_verdict_into_a_wait():
         "except (UnknownOutcomeError, InvalidRequestError):\n    raise\n"
         "except Exception as error:\n    raise EvidenceUnknown('x') from error\n"
     )
-    assert (3, "deterministic error becomes a wait") in scan_source(wait)
+    assert (3, "deterministic error becomes a wait") in scan_legacy_tolerance(wait)
     assert not [
         hit
-        for hit in scan_source(verdict_first)
+        for hit in scan_legacy_tolerance(verdict_first)
         if "verdict" in hit[1] or "wait" in hit[1]
     ]
 

@@ -39,7 +39,7 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_operations.availability_intent import (
     RecipeRetryIntent,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from ..worker.memory_contract import WorkerMemoryComponent
 from .contracts import (

@@ -40,7 +40,7 @@ from ..models.cache import (
 from ..models.catalog import CatalogDocumentRevision
 from ..unused_storage_collection.evidence import _Evidence
 from . import states as model_cache_states
-from .artifacts import _unique_artifacts
+from .artifacts import _is_digest, _unique_artifacts
 from .catalog_helpers import _recipe_model_content_digests
 from .contract import ModelCacheRemovalPayload, ModelCacheSetState
 from .errors import (
@@ -131,7 +131,6 @@ class RemovalReviewMixin:
                     return cache._replay_model_removal(
                         existing, actor=actor, selector=normalized_selector
                     )
-                from .artifacts import _is_digest
 
                 digest = (
                     normalized_selector

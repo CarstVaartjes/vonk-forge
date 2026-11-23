@@ -2,11 +2,12 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -16,7 +17,7 @@ from vonk_forge_contracts import (
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ExecutionPlanCompilationError
 from vonk_control.install_admission.contracts import (
@@ -78,7 +79,7 @@ def _canonical_catalog_documents(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
     disk_estimates: tuple[int, int] = (30, 70),
-) -> tuple[ModelDefinition, RecipeDefinition, dict, dict]:
+) -> tuple[ModelDefinition, RecipeDefinition, dict[str, Any], dict[str, Any]]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
@@ -109,7 +110,7 @@ def _canonical_catalog_documents(
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     now: datetime,
     *,
     denied_jurisdictions: tuple[str, ...] = (),
@@ -971,10 +972,14 @@ def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
 
 def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
     sessions, _now, _node, _mapping, build = setup(tmp_path, free=200)
-    with pytest.raises(IntegrityError), sessions.begin() as session:
+
+    def expected_failure(session):
         row = session.get(RecipeBuild, build)
         assert row is not None
         row.image_digest = "latest"
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        expected_failure(session)
 
 
 def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
@@ -1012,15 +1017,19 @@ def test_an_agent_that_cannot_pull_images_asks_for_an_upgrade(tmp_path) -> None:
 
 def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
     sessions, _now, _node, mapping, _build = setup(tmp_path, free=200)
-    with (
-        pytest.raises(Exception) as _ending,
-        sessions.begin() as session,
-    ):
+
+    def expected_failure(session):
         node = session.scalar(
             select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping)
         )
         assert node is not None
         node.endpoint_owner = False
+
+    with (
+        pytest.raises(Exception) as _ending,
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
 
 
 def _record_inventory(sessions, node_id, at, *, free=200) -> None:

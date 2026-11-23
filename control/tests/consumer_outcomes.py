@@ -4,12 +4,12 @@ Effect preservation and fresh admission belong in the scenario using this helper
 Assertions raised by the scenario itself must still fail the test.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 
 @contextmanager
-def not_adopted() -> Iterator[list[Exception]]:
+def not_adopted() -> Generator[list[Exception]]:
     failures: list[Exception] = []
     try:
         yield failures

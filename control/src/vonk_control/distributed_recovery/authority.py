@@ -9,10 +9,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..distributed_lifecycle import canonical_distributed_readiness
 from ..jobs.documents import (
@@ -48,7 +48,7 @@ from ..recipe_operations.stop_payloads import (
     durable_run_stop_payloads,
 )
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .common import (
     _DAMAGED,

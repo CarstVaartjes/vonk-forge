@@ -48,12 +48,12 @@ from vonk_agent_protocol.agent_state import (
     RenewalHelperManifest,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -4304,7 +4304,7 @@ class SparkLifecycle:
         control_src = REPOSITORY_ROOT / "control/src"
         if os.fspath(control_src) not in sys.path:
             sys.path.insert(0, os.fspath(control_src))
-        from vonk_control.recipe_image_availability.api import (
+        from vonk_control.recipe_image_availability.response_contract import (
             RecipeImageAvailabilityResponse,
         )
 

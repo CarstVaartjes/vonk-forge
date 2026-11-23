@@ -27,7 +27,7 @@ from sqlalchemy.schema import CreateTable, DropTable
 from . import (
     models as _models,  # noqa: F401 -- loads every mapped table onto Base.metadata
 )
-from .exact_integer_storage import DecimalIntegerToken
+from .exact_integer_storage import DecimalIntegerAtMost, DecimalIntegerToken
 from .model_primitives import Base
 from .settings import DATABASE_WAIT_BUDGETS
 
@@ -60,7 +60,6 @@ def _validate_rows(
     if table_name == "model_cache_sets":
         # Before any mutation, the old owning values must also obey their
         # cross-field bound. This validates exact token magnitude, not affinity.
-        from .exact_integer_storage import DecimalIntegerAtMost
 
         order = DecimalIntegerAtMost(
             literal_column("verified_bytes"), literal_column("expected_bytes")
@@ -106,7 +105,7 @@ def _postgres_owned_checks_current(
                 "SELECT conname,convalidated FROM pg_constraint "
                 "WHERE conrelid=to_regclass(%s) AND contype='c'",
                 (table_name,),
-            )
+            ).all()
         )
         return all(
             validated.get(name) is True and actual.get(name) == expression

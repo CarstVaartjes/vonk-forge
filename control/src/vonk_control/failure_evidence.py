@@ -43,6 +43,10 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from . import agent_operation_states
 from .artifact_jobs import states as ajs
 from .bounded_json import BoundedJSONError, require_integer, sequence
+from .fleet_profiles.operation_projection import _operation_item
+from .jobs.documents import AvailabilityJobPayload
+from .lifecycle.job_ranks import ended_artifact_job
+from .lifecycle.run_switch import _stored_child
 from .logging import redact_text
 from .models.cache import ModelCacheOperation
 from .models.fleet import FleetProfileApplication
@@ -55,7 +59,7 @@ from .operations.item_contract import (
     OperationResultFacts,
     operation_item,
 )
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 from .summary_cut import summary_cut
 
@@ -645,8 +649,6 @@ class FailureEvidenceService:
             job = session.get(Job, operation_id)
             ended = None
             if job is not None and job.state not in FAILED_ATTEMPT_STATES:
-                from .lifecycle.job_ranks import ended_artifact_job
-
                 # A multi-rank artifact job fails when its owner rank reports;
                 # the parent Job ends only after the siblings stop, so the
                 # artifact job's own end is the failure and its words the cause.
@@ -675,9 +677,6 @@ class FailureEvidenceService:
                 elif not (result.reason or result.summary) and job.status_reason:
                     result = result.model_copy(update={"reason": job.status_reason})
                 if result.diagnostics is None and not result.diagnostics_invalid:
-                    from .jobs.documents import AvailabilityJobPayload
-                    from .lifecycle.run_switch import _stored_child
-
                     # A run-switch phase issues its Spark work through a child
                     # Job, so the receipt hangs one level below that child.
                     parents = [job.id]
@@ -744,11 +743,7 @@ class FailureEvidenceService:
                 )
             application = session.get(FleetProfileApplication, operation_id)
             if application is not None and application.state in FAILED_ATTEMPT_STATES:
-                from .fleet_profiles.service import FleetProfileService
-
-                projected = operation_item(
-                    FleetProfileService._operation_item(application)
-                )
+                projected = operation_item(_operation_item(application))
                 if projected.attempt != attempt:
                     return None
                 result = (

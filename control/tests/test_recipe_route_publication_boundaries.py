@@ -20,7 +20,7 @@ import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.engine import Engine
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
@@ -43,6 +43,9 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.mapping import ClusterMapping
 from vonk_control.models.routes import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.execution_contract import (
+    parse_stored_run_endpoint,
+)
 from vonk_control.recipe_operations.operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.service import RecipeRouteService
@@ -255,7 +258,7 @@ def _crash_between_effect_and_completion_is_recovered(
     def die(*_args, **_kwargs):
         raise _Crash
 
-    service.projection_in_session = die  # type: ignore[method-assign]
+    service.projection_in_session = die
     with base.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
     with contextlib.suppress(_Crash):
@@ -409,9 +412,12 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
     """Bookkeeping damage cannot become a permanent publication refusal."""
 
     service, _publisher, _applied, run_id = setup(tmp_path)
+    old = None
+    field = None
     with service.sessions.begin() as session:
         run = _recipe_run(session, run_id)
         node = session.query(RunNode).filter_by(run_id=run_id, rank=0).one()
+        row = None
         if fault == "rank-gap":
             row, field, old = node, "rank", node.rank
             node.rank = 10
@@ -423,10 +429,6 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
                 session.query(RunNode).filter_by(run_id=run_id, rank=1).one().node_id
             )
         elif fault == "scheme":
-            from vonk_control.recipe_operations.execution_contract import (
-                parse_stored_run_endpoint,
-            )
-
             endpoint = parse_stored_run_endpoint(node.endpoint)
             assert endpoint is not None
             node.endpoint = endpoint.model_copy(
@@ -448,6 +450,7 @@ def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path,
     with service.sessions.begin() as session:
         healed = session.get(model, key)
         assert healed is not None
+        assert field is not None
         setattr(healed, field, old)
     assert service.publish_run(run_id).generation > 0
 
@@ -513,10 +516,8 @@ def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
         )
 
     service = _service(base, tmp_path / "live", lambda: NOW, denied)
-    try:
+    with contextlib.suppress(Exception):
         service.publish_run(run_id)
-    except Exception as outcome:  # noqa: BLE001
-        assert outcome is not None
     assert len(calls) == 1
     with base.sessions() as session:
         assert _recipe_run(session, run_id).route_state != "published"
@@ -666,10 +667,6 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
         elif damage == "port":
             node.port += 1
         elif damage == "scheme":
-            from vonk_control.recipe_operations.execution_contract import (
-                parse_stored_run_endpoint,
-            )
-
             endpoint = parse_stored_run_endpoint(node.endpoint)
             assert endpoint is not None
             node.endpoint = endpoint.model_copy(

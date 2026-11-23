@@ -144,6 +144,7 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
                 assert 300 <= (next_due - now[0]).total_seconds() <= 3600
                 due = next_due
         allowed = True
+        count = None
         if resume in {"token", "missing-token", "cancel", "newer"}:
             if resume == "cancel":
                 cache.cancel_operation(
@@ -200,6 +201,7 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
             assert final.failure is None
             assert not final.blockers
             if resume in {"approval", "restart"}:
+                assert count is not None
                 assert len(requests) == count + 1
     finally:
         cache.close()

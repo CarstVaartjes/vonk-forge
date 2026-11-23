@@ -5,7 +5,7 @@ import json
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -115,7 +115,7 @@ class NoRemoval:
 
 
 @contextmanager
-def _historical_mapper(engine: Engine) -> Iterator[Engine]:
+def _historical_mapper(engine: Engine) -> Generator[Engine]:
     """Yield a private engine whose dialect stores owning integers as BIGINT.
 
     Sequential historical producer fixtures run the real services against the
@@ -334,7 +334,8 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
                 join_transaction_mode="create_savepoint",
             )
             baseline = CatalogEntityService(baseline_sessions, clock=lambda: NOW)
-            with pytest.raises(Exception) as _ending:
+
+            def expected_failure():
                 row = create_draft(
                     baseline, _document(2**63, "baseline-large"), actor="operator"
                 )
@@ -342,6 +343,9 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
                     reread = session.get(CatalogDocumentRevision, row.id)
                     assert reread is not None
                     assert reread.download_bytes == 2**63
+
+            with pytest.raises(Exception) as _ending:
+                expected_failure()
         finally:
             transaction.rollback()
     with sessions() as session:

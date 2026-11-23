@@ -19,16 +19,16 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..distributed_recovery.common import ended_run_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models.execution import RecipeInstallation, RecipeRun, RunNode
 from ..models.jobs import Job
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .observation_helpers import _active_recipe_revision
 from .progress import _role_phases, _topology_order
 from .stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads

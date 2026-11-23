@@ -22,6 +22,8 @@ from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import LoginSession, User
 from vonk_control.passwords import hash_password, verify_password
 
+from .insert_collision_support import Rendezvous
+
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
 DEFAULT_VERIFIER = object()
@@ -398,18 +400,18 @@ def test_resolution_rejects_session_when_exact_browser_authority_changes(
 def _concurrently_reserve(
     limiter: LoginRateLimiter, subjects: tuple[str, ...]
 ) -> list[object]:
-    start = threading.Barrier(len(subjects) + 1)
-    reserved = threading.Barrier(len(subjects) + 1)
+    start = Rendezvous(len(subjects) + 1)
+    reserved = Rendezvous(len(subjects) + 1)
     release = threading.Event()
     attempts: list[object] = []
     attempts_lock = threading.Lock()
 
     def reserve(subject: str) -> None:
-        start.wait(timeout=30)
+        start.wait()
         attempt = limiter.reserve(subject)
         with attempts_lock:
             attempts.append(attempt)
-        reserved.wait(timeout=30)
+        reserved.wait()
         assert release.wait(timeout=30)
         if attempt is not None:
             limiter.fail(attempt)
@@ -419,8 +421,8 @@ def _concurrently_reserve(
     ]
     for thread in threads:
         thread.start()
-    start.wait(timeout=30)
-    reserved.wait(timeout=30)
+    start.wait()
+    reserved.wait()
     release.set()
     for thread in threads:
         thread.join(timeout=30)

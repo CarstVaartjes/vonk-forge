@@ -12,7 +12,7 @@ from vonk_agent_protocol.gpu_clock import (
 
 from ..fleet_profile_contract.definitions import StoredFleetProfileAssignment
 from ..fleet_profile_contract.effects import FleetProfileGpuClockEffect
-from ..fleet_profiles.service import FleetProfileService
+from ..fleet_profiles.persistence import _intended_profile
 from ..lifecycle.evidence import Residue
 from ..models.fleet import FleetProfileApplication, FleetProfileSelection
 
@@ -42,7 +42,7 @@ def selected_gpu_clocks(
     application = session.get(FleetProfileApplication, selection.application_id)
     if application is None or application.selection_generation != selection.generation:
         raise ValueError("selected profile GPU clock intent is unavailable")
-    intended = FleetProfileService._intended_profile(application, session=session)
+    intended = _intended_profile(application, session=session)
     if isinstance(
         intended, Residue
     ):  # unknown stored evidence, not a Python argument type

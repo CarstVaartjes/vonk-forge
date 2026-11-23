@@ -10,8 +10,8 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import (
@@ -22,6 +22,7 @@ from vonk_agent_protocol.state_machines import (
 
 from ..admission_locking import admission_attempts
 from ..jobs import states as job_states
+from ..jobs.documents import RecipeBuildIntent
 from ..lifecycle.evidence import (
     Damaged,
     Residue,
@@ -31,9 +32,9 @@ from ..models.cache import RecipeBuild
 from ..models.execution import InstallationNode, RecipeInstallation, ResourceReservation
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
-from ..recipe_builds.cancellation import RecipeBuildIntent, build_cancellation
+from ..recipe_builds.cancellation import build_cancellation
 from ..recipe_builds.common import RecipeBuildPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .execution_contract import (

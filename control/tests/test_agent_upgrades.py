@@ -9,12 +9,9 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import AgentUpgradeResult
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION, AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import (
-    AgentResult,
-    AgentUpgradeResult,
-    canonical_message,
-)
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -26,6 +23,7 @@ from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.package_source import AgentPackageSource
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retry import schedule_agent_upgrade_retry
 from vonk_control.agent_jobs.service import AgentJobService

@@ -4,6 +4,7 @@ import json
 import multiprocessing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -21,6 +22,7 @@ from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.jobs import Job
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.recipe_image_availability.availability_contract import (
     AvailabilityBuildReceipt,
 )
@@ -31,6 +33,7 @@ from vonk_control.runtime_image_preparation.contracts import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .non_blocking import assert_ended_without_blocking
 from .recipe_image_availability_support import (
     ARCHIVE_SHA,
     IMAGE_DIGEST,
@@ -197,9 +200,6 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
         assert ended is not None
         assert ended is not None
         assert ended.payload.get("claim_owner") is None
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     _, fresh = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -286,8 +286,6 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
     service.run_pending()
     assert service.get(pending.id).result is None
     if fault == "future_retry":
-        from vonk_control.persisted_waits import schedule_wait
-
         with sessions.begin() as session:
             row = session.get(Job, pending.id)
             assert row is not None

@@ -11,9 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason, WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..artifact_jobs.lifecycle import (
     ArtifactIdentity,

@@ -310,13 +310,17 @@ def test_busy_binding_publisher_replans_and_preserves_both_models(
             row = holder.get(ModelCacheSet, shared)
             assert row is not None
             service._remember_verified_models(holder, row, incoming)
+
+            def expected_failure(contender):
+                other = contender.get(ModelCacheSet, shared)
+                assert other is not None
+                service._remember_verified_models(contender, other, incoming)
+
             with (
                 pytest.raises(ModelCacheConflictUnknown),
                 sessions.begin() as contender,
             ):
-                other = contender.get(ModelCacheSet, shared)
-                assert other is not None
-                service._remember_verified_models(contender, other, incoming)
+                expected_failure(contender)
         _next_pass(service)
         with sessions() as session:
             row = session.get(ModelCacheSet, shared)

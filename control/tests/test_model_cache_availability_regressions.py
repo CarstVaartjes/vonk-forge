@@ -124,6 +124,7 @@ def _drain(
     return_on_wait: bool = False,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    observed = None
     while time.monotonic() < deadline:
         service.tick()
         observed = service.get_operation(operation_id)
@@ -137,6 +138,7 @@ def _drain(
             return
         # Let the transfer thread commit without a CPU-speed-dependent poll cap.
         time.sleep(0.01)
+    assert observed is not None
     raise AssertionError(
         f"background operation did not settle: state={observed.state}, "
         f"completed={observed.progress.get('completed_artifacts')}/"
@@ -270,6 +272,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
     assert service.get_operation(operation.id).state == "running"
     release_sibling.set()
     deadline = time.monotonic() + 10
+    final = None
     while time.monotonic() < deadline:
         service.tick()
         final = service.get_operation(operation.id)
@@ -278,6 +281,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(
         time.sleep(0.01)
     # The integrity failure settles only after the sibling finished; the bad
     # bytes were discarded and the operation waits for its automatic retry.
+    assert final is not None
     assert final.state == "queued"
     assert final.failure is not None
     assert final.failure["retryable"] is True
@@ -861,6 +865,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     assert len(requests) == 2
 
     key = "00000000-0000-4000-8000-000000000402"
+    accepted = None
     for _ in range(2):
         accepted = service.check_access_and_resume(
             first.id,
@@ -871,6 +876,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         )
         assert accepted.artifact_set_sha256 == first.artifact_set_sha256
         assert len(requests) == 2  # durable acceptance precedes worker HTTP effects
+    assert accepted is not None
     current_id = accepted.id
     assert service.get_operation(first.id).state == LifecycleState.CANCELLED
     service.tick()
@@ -1066,6 +1072,7 @@ def test_two_controller_services_share_one_upstream_object_transfer(
 
 def _drain_until(service, operation_id: str, now: list[datetime], states: set[str]):
     deadline = time.monotonic() + 10
+    observed = None
     while time.monotonic() < deadline:
         now[0] += timedelta(seconds=600)
         service.tick()
@@ -1073,6 +1080,7 @@ def _drain_until(service, operation_id: str, now: list[datetime], states: set[st
         if observed.state in states:
             return observed
         time.sleep(0.01)
+    assert observed is not None
     raise AssertionError(f"operation did not reach {states}: {observed.state}")
 
 

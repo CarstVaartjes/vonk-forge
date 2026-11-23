@@ -10,8 +10,7 @@ from dataclasses import dataclass, replace
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.host_helper import ContainerRuntimeAction
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
@@ -27,8 +26,11 @@ from vonk_agent_protocol.outcome import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 from vonk_agent_protocol.state_machines import InstallationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
+from .cancelled_runtime import cancellation_stop_current
 from .categorized_errors import InvalidType
+from .jobs.documents import RecipeStopParent
 from .models.catalog import CatalogDocumentRevision
 from .models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNode
 from .models.jobs import Job
@@ -39,7 +41,7 @@ from .recipe_operations.execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 from .stored.states import ClusterMappingState
 from .strict_json import read_stored_model, serialize_json_value
 
@@ -109,9 +111,6 @@ def derive_runtime_plan_binding(
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
     if action is ContainerRuntimeAction.STOP:
-        from .cancelled_runtime import cancellation_stop_current
-        from .jobs.documents import RecipeStopParent
-
         if not cancellation_stop_current(session, parent, operation):
             # The cancellation's runtime owner moved on: this order can never
             # be its Stop again. A definite answer, never a refusal.

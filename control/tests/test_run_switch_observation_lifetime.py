@@ -2,16 +2,18 @@
 
 from datetime import timedelta
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.lifecycle.types import Effect
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNodeContact
 from vonk_control.models.jobs import Job
@@ -32,6 +34,7 @@ from vonk_control.run_switch_operations.image_receipts import (
     _require_profile_runtime_image,
 )
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
+from vonk_control.run_switch_operations.provider import _ADAPTER
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 
 from .non_blocking import assert_ended_without_blocking
@@ -173,12 +176,14 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         )
 
     operation = fresh()
+    held = None
     for _ in range(10):
         service.tick()
         held = service.get(operation.operation_id)
         assert held.result is not None
         if held.result.retry_reason is not None:
             break
+    assert held is not None
     assert held.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
     assert held.result is not None
     due = held.next_attempt_at
@@ -206,12 +211,14 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             if fault == "transfer-bytes"
             else ProfileChildPhase.VERIFY
         )
+        resumed = None
         for _ in range(10):
             resumed = service.get(operation.operation_id)
             assert resumed.result is not None
             if wanted in resumed.result.completed_phases:
                 break
             service.tick()
+        assert resumed is not None
         assert resumed.result is not None
         assert wanted in resumed.result.completed_phases
     else:
@@ -246,8 +253,6 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             persisted = session.get(Job, operation.operation_id)
             assert persisted is not None
             assert persisted.state == ended.state
-            from vonk_control.lifecycle.types import Effect
-            from vonk_control.run_switch_operations.provider import _ADAPTER
 
             assert ended.result is not None
             assert ended.result.observation_deadline_at == now[0]
@@ -357,7 +362,7 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
     installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid4()))
     now = [NOW]
     copied = [0]
-    transfer: list = []
+    transfer: list[Any] = []
 
     class SlowTransfer(RecordingArtifactExecutor):
         def execute(self, plan, phase, **kwargs):

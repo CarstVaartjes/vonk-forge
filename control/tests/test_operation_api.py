@@ -15,9 +15,9 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.contracts import OperatorRetirementRefused
 from vonk_control.agent_jobs.service import AgentJobService
@@ -941,7 +941,8 @@ def test_resume_action_disappearing_after_preflight_is_refused(
         parent = session.get(Job, job_id)
         stored = session.get(AgentOperation, operation.id)
         assert parent is not None and parent.state == "needs-operator"
-        assert stored is not None and stored.state in aos.PARKED
+        assert stored is not None
+        assert stored.state in aos.PARKED
         assert stored.next_action_at is None
 
 
@@ -1055,8 +1056,10 @@ def test_durable_retire_refuses_live_current_attempt_without_transition(
             )
         )
         assert parent is not None and parent.state == "needs-operator"
-        assert stored is not None and stored.state in aos.PARKED
-        assert current_attempt is not None and current_attempt.state == "running"
+        assert stored is not None
+        assert stored.state in aos.PARKED
+        assert current_attempt is not None
+        assert current_attempt.state == "running"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

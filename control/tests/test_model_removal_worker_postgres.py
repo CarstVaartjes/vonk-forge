@@ -27,6 +27,7 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_cache.views import CacheOperationView
 from vonk_control.models.cache import ModelCacheOperation
+from vonk_control.persisted_waits import schedule_wait
 
 from .model_cache_support import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
@@ -242,7 +243,6 @@ def test_held_and_not_due_first_removals_do_not_starve_unrelated_due_owner(
         waiting_payload = parse_model_cache_payload("remove", waiting_row.payload)
         assert isinstance(waiting_payload, ModelCacheRemovalPayload)
         waiting_document = waiting_payload.model_dump(mode="json")
-        from vonk_control.persisted_waits import schedule_wait
 
         schedule_wait(waiting_row, delayed_until)
         waiting_row.payload = waiting_document

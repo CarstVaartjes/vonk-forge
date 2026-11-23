@@ -16,7 +16,8 @@ from uuid import uuid4
 
 import pytest
 
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentResult
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.optional_evidence import redact_host_paths
 from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 

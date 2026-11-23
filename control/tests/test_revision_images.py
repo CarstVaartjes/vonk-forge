@@ -30,6 +30,7 @@ from vonk_control.fleet_profile_contract.definitions import (
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_primitives import Base
 from vonk_control.models.cache import RecipeBuild
+from vonk_control.models.catalog import CatalogDocument
 from vonk_control.models.fleet import FleetProfile
 from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
@@ -398,8 +399,6 @@ def test_saved_profile_selector_remains_editable_during_image_removal(sessions) 
         recipe_id, revision_id = _seed(sessions)
         _build(session, revision_id, archive=ARCHIVE_SHA)
     with sessions() as session:
-        from vonk_control.models.catalog import CatalogDocument
-
         recipe = session.get(CatalogDocument, recipe_id)
         assert recipe is not None
         selector = f"{recipe.publisher}/{recipe.slug}"

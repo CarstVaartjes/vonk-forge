@@ -87,6 +87,7 @@ def test_postgres_exact_intent_recovers_within_budget_after_process_death(
     first = None
     last = None
 
+    due = None
     for failure_number in range(1, 5):
         claim = claim_agent(
             jobs,
@@ -147,6 +148,7 @@ def test_postgres_exact_intent_recovers_within_budget_after_process_death(
         assert completed is not None
         assert completed.state == "succeeded"
 
+    assert due is not None
     clock.now = due
     recovered = claim_agent(jobs, NODE_A, "serial-a")
     assert recovered is not None

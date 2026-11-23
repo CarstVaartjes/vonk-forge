@@ -6,9 +6,8 @@ import json
 from importlib.resources import files
 
 import pytest
+import vonk_forge_contracts as contracts
 from sqlalchemy.orm import Session
-
-contracts = pytest.importorskip("vonk_forge_contracts")
 from vonk_forge_contracts import document_sha256
 
 from vonk_control.artifact_jobs.contracts import _active_recipe_revision

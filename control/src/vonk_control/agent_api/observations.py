@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vonk_agent_protocol.claims import ClaimRequest
-from vonk_agent_protocol.contracts import AgentClaim, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim
 from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.inventory import InventoryRequest, InventoryVerdict
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
@@ -24,6 +24,7 @@ from vonk_agent_protocol.reason_codes.evidence import AgentEvidenceCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
 from vonk_agent_protocol.state_machines import RouteState, RunState
 from vonk_agent_protocol.telemetry import TelemetryRequest
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.enrollment.responses import _now
 from vonk_control.operator_receipt_contract import ReceiptPolicy
 
@@ -32,13 +33,13 @@ from ..agent_jobs.contracts import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
 from ..http_errors import temporary_http_answer
+from ..identifiers import UuidId
 from ..inventory.repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
     NodeInventoryReport,
     _validated_inventory,
 )
-from ..library.contract import UuidId
 from ..logging import log_event
 from ..models.cache import RecipeBuild
 from ..models.execution import STOPPABLE_NOT_RUNNING_RUN_STATES, RecipeRun, RunNode

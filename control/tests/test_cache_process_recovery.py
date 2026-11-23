@@ -86,6 +86,7 @@ with open(sys.argv[1], "a+b") as lock:
         for cycle in range(5):
             before = now[0]
             deadline = time.monotonic() + 30
+            observed = None
             while time.monotonic() < deadline:
                 service.tick()
                 observed = service.get_operation(waiting.id)
@@ -100,6 +101,7 @@ with open(sys.argv[1], "a+b") as lock:
                     break
                 time.sleep(0.01)
             else:
+                assert observed is not None
                 raise AssertionError(
                     f"busy artifact did not release its execution claim: {observed.state}"
                 )
@@ -129,6 +131,7 @@ with open(sys.argv[1], "a+b") as lock:
         holder.stdin.close()
         assert holder.wait(timeout=30) == 0
         deadline = time.monotonic() + 30
+        observed = None
         while time.monotonic() < deadline:
             # Production time advances naturally. The fixture follows only a
             # genuine queued busy receipt's canonical clock, after the actual
@@ -151,6 +154,7 @@ with open(sys.argv[1], "a+b") as lock:
                 break
             time.sleep(0.01)
         else:
+            assert observed is not None
             raise AssertionError(
                 f"busy artifact did not recover after writer exit: {observed.state}"
             )

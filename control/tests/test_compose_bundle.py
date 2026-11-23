@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -38,7 +39,7 @@ def _embedded(tmp_path: Path, digest: str = RELEASE) -> Path:
     return path
 
 
-def _stale_rule() -> dict:
+def _stale_rule() -> dict[str, Any]:
     document = json.loads(
         (ROOT / "deploy/compose/prometheus/alerts.yaml").read_text(encoding="utf-8")
     )
@@ -227,7 +228,7 @@ def test_bundle_digest_follows_the_compose_graph_not_its_formatting(
     script.write_bytes(original)
 
     # A third-party image bump in the main file changes it.
-    def bump(document: dict) -> None:
+    def bump(document: dict[str, Any]) -> None:
         document["services"]["caddy"]["image"] += "-next"
 
     rewrite(template, bump)
@@ -235,7 +236,7 @@ def test_bundle_digest_follows_the_compose_graph_not_its_formatting(
     assert bumped != released
 
     # So does a change inside an included file.
-    def restart(document: dict) -> None:
+    def restart(document: dict[str, Any]) -> None:
         next(iter(document["services"].values()))["restart"] = "no"
 
     rewrite(tmp_path / includes[0], restart)

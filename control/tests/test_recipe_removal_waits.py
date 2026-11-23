@@ -124,6 +124,7 @@ def test_a_removal_recovers_under_the_same_request_after_repeated_failures(
     contended = [10**6]
     engine, sessions, service, now, _recipe = _removal(tmp_path, monkeypatch, contended)
     try:
+        waiting = None
         for _ in range(RecoveryPolicy().max_failures + 2):
             service.advance_removals(limit=1)
             now[0] += timedelta(hours=1)
@@ -138,6 +139,7 @@ def test_a_removal_recovers_under_the_same_request_after_repeated_failures(
         contended[0] = 0
         for _ in range(4):
             service.advance_removals(limit=1)
+        assert waiting is not None
         assert _status(service).operation_id == waiting.operation_id
         assert _status(service).state == LifecycleState.SUCCEEDED
         _admit_fresh_preparation(service)

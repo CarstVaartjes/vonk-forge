@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
@@ -21,7 +21,12 @@ from vonk_control.storage_demands import NAS_MODELS, StorageDemands
 from .model_cache_support import _artifact, _download
 
 SIZE = 4096
-_Usage = namedtuple("_Usage", "total used free")
+
+
+class _Usage(NamedTuple):
+    total: int
+    used: int
+    free: int
 
 
 def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):

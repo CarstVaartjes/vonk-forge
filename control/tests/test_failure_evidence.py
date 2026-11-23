@@ -4,6 +4,7 @@ import copy
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -12,8 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.failure_evidence import LOG_TAIL_BYTES, FailureDiagnostics
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -429,7 +432,9 @@ def test_the_omission_marker_is_read_as_the_agent_writes_it(
 
 
 @pytest.mark.parametrize("case", _OMISSION_VECTOR["clamps"])
-def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(case: dict) -> None:
+def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(
+    case: dict[str, Any],
+) -> None:
     """Catches the Controller's bound drifting from the agent's clamp_retained."""
     assert _keep_retained(case["text"], case["limit"]) == (
         case["kept"],

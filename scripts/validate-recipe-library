@@ -492,7 +492,7 @@ def _validate_recipe_option_policy(
     from vonk_control.harnesses.canonical import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
         validate_runtime_policy,
     )
-    from vonk_control.harnesses.common import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
+    from vonk_control.harnesses.errors import (  # noqa: PLC0415 - from the platform checkout put on sys.path above
         HarnessCompileError,
     )
 

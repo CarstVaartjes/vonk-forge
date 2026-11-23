@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..models.execution import RecipeRun
@@ -82,5 +82,5 @@ def workload_aliases(
                 RecipeRun, RecipeRun.id == AgentOperation.payload["run_id"].as_string()
             )
             .where(AgentOperation.id.in_([operation.id for operation in operations]))
-        )
+        ).all()
     )

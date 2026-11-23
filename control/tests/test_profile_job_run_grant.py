@@ -16,7 +16,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -33,6 +33,7 @@ from vonk_agent_protocol.recipe_jobs import (
 from vonk_agent_protocol.recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.agent_jobs.contracts import StaleAgentFence
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
@@ -50,7 +51,7 @@ from vonk_control.inventory.items import inventory_items
 from vonk_control.models.execution import RecipeRun
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .agent_grant_requests import job_run_grant_request
 from .artifact_jobs_support import _configure_artifact_recipe, submitted_artifact_job
@@ -266,13 +267,17 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert late_stop.runtime_target_id == later.id
         with pytest.raises(HostHelperAuthorityError):
             _grant_start(authority, spark[0], later_claim.fence, later_plan)
+
         # The window bounds the cancelled job: still heartbeating every 20 s,
         # its fence goes stale only once the window has closed.
-        with pytest.raises(StaleAgentFence):
+        def expected_failure():
             for _ in range(5):
                 world.advance(20)
                 orders.heartbeat(later_claim, None, 60)
                 world.tick()
+
+        with pytest.raises(StaleAgentFence):
+            expected_failure()
         assert world.clock() - cancelled_at >= timedelta(
             seconds=SUPERSEDED_CANCELLATION_SECONDS
         )

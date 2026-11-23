@@ -10,7 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.api.production import _keep_recipe_routes
-from vonk_control.gateway.keys import GatewayKeyCreated, GatewayKeyService
+from vonk_control.gateway.keys import GatewayKeyService
+from vonk_control.gateway.keys_contract import GatewayKeyCreated
 from vonk_control.gateway.route_grants import (
     GatewayInferenceRoute,
     recipe_key_routes,

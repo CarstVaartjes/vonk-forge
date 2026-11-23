@@ -13,7 +13,7 @@ from vonk_forge_contracts import PrebuiltImage
 
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_control.auth import CursorCodec
-from vonk_control.catalog import entities
+from vonk_control.catalog import entities, revision_contract
 from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
@@ -138,7 +138,8 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
         raise OSError("compiler dependency unavailable")
 
     with monkeypatch.context() as patch:
-        patch.setattr(entities, "build_policy_projection", unavailable_policy)
+        for consumer in (entities, revision_contract):
+            patch.setattr(consumer, "build_policy_projection", unavailable_policy)
         ended = sync.automatic()
         assert ended.id != first.id
         assert ended.completed_at is not None

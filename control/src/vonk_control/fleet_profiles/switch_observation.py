@@ -43,14 +43,15 @@ from ..run_switch_contract.operations import RunSwitchOperation
 from .assessment_support import (
     _stored_state,
 )
+from .continuing_effects import _adopted_application_scope
 from .dependencies import _CHILD_PENDING_STATES
 from .persistence import (
-    _persisted_profile_plan,
     _persisted_profile_progress,
 )
 from .projection_support import (
     _aware,
 )
+from .switch_children import _ending_disposition, _queue_item_nodes
 
 if TYPE_CHECKING:
     from .run_switch_adapter import (
@@ -85,8 +86,6 @@ class RunSwitchFleetProfileAdapter:
         application_id: str,
         assignments: tuple[FleetProfileAssignment, ...],
     ) -> FleetProfileChildOperation:
-        from .run_switch_adapter import _ending_disposition
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
         application = session.get(FleetProfileApplication, application_id)
@@ -97,15 +96,13 @@ class RunSwitchFleetProfileAdapter:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
         progress = _persisted_profile_progress(application)
         cancelling = progress.cancellation is not None
-        adopted_scope = FleetProfileService._adopted_application_scope(
-            session, application
-        )
+        adopted_scope = _adopted_application_scope(session, application)
         pending_scopes: list[set[str]] = []
         lost_children: dict[int, FleetProfileSwitchPendingChild] = {}
         view: FleetProfileChildOperation | None = None
         for pending in list(state.pending_children):
             item = state.queue[pending.queue_index]
-            nodes = self._queue_item_nodes(application, item)
+            nodes = _queue_item_nodes(application, item)
             child = self._observed_child(pending.operation_id)
             if child is None:
                 # Re-enter exactly the same queue index/request after lost SQL
@@ -211,7 +208,7 @@ class RunSwitchFleetProfileAdapter:
         for index, item in enumerate(state.queue):
             if index in occupied:
                 continue
-            nodes = self._queue_item_nodes(application, item)
+            nodes = _queue_item_nodes(application, item)
             if not nodes:
                 doc_state(state, LifecycleState.RUNNING)
                 state.status_reason = (
@@ -330,7 +327,7 @@ class RunSwitchFleetProfileAdapter:
             child
             for child in state.children
             if adopted_scope is None
-            or set(self._queue_item_nodes(application, state.queue[child.queue_index]))
+            or set(_queue_item_nodes(application, state.queue[child.queue_index]))
             <= set(adopted_scope)
         ]
         placed = {
@@ -340,11 +337,7 @@ class RunSwitchFleetProfileAdapter:
             failure
             for failure in state.assignment_failures
             for nodes in (
-                set(
-                    self._queue_item_nodes(
-                        application, state.queue[failure.queue_index]
-                    )
-                )
+                set(_queue_item_nodes(application, state.queue[failure.queue_index]))
                 if failure.queue_index is not None
                 # An assignment the queue could not place has no queue item.
                 else placed.get(failure.assignment_id or "", set()),
@@ -399,68 +392,15 @@ class RunSwitchFleetProfileAdapter:
         return self._view_from_state(application, state)
 
     @staticmethod
-    def _queue_item_nodes(
-        application: FleetProfileApplication, item: FleetProfileSwitchQueueItem
-    ) -> tuple[str, ...]:
-        reviewed = _persisted_profile_plan(application)
-        progress = _persisted_profile_progress(application)
-        if isinstance(reviewed, Residue) or progress.intended_profile is None:
-            return ()
-        if item.kind in {
-            ProfileSwitchChildKind.RUN.value,
-            ProfileSwitchChildKind.INSTALL.value,
-        }:
-            assignment = next(
-                (
-                    value
-                    for value in progress.intended_profile.assignments
-                    if value.id == item.id
-                ),
-                None,
-            )
-            return (
-                tuple(sorted(node.node_id for node in assignment.nodes))
-                if assignment
-                else ()
-            )
-        if item.kind == ProfileChildPhase.STOP.value:
-            effect = next(
-                (
-                    value
-                    for value in reviewed.effects.runs
-                    if value.run_id == item.id
-                    and value.action == ProfileChildPhase.STOP.value
-                ),
-                None,
-            )
-            if effect is None:
-                return ()
-            return tuple(
-                effect.profile_stop_scope.target_node_ids
-                if effect.profile_stop_scope
-                else effect.node_ids
-            )
-        effect = next(
-            (
-                value
-                for value in reviewed.effects.installations
-                if value.installation_id == item.id and value.action == "remove"
-            ),
-            None,
-        )
-        return tuple(effect.node_ids) if effect else ()
-
-    @staticmethod
     def _queue_item_in_scope(
         session: Session,
         application: FleetProfileApplication,
         item: FleetProfileSwitchQueueItem,
         scope: tuple[str, ...],
     ) -> bool:
-        from .run_switch_adapter import RunSwitchFleetProfileAdapter
 
         del session
-        nodes = RunSwitchFleetProfileAdapter._queue_item_nodes(application, item)
+        nodes = _queue_item_nodes(application, item)
         return bool(nodes) and set(nodes) <= set(scope)
 
     def _observed_child(self, operation_id: str) -> RunSwitchOperation | None:
@@ -487,7 +427,6 @@ class RunSwitchFleetProfileAdapter:
         before_dispatch: bool = False,
         dispatch_scope: tuple[str, ...] | None = None,
     ) -> FleetProfileChildOperation | None:
-        from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._run_switch._clock())
@@ -511,9 +450,7 @@ class RunSwitchFleetProfileAdapter:
         if ordinal is None:
             return None
         scope = dispatch_scope or tuple(state.scope_node_ids)
-        adopted_scope = FleetProfileService._adopted_application_scope(
-            session, application
-        )
+        adopted_scope = _adopted_application_scope(session, application)
         if cancellation is None and adopted_scope is not None:
             if dispatch_scope is not None and not set(dispatch_scope) <= set(
                 adopted_scope

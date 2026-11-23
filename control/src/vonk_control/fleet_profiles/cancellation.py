@@ -13,7 +13,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -24,6 +23,7 @@ from vonk_agent_protocol.state_machines import (
     DesiredAssignmentState,
     ObservedAssignmentState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract.applications import (
@@ -42,10 +42,11 @@ from ..models.fleet import (
     FleetProfileSelection,
 )
 from ..operations.blockers import make_blocker
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..persisted_waits import read_wait, schedule_wait
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import stall_deadline
 from ..strict_json import read_stored_model
+from ..wait_contract import typed_wait_reason
 from ..workload_intent import take_workload_intent
 from . import states as fleet_profile_states
 from .assessment_support import (
@@ -54,6 +55,8 @@ from .assessment_support import (
     _profile_preview_is_waitable,
     _storage_wait_of,
 )
+from .assignment_assessment import _assignment_state
+from .continuing_effects import _adopted_application_scope
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
@@ -63,6 +66,7 @@ from .contracts import (
 )
 from .persistence import (
     _application_effect_scope,
+    _intended_profile,
     _newer_pending_profile_load,
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -170,7 +174,7 @@ class FleetProfileService:
                 # accepting a second request identity for the same stop.
                 cancellation = previous
             else:
-                if self._adopted_application_scope(session, row) is not None:
+                if _adopted_application_scope(session, row) is not None:
                     # Continuing effects belong to the newer selected request.
                     # An older cancellation cannot mutate that newer authority.
                     raise FleetProfileInvalid(
@@ -432,7 +436,7 @@ class FleetProfileService:
                         (assignment.id, state.current_state)
                         for assignment in selected.intended.assignments
                         if assignment.desired_state == DesiredAssignmentState.RUNNING
-                        for state in (self._assignment_state(session, assignment),)
+                        for state in (_assignment_state(session, assignment),)
                         if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
@@ -474,7 +478,7 @@ class FleetProfileService:
                         # must neither conflict with it nor reset its backoff.
                         return False
                     previous_request_id = previous.id
-                    intended = self._intended_profile(previous, session=session)
+                    intended = _intended_profile(previous, session=session)
                     if not isinstance(intended, Residue):
                         previous_reviewed_digest = intended.reviewed_plan_digest
 

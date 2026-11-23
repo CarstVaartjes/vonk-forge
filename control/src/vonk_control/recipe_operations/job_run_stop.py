@@ -14,8 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -23,18 +22,21 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.state_machines import RouteState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import is_admission_contention
 from ..agent_jobs.service import AgentJobService
 from ..fleet_profiles.stop_authority import (
+    validate_jobrun_stop_source,
+    validate_profile_jobrun_stop_target,
+    validate_profile_stop_owner,
+)
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
     jobrun_stop_key,
-    validate_jobrun_stop_source,
-    validate_profile_jobrun_stop_target,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -44,7 +46,7 @@ from ..models.execution import ArtifactJob, RecipeInstallation, RecipeRun, RunNo
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from ..workload_intent import allocate_workload_intent
 from .errors import (
@@ -54,13 +56,13 @@ from .errors import (
 )
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
-from .observation_helpers import _active_recipe_revision
+from .observation_helpers import _active_recipe_revision, _run_is_one_shot
 from .profile_job_run_stop import _exact_jobrun_sources, _jobrun_effect_may_remain
 from .progress import (
     _parent_execution_mode,
     _parent_identity,
 )
-from .rank_authority import _profile_jobrun_parent, _run_is_one_shot
+from .rank_authority import _profile_jobrun_parent
 from .results import _validated_result
 from .stop_payloads import (
     stop_payload_from_job_run,

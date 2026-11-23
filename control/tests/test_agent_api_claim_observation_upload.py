@@ -10,6 +10,7 @@ import logging
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, timedelta
 from importlib.resources import files
 from threading import Event
@@ -21,10 +22,10 @@ from sqlalchemy import event
 from starlette.types import Message
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.recipe_observations import RecipeRunObservationsWire
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_api.common import (
     _commit_recipe_image_upload,
     _prepare_recipe_image_upload,
@@ -488,10 +489,8 @@ def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     try:
         os.write(descriptor, b"partial archive")
         competing = None
-        try:
+        with suppress(Exception):  # cursor preservation and fresh admission decide
             competing = _prepare_recipe_image_upload(tmp_path, "a" * 64)
-        except Exception:  # noqa: BLE001, S110 -- cursor preservation and fresh admission decide
-            pass
         if competing is not None:
             os.close(competing[0])
         assert competing is None
@@ -669,7 +668,7 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
     start = next(
         message for message in sent if message["type"] == "http.response.start"
     )
-    headers = dict(start["headers"])  # type: ignore[arg-type]
+    headers = dict(start["headers"])
     assert start["status"] == 401
     assert body_reads == 0
     assert headers[b"x-content-type-options"] == b"nosniff"

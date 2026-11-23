@@ -18,6 +18,10 @@ from ..jobs import states as job_states
 from ..logging import redact_text
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
+from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
+from ..recipe_image_availability.view_contract import (
+    RecipeImageAvailabilityView,
+)
 from ..recipe_operations.lifecycle_contract import RecipeOperationCancellationResult
 from ..strict_json import serialize_json_value
 from .contract import (
@@ -65,11 +69,6 @@ class CancellationMixin:
     ) -> int:
         """Reconcile accepted child operations without claiming the batch slot."""
         service = cast("RecipeUpdateBatches", self)
-
-        from ..recipe_image_availability.contracts import RecipeImageAvailabilityError
-        from ..recipe_image_availability.view_contract import (
-            RecipeImageAvailabilityView,
-        )
 
         if not 1 <= limit <= 100:
             raise InvalidValue(

@@ -46,12 +46,14 @@ from ..security.enrollment import (
     require_expired_proof,
     require_node,
     require_staged_certificate,
+    validate_issued_binding,
 )
 from ..security.enrollment import (
     require_expired_source as _require_expired_source,
 )
 from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 from .contract import EnrollmentObservationOutcome, EnrollmentRevocationStatus
+from .ending import retain_ended_effect
 from .persistence import _issuance_binding
 from .rotation import RotationService
 from .types import (
@@ -130,7 +132,6 @@ class EnrollmentService(RotationService):
             )
             if issued is None:
                 return False
-            from ..security.enrollment import validate_issued_binding
 
             validate_issued_binding(issued, binding)
             with self._transaction() as session:
@@ -195,7 +196,6 @@ class EnrollmentService(RotationService):
         they have been blocked. True when any row was confirmed or deleted.
         """
         now = _utc(self._clock())
-        from .ending import retain_ended_effect
 
         if serial is None:
             with self._transaction() as session:

@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -39,9 +39,9 @@ from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation
 from ..operations.blockers import make_blocker
-from ..prebuilt_images import PrebuiltDecision
 from ..recipe_builds.cancellation import BuildConsumerError, lock_build_dependency
 from ..recipe_builds.common import (
+    PrebuiltDecision,
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,

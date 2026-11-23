@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from tests.recipe_library_source import recipe_library_root
@@ -61,7 +61,7 @@ def _revision_times() -> dict[str, datetime]:
 
 
 def _insert_synthetic_corpus(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     *,
     kind: str,
     template: dict[str, object],
@@ -135,7 +135,7 @@ def _insert_synthetic_corpus(
         session.add_all(heads)
 
 
-def _build(path: Path) -> tuple[LibraryProjection, sessionmaker]:
+def _build(path: Path) -> tuple[LibraryProjection, sessionmaker[Session]]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     engine = create_engine(f"sqlite:///{path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
@@ -212,11 +212,15 @@ def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
         cursors=_OldShape(b"k" * 32),
         clock=lambda: _EPOCH + timedelta(days=1),
     )
-    with pytest.raises(CursorError):
+
+    def expected_failure():
         if kind == "model":
             projection.models(limit=2, sort=sort, cursor="any")
         else:
             projection.recipe_library(limit=2, sort=sort, cursor="any")
+
+    with pytest.raises(CursorError):
+        expected_failure()
 
 
 def test_models_sort_name_and_updated_are_distinct_and_complete(

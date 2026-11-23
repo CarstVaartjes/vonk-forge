@@ -21,8 +21,8 @@ from sqlalchemy.orm.exc import StaleDataError
 from cluster_profiles import cli_states_generated as cli_words
 from cluster_profiles.control_client.common import observation_disposition
 from cluster_profiles.control_client.errors import ControlHTTPError
+from vonk_agent_protocol.agent_operations import AgentFailureKind
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentFailureKind
 from vonk_agent_protocol.disposition import (
     FAILURE_KIND_DISPOSITION,
     HTTP_STATUS_DISPOSITIONS,
@@ -85,6 +85,8 @@ from .deterministic_retries import (
     scan_dispositions,
     scan_rust_dispositions,
 )
+from .recipe_routes_support import NOW as ROUTE_NOW
+from .recipe_routes_support import setup
 from .test_lifecycle_core import FakeAdapter
 
 NOW = datetime(2026, 10, 13, 12, tzinfo=UTC)
@@ -320,6 +322,7 @@ def test_only_a_recurring_uncertain_effect_spends_the_retry_count() -> None:
 def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
     policy = RecoveryPolicy(max_failures=3, base_delay_seconds=5, max_delay_seconds=60)
     failures = 0
+    step = None
     for _ in range(policy.max_failures * 4):
         step = schedule(policy, "route", failures, Disposition.WAIT, NOW)
         assert step.failures == failures == 0
@@ -331,6 +334,7 @@ def test_an_owner_outside_the_core_schedules_on_the_same_rule() -> None:
         step = schedule(policy, "route", failures, Disposition.OBSERVE, NOW)
         failures = step.failures
         assert failures == spent
+    assert step is not None
     assert step.next_at is not None
     assert NOW < step.next_at <= NOW + timedelta(seconds=policy.max_delay_seconds)
 
@@ -584,10 +588,8 @@ def test_stale_writer_across_worker_passes_waits_then_publishes(
 ) -> None:
     """Catches a mapper conflict becoming terminal after six publication passes."""
 
-    from .recipe_routes_support import NOW, setup
-
     routes, _runtime, applied, run_id = setup(tmp_path)
-    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: NOW)
+    worker = RecipeOperationWorker(routes.sessions, routes, clock=lambda: ROUTE_NOW)
     with routes.sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None

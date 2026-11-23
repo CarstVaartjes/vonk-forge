@@ -65,6 +65,7 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
         refusal = "stop plan is blocked"
         waits: set[str] = set()
         live: list[FleetProfileApplication] = []
+        applications = None
         for _ in range(60 * RECOVERY.max_failures):
             # The simulation's monitor is not consulted: it reports the
             # injected refusal repeating, which is the fault under test.
@@ -93,6 +94,7 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
                     waits.add(row.id)
 
         assert live, "the same selected intent must keep a scheduled observation"
+        assert applications is not None
         assert len(applications) > RECOVERY.max_failures + 2
         assert waits, "the Stop refusal must be visible during recovery"
         with world.sessions() as session:

@@ -9,7 +9,7 @@ while the withdrawal is still complete.
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
@@ -49,6 +49,7 @@ from .recipe_operations_support import (
     setup_services,
     started_recipe,
 )
+from .test_route_runtime import _verified_bundle
 
 
 class _Gate:
@@ -138,7 +139,7 @@ def _owner_lock_is_free(routes: RecipeRouteService) -> None:
 
 
 @contextmanager
-def _route_owner_held_elsewhere(routes: RecipeRouteService) -> Iterator[None]:
+def _route_owner_held_elsewhere(routes: RecipeRouteService) -> Generator[None]:
     """Another Controller process holds the route publication owner meanwhile."""
 
     held, release = threading.Event(), threading.Event()
@@ -544,9 +545,6 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
     assert ended.state == LifecycleState.SUCCEEDED
     assert fresh.id != continued[0].id
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
-
-
-from .test_route_runtime import _verified_bundle
 
 
 def test_postgres_held_route_owner_never_fails_a_serving_route(

@@ -5,9 +5,9 @@ from __future__ import annotations
 from pydantic import ValidationError
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.reason_codes.evidence import ArtifactLifecycleCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..artifact_jobs.lifecycle import (
     ArtifactReferenceUnverified,
@@ -26,6 +26,7 @@ from ..run_switch_contract.operations import (
     RunSwitchRuntimeImageReferenceIntent,
 )
 from ..run_switch_contract.plans import RunSwitchPlan
+from ..run_switch_operations.constants import _OPERATION_KINDS
 from ..strict_json import read_stored_model
 
 
@@ -167,6 +168,5 @@ def _run_switch_runtime_image_intent(
 
 
 def _run_switch_kinds() -> frozenset[str]:
-    from ..run_switch_operations.constants import _OPERATION_KINDS
 
     return frozenset(_OPERATION_KINDS)

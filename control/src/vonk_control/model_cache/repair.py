@@ -21,6 +21,7 @@ from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
 from ..lifecycle.types import Reported
 from ..models.cache import ModelCacheOperation, ModelCacheSet
+from ..operation_api.providers import _activity_keyset_filter
 from ..operations.contract import AvailabilityOperationFailure
 from ..strict_json import serialize_json_value
 from . import states as model_cache_states
@@ -367,7 +368,6 @@ class RepairMixin:
         ``after`` is the already authenticated global activity boundary.
         """
         cache = cast("ModelCacheService", self)
-        from ..operation_api.providers import _activity_keyset_filter
 
         if not 1 <= limit <= 101:
             raise InvalidValue("operation provider page limit is invalid")

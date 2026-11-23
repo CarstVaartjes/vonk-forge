@@ -15,7 +15,7 @@ import ssl
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -64,7 +64,7 @@ def _https_api_peer(
     headers: dict[str, str],
     *,
     drop_load_answer: bool = False,
-) -> Iterator[tuple[str, Path, _PeerState]]:
+) -> Generator[tuple[str, Path, _PeerState]]:
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(UTC)
@@ -214,7 +214,7 @@ def _https_api_peer(
             self.wfile.write(response_body)
             self.close_connection = True
 
-        def log_message(self, *_args: object) -> None:
+        def log_message(self, format: str, *_args: object) -> None:
             pass
 
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -242,7 +242,7 @@ def installed_vonkctl(tmp_path_factory: pytest.TempPathFactory) -> Path:
         root = root.parent
     workspace = root / "installed-profile-cli"
     complete = workspace / "complete"
-    with open(root / "installed-profile-cli.lock", "a") as lock:
+    with (root / "installed-profile-cli.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if not complete.is_file():
             shutil.rmtree(workspace, ignore_errors=True)

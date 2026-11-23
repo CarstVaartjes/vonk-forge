@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import event, select
 
 from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     InvalidRequestReason,
@@ -31,6 +31,7 @@ from vonk_agent_protocol.recipe_jobs import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.artifact_jobs import states as ajs
 from vonk_control.artifact_jobs.contracts import (
@@ -82,6 +83,7 @@ def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
 
     engine = sessions.kw["bind"]
     event.listen(engine, "before_cursor_execute", unavailable)
+    recovered = None
     try:
         if exhausted:
             with pytest.raises(ArtifactJobUnavailableError):
@@ -94,6 +96,7 @@ def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
         event.remove(engine, "before_cursor_execute", unavailable)
     replay = create_artifact_job(service, **request)
     if not exhausted:
+        assert recovered is not None
         assert replay.id == recovered.id
     assert service.get_by_request_id(request["request_id"]).id == replay.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=1092)

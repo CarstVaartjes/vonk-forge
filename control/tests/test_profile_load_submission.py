@@ -25,7 +25,7 @@ from cluster_profiles.controller_cli.profile_load import (
     _review_and_submit_profile_load,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
@@ -733,7 +733,8 @@ def _running_profile_api(tmp_path, engine):
     api, codec = _client(sessions, profiles=service)
     headers = _headers(codec, "administrator")
     preview = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
-    assert preview.status_code == 200 and preview.json()["allowed"], preview.text
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["allowed"], preview.text
     return sessions, api, headers, profile, installed, run, preview.json()
 
 

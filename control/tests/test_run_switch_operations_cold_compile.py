@@ -11,11 +11,12 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as AgentOperationKind
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as AgentOperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.jobs.documents import RunSwitchRunIntent
 from vonk_control.models.cache import RecipeBuild
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.execution import (
@@ -696,8 +697,6 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        from vonk_control.jobs.documents import RunSwitchRunIntent
-
         payload = _run_switch_payload(session.get(Job, operation.operation_id))
         assert payload is not None
         assert isinstance(payload.intent, RunSwitchRunIntent)

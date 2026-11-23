@@ -13,17 +13,16 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vonk_agent_protocol.agent_operations import (
+    AgentFailureResult,
+    AgentInstallResult,
+    RecipeStartResult,
+)
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.build_import import (
     RecipeBuildCleanupEvidence,
     RecipeBuildEvidence,
 )
-from vonk_agent_protocol.contracts import (
-    AgentFailureResult,
-    AgentInstallResult,
-    RecipeStartResult,
-    canonical_message,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.reason_codes.recipes import RecipeOperationCode
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.recipe_operations import (
@@ -31,8 +30,10 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeStopResult,
     RecipeUninstallResult,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
-from ..library.contract import NodeId, UuidId
+from ..identifiers import UuidId
+from ..library.contract import NodeId
 from ..strict_json import StrictJSONModel
 
 

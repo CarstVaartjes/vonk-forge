@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
+from fastapi import HTTPException
 from pydantic import BaseModel
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -23,6 +24,7 @@ from vonk_forge_contracts.api_checks import (
     accepted_modalities,
 )
 
+from vonk_agent_protocol.error_response import RequestValidationProblem
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import AssetAvailability, RunState
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -467,3 +469,25 @@ def _canonical_recipe_summary(
         runs_truncated=False,
         reasons=[],
     )
+
+
+class SelectorAmbiguityHTTPError(HTTPException):
+    """Carry canonical choices separately from bounded, redacted error copy."""
+
+    def __init__(
+        self,
+        error: LibrarySelectorAmbiguous,
+        *,
+        status_code: int = 422,
+        code: str | None = None,
+    ) -> None:
+        self.problem = RequestValidationProblem(
+            detail="selector is ambiguous; choose an exact canonical candidate",
+            issues=[],
+            candidates=list(error.candidates),
+        )
+        super().__init__(
+            status_code=status_code,
+            detail=self.problem.detail,
+            headers={"x-vonk-error-code": code} if code is not None else None,
+        )

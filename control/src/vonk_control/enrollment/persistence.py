@@ -41,6 +41,7 @@ from ..security.enrollment import (
     require_grant,
     require_node,
 )
+from .ending import retain_ended_effect
 from .types import EnrollmentDenied, EnrollmentIssuanceUncertain
 from .validation import (
     _load_csr,
@@ -112,8 +113,6 @@ def _persist_issued_enrollment(
             .with_for_update(of=AgentCertificateRotation)
         )
         if rotation is not None:
-            from .ending import retain_ended_effect
-
             retain_ended_effect(
                 session,
                 _issuance_binding(rotation.provider_request),

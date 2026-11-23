@@ -36,6 +36,10 @@ from vonk_control.fleet_profile_contract.vocabulary import (
     FleetProfileOperationState,
 )
 from vonk_control.fleet_profiles.assessment_support import _operation_state
+from vonk_control.fleet_profiles.contracts import (
+    FleetProfileAdmissionEffectBusy,
+    _FleetProfileRecoveryBindingConflict,
+)
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
 from vonk_control.fleet_profiles.projection_support import _switch_queue
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
@@ -45,6 +49,7 @@ from vonk_control.models.execution import (
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.models.fleet import (
     FleetProfileApplication,
@@ -370,6 +375,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
         actor="admin",
     )
     completed_agent_operations: set[str] = set()
+    current = None
     for _ in range(30):
         _follow_profile_retry(service, application.id, now)
         run_switch.tick()
@@ -395,6 +401,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
             )
             completed_agent_operations.add(operation_id)
     else:
+        assert current is not None
         pytest.fail(
             "profile cleanup did not converge: "
             + json.dumps(current.model_dump(mode="json"), default=str)
@@ -716,11 +723,6 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     profile = service.create(_input(revision_id), actor="admin")
     ended = service.apply(profile.id, request_key=_uuid(920), actor="admin")
     if end_path != "admission":
-        from vonk_control.fleet_profiles.contracts import (
-            FleetProfileAdmissionEffectBusy,
-            _FleetProfileRecoveryBindingConflict,
-        )
-
         # Automatic recovery scans backing-off loads, rather than pending admission.
         with sessions.begin() as session:
             row = session.get(FleetProfileApplication, ended.id)
@@ -760,9 +762,6 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
             assert row.progress.get("admission_retry_at") is None
             assert row.progress.get("retry_due_at") is None
             assert row.current_operation_id is None
-            from sqlalchemy import select
-
-            from vonk_control.models.execution import ResourceReservation
 
             assert (
                 list(

@@ -41,6 +41,7 @@ from vonk_control.persisted_waits import (
     schedule_wait,
     write_wait,
 )
+from vonk_control.run_switch_journal_repair.discovery import _fingerprint
 from vonk_control.stored.json_values import binding_for
 from vonk_control.wait_contract import WaitEvidence
 
@@ -135,7 +136,6 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert "last_progress_at" in raw
         assert raw["last_progress_at"] is None
         assert loaded.result == {"flag": False, "count": 0, "value": None}
-        from vonk_control.run_switch_journal_repair.discovery import _fingerprint
 
         fingerprint = _fingerprint(loaded)
         session.expire(loaded)
@@ -158,12 +158,16 @@ def test_wait_round_trip_reconstruction_projection_and_rollback(
         assert storage is not None
         assert storage.available_bytes == 0
         assert read_wait(loaded) == wait  # observation cannot change custody
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+
+    def expected_failure(session):
         loaded = session.get(Job, job.id)
         assert loaded is not None
         schedule_wait(loaded, due + timedelta(seconds=10))
         loaded.state = LifecycleState.RUNNING
         raise RuntimeError("injected abort before commit")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
     with sessions.begin() as session:
         loaded = session.scalar(select(Job).where(Job.id == job.id))
         assert loaded is not None

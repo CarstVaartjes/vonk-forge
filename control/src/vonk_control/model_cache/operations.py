@@ -19,6 +19,7 @@ from ..operations.contract import AvailabilityOperationFailure
 from ..persisted_waits import read_wait
 from ..strict_json import read_stored_model, serialize_json_value
 from . import states as model_cache_states
+from .cancellation import _payload_of
 from .catalog_helpers import _datetime, _iso, _parse_iso
 from .constants import SCHEMA_VERSION
 from .contract import (
@@ -272,9 +273,8 @@ class OperationsMixin:
         # as the failure evidence.  Reading never raises on a damaged envelope,
         # progress or result (a damaged ``cancellation`` sub-document still does:
         # that raise is the input-validation family's).
-        from .service import ModelCacheService
 
-        stored = ModelCacheService._payload_of(operation)
+        stored = _payload_of(operation)
         progress = _operation_progress(operation)
         cancellation = None if stored is None else stored.cancellation
         result = None if stored is None else stored.result
@@ -348,7 +348,6 @@ class OperationsMixin:
         operation: ModelCacheOperation,
     ) -> AvailabilityOperationFailure | None:
         """Read the one current persisted failure contract without repair/defaults."""
-        from .service import ModelCacheService
 
-        payload = ModelCacheService._payload_of(operation)
+        payload = _payload_of(operation)
         return None if payload is None else payload.failure

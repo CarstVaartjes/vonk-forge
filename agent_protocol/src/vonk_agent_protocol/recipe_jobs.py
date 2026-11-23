@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BeforeValidator,
@@ -18,7 +18,6 @@ from pydantic import (
 
 from .agent_words import FailureStage
 from .compiled_execution_plan import CompiledExecutionPlan
-from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
 from .job_limits import (
     MAX_INPUT_FILE_BYTES,
@@ -28,11 +27,12 @@ from .job_limits import (
     MAX_OUTPUT_FILES,
     MAX_OUTPUT_TOTAL_BYTES,
 )
-from .wire_model import MAX_RUN_GENERATION, WireModel
-
-if TYPE_CHECKING:
-    from .job_inputs import RecipeJobInputManifest
-
+from .wire_model import (
+    MAX_RUN_GENERATION,
+    AgentProtocolError,
+    WireModel,
+    canonical_message,
+)
 
 _DIGEST = r"^[0-9a-f]{64}$"
 _NAME = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -133,11 +133,26 @@ class RecipeJobInputFile(RecipeJobInputRequest):
         return parsed
 
 
+class RecipeJobInputManifest(WireModel):
+    """Declared user files; manifest.json itself is platform metadata."""
+
+    schema_version: Literal[1]
+    total_bytes: int = Field(ge=0, le=MAX_INPUT_TOTAL_BYTES)
+    files: list[RecipeJobInputFile] = Field(max_length=MAX_INPUT_FILES)
+
+    @model_validator(mode="after")
+    def files_match_totals(self) -> RecipeJobInputManifest:
+        names = [file.name for file in self.files]
+        if names != sorted(set(names), key=lambda name: name.encode("utf-8")):
+            raise ValueError("input filenames must be unique and canonically sorted")
+        if self.total_bytes != sum(file.size_bytes for file in self.files):
+            raise ValueError("input total_bytes does not match declared files")
+        return self
+
+
 def _manifest_document(
     files: Sequence[RecipeJobFile | RecipeJobInputFile],
 ) -> RecipeJobInputManifest | RecipeJobOutputManifestContent:
-    from .job_inputs import RecipeJobInputManifest
-
     model = (
         RecipeJobInputManifest
         if not files or isinstance(files[0], RecipeJobInputFile)
@@ -419,6 +434,7 @@ __all__ = [
     "RecipeJobEvidence",
     "RecipeJobFile",
     "RecipeJobInputFile",
+    "RecipeJobInputManifest",
     "RecipeJobOutputLimits",
     "RecipeJobOutputManifest",
     "RecipeJobOutputMapping",

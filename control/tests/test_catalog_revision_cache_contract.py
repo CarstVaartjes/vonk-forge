@@ -28,7 +28,7 @@ from vonk_control.model_cache.contract import (
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.models.cache import ModelCacheOperation
 from vonk_control.models.catalog import CatalogDocumentRevision
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .display_fixtures import create_draft, reword
 from .test_model_cache_availability_regressions import _artifact, _database, _start
@@ -140,6 +140,8 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
 
     monkeypatch.setattr(contract, f"read_{kind}", counting)
     monkeypatch.setattr(contract, "document_sha256", forbidden)
+    row = None
+    parsed = None
     for index in range(50):
         row = CatalogDocumentRevision(
             id=str(index), kind=kind, content_digest=digest, document=deepcopy(raw)
@@ -150,14 +152,17 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
             assert _stored_recipe(row) == parsed
     assert len(calls) == 1
     # A caller cannot poison another reader of this immutable content identity.
+    assert parsed is not None
     if isinstance(parsed, ModelDefinition):
         parsed.files[0].roles = ["caller-local"]
+        assert row is not None
         stored_model = read_catalog_document(row)
         assert isinstance(stored_model, ModelDefinition)
         assert stored_model.files[0].roles == raw["files"][0]["roles"]
     else:
         assert isinstance(parsed, RecipeDefinition)
         parsed.provenance.attribution = ["caller-local edit"]
+        assert row is not None
         stored = read_catalog_document(row)
         assert isinstance(stored, RecipeDefinition)
         assert stored.provenance.attribution == raw["provenance"]["attribution"]

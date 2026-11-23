@@ -101,13 +101,17 @@ def test_every_reference_busy_or_ownership_conflict_stays_transient(
         raise ArtifactReferenceUnsettled(code, "concurrent reference owner")
 
     monkeypatch.setattr(image_preparation, "require_reference_open", busy)
-    with pytest.raises(Exception) as raised:
+
+    def expected_failure():
         if provisional:
             service._persist_provisional_image_reference(
                 claim, receipt=_reference_receipt()
             )
         else:
             service._persist_receipt(claim, _reference_receipt())
+
+    with pytest.raises(Exception) as raised:
+        expected_failure()
     assert disposition(raised.value) is Disposition.WAIT
     assert availability_disposition(raised.value) is Disposition.WAIT
     assert isinstance(raised.value, ArtifactReferenceUnsettled)

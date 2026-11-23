@@ -13,7 +13,6 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -21,6 +20,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.run_switch_operations.results import _persisted_result
 
 from ..admission_locking import ConstraintReplay, admitting
@@ -48,7 +48,7 @@ from ..recipe_builds.cancellation import (
 )
 from ..run_switch_contract.operations import RunSwitchOperation
 from ..run_switch_contract.plans import RunSwitchPlan
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )
@@ -59,6 +59,7 @@ from .constants import (
     _OPERATION_KINDS,
     _active_recipe_revision,
 )
+from .contracts import ScopeIntentStatus
 from .errors import RunSwitchRequestInvalid
 from .identity_helpers import _string_or_none
 from .image_receipts import _plan_target_node_ids, _planned_transfer_bytes
@@ -69,6 +70,7 @@ from .planning_helpers import (
     _digest,
     _now,
     _run_switch_payload,
+    _scope_intent_status,
     _stored_job_plan,
 )
 from .provider import _ADAPTER
@@ -313,7 +315,7 @@ class ReservationMixin:
                 return False
             # Cancellation and newer intent are settled before any re-plan.
             if persisted_progress.cancellation or (
-                service._scope_intent_status(session, row) != "current"
+                _scope_intent_status(session, row) != ScopeIntentStatus.CURRENT
             ):
                 return False
             due = row.next_action_at
@@ -385,7 +387,7 @@ class ReservationMixin:
             ):
                 return False
             if progress.cancellation or (
-                service._scope_intent_status(session, current) != "current"
+                _scope_intent_status(session, current) != ScopeIntentStatus.CURRENT
             ):
                 return False
             if unreadable is not None:

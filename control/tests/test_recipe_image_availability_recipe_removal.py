@@ -393,7 +393,6 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
         assert bad.state == LifecycleState.SUCCEEDED
         assert good is not None
         assert good.state == LifecycleState.SUCCEEDED
-        from vonk_control.models.cache import ArtifactLifecycleGate
 
         assert (
             session.scalar(

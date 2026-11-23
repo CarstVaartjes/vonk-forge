@@ -25,7 +25,7 @@ from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 from vonk_control.telemetry.maintenance import TelemetryMaintenance
 from vonk_control.telemetry.samples import TelemetryRepository
 
-from .recipe_operations_support import NOW as now
+from .recipe_operations_support import NOW as OPERATIONS_NOW
 from .recipe_operations_support import setup_services
 
 NODE = "spk_" + "c" * 32
@@ -190,11 +190,11 @@ def test_archived_measurement_lock_does_not_block_install_admission(
     )
     node_id = nodes[0]
     service = lifecycle._install_admission
-    plan = service.plan_install(mapping_id, build_id, now=now)
+    plan = service.plan_install(mapping_id, build_id, now=OPERATIONS_NOW)
     assert plan.allowed
     sample = TelemetrySample(
         boot_id="00000000-0000-4000-8000-000000000001",
-        observed_at=now,
+        observed_at=OPERATIONS_NOW,
         memory_total_bytes=None,
         memory_available_bytes=None,
         disk_total_bytes=None,
@@ -203,7 +203,9 @@ def test_archived_measurement_lock_does_not_block_install_admission(
         gpu_memory_total_bytes=None,
         gpu_memory_free_bytes=None,
     )
-    TelemetryRepository(sessions, clock=lambda: now).record_batch(node_id, [sample])
+    TelemetryRepository(sessions, clock=lambda: OPERATIONS_NOW).record_batch(
+        node_id, [sample]
+    )
     with sessions.begin() as history:
         locked = history.scalar(
             select(NodeInventoryResourceSnapshot)
@@ -211,7 +213,7 @@ def test_archived_measurement_lock_does_not_block_install_admission(
             .with_for_update(of=NodeInventoryResourceSnapshot)
         )
         assert locked is not None
-        identifier = service.accept_install(plan, actor="admin", now=now)
+        identifier = service.accept_install(plan, actor="admin", now=OPERATIONS_NOW)
     with sessions() as session:
         assert session.get(RecipeInstallation, identifier) is not None
 

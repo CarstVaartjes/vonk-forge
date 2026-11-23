@@ -27,8 +27,8 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     SecurityRefusalReason,
@@ -53,7 +53,7 @@ from vonk_control.lifecycle.types import (
     State,
     Tick,
 )
-from vonk_control.lifecycle_preflight import LifecyclePreflightCheckpoint
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.jobs import Job
 from vonk_control.persisted_waits import read_wait
 from vonk_control.recovery_policy import RECOVERY
@@ -176,7 +176,8 @@ class _ScriptedExecutor(RecordingArtifactExecutor):
         super().__init__(**kwargs)
         self.faults: dict[str, Any] = {}
 
-    def execute(self, plan, phase, **kwargs):
+    # Scripted phases return deliberately invalid results.
+    def execute(self, plan, phase, **kwargs):  # pyright: ignore[reportIncompatibleMethodOverride]
         fault = self.faults.get(phase.kind)
         if isinstance(fault, BaseException):
             self.calls.append(phase.kind)
@@ -585,7 +586,7 @@ def test_an_error_nobody_classified_is_retried_by_the_tick_guard(
             )
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
@@ -615,7 +616,8 @@ def test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause(tmp_path: Path) 
             break
         delays.append((due - harness.now[0]).total_seconds())
         harness.now[0] = due
-    assert delays and all(1 <= delay <= 75 for delay in delays), delays
+    assert delays, delays
+    assert all(1 <= delay <= 75 for delay in delays), delays
     assert max(delays) <= 75  # one bounded clock, not the old 5 minutes
 
 
@@ -802,7 +804,7 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
             raise OperationInterrupted("the observation was interrupted")
         return original(operation_id)
 
-    harness.service._advance = advance  # type: ignore[method-assign]
+    harness.service._advance = advance
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)

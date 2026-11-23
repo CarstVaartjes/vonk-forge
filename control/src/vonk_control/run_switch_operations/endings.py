@@ -13,13 +13,15 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileSwitchChildKind
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.run_switch_operations.results import _persisted_result
 
+from ..agent_jobs.retirement import release_owned_reservations_in_session
 from ..bounded_json import require_integer
+from ..distribution_executor.receipts import _ChildView
 from ..failure_classification import error_code, is_security_failure
 from ..jobs import states as job_states
 from ..lifecycle.run_switch import end_unclaimed_children
@@ -40,7 +42,7 @@ from ..run_switch_contract.progress_view import (
     _merge_progress_evidence,
 )
 from ..stall_window import Verdict, stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .awaited_children import start_request_key
 from .errors import RunSwitchOperationConflict
 from .observation_window import checkpoint_deadline, checkpoint_verdict
@@ -53,7 +55,6 @@ from .result_helpers import _read_progress
 _REOFFER_INTERVAL = timedelta(seconds=5)
 
 if TYPE_CHECKING:
-    from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
 
 
@@ -67,8 +68,6 @@ class EndingsMixin:
         remote effects are retained without withdrawing routes.
         """
         service = typing_cast("RunSwitchOperationService", self)
-
-        from ..agent_jobs.retirement import release_owned_reservations_in_session
 
         with service._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
@@ -265,7 +264,6 @@ class EndingsMixin:
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
         service = typing_cast("RunSwitchOperationService", self)
-        from ..distribution_executor.receipts import _ChildView
 
         getter = getattr(service._phase_executor, "get", None)
         if callable(getter):

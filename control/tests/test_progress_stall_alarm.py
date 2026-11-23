@@ -12,16 +12,17 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import select, update
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,
     ProgressPhase,
 )
-from vonk_agent_protocol.contracts import AgentFailureKind, AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     ProgressAlarmCode,
@@ -37,6 +38,15 @@ from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
+from vonk_control.fleet_profiles import (
+    cancellation,
+    capacity,
+    control_effects,
+    endpoint_projection,
+    profile_projection,
+    reconcile,
+)
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models.execution import ResourceReservation
 from vonk_control.models.fleet import FleetProfileApplication
@@ -333,7 +343,7 @@ def _copying_load(tmp_path: Path):
     """A load whose Sparks need the model copied: its distribution child is
     driven by the test, reporting what an agent's copy reports."""
 
-    transfer: list = []
+    transfer: list[Any] = []
 
     class Copy(RecordingArtifactExecutor):
         def execute(self, plan, phase, **kwargs):
@@ -359,7 +369,7 @@ def _copying_load(tmp_path: Path):
         """The child's execution (``key``, by default its id) copied ``copied``."""
 
         plan, phase = transfer
-        payload: dict = {
+        payload: dict[str, Any] = {
             "progress": {"completed_bytes": copied, "total_bytes": 10**9},
             "operation": {
                 "phase": operation_phase,
@@ -411,6 +421,8 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
     copied: dict[str, int] = {}
     places: set[str] = set()
     codes: set[str] = set()
+    stall = None
+    application = None
     for _ in range(80):
         _loop(load, lambda: False, rounds=1)
         load.now[0] += timedelta(minutes=1)
@@ -425,6 +437,7 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
         codes.update(item.code for item in application.blockers)
         if _alarm(load):
             break
+    assert application is not None
     assert _alarm(load), application.blockers
     assert application.state == LifecycleState.RUNNING.value  # still waiting
     assert len(places) == 1  # one place across the child's backoff and retry
@@ -435,6 +448,7 @@ def test_a_copy_retried_through_phase_retries_is_stalled_one_window_later(
     assert load.now[0] <= application.created_at + PROGRESS_STALL_WINDOW + timedelta(
         minutes=10
     )
+    assert stall is not None
     assert stall is not None
     assert stall.first_seen_at + PROGRESS_STALL_WINDOW <= load.now[0]
     (listed,) = _platform_stalled(load)
@@ -523,7 +537,8 @@ def test_a_load_moving_through_its_phases_for_longer_than_a_window_is_never_stal
         application.status_reason
     )
     assert load.now[0] - application.created_at > PROGRESS_STALL_WINDOW
-    assert len({phase for phase, _ in shown}) > 2 and len(shown) > 4, shown
+    assert len({phase for phase, _ in shown}) > 2, shown
+    assert len(shown) > 4, shown
 
 
 def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(
@@ -754,19 +769,24 @@ def test_a_load_waiting_for_the_load_it_continues_is_never_silent(monkeypatch) -
     # Restoring the exact child receipt releases the dependent load through
     # normal ticks. The escalation is informational, never an operator latch.
     adapter.advance = real_advance
-    real_state = FleetProfileService._assignment_state.__func__
 
-    def observed_running(cls, session, assignment, **kwargs):
-        state = real_state(cls, session, assignment, **kwargs)
+    def observed_running(session, assignment, **kwargs):
+        state = _assignment_state(session, assignment, **kwargs)
         # The synthetic executor's matching workload observation arrives with
         # its receipt. Production reads these facts from its run/installation.
         if adapter.get(held).state == LifecycleState.SUCCEEDED:
             state.current_state = ObservedAssignmentState.RUNNING
         return state
 
-    monkeypatch.setattr(
-        FleetProfileService, "_assignment_state", classmethod(observed_running)
-    )
+    for consumer in (
+        cancellation,
+        capacity,
+        control_effects,
+        endpoint_projection,
+        profile_projection,
+        reconcile,
+    ):
+        monkeypatch.setattr(consumer, "_assignment_state", observed_running)
     for _ in range(24):
         now[0] += timedelta(seconds=30)
         service.tick()

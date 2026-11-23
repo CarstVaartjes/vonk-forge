@@ -13,15 +13,16 @@ from sqlalchemy import select, text
 
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runtime import RuntimeImageCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (
     FleetProfileSwitchAdapterState,
 )
 from vonk_control.fleet_profiles.factory import build_production_fleet_profile_service
+from vonk_control.fleet_profiles.persistence import _intended_profile
 from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
 from vonk_control.jobs.documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
@@ -46,7 +47,7 @@ from vonk_control.runtime_image_preparation.contracts import (
     RuntimeImagePreparationError,
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .fleet_profiles_support import NOW, _node_id
 from .recipe_operations_support import setup_services
@@ -220,7 +221,7 @@ def test_selected_profile_reconciles_a_newly_enrolled_spark(
         assert selection.application_id != first.id
         selected = session.get(FleetProfileApplication, selection.application_id)
         assert selected is not None
-        intended = service._intended_profile(selected, session=session)
+        intended = _intended_profile(selected, session=session)
         assert not isinstance(intended, Residue)
         assert _node_id(99) in intended.scope.node_ids
 

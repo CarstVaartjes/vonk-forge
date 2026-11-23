@@ -17,7 +17,7 @@ from ..load_swap import held_rise, readable_run_plan
 from ..machine_states import rank_installed, read_state
 from ..models.catalog import CatalogDocumentRevision
 from ..models.mapping import ClusterMappingNode
-from ..recipe_operations.rank_authority import _run_is_one_shot
+from ..recipe_operations.observation_helpers import _run_is_one_shot
 from ..recipe_update_batches.notice import recipe_update_notice
 from ..run_readiness import run_not_ready_for_profile
 from ..run_states import ENDED_RUN_STATES

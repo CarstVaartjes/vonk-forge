@@ -6,9 +6,10 @@ import re
 from collections.abc import Sequence
 from pathlib import PurePosixPath
 
-from vonk_agent_protocol.host_helper import MAX_ARGV_BYTES
+from vonk_agent_protocol.document_limits import MAX_ARGV_BYTES
 
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
+from .errors import HarnessCompileError
 
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(
@@ -17,10 +18,6 @@ _SHELL_EXECUTABLES = frozenset(
 _SHELL_LAUNCHERS = frozenset({"env", "busybox", "sudo", "doas"})
 _IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
 _SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
-
-
-class HarnessCompileError(ValueError):
-    pass
 
 
 def structured_command(value: object) -> tuple[str, ...]:

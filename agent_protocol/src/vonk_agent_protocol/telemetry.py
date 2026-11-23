@@ -13,11 +13,6 @@ from typing import Any, ClassVar
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import ValidationError
 
-from .contracts import (
-    AgentProtocolError,
-    CanonicalUUID,
-    canonical_message,
-)
 from .gpu_clock import GpuClockObservation
 from .optional_evidence import (
     EvidenceGroup,
@@ -25,7 +20,13 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .reason_codes.evidence import AgentEvidenceCode
-from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireModel
+from .wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    AgentProtocolError,
+    CanonicalUUID,
+    WireModel,
+    canonical_message,
+)
 
 # Authenticated transport memory safeguard.
 MAX_TELEMETRY_REPORT_BYTES = 1024 * 1024

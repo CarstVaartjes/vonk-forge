@@ -24,6 +24,7 @@ import json
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -161,7 +162,7 @@ def _json(value) -> str:
 # ------------------------------------------------------------- state space
 
 
-def _application_row(state: str, progress: dict) -> FleetProfileApplication:
+def _application_row(state: str, progress: dict[str, Any]) -> FleetProfileApplication:
     return FleetProfileApplication(
         id=str(uuid.uuid4()),
         request_key=str(uuid.uuid4()),

@@ -12,17 +12,18 @@ from sqlalchemy import delete, select
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import FailureCode, LifecycleState
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode, SupersedeCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import admission_locking
 from vonk_control.categorized_errors import InvalidValue
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
+from vonk_control.fleet_profiles.continuing_effects import _superseding_intent
 from vonk_control.fleet_profiles.contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
@@ -346,13 +347,13 @@ def test_intent_checks_do_not_resolve_storage_inside_coordination(tmp_path: Path
         progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(application.progress), strict=True
         )
-        assert not service._superseding_intent(session, application, progress)
+        assert not _superseding_intent(session, application, progress)
         assert service._retry_eligible(session, application)
         saved = session.get(FleetProfile, profile.id)
         assert saved is not None
         saved.name = "New saved intent"
         saved.revision += 1
-        assert not service._superseding_intent(session, application, progress)
+        assert not _superseding_intent(session, application, progress)
         assert service._retry_eligible(session, application)
 
 

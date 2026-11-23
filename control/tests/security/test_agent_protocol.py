@@ -15,16 +15,13 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import (
-    MAX_DOCUMENT_BYTES,
-    AgentClaim,
-    AgentOperation,
-    AgentProtocolError,
-    AgentResult,
-    canonical_message,
-)
+import vonk_agent_protocol
+from vonk_agent_protocol.agent_operations import AgentOperation
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.document_limits import MAX_DOCUMENT_BYTES
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 from vonk_control.agent_jobs.contracts import StaleAgentAttempt
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.model_primitives import Base
@@ -263,7 +260,6 @@ def test_control_environment_installs_the_workspace_protocol() -> None:
             "project"
         ]["version"]
     )
-    import vonk_agent_protocol
 
     assert Path(vonk_agent_protocol.__file__).is_relative_to(
         ROOT / "agent_protocol/src"
@@ -312,7 +308,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs(
                 """
                 import importlib.metadata, json
                 from importlib.resources import files
-                from vonk_agent_protocol.contracts import AgentProtocolError
+                from vonk_agent_protocol.wire_model import AgentProtocolError
                 from vonk_agent_protocol.distribution import DistributionObject
                 from vonk_control.recipe_operations.runtime_specs import compile_runtime_spec
                 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256, read_model, read_recipe

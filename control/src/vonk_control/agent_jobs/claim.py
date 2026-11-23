@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import Disposition
 from vonk_agent_protocol.build_import import RecipeBuildRequest
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import (
     AgentClaim,
-    AgentOperation,
     AgentProgress,
+    AgentUpgradePayload,
     canonical_payload,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import (
@@ -34,6 +36,7 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
+from ..agent_operation_facts import fencing_intent
 from ..auth import AgentSource
 from ..categorized_errors import InvalidValue
 from ..inventory.items import inventory_items, runtime_value
@@ -51,12 +54,7 @@ from ..persisted_waits import schedule_wait
 from ..recovery_policy import WAIT_STEP
 from .claim_authority import dispatch_wait, recipe_build_disk_wait
 from .claim_reconcile import _first_claimable_id
-from .contracts import (
-    _MUTATING_OPERATIONS,
-    CLAIM_LEASE_SECONDS,
-    fencing_intent,
-    mutations_conflict,
-)
+from .contracts import _MUTATING_OPERATIONS, CLAIM_LEASE_SECONDS, mutations_conflict
 from .endings import end_unobserved_order
 from .evidence import (
     _exact_service_stop_receipt_covers_start,
@@ -613,10 +611,6 @@ def _claim_once(
                     parent.status_reason = operation.status_reason
                 return None
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
-            import secrets
-
-            from vonk_agent_protocol.contracts import AgentUpgradePayload
-
             payload = column_value(operation, "payload")
             if not isinstance(payload, AgentUpgradePayload):
                 return None  # the damaged-payload ending above already owns this case

@@ -12,7 +12,6 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.inventory import (
     MAX_REPORTED_INSTALLATIONS,
     InstallationBytes,
@@ -23,6 +22,7 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.installed_bytes import refresh_installed_bytes
 from vonk_control.inventory.repository import (
     InventoryRepository,

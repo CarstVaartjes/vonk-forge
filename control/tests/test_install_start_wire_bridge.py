@@ -11,7 +11,8 @@ import pytest
 from sqlalchemy import select
 
 from tests.wire_probes import prebuilt_probe
-from vonk_agent_protocol.contracts import AgentResult, RecipeStartResult
+from vonk_agent_protocol.agent_operations import RecipeStartResult
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.distribution import DistributionAssignment
 from vonk_control.agent_outcome import stored_report
 from vonk_control.distribution.service import DistributionService

@@ -15,8 +15,8 @@ from sqlalchemy import Table, create_engine, event, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import HostResourceSample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
@@ -136,9 +136,9 @@ class Events(FleetEventRepository):
 class Telemetry(TelemetryRepository):
     def __init__(self, values: dict[str, TelemetrySampleView] | None = None) -> None:
         self.values = values or {}
-        self.calls: list[tuple[str, ...]] = []
+        self.calls: list[Sequence[str]] = []
 
-    def by_ids(self, sample_ids: tuple[str, ...]) -> dict[str, TelemetrySampleView]:
+    def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         self.calls.append(sample_ids)
         return {
             sample_id: self.values[sample_id]
@@ -1388,8 +1388,7 @@ def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None
         generator = _events(stream_for(events), 0)
         frames: list[str] = []
         try:
-            async for frame in generator:
-                frames.append(frame)
+            frames.extend([frame async for frame in generator])
         finally:
             await generator.aclose()
         return frames

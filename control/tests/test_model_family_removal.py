@@ -219,7 +219,9 @@ def test_a_stored_4_9_model_row_still_reads_and_its_projection_drops_the_family(
     with sessions() as session:
         row = session.get(CatalogDocumentRevision, revision_id)
         assert row is not None
-        assert "family" not in row.projected["identity"]
+        identity = row.projected["identity"]
+        assert isinstance(identity, dict)
+        assert "family" not in identity
         assert row.document == legacy
         assert row.artifact_key == "1" * 64
 

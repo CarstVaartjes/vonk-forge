@@ -29,6 +29,7 @@ from .common import ControllerClient, _query, _quoted, _request_key
 from .fleet import _overview
 from .installation import _recipe_installation_reconcile
 from .observation import _cache_progress, _follow_mutation, _poll_path, _watch_resource
+from .unused_removal import _remove_unused
 
 
 def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, object]:
@@ -120,8 +121,10 @@ def _model(
         result = _submit_cache_request(client, "model", args, factory)
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
+        if args.unused:
+            return _remove_unused(client, args, factory)
         result = _remove_model(client, args, factory)
-        if args.review or args.unused:
+        if args.review:
             return result
         return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")

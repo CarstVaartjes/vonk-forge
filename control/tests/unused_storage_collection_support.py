@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections import namedtuple
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy import Engine, create_engine, event, select
@@ -41,6 +41,7 @@ from vonk_control.storage_demands import (
     StorageDemands,
 )
 from vonk_control.unused_storage_collection.common import ACTOR
+from vonk_control.unused_storage_collection.references import _utc
 from vonk_control.unused_storage_collection.service import UnusedStorageCollector
 
 from .model_cache_support import _artifact, _download
@@ -292,8 +293,6 @@ def _within_grace(world: Catalog) -> None:
     with world.sessions.begin() as session:
         for model in (RecipeInstallation, InstallationNode, RecipeRun):
             for row in session.scalars(select(model)):
-                from vonk_control.unused_storage_collection.references import _utc
-
                 row.updated_at = NOW - (NOW - _utc(row.updated_at)) / 100
 
 
@@ -609,8 +608,12 @@ class _Volume:
 
     def usage(self, _path: object = None):
 
-        usage = namedtuple("usage", "total used free")
-        return usage(self.total, self.total - self.free, self.free)
+        class DiskUsage(NamedTuple):
+            total: int
+            used: int
+            free: int
+
+        return DiskUsage(self.total, self.total - self.free, self.free)
 
     def pair(self, _path: Path) -> tuple[int, int]:
         return self.total, self.free

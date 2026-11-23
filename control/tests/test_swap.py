@@ -12,7 +12,6 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from cluster_profiles.cli_render.fleet import _swap
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.host_helper import ApplySwapOperation, parse_host_operation
 from vonk_agent_protocol.inventory import (
     HostSettings,
@@ -34,6 +33,7 @@ from vonk_agent_protocol.swap import (
     swap_satisfied,
     usable_swap_bytes,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_projection.nodes import _swap_warning
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,

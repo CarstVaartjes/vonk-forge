@@ -6,21 +6,24 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from vonk_agent_protocol.contracts import (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    canonical_message,
-)
-from vonk_agent_protocol.host_helper import (
+from vonk_agent_protocol.document_limits import (
     HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
     MAX_ARGV_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_HELPER_FRAME_BYTES,
     MAX_HOST_RUNTIME_ARGUMENT_BYTES,
     MAX_HOST_RUNTIME_REQUEST_BYTES,
+)
+from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
     HostRuntimeRequest,
-    RecipeReconciliationIdentity,
 )
-from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
+from vonk_agent_protocol.recipe_operations import (
+    RecipeReconciliationIdentity,
+    RecipeStartPayload,
+    RecipeStopPayload,
+)
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 def start_plan(*, large_environment: bool = False) -> RecipeStartPayload:

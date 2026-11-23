@@ -57,7 +57,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session, sessionmaker
 
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -65,15 +64,18 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states
+from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+from ..agent_jobs.retry import abandon_idempotent_job_in_session
 from ..agent_operation_facts import aware
 from ..jobs import states as job_states
 from ..lifecycle_preflight import end_unclaimed_probes
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..operations.blockers import OperationBlocker, make_blocker
-from ..persisted_waits import lifecycle_wait, schedule_wait, typed_wait_reason, wait_due
+from ..persisted_waits import lifecycle_wait, schedule_wait, wait_due
 from ..run_switch_contract.observation import (
     RunSwitchStoredChildIdentity,
     RunSwitchStoredIdentity,
@@ -82,6 +84,9 @@ from ..run_switch_contract.observation import (
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.progress import RunSwitchMemberReceipt
 from ..run_switch_contract.vocabulary import RunSwitchMemberState
+from ..run_switch_operations.awaited_children import child_job_ids
+from ..run_switch_operations.observation_window import checkpoint_deadline
+from ..wait_contract import typed_wait_reason
 from .adapter import Dispatch
 from .agent_operation import AgentOperationAdapter
 from .composite import aggregate
@@ -176,9 +181,6 @@ def end_unclaimed_children(
     the caller offers it again on its next check.
     """
     # agent_jobs builds on the lifecycle core; import its writers at use.
-    from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
-    from ..agent_jobs.retry import abandon_idempotent_job_in_session
-    from ..run_switch_operations.awaited_children import child_job_ids
 
     children = child_job_ids(progress)
     probes = progress.preflight.pending_jobs.values() if progress.preflight else ()
@@ -321,7 +323,6 @@ class RunSwitchAdapter:
         # count: a hold for evidence that has not arrived (post-stop inventory,
         # capacity, a busy lock) must outlive the backoff steps, and the
         # service ends it with a typed retryable code when the window closes.
-        from ..run_switch_operations.observation_window import checkpoint_deadline
 
         return Lifecycle(
             id=job.id,

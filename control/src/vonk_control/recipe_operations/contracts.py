@@ -9,17 +9,17 @@ from pydantic import ConfigDict
 
 from vonk_agent_protocol.wire_model import WireModel
 
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.stop_contract import (
     JobRunStopScope,
     ProfileJobRunStopAuthorization,
 )
+from ..identifiers import UuidId
 from ..jobs.documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
+    RecipeBuildIntent,
     ServiceRunStopReview,
 )
-from ..library.contract import UuidId
-from ..recipe_builds.cancellation import RecipeBuildIntent
 from ..run_switch_contract.requests import RunSwitchReconciliationAuthority
 from ..strict_json import StrictJSONModel
 from .lifecycle_contract import RecipeOperationCancellationResult

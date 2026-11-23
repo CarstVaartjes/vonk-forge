@@ -14,10 +14,10 @@ from pathlib import Path
 import pytest
 
 from vonk_agent_protocol.agent_words import ProgressPhase
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.wire_model import (
     OperationMemberProgress,
     OperationProgress,
+    canonical_message,
 )
 
 from .parsed_sources import parse_file
@@ -41,9 +41,14 @@ def exclude_unset_sites(tree: ast.Module) -> list[tuple[str, str]]:
             self.generic_visit(node)
             self.scope = previous
 
-        visit_ClassDef = visit_scope
-        visit_FunctionDef = visit_scope
-        visit_AsyncFunctionDef = visit_scope
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            self.visit_scope(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            self.visit_scope(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            self.visit_scope(node)
 
         def visit_Call(self, node: ast.Call) -> None:
             for keyword in node.keywords:

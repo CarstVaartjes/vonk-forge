@@ -14,7 +14,7 @@ from dataclasses import replace
 
 import pytest
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESS_BY_SLUG
 from vonk_control.runtime.adapters import (
     ADAPTER_IMAGE_USER,

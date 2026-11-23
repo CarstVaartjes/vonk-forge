@@ -10,9 +10,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import delete, select
 
 import vonk_control
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.grant_requests import HostRuntimeGrantRequest
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
@@ -25,6 +24,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
     WaitReason,
 )
 from vonk_agent_protocol.reason_codes.runtime import RuntimePreflightCode
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.host_helper_authority import (
@@ -34,10 +34,8 @@ from vonk_control.host_helper_authority import (
 from vonk_control.inventory.items import inventory_items
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter
 from vonk_control.lifecycle.types import State
-from vonk_control.lifecycle_preflight import (
-    LifecyclePreflight,
-    LifecyclePreflightCheckpoint,
-)
+from vonk_control.lifecycle_preflight import LifecyclePreflight
+from vonk_control.lifecycle_preflight_contract import LifecyclePreflightCheckpoint
 from vonk_control.models.catalog import CatalogDocumentRevision
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
@@ -959,7 +957,8 @@ def test_only_the_checkpoint_reads_its_round_reason():
     readers = sorted(
         f"{path.relative_to(root)}:{node.lineno}"
         for path in root.rglob("*.py")
-        if path.name != "lifecycle_preflight.py"
+        if path.name
+        not in {"lifecycle_preflight.py", "lifecycle_preflight_contract.py"}
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(node, ast.Attribute)
         and node.attr in {"last_failure_code", "last_failure_detail"}

@@ -19,10 +19,10 @@ from ..control_client.errors import (
     ControlUnavailable,
 )
 from ..control_client.schema import validate_control_document
-from .common import ControllerClient, _quoted, _request_key
+from .common import ControllerClient, _known_http_refusal_status, _quoted, _request_key
 from .observation import _poll_path
 from .selection import _observe_selection, _selection_remaining
-from .submission import _known_http_refusal_status, _submit_idempotent_request
+from .submission import _accepted_submission, _submit_idempotent_request
 
 
 def _run_switch_request_operation(
@@ -256,7 +256,6 @@ def _recipe_installation_reconcile(
         existing = None
     if existing is not None:
         args.submission.operation_id = validate(existing)
-        from .submission import _accepted_submission
 
         _accepted_submission(args, args.submission.operation_id)
         return _follow_installation_reconciliation(

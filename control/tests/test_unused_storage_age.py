@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as Operation
+from vonk_agent_protocol.agent_operations import AgentOperation as Operation
 from vonk_agent_protocol.state_machines import InstallationState, RunState
 from vonk_control.models.execution import RecipeInstallation
 from vonk_control.models.operations import AgentOperation
@@ -71,8 +71,6 @@ def test_non_model_expiry_survives_restart_and_retries_failed_unlink(
     assert receipt.exists()
     assert model.exists()
     with world.sessions() as session:
-        from vonk_control.models.execution import RecipeInstallation
-
         row = session.get(RecipeInstallation, live)
         assert row is not None
         assert row.state == InstallationState.INSTALLED

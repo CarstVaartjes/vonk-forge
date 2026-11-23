@@ -24,18 +24,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 from vonk_agent_protocol.state_machines import CatalogSyncState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from ..capabilities import CapabilityUnavailableError
 from ..models.cache import RecipeLibrarySyncRun
 from ..models.catalog import CatalogDocumentRevision
 from ..owner_liveness import OwnerKind, OwnerRef, owner
-from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
+from ..persisted_waits import read_wait, schedule_wait
 from ..recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -44,7 +44,7 @@ from ..recipe_library_types import (
 from ..recipe_packages.contracts import has_newer_major_note
 from ..source_bundles import SourceBundleUnknown
 from ..stored.states import LibrarySyncRunState
-from ..wait_contract import QueueWait
+from ..wait_contract import QueueWait, typed_wait_reason
 from .queries import active_head_revision
 from .revision_contract import catalog_document_readable
 from .service import CatalogService

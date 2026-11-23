@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..strict_json import read_stored_model
 

@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from vonk_agent_protocol.reason_codes.catalog import CatalogSyncCode
 
 from ..auth import Actor
-from ..library.contract import UuidId
+from ..identifiers import UuidId
 from ..machine_states import CatalogSyncStateField
 from ..operation_api.constants import _ADMIN_OPERATION_IDS
 from ..strict_json import StrictModel

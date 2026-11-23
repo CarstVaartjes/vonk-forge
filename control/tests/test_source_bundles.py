@@ -13,9 +13,9 @@ from hypothesis import strategies as st
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.reason_codes.sources import SourceBundleCode
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import source_bundles
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog.service import CatalogService
@@ -389,9 +389,11 @@ def test_normalised_source_bundle_path_never_leaves_the_root(raw: str) -> None:
     try:
         normalised = source_bundles._safe_path(raw)
     except SourceBundleError as error:
-        assert error.code in {
-            SourceBundleCode.PATH_FORBIDDEN,
-            SourceBundleCode.PATH_TOO_LONG,
-        }
+        code = error.code
+    else:
+        assert _stays_inside_root(normalised)
         return
-    assert _stays_inside_root(normalised)
+    assert code in {
+        SourceBundleCode.PATH_FORBIDDEN,
+        SourceBundleCode.PATH_TOO_LONG,
+    }

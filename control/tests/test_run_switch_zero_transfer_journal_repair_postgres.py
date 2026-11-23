@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Event
@@ -14,13 +15,13 @@ from uuid import uuid4
 
 import pytest
 from psycopg.errors import LockNotAvailable
-from sqlalchemy import delete, event, inspect, select
+from sqlalchemy import delete, event, inspect, select, update
 from sqlalchemy.engine import ExceptionContext
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import JournalRepairCode
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control import terminal_history_collection
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.db.startup import initialize_database
@@ -36,10 +37,12 @@ from vonk_control.models.fleet import AgentNode
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation, AgentOperationAttempt
 from vonk_control.operations.contract import OperationRecoveryAction
+from vonk_control.persisted_waits import read_wait
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.run_switch_contract.journal import (
     JournalRepairDisposition,
     JournalRepairPurpose,
+    RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
 )
@@ -51,6 +54,7 @@ from vonk_control.run_switch_journal_repair.observation import (
 )
 from vonk_control.run_switch_journal_repair.pending import REPAIR_BUDGET
 from vonk_control.run_switch_operations import advance as advance_owner
+from vonk_control.run_switch_operations import cancellation_retry
 from vonk_control.run_switch_operations.image_receipts import _planned_transfer_parts
 from vonk_control.run_switch_operations.planning_helpers import (
     _run_switch_payload,
@@ -76,6 +80,7 @@ from .test_profile_load_installed_cli import (
     _https_api_peer,
     _process_environment,
 )
+from .test_terminal_history_collection import _job
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
@@ -423,8 +428,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
             60,
         )
     elif fault == "second-attempt":
-        from vonk_control.models.operations import AgentOperationAttempt
-
         with sessions() as session:
             attempt = session.scalar(
                 select(AgentOperationAttempt).where(
@@ -465,10 +468,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
     else:
         # Explicit corruption negatives, under the seed-only guard. The initial
         # cross-domain fault above is always produced by the genuine old merger.
-        from sqlalchemy import delete
-
-        from vonk_control.models.fleet import AgentNode
-        from vonk_control.models.operations import AgentOperationAttempt
 
         with write_guard_mode(strict=False), sessions.begin() as session:
             child = session.get(Job, install_id)
@@ -482,8 +481,6 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
                     )
                 )
             elif fault == "wrong-child-request":
-                import uuid
-
                 child.request_id = str(uuid.uuid4())
             elif fault == "newer-ordinal":
                 node = session.get(AgentNode, row.targets[0])
@@ -570,8 +567,6 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
         terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
     )
 
-    from .test_terminal_history_collection import _job
-
     (
         sessions,
         _lifecycle,
@@ -630,7 +625,6 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
             assert row is not None
             assert row.result == raw
             assert (row.id, row.request_id, row.payload_digest, row.payload) == identity
-            from vonk_control.persisted_waits import read_wait
 
             pending = session.get(RunSwitchJournalRepairPending, switch_id)
             if pending is None:
@@ -655,10 +649,6 @@ def test_held_required_row_defers_without_clock_reset_and_disjoint_work_advances
     with sessions() as session:
         pending = session.get(RunSwitchJournalRepairPending, switch_id)
         if pending is not None:
-            from vonk_control.run_switch_contract.journal import (
-                RunSwitchJournalRepairPendingState,
-            )
-
             RunSwitchJournalRepairPendingState.model_validate_json(
                 canonical_message(pending.progress), strict=True
             )
@@ -719,9 +709,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             60,
         )
     else:
-        from vonk_control.run_switch_journal_repair import pending as repair_owner
-
-        original_record = repair_owner.record_repair_cancellation
+        original_record = cancellation_retry.record_repair_cancellation
 
         def repair_before_record(*args):
             assert (
@@ -731,7 +719,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             original_record(*args)
 
         monkeypatch.setattr(
-            repair_owner, "record_repair_cancellation", repair_before_record
+            cancellation_retry, "record_repair_cancellation", repair_before_record
         )
     cancellation = planner.cancel(
         switch_id,
@@ -803,9 +791,6 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
         )
         assert len(list(session.scalars(select(RunSwitchJournalRepair)))) == 1
     # The settled preparation cannot retain a same-Spark admission hold.
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
 
     with sessions() as session:
         row = session.get(Job, switch_id)
@@ -1214,9 +1199,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         assert job is not None
         assert job.result == raw
         assert session.get(RunSwitchJournalRepairPending, switch_id) is None
-        from vonk_control.run_switch_contract.journal import (
-            RunSwitchJournalRepairEndEvidence,
-        )
 
         [audit] = list(
             session.scalars(
@@ -1367,7 +1349,6 @@ def test_current_witness_repairs_despite_unusable_history(
             ).model_copy(update={"request_key": str(uuid4())})
         )
         # Seed storage damage below the append-only ORM writer boundary.
-        from sqlalchemy import update
 
         session.execute(
             update(RunSwitchJournalRepair)

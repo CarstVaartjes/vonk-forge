@@ -8,12 +8,12 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
-from threading import Barrier, Event
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, event, select, update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -28,6 +28,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
 from vonk_agent_protocol.reason_codes.profiles import ProfileReasonCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.state_machines import DesiredAssignmentState
+from vonk_control.catalog import revision_contract as contract
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (
     rederive_projection,
@@ -43,12 +44,15 @@ from vonk_control.fleet_profile_contract.definitions import (
 )
 from vonk_control.fleet_profile_contract.review import FleetProfilePreview
 from vonk_control.fleet_profiles import read_observation as observation
+from vonk_control.fleet_profiles import read_observation as profile_read_observation
+from vonk_control.fleet_profiles.assignment_assessment import _assignment_state
 from vonk_control.fleet_profiles.contracts import FleetProfileConflict
 from vonk_control.fleet_profiles.projection_support import _profile_document
 from vonk_control.fleet_profiles.read_observation import (
     observe_storage,
     profile_read,
 )
+from vonk_control.fleet_profiles.saved_profiles import _definition
 from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.model_cache.contract import (
     CachedModelResolution,
@@ -79,6 +83,8 @@ from vonk_control.runtime_image_preparation.storage import (
 
 from .display_fixtures import create_draft, reworded
 from .fleet_profiles_support import _SwitchAdapter
+from .insert_collision_support import Rendezvous
+from .pass_budget_clocks import completing_wait, expiring_wait
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -94,7 +100,7 @@ RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
 RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
-def _sessions() -> sessionmaker:
+def _sessions() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -127,7 +133,7 @@ RECIPE_OPTIONS = [
 ]
 
 
-def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
+def _seed(sessions: sessionmaker[Session], *, options: bool = False) -> None:
     with sessions.begin() as session:
         session.add(User(subject="test", role="administrator"))
     model_document = json.loads(
@@ -308,11 +314,11 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
     if existing:
         service.update_number(2, FleetProfileInput(name="Original"), actor="test")
     observed = service.definition_number(2)
-    ready = Barrier(2)
+    ready = Rendezvous(2, timeout=10)
 
     def save(name):
         value = FleetProfileInput(name=name, expected_revision=observed.revision)
-        ready.wait(timeout=10)
+        ready.wait()
         try:
             return service.update_number(2, value, actor="test")
         except FleetProfileConflict:
@@ -462,7 +468,7 @@ def _draft_input(name: str = "Draft") -> FleetProfileDefinition:
     )
 
 
-def _stored_state(sessions: sessionmaker) -> list[tuple]:
+def _stored_state(sessions: sessionmaker[Session]) -> list[tuple[str, int, int, str]]:
     with sessions() as session:
         return [
             (row.id, row.number, row.revision, row.name)
@@ -521,11 +527,9 @@ def test_a_draft_equal_to_the_stored_definition_is_reviewed_as_the_replayed_save
     # A catalog refresh adds options; a save of equal content still replays
     # without normalising, so the draft review must not add them either.
     with sessions() as session:
-        document = json.loads(
-            json.dumps(
-                session.get(CatalogDocumentRevision, RECIPE_REVISION_ID).document
-            )
-        )
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert revision is not None
+        document = json.loads(json.dumps(revision.document))
     document["options"] = RECIPE_OPTIONS
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     revision = catalog.revise(RECIPE_DOCUMENT_ID, document, actor="test")
@@ -1268,13 +1272,11 @@ def test_a_run_made_with_other_option_choices_is_not_the_assignments_state() -> 
         )
         session.flush()
         # The mapping was made for "standard": not this assignment's.
-        assert service._assignment_state(session, assignment).current_state == (
-            "not-placed"
-        )
+        assert _assignment_state(session, assignment).current_state == ("not-placed")
         matching = assignment.model_copy(
             update={"option_choices": {"verification": "standard"}}
         )
-        assert service._assignment_state(session, matching).current_state == "placed"
+        assert _assignment_state(session, matching).current_state == "placed"
 
 
 @pytest.mark.parametrize(
@@ -1287,8 +1289,6 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     selector_count,
 ):
     """A save must not resolve and parse the same selector per assignment and view."""
-
-    import vonk_control.catalog.revision_contract as contract
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1457,7 +1457,7 @@ def test_save_observer_timeout_is_atomic_and_reconnects_to_committed_content(
         stored = session.get(FleetProfile, before.id)
         assert stored is not None
         assert stored.revision == before.revision + (not projection_fails)
-        assert service._definition(stored) == (
+        assert _definition(stored) == (
             before.definition
             if projection_fails
             else FleetProfileDefinition.model_validate(
@@ -1480,8 +1480,6 @@ def test_profile_read_observes_distinct_content_once(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     _seed(sessions)
-
-    from vonk_control.catalog import revision_contract as contract
 
     selectors = ["vonk-forge/synthetic-tiny-build"]
     with sessions() as session:
@@ -1545,7 +1543,6 @@ def test_profile_read_observes_distinct_content_once(
         return parser(raw)
 
     monkeypatch.setattr(contract, "read_recipe", parsed)
-    from vonk_control.fleet_profiles import read_observation as observation
 
     submissions = []
     submit = observation._POOL.submit
@@ -1637,7 +1634,7 @@ def test_profile_list_skips_cache_check_and_single_read_observes(
     assert read.cache_summary.unknown == 0
 
 
-def _add_recipe(sessions: sessionmaker, slug: str) -> str:
+def _add_recipe(sessions: sessionmaker[Session], slug: str) -> str:
     """Publish another active recipe revision; returns its selector."""
     with sessions.begin() as session:
         base = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
@@ -1822,10 +1819,6 @@ def test_profile_storage_wait_is_bounded_and_recovers(
         if endpoint == "preview":
             return service.preview(saved.id)
         return service.read_number(1)
-
-    from vonk_control.fleet_profiles import read_observation as profile_read_observation
-
-    from .pass_budget_clocks import completing_wait, expiring_wait
 
     # The request budget runs out while the receipt is stalled, never by load.
     monkeypatch.setattr(

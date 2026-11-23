@@ -8,10 +8,10 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 from sqlalchemy import select, update
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode
 from vonk_agent_protocol.state_machines import ReservationState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.inventory.items import runtime_value
 from vonk_control.inventory.repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
@@ -511,10 +511,14 @@ def test_build_reconnects_after_child_commit_before_parent_checkpoint(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_build)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(12):
             profiles.tick()
             planner.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     with sessions.begin() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.build.v1"))
         assert child is not None

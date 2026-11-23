@@ -21,6 +21,8 @@ from typing import IO, Any, Self, cast
 
 import httpx2
 
+from .control_client.errors import ControlTransportUnsupported
+
 _DNS_LOCK = threading.Lock()
 _DNS_PENDING: dict[tuple[object, ...], Future[Any]] = {}
 
@@ -142,8 +144,7 @@ class HTTPSResponse(io.BufferedIOBase):
             )
         except ImportError:
             # A proxy scheme whose package is missing: a typed error, not a
-            # traceback. Imported here to avoid an import cycle.
-            from .control_client.errors import ControlTransportUnsupported
+            # traceback.
 
             raise ControlTransportUnsupported from None
         data = request.data

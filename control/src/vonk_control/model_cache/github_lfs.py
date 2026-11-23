@@ -43,7 +43,7 @@ from vonk_agent_protocol.reason_codes.model_cache import ModelCacheCode
 
 from ..bounded_retry import bounded_attempts
 from ..operations.contract import AvailabilityRecoveryAction
-from .catalog_helpers import _datetime, _github_lfs_binding
+from .catalog_helpers import _datetime
 from .constants import (
     _GITHUB_HOST,
     _GITHUB_LFS_OBJECT_HOSTS,
@@ -67,6 +67,7 @@ from .provider_contracts import (
     _GitHubLfsObjectRef,
     _GitHubLfsOperation,
 )
+from .providers import _github_lfs_binding
 
 if TYPE_CHECKING:
     from .artifacts import ArtifactSpec

@@ -5,20 +5,23 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.telemetry import (
     EngineReading,
     GpuUnavailableReason,
     HostResourceSample,
     TelemetrySample,
 )
-from vonk_agent_protocol.wire_model import MAX_TELEMETRY_CAPACITY_BYTES
+from vonk_agent_protocol.wire_model import (
+    MAX_TELEMETRY_CAPACITY_BYTES,
+    canonical_message,
+)
 from vonk_control.fleet_projection.common import telemetry_point
 from vonk_control.model_primitives import Base
 from vonk_control.models.execution import RecipeRun
@@ -222,13 +225,10 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
         resource = session.scalar(select(NodeInventoryResourceSnapshot))
         assert resource is not None
         identifier = resource.id
+
     # Controller initialization selects warning mode for production writes;
     # this rejection assertion owns its strict scope instead of test order.
-    with (
-        write_guard_mode(strict=True),
-        pytest.raises(ValueError),
-        sessions.begin() as session,
-    ):
+    def expected_failure(session):
         resource = session.get(NodeInventoryResourceSnapshot, identifier)
         assert resource is not None
         resource.host_resources = HostResourceSample.model_construct(
@@ -237,6 +237,13 @@ def test_resource_store_rejects_invalid_measurement_without_partial_sample(
             disk_total_bytes=None,
             disk_free_bytes=None,
         )
+
+    with (
+        write_guard_mode(strict=True),
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
     assert repository.latest((NODE_A,))[NODE_A].memory_available_bytes == 64_000_000_000
 
 
@@ -472,7 +479,7 @@ def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     assert point.memory_total_bytes == recovered.memory_total_bytes
 
 
-def _vector() -> dict:
+def _vector() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
@@ -512,7 +519,7 @@ def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) ->
     } & set(served)
 
 
-def _vector_v2() -> dict:
+def _vector_v2() -> dict[str, Any]:
     return json.loads(
         (
             files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"

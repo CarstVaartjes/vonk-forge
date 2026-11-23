@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.distribution.filesystem import RecipeBuildObjectSource
 from vonk_control.distribution.model_cache import ModelCacheObjectSource

@@ -26,6 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import sessionmaker
 
 from tests.signed_recipe_release import signed_recipe_releases
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import (
     LifecycleState,
     WaitOwnerKind,
@@ -51,7 +52,12 @@ from vonk_control.models.operations import AgentOperation
 from vonk_control.operations.blockers import BlockingOperation, make_blocker
 from vonk_control.persisted_waits import read_wait, schedule_wait, write_wait
 from vonk_control.presence import ManagementAddressPolicy
+from vonk_control.recipe_operations.lifecycle_contract import (
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
+)
 from vonk_control.step_ca import StepCAUnavailable
+from vonk_control.stored.rows import read_row_column
 from vonk_control.wait_contract import WaitEvidence
 from vonk_control.wait_redrive import WAIT_MODELS, wait_sources
 from vonk_control.worker.assembly import assemble_production_worker
@@ -450,7 +456,7 @@ def test_owner_rotation_recovers_a_terminal_revocation_after_ca_outage(postgres_
     revoked = []
 
     class Authority(RevokingAuthority):
-        def revoke_node(self, serial, observed_at):
+        def revoke_node(self, serial, now):
             if not available[0]:
                 raise StepCAUnavailable("CA transport unavailable")
             revoked.append(serial)
@@ -599,12 +605,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
         )
     saved_result = None
     if missing_receipt:
-        from vonk_control.recipe_operations.lifecycle_contract import (
-            RecipeOperationProgressResult,
-            RecipeOperationResult,
-        )
-        from vonk_control.stored.json_values import read_row_column
-
         with sessions.begin() as session:
             parent = session.get(Job, started.id)
             assert parent is not None
@@ -618,8 +618,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
             ).model_dump(mode="json", exclude_none=True)
     now = RECIPE_NOW + timedelta(seconds=5)
     if superseded:
-        from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-
         with sessions.begin() as session:
             service._admit_workload_intent(
                 session,
@@ -654,9 +652,6 @@ def test_due_recipe_parent_uses_normal_phase_advancement_after_restart(
     assert backstop is not None
     backstop()
     if missing_receipt:
-        from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
-        from vonk_control.persisted_waits import read_wait
-
         with sessions.begin() as session:
             parent = session.get(Job, started.id)
             assert parent is not None

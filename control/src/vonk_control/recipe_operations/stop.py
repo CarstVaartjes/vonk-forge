@@ -13,9 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import Disposition
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
@@ -24,6 +23,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -36,9 +36,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_mapping
 from ..failure_classification import disposition
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..jobs.documents import RecipeStopParent, controller_recipe_document
 from ..logging import redact_text
 from ..models.execution import RecipeRun
@@ -47,7 +45,7 @@ from ..models.operations import AgentOperation
 from ..persisted_waits import schedule_wait
 from ..recipe_routes.shared import RecipeRouteError, route_publication_transaction
 from ..run_admission import RunAdmissionBusy
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import _STOP_WITHDRAWAL_ATTEMPTS
 from .errors import (
     RecipeArtifactJobCancellationPending,

@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_agent_protocol.state_machines import InstallationState, NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..jobs.documents import RecipeStartParent, RecipeStopParent
 from ..lifecycle.evidence import Residue
@@ -37,7 +37,7 @@ from ..recipe_operations.start_payloads import (
     validate_distributed_start_timeout_seconds,
 )
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import ClusterMappingState
 from ..strict_json import read_stored_model
 from .authority import (

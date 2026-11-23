@@ -10,6 +10,7 @@ import socket
 from pathlib import Path
 
 import uvicorn
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tests.fleet_profiles_support import _SwitchAdapter
@@ -22,7 +23,6 @@ from vonk_control.jobs.queue import JobService
 
 def _app(trace_path: Path):
     database_url = os.environ["VONK_TEST_DATABASE_URL"]
-    from sqlalchemy import create_engine
 
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)

@@ -10,23 +10,24 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import (
     InvalidRequestReason,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.state_machines import RouteState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     set_admission_timeout,
 )
-from ..fleet_profiles.stop_authority import (
+from ..fleet_profiles.persistence import _persisted_profile_progress
+from ..fleet_profiles.stop_authority import validate_profile_stop_owner
+from ..fleet_profiles.stop_contract import (
     ProfileStopAuthorityError,
     ProfileStopOwnerBinding,
-    validate_profile_stop_owner,
 )
 from ..jobs.documents import (
     RecipeStopParent,
@@ -38,7 +39,12 @@ from ..logging import redact_text
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.fleet import FleetProfileApplication
 from ..models.jobs import Job
-from ..stored.json_values import read_row_column
+from ..run_switch_contract.operations import RunSwitchOperationResult
+from ..run_switch_operations.observation_helpers import (
+    _phase_request_key,
+    _stop_child_request_key,
+)
+from ..stored.rows import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .impact_plans import (
     StopPlan,
@@ -61,12 +67,6 @@ class StopAcceptanceMixin:
         ordinal: int | None,
     ) -> ProfileStopOwnerBinding:
         service = typing_cast("RecipeOperationService", self)
-        from ..fleet_profiles.persistence import _persisted_profile_progress
-        from ..run_switch_contract.operations import RunSwitchOperationResult
-        from ..run_switch_operations.observation_helpers import (
-            _phase_request_key,
-            _stop_child_request_key,
-        )
 
         application = session.get(FleetProfileApplication, profile_application_id)
         if application is None or application.current_step is None or ordinal is None:

@@ -29,13 +29,15 @@ from ..fleet_profile_contract.endpoints import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models.fleet import FleetProfile, FleetProfileApplication, FleetProfileSelection
-from ..recipe_operations.rank_authority import _run_is_one_shot
+from ..recipe_operations.observation_helpers import _run_is_one_shot
 from ..run_route_name import carries_alias
 from ..strict_json import stored_document_detail
+from .assignment_assessment import _assignment_state
 from .contracts import (
     FleetProfileConflict,
 )
 from .persistence import (
+    _intended_profile,
     _persisted_profile_progress,
     _residue_detail,
 )
@@ -120,7 +122,7 @@ class FleetProfileService:
             )
         issue_detail: str | None = None
         try:
-            intended = self._intended_profile(application, session=session)
+            intended = _intended_profile(application, session=session)
         except (FleetProfileConflict, ValidationError) as error:
             cause = error.__cause__
             issue_detail = stored_document_detail(error)
@@ -167,7 +169,7 @@ class FleetProfileService:
                 state = EndpointState.UNAVAILABLE
                 run_id = None
             else:
-                current = self._assignment_state(session, assignment)
+                current = _assignment_state(session, assignment)
                 run = current.run
                 if run is not None and _run_is_one_shot(session, run):
                     # A job member never has an endpoint: it serves by holding

@@ -6,7 +6,7 @@ import io
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from threading import Barrier, local
+from threading import local
 from typing import cast
 from uuid import uuid4
 
@@ -15,7 +15,7 @@ from sqlalchemy import event, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_forge_contracts import document_sha256
 
-from vonk_agent_protocol.contracts import AgentOperation
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.fleet import DistributionCode
 from vonk_agent_protocol.state_machines import (
@@ -47,6 +47,7 @@ from vonk_control.source_bundles import (
 )
 
 from .artifact_jobs_support import _configure_artifact_recipe
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import installed_recipe, setup_services
 from .test_catalog_entities import NOW, _model, _recipe
 from .test_distribution import _assignment
@@ -55,7 +56,7 @@ from .test_distribution import _assignment
 @contextmanager
 def simultaneous_insert(engine, table: str):
     """Both producers reach their first insert before either can commit."""
-    barrier = Barrier(2)
+    barrier = Rendezvous(2, timeout=10)
     producer = local()
 
     def before(_connection, _cursor, statement, _parameters, _context, _many):
@@ -63,7 +64,7 @@ def simultaneous_insert(engine, table: str):
             producer, "started", False
         ):
             producer.started = True
-            barrier.wait(timeout=10)
+            barrier.wait()
 
     event.listen(engine, "before_cursor_execute", before)
     try:
@@ -143,10 +144,10 @@ def test_concurrent_activation_rolls_back_losing_run_and_replays(
     )
     plan = operations.preview_run(installation.owner_id, "image-job")
     request_id = str(uuid4())
-    start = Barrier(2)
+    start = Rendezvous(2, timeout=10)
 
     def activate(_index):
-        start.wait(timeout=10)
+        start.wait()
         return operations.activate_job_run(
             plan,
             plan_digest=plan.plan_digest,

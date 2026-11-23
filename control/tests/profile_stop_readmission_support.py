@@ -6,8 +6,8 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.inventory.items import inventory_items, runtime_value
 from vonk_control.inventory.repository import (

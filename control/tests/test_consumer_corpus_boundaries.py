@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -24,17 +25,15 @@ from cluster_profiles.generated_control.client import AuthenticatedClient
 from cluster_profiles.generated_control.models.job_detail_response import (
     JobDetailResponse as GeneratedJobDetailResponse,
 )
+from vonk_agent_protocol.agent_operations import AgentFailureResult, AgentOperation
 from vonk_agent_protocol.contracts import (
     AgentClaim,
     AgentDirective,
-    AgentFailureResult,
-    AgentOperation,
     AgentProgress,
     AgentResult,
-    canonical_message,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
-from vonk_agent_protocol.wire_model import OperationProgress
+from vonk_agent_protocol.wire_model import OperationProgress, canonical_message
 from vonk_control.agent_jobs.stored import column_message
 from vonk_control.failure_evidence import safe_text
 from vonk_control.models.operations import AgentOperationAttempt
@@ -143,7 +142,7 @@ def job_diagnostics(job: JobDetailResponse) -> FailureDiagnostics:
     return failure.diagnostics
 
 
-def api_with_diagnostic(leaf: dict):
+def api_with_diagnostic(leaf: dict[str, Any]):
     # Only the observation source is injected; production create_app, projection,
     # authentication, response serialization, generated HTTP and CLI all execute.
     jobs = Jobs()
@@ -312,7 +311,7 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, *_args):
+        def log_message(self, format: str, *_args: object) -> None:
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

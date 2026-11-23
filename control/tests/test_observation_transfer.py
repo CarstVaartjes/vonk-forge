@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 from cluster_profiles.control_client.errors import ControlClientError
 from cluster_profiles.control_client.schema import source_schema_validator
 from cluster_profiles.control_client.transfers import ControlClient
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.api import routes_platform as api
 from vonk_control.api.application import create_app
 from vonk_control.auth import Actor, TokenCodec
@@ -206,8 +206,12 @@ def test_capture_is_frozen_before_first_network_suspension(tmp_path):
 
     async def collect() -> bytes:
         pieces: list[bytes] = []
-        async for part in response.body_iterator:
-            pieces.append(part.encode() if isinstance(part, str) else bytes(part))
+        pieces.extend(
+            [
+                part.encode() if isinstance(part, str) else bytes(part)
+                async for part in response.body_iterator
+            ]
+        )
         return b"".join(pieces)
 
     peer = Response(

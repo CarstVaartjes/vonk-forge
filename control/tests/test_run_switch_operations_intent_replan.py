@@ -463,7 +463,6 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
             assert node is not None
             node.state = active_state
             node.revoked_at = None
-        from .non_blocking import assert_ended_without_blocking
 
         def cause(receipt):
             assert receipt.status_reason

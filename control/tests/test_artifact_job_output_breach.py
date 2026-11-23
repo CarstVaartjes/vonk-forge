@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 
@@ -49,7 +50,7 @@ PNG = "image/png"
 JSON = "application/json"
 
 
-def _two_slots(document: dict) -> None:
+def _two_slots(document: dict[str, Any]) -> None:
     """An image slot (1 to 4 files, 1500 bytes) and an optional metadata slot,
     under a 2000-byte contract: every rule can be the first one broken."""
 

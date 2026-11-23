@@ -8,35 +8,45 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.agent_words import FailureStage
-from vonk_agent_protocol.contracts import (
+from vonk_agent_protocol.agent_operations import (
     AgentFailureKind,
     AgentFailureResult,
     AgentOperation,
+    AgentUpgradeResult,
+    ArtifactDistributionResult,
+)
+from vonk_agent_protocol.agent_words import FailureStage
+from vonk_agent_protocol.contracts import (
     AgentResult,
     AgentResultPayload,
     AgentUpgradePayload,
-    AgentUpgradeResult,
-    ArtifactDistributionResult,
-    canonical_message,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.lifecycle_vocabulary import AgentResultState, LifecycleState
 from vonk_agent_protocol.package_upgrade import PackageActivationPhase
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from .. import agent_operation_states as aos
-from ..agent_operation_facts import aware, job_output_retention_expiry
+from ..agent_operation_facts import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    aware,
+    job_output_retention_expiry,
+)
 from ..agent_outcome import agent_outcome
+from ..agent_upgrades.dispatch import DispatchMixin
+from ..agent_upgrades.stored import _stored_package
+from ..cancelled_runtime import cancellation_stop_current
 from ..inventory.items import runtime_value
+from ..jobs.documents import DistributionJobPayload
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.operations import AgentOperation as StoredOperation
 from ..models.operations import AgentOperationAttempt
 from ..package_activation import matches_receipt
-from .contracts import _ENDED_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
+from .contracts import _ENDED_PARENT_STATES
 from .stored import column_field, column_value
 
 if TYPE_CHECKING:
@@ -123,8 +133,6 @@ def adopt_observation_receipt(
     state: AgentResultState = AgentResultState.SUCCEEDED,
 ) -> bool:
     """One decision for live ingress and worker replay under the queue's locks."""
-    from ..cancelled_runtime import cancellation_stop_current
-    from ..jobs.documents import DistributionJobPayload
 
     if (
         state != AgentResultState.SUCCEEDED
@@ -254,8 +262,6 @@ def _upgrade_receipt_current(
 ) -> bool:
     # Use the upgrade owner's exact contact decision, not a second success
     # classifier. Observation itself never records contact or renews the fence.
-    from ..agent_upgrades.dispatch import DispatchMixin
-    from ..agent_upgrades.stored import _stored_package
 
     if isinstance(receipt, AgentUpgradeResult):
         package = _stored_package(parent)

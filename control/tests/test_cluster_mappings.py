@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.cluster_mappings import (
     ClusterMappingError,
     ClusterMappingService,
@@ -105,7 +105,7 @@ def _canonical_catalog_documents(
 
 
 def _seed_canonical_catalog(
-    sessions: sessionmaker, now: datetime, *, options: bool = False
+    sessions: sessionmaker[Session], now: datetime, *, options: bool = False
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(options=options)
     model_digest = document_sha256(model.model_dump(mode="json"))
@@ -197,7 +197,9 @@ def _seed_canonical_catalog(
                 ),
             ]
         )
-        return session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert revision is not None
+        return revision
 
 
 def setup(tmp_path: Path, *, options: bool = False):
@@ -339,10 +341,8 @@ def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(
     mapping_id = service.materialize(
         service.preview(revision.id, node_ids, {}, "admin"), actor="admin", now=now
     )
-    with (
-        pytest.raises(ValueError),
-        sessions.begin() as session,
-    ):
+
+    def expected_failure(session):
         node = session.scalar(
             select(ClusterMappingNode).where(
                 ClusterMappingNode.mapping_id == mapping_id
@@ -350,6 +350,12 @@ def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(
         )
         assert node is not None
         node.role = "tampered"
+
+    with (
+        pytest.raises(ValueError),
+        sessions.begin() as session,
+    ):
+        expected_failure(session)
     with sessions() as session:
         nodes = tuple(
             session.scalars(

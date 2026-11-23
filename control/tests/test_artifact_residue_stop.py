@@ -9,7 +9,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select, text
 
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
@@ -24,6 +24,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeUnknown
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
@@ -45,6 +46,12 @@ from .test_artifact_job_recovery import _issued_job
 
 @pytest.mark.parametrize("damaged_evidence", [False, True, "omitted"])
 def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
+    tmp_path, damaged_evidence
+):
+    retain_run_claims_until_exact_stop_receipt(tmp_path, damaged_evidence)
+
+
+def retain_run_claims_until_exact_stop_receipt(
     tmp_path,
     damaged_evidence,
     grant_observer: Callable[[SignedHostHelperGrant, datetime], None] | None = None,

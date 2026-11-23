@@ -12,9 +12,9 @@ from sqlalchemy import Engine, Table, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.jobs.documents import (
     RecipeJobActivateParent,
     RecipeStartParent,
@@ -30,7 +30,7 @@ from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWa
 from vonk_control.run_switch_operations.planning_helpers import _aware
 from vonk_control.run_switch_operations.result_helpers import _read_progress
 from vonk_control.run_switch_operations.results import _persisted_result
-from vonk_control.stored.json_values import read_row_column
+from vonk_control.stored.rows import read_row_column
 
 from .recipe_operations_support import NOW, setup_services
 from .run_switch_operations_support import (
@@ -303,10 +303,13 @@ def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
         session.add(_job_row(child_id, "running"))
     assert woken == []
 
-    with pytest.raises(RuntimeError), sessions.begin() as session:
+    def expected_failure(session):
         _get(session, Job, child_id).state = "failed"
         session.flush()
         raise RuntimeError("rolled back")
+
+    with pytest.raises(RuntimeError), sessions.begin() as session:
+        expected_failure(session)
     assert woken == []  # a rolled-back end wakes nobody
 
     with sessions.begin() as session:

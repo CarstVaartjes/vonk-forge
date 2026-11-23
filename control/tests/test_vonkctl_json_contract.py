@@ -13,6 +13,7 @@ import re
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
+from typing import Any
 
 import jsonschema
 import pytest
@@ -86,7 +87,7 @@ def _control_client(api: TestClient, tmp_path: Path, token: str) -> ControlClien
 
 def _published(
     client: ControlClient, capsys, kinds_seen: set[DocumentKind], *argv: str
-) -> dict:
+) -> dict[str, Any]:
     """Run a command, return its document after proving it against its schema."""
 
     status = cli.main(("--json", "--no-input", *argv), control_client=client)
@@ -99,7 +100,7 @@ def _published(
     return document
 
 
-def _prove(kind: DocumentKind, document: dict, printed: str) -> None:
+def _prove(kind: DocumentKind, document: dict[str, Any], printed: str) -> None:
     """The printed document satisfies its published schema and its strict model."""
 
     assert document["schema_version"] == schema_version(kind)
@@ -124,7 +125,7 @@ class _KeepsRunning:
         return document
 
 
-def _failed(client: object, capsys, *argv: str) -> dict:
+def _failed(client: object, capsys, *argv: str) -> dict[str, Any]:
     """Run a command that prints a failure or a followed-command observation."""
 
     status = cli.main(("--json", "--no-input", *argv), control_client=client)
@@ -140,14 +141,14 @@ def _failed(client: object, capsys, *argv: str) -> dict:
     return document
 
 
-def _kind_of(argv: tuple[str, ...], document: dict) -> DocumentKind:
+def _kind_of(argv: tuple[str, ...], document: dict[str, Any]) -> DocumentKind:
     args = cli._parser().parse_args(("--json", "--no-input", *argv))
     kind = document_kind(args, document, error=False)
     assert kind is not None, argv
     return kind
 
 
-def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
+def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict[str, Any]]:
     """A real Controller API with one saved empty profile, and a CLI client for it."""
 
     engine = create_engine(
@@ -362,7 +363,7 @@ def test_incompatible_schema_edits_are_detected() -> None:
 
 
 def test_a_ref_to_the_old_definition_plus_optional_fields_keeps_the_version() -> None:
-    def doc(target: str, extra: dict) -> dict:
+    def doc(target: str, extra: dict[str, Any]) -> dict[str, Any]:
         return {
             "properties": {"knob": {"$ref": f"#/$defs/{target}"}},
             "$defs": {

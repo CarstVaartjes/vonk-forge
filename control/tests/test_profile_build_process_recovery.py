@@ -15,14 +15,15 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.distribution_executor.preparation import (
     CompositeDistributionPhaseExecutor,
 )
@@ -52,12 +53,19 @@ from vonk_control.recipe_operations.operation_worker import RecipeOperationWorke
 from vonk_control.recipe_operations.service import RecipeOperationService
 from vonk_control.recipe_routes.service import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_contract.operations import (
+    RunSwitchOperationResult,
+)
+from vonk_control.run_switch_operations.image_receipts import (
+    effective_build_receipt,
+)
 from vonk_control.run_switch_operations.interfaces import PhaseExecution
 from vonk_control.run_switch_operations.result_helpers import _phase_result
 from vonk_control.run_switch_operations.service import RunSwitchOperationService
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.stored.rows import read_row_column
 
 from .recipe_operations_support import (
     ConcurrentPublisher,
@@ -88,10 +96,6 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
-                from vonk_control.run_switch_operations.image_receipts import (
-                    effective_build_receipt,
-                )
-
                 image = effective_build_receipt(plan, kwargs["progress"])
                 assert image is not None
                 return PhaseExecution(
@@ -186,7 +190,7 @@ def _complete_agent_work(sessions, lifecycle, root: Path) -> None:
             complete_started_recipe(sessions, lifecycle, job.id)
 
 
-def _worker_process(config: dict, crash: str) -> None:
+def _worker_process(config: dict[str, Any], crash: str) -> None:
     root = Path(config["root"])
     now = [datetime.fromisoformat(config["now"])]
     engine = create_engine(
@@ -312,6 +316,7 @@ def _worker_process(config: dict, crash: str) -> None:
             return
         # One synchronous worker serves parents and their children. A parent
         # that blocks instead of returning to the loop hits the process timeout.
+        application = None
         for _ in range(80):
             if config.get("refresh_inventory"):
                 # Physical readings are deterministic fixture evidence; the
@@ -373,10 +378,6 @@ def _worker_process(config: dict, crash: str) -> None:
                     )
                 )
                 return
-            from vonk_control.run_switch_contract.operations import (
-                RunSwitchOperationResult,
-            )
-            from vonk_control.stored.json_values import read_row_column
 
             # Follow persisted due times instead of ending the harness before
             # the accepted observation budget. No real-time sleep or new
@@ -398,6 +399,7 @@ def _worker_process(config: dict, crash: str) -> None:
                 (job.kind, job.state, job.status_reason, job.result)
                 for job in session.scalars(select(Job))
             ]
+        assert application is not None
         raise AssertionError(
             f"profile did not settle: {application.model_dump(mode='json')}; {pending}"
         )

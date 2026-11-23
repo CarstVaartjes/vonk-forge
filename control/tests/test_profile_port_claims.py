@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.state_machines import ReservationState, RunState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.applications import (
     FleetProfileApplicationProgress,
 )
@@ -315,10 +315,14 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
         return result
 
     monkeypatch.setattr(executor, "execute", crash_after_start)
-    with pytest.raises(SystemExit):
+
+    def expected_failure():
         for _ in range(16):
             planner.tick()
             profiles.tick()
+
+    with pytest.raises(SystemExit):
+        expected_failure()
     lifecycle = planner._lifecycle
     assert lifecycle is not None
     with sessions() as session:
@@ -467,6 +471,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
         )
         assert claim is not None
         claim_id = claim.id
+        operation = None
         for _ in range(12):
             planner.tick()
             profiles.tick()
@@ -476,6 +481,7 @@ def test_busy_runtime_handoff_retries_the_original_claim_after_releasing_sql(
                 and operation.result.retry_reason == "run.capacity_busy"
             ):
                 break
+        assert operation is not None
         assert operation.state == LifecycleState.RUNNING
         assert operation.result is not None
         assert operation.result.retry_reason == "run.capacity_busy"

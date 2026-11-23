@@ -6,9 +6,13 @@ import hashlib
 import json
 import os
 from datetime import UTC
+from email.message import Message
 from importlib.resources import files
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import URLError
+from urllib.parse import quote
 
 import httpx2
 import pytest
@@ -17,6 +21,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
+from cluster_profiles.cli import main
+from cluster_profiles.control_client.transfers import ControlClient
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.model_cache.api import (
@@ -60,10 +66,8 @@ def test_a_restarted_service_that_ticks_on_the_shared_connection_fails_the_net(
     """The shape of the flake: a second service on the fixture's sessions ticks."""
 
     sessions = _shared_connection_sessions()
-    with (
-        pytest.raises(AssertionError, match="use threaded_cache"),
-        _watch_services_on(sessions),
-    ):
+
+    def expected_failure():
         ModelCacheService(
             sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
         )
@@ -71,6 +75,12 @@ def test_a_restarted_service_that_ticks_on_the_shared_connection_fails_the_net(
             sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
         )
         restarted.tick()
+
+    with (
+        pytest.raises(AssertionError, match="use threaded_cache"),
+        _watch_services_on(sessions),
+    ):
+        expected_failure()
 
 
 def test_a_service_that_starts_no_background_work_passes_the_net(tmp_path: Path):
@@ -326,12 +336,14 @@ def test_model_removal_review_reports_exact_live_deletion_owner(
 
     # Scope observation may defer; follow its durable clock, rather than assuming
     # that one worker pass commits the deletion gates.
+    blocked = None
     for _attempt in range(10):
         advance_when_due()
         blocked = service.review_model_removal("a" * 64)
         if any(item.owner_id == accepted.id for item in blocked.active_work):
             break
 
+    assert blocked is not None
     assert any(item.owner_id == accepted.id for item in blocked.active_work)
     assert scope_attempts > 1
 
@@ -514,14 +526,6 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         observed = api.get(f"/api/model/requests/{key}")
         assert observed.status_code == 200, observed.text
         assert observed.json()["operation_id"] == accepted.id
-
-        from email.message import Message
-        from io import BytesIO
-        from urllib.error import URLError
-        from urllib.parse import quote
-
-        from cluster_profiles.cli import main
-        from cluster_profiles.control_client.transfers import ControlClient
 
         token = tmp_path / "recovery-token"
         token.write_text("fixture-token")

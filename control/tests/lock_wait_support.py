@@ -16,8 +16,8 @@ def backend_pid(session: Session) -> int:
     return pid
 
 
-def lock_waits_behind(
-    sessions: sessionmaker[Session], holder_pid: int, work: Future
+def lock_waits_behind[T](
+    sessions: sessionmaker[Session], holder_pid: int, work: Future[T]
 ) -> set[tuple[object, ...]]:
     """The lock requests seen queued behind ``holder_pid`` until ``work`` ends.
 

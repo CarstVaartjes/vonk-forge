@@ -33,7 +33,7 @@ from ..model_cache.contract import (
 from ..models.cache import ModelCacheSet, RecipeLibrarySyncRun
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..stored.states import CatalogRevisionState, LibrarySyncRunState
 from .common import (
     DocumentText,

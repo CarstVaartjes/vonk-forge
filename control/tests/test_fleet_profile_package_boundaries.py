@@ -44,15 +44,15 @@ def test_profile_words_are_consumed_from_the_generated_contract_vocabulary() -> 
             or (isinstance(node, ast.AnnAssign) and node.value is not None)
             for inner in ast.walk(node)
         }
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and node.value in words
-                and id(node) not in keys
-                and id(node) not in typed
-            ):
-                violations.append((path.name, node.lineno, node.value))
+        violations.extend(
+            (path.name, node.lineno, node.value)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in words
+            and id(node) not in keys
+            and id(node) not in typed
+        )
     assert not violations, f"use the canonical profile enum: {violations}"
 
 

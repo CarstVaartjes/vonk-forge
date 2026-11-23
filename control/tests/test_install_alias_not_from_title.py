@@ -7,7 +7,7 @@ from vonk_control.fleet_profile_contract.definitions import (
     FleetProfileAssignment,
     FleetProfileNode,
 )
-from vonk_control.fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+from vonk_control.fleet_profiles.switch_children import _assignment_intent
 
 
 def _assignment(
@@ -33,7 +33,7 @@ def test_install_plan_alias_does_not_follow_the_recipe_title() -> None:
     ident = str(uuid4())
     before = _assignment("Old Title", DesiredAssignmentState.INSTALLED, None, ident)
     after = _assignment("Renamed Recipe", DesiredAssignmentState.INSTALLED, None, ident)
-    intent = RunSwitchFleetProfileAdapter._assignment_intent
+    intent = _assignment_intent
     assert intent(before) == intent(after) == ("install", ident)
 
 
@@ -42,7 +42,7 @@ def test_running_alias_is_the_stored_alias_whatever_the_title() -> None:
         running = _assignment(
             title, DesiredAssignmentState.RUNNING, "studio-chat", str(uuid4())
         )
-        assert RunSwitchFleetProfileAdapter._assignment_intent(running) == (
+        assert _assignment_intent(running) == (
             "switch",
             "studio-chat",
         )

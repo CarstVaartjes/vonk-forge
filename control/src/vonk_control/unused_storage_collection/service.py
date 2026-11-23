@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from ..inventory.repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models.execution import InstallationNode, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
+from ..persisted_waits import read_wait
 from ..runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from ..settings import (
     STORAGE_EVICTION_RESERVE_FLOOR_BYTES,
@@ -41,6 +42,7 @@ from .common import (
     _KEPT_WORDS,
     _LOGGER,
     SWEEP_BUDGET_SECONDS,
+    EvictionCapacity,
     ImageBlobReclaimer,
     InstallationRemoval,
     Swept,
@@ -51,7 +53,15 @@ from .common import (
     _kept_sentence,
     _model_objects,
 )
-from .evidence import _CollectorEvidence, _Evidence, _Item, _Outcome, _Round
+from .evidence import (
+    StorageItemKind,
+    _CollectorEvidence,
+    _DueRemovalTarget,
+    _Evidence,
+    _Item,
+    _Outcome,
+    _Round,
+)
 from .pressure import (
     _check_round,
     _nas_filesystems,
@@ -176,8 +186,6 @@ class UnusedStorageCollector:
         return bool(result.installations or result.images or result.models)
 
     def redrive_installation(self, installation_id: str) -> bool:
-        from ..persisted_waits import read_wait
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         with self._sessions() as session:
             row = session.get(RecipeInstallation, installation_id)
@@ -193,7 +201,6 @@ class UnusedStorageCollector:
         )
 
     def redrive_artifact(self, artifact_kind: str, digest: str) -> bool:
-        from .evidence import StorageItemKind, _DueRemovalTarget
 
         kinds = {
             "runtime-image": StorageItemKind.IMAGE,
@@ -555,3 +562,32 @@ class UnusedStorageCollector:
     _model_items = _model_items
     _remove_model_set = _remove_model_set
     _remove_model = _remove_model
+
+
+def spark_eviction_capacity(
+    session: Session,
+    node_id: str,
+    now: datetime,
+    superseded_applications: Collection[str] = (),
+) -> EvictionCapacity:
+    """What unused installations on a Spark could free, read-only, and what stays.
+
+    A review asks this to plan the eviction a load needs instead of refusing it:
+    the installations the collector can remove (no saved profile points to them
+    first, then pointed ones, least recently used first) and a sentence naming
+    what it must keep, so a refusal names what blocks. It registers no demand and
+    removes nothing. The loads the reviewed one supersedes keep nothing: they
+    end when it is accepted, before it waits for the eviction.
+    """
+
+    kept_bytes: Counter[str] = Counter()
+    items = UnusedStorageCollector._spark_items(
+        session,
+        node_id,
+        _Evidence.read(session, now, superseded_applications),
+        Counter(),
+        kept_bytes,
+    )
+    return EvictionCapacity(
+        sum(item.freeable for item in items), _kept_sentence(kept_bytes), tuple(items)
+    )

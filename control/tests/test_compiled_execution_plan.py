@@ -24,7 +24,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
@@ -469,7 +469,7 @@ def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
 
 @pytest.mark.parametrize("port", [None, 0, 65536, "9000"])
 def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> None:
-    with pytest.raises((CompiledExecutionPlanError, ValidationError)):
+    def expected_failure():
         payload = _launch(
             _compile(),
             _spec(),
@@ -487,6 +487,9 @@ def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> 
             },
         )
         validate_compiled_launch_payload(payload)
+
+    with pytest.raises((CompiledExecutionPlanError, ValidationError)):
+        expected_failure()
 
 
 def test_compiled_launch_projection_requires_explicit_placement_fields() -> None:

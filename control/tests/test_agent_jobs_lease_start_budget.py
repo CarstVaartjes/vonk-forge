@@ -11,10 +11,13 @@ from datetime import UTC, timedelta
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import (
+    AgentOperation as ProtocolAgentOperation,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.retirement import authorize_operator_resume_in_session
 from vonk_control.agent_operation_facts import START_STALL_WINDOW, job_start_deadline
@@ -144,7 +147,7 @@ def test_revoked_expired_or_node_mismatched_certificate_cannot_claim(service) ->
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
     with sessions.begin() as session:
-        session.get(AgentCertificate, "serial-a").revoked_at = clock.now  # type: ignore[union-attr]
+        session.get(AgentCertificate, "serial-a").revoked_at = clock.now
 
     assert claim_agent(jobs, NODE_A, "serial-a") is None
     assert claim_agent(jobs, NODE_A, "serial-b") is None
@@ -186,7 +189,7 @@ def test_sqlite_enqueue_rejects_terminal_parent(service, terminal_state: str) ->
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
     with sessions.begin() as session:
-        session.get(Job, parent_job.id).state = terminal_state  # type: ignore[union-attr]
+        session.get(Job, parent_job.id).state = terminal_state
 
     with pytest.raises(ValueError):
         jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -833,11 +836,14 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
         certificate.state = "revoked"
         certificate.revoked_at = clock.now
 
-    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+    def expected_failure():
         if agent_action == "heartbeat":
             jobs.heartbeat(claim, {"phase": "checking"}, 60)
         else:
             jobs.succeed(claim, {"healthy": True})
+
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+        expected_failure()
 
     with sessions() as session:
         node = session.get(AgentNode, NODE_A)

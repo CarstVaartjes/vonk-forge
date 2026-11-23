@@ -9,7 +9,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
 
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.contracts import AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentResult
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     LifecycleState,
@@ -17,6 +17,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import (
 )
 from vonk_agent_protocol.outcome import OutcomeDone
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.fleet_profile_contract.definitions import FleetProfileInput
 from vonk_control.fleet_profile_contract.switch_state import (
@@ -50,6 +51,7 @@ from .fleet_profiles_support import (
     _uuid,
 )
 from .node_contacts import contact_row
+from .profile_stop_readmission_support import start_on_released_gang
 from .recipe_operations_support import (
     _issue_exact_stop_grant,
     installed_recipe,
@@ -509,7 +511,6 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
 
     # The old physical gang is free even while the disjoint load stays pending.
     # Exercise normal admission and a fenced native Start on that exact gang.
-    from .profile_stop_readmission_support import start_on_released_gang
 
     fresh_run_id = start_on_released_gang(
         sessions,

@@ -10,12 +10,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 
+from vonk_agent_protocol.agent_operations import AgentOperation
 from vonk_agent_protocol.agent_words import (
     Disposition,
     ProfileChildPhase,
     ProfileEffectState,
 )
-from vonk_agent_protocol.contracts import AgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_control.run_switch_operations.results import _persisted_result
@@ -25,6 +25,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
+from ..distribution_executor.receipts import _ChildView
 from ..failure_classification import disposition, is_definite
 from ..fleet_profiles.capacity import (
     accepted_profile_runtime_image,
@@ -49,6 +50,7 @@ from ..persisted_waits import schedule_wait, wait_due
 from ..recipe_builds.cancellation import needs_container_build
 from ..recipe_builds.common import RecipeBuildAdmissionBusy
 from ..recipe_operations.interfaces import RecipeOperationView
+from ..run_switch_contract.journal import JournalRepairDisposition
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_contract.progress_view import (
@@ -57,8 +59,11 @@ from ..run_switch_contract.progress_view import (
     _complete_phase_progress,
     _merge_progress_evidence,
 )
+from ..run_switch_journal_repair.observation import (
+    try_repair_zero_transfer_journal,
+)
 from ..stall_window import stall_deadline
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
     _OBSERVING,
@@ -66,6 +71,7 @@ from .constants import (
     _TERMINAL_STATES,
     _is_artifact_phase,
 )
+from .contracts import ScopeIntentStatus
 from .endings_helpers import _reject_invalid_operation
 from .errors import (
     RunSwitchOperationConflict,
@@ -86,7 +92,13 @@ from .ownership import (
     _complete_cancellation,
     _lock_current_build_parent,
 )
-from .planning_helpers import _aware, _now, _run_switch_payload, _stored_job_plan
+from .planning_helpers import (
+    _aware,
+    _now,
+    _run_switch_payload,
+    _scope_intent_status,
+    _stored_job_plan,
+)
 from .provider import _ADAPTER
 from .result_helpers import (
     _bound_workload_intent,
@@ -109,11 +121,6 @@ class AdvanceMixin:
     def _advance(self, operation_id: str) -> bool:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
-        from ..distribution_executor.receipts import _ChildView
-        from ..run_switch_contract.journal import JournalRepairDisposition
-        from ..run_switch_journal_repair.observation import (
-            try_repair_zero_transfer_journal,
-        )
 
         repair = try_repair_zero_transfer_journal(service._sessions, operation_id, now)
         if repair != JournalRepairDisposition.NOT_APPLICABLE:
@@ -234,8 +241,8 @@ class AdvanceMixin:
                 )
                 job.result = _persisted_result(progress)
                 session.commit()
-            intent_status = service._scope_intent_status(session, job)
-            if intent_status == "invalid":
+            intent_status = _scope_intent_status(session, job)
+            if intent_status == ScopeIntentStatus.INVALID:
                 service._mark_failed(
                     job,
                     "run-switch workload authority or Spark scope is invalid",
@@ -244,13 +251,13 @@ class AdvanceMixin:
                 )
                 session.commit()
                 return True
-            if intent_status == "missing-target":
+            if intent_status == ScopeIntentStatus.MISSING_TARGET:
                 service._schedule_checkpoint_retry(
                     job, progress, RunSwitchCode.TARGET_NOT_ACTIVE, now
                 )
                 session.commit()
                 return True
-            if intent_status == "waiting":
+            if intent_status == ScopeIntentStatus.WAITING:
                 pending_due = job.next_action_at
                 if (
                     job.state in job_states.words(LifecycleState.OBSERVING)
@@ -277,7 +284,7 @@ class AdvanceMixin:
                 job.updated_at = now
                 session.commit()
                 return True
-            if intent_status == "superseded":
+            if intent_status == ScopeIntentStatus.SUPERSEDED:
                 _ADAPTER.cancelled(
                     job,
                     progress,

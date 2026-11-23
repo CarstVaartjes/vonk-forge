@@ -77,7 +77,7 @@ def _artifact_key(model: ModelDefinition) -> str:
     return str(projection["artifact_key"])
 
 
-def _legacy_model(model: dict) -> dict:
+def _legacy_model(model: dict[str, Any]) -> dict[str, Any]:
     """The Model document a 3.x library published: the facts inside it."""
     return {
         **copy.deepcopy(model),
@@ -89,9 +89,9 @@ def _legacy_model(model: dict) -> dict:
 
 def _store(
     session,
-    document: dict,
+    document: dict[str, Any],
     *,
-    projected: dict,
+    projected: dict[str, Any],
     artifact_key: str,
     execution_key: str = "2" * 64,
     source_bundle_sha256: str | None = None,
@@ -144,7 +144,9 @@ def _store(
     return revision.id
 
 
-def _legacy_projection(model: ModelDefinition, legacy: dict) -> dict:
+def _legacy_projection(
+    model: ModelDefinition, legacy: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "identity": legacy["identity"],
         "format": legacy["format"],
@@ -441,7 +443,9 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
         stale = copy.deepcopy(row.projected)
-        stale["build_options"]["layers"] = True  # a previous compiler's policy
+        build_options = stale["build_options"]
+        assert isinstance(build_options, dict)
+        build_options["layers"] = True  # a previous compiler's policy
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == row.id)
@@ -456,4 +460,6 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
         stored = read_catalog_projection(row)
         assert isinstance(stored, RecipeRevisionProjection)
         assert stored.api == api
-        assert row.projected["build_options"]["layers"] is False
+        build_options = row.projected["build_options"]
+        assert isinstance(build_options, dict)
+        assert build_options["layers"] is False

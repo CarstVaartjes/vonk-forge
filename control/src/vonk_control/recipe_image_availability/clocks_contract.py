@@ -21,7 +21,7 @@ from pydantic import (
     ValidationError,
 )
 
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.wire_model import canonical_message
 
 
 @dataclass(frozen=True)

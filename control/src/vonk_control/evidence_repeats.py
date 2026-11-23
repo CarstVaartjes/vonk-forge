@@ -10,8 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentFailureResult
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
+from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
 from vonk_agent_protocol.outcome import OutcomeUnknown
 
@@ -27,7 +28,7 @@ from .repeated_evidence_contract import (
     is_contact_subject,
 )
 from .settings import PROFILE_STALL_WINDOW_SECONDS
-from .stored.json_values import read_row_column
+from .stored.rows import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)

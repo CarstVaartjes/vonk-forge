@@ -102,7 +102,9 @@ class _Service(StopMixin):
         self._lookups += 1
         return self._replay if self._lookups > 1 else None
 
-    def _service_stop_pending(self, *_args):
+    def _service_stop_pending(
+        self, request_id, profile_target_node_ids, profile_application_id
+    ):
         return False
 
     def _stop_logical_job_run(self, *_args, **_kwargs):
@@ -111,7 +113,8 @@ class _Service(StopMixin):
     def _accept_service_stop(self, *args, **kwargs):
         return self._accept(*args, **kwargs)
 
-    def _check_service_stop(self, *_args):
+    # Never reached on these paths; a review here would fail the test.
+    def _check_service_stop(self, session, job):  # pyright: ignore[reportIncompatibleMethodOverride]
         return None
 
     def _dispatch_stop_after_withdrawal(self, *_args, **_kwargs):

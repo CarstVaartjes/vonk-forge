@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 from vonk_forge_contracts.recipe import RecipeRuntimeEnvironment, RecipeSetting
@@ -51,7 +52,7 @@ MODELS: dict[str, type[BaseModel]] = {
 }
 
 
-def diagnostic() -> dict:
+def diagnostic() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "collected_at": "2026-10-07T01:00:00+00:00",
@@ -126,7 +127,7 @@ def job_envelope(leaf: str) -> str:
     return json.dumps(document, separators=(",", ":")).replace('"__LEAF__"', leaf)
 
 
-def corpus() -> dict:
+def corpus() -> dict[str, Any]:
     cases = []
 
     def add(

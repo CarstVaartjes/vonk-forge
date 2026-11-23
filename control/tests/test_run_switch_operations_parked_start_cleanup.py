@@ -668,11 +668,11 @@ def test_scoped_cleanup_retries_when_uninstall_capacity_writer_is_busy(
         del args, kwargs
         raise RunAdmissionBusy("run capacity writer is busy")
 
-    lifecycle.uninstall = busy_once  # type: ignore[method-assign]
+    lifecycle.uninstall = busy_once
     try:
         assert service.tick() is True
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     parked = service.get(operation.operation_id)
     assert parked.state == "running"
@@ -720,11 +720,11 @@ def test_a_retryable_plan_blocker_is_named_not_hidden_as_capacity_busy(
         raise RunAdmissionBusy("blocked", code=blocker.code, blockers=(blocker,))
 
     original_uninstall = lifecycle.uninstall
-    lifecycle.uninstall = blocked  # type: ignore[method-assign]
+    lifecycle.uninstall = blocked
     try:
         assert service.tick() is True
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     parked = service.get(operation.operation_id)
     assert parked.result is not None
@@ -772,7 +772,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         assert view.next_attempt_at is not None
         now[0] = view.next_attempt_at + timedelta(seconds=1)
 
-    lifecycle.uninstall = busy  # type: ignore[method-assign]
+    lifecycle.uninstall = busy
     try:
         assert service.tick() is True
         view, current = result()
@@ -805,7 +805,7 @@ def test_capacity_backoff_and_checkpoint_retry_share_one_attempt_counter(
         assert current.retry_attempt == 2
         # Recovery is asserted through effects and ownership below.
     finally:
-        lifecycle.uninstall = original_uninstall  # type: ignore[method-assign]
+        lifecycle.uninstall = original_uninstall
 
     # Phase progress clears the shared counter.
     advance_to_due()

@@ -8,8 +8,9 @@ from typing import Literal
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentClaim, AgentResult, canonical_message
+from vonk_agent_protocol.contracts import AgentClaim, AgentResult
 from vonk_agent_protocol.recipe_operations import RecipeReconcilePayload
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.models.jobs import Job

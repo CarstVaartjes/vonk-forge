@@ -13,7 +13,6 @@ from typing import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_agent_protocol.reason_codes.admission import (
     AdmissionCode,
@@ -22,6 +21,8 @@ from vonk_agent_protocol.reason_codes.admission import (
 from vonk_agent_protocol.reason_codes.recipes import RecipeBuildCode, ReconcileCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.reason_codes.vocabulary import run_switch_code
+from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..categorized_errors import (
     InvalidValue,
@@ -31,6 +32,7 @@ from ..memory_reservations import (
     MEMORY_RESERVATION_KINDS,
     reviewed_run_memory_reservations,
 )
+from ..models.fleet import AgentNode
 from ..models.jobs import Job
 from ..models.telemetry import NodeInventorySnapshot
 from ..operations.blockers import SwapShortfallEvidence
@@ -52,13 +54,14 @@ from ..run_switch_contract.vocabulary import (
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .constants import (
     _CHANGE_EFFECTS_ADAPTER,
     _KNOBS_ADAPTER,
     _MEMORY_STOP_CONDITIONAL_REFUSALS,
     _SWAP_COMPONENT,
 )
+from .contracts import ScopeIntentStatus
 from .interfaces import ArtifactInspection
 
 #: The lock-contention word of every admission owner a phase can wait on.
@@ -403,3 +406,23 @@ def _inspection_unavailable(detail: str) -> ArtifactInspection:
             ),
         ),
     )
+
+
+def _scope_intent_status(session: Session, job: Job) -> ScopeIntentStatus:
+    """Distinguish malformed authority from a later authorized node head."""
+
+    parent = _run_switch_payload(job)
+    ordinal = parent.workload_intent_ordinal if parent is not None else None
+    if type(ordinal) is not int or ordinal < 1:
+        return ScopeIntentStatus.INVALID
+    nodes = session.scalars(select(AgentNode).where(AgentNode.node_id.in_(job.targets)))
+    current = list(nodes)
+    if any(node.revoked_at is not None for node in current):
+        return ScopeIntentStatus.INVALID
+    if len(current) != len(job.targets):
+        return ScopeIntentStatus.MISSING_TARGET
+    if any(node.state != NodeIdentityState.ACTIVE for node in current):
+        return ScopeIntentStatus.WAITING
+    if any(node.workload_intent_ordinal != ordinal for node in current):
+        return ScopeIntentStatus.SUPERSEDED
+    return ScopeIntentStatus.CURRENT

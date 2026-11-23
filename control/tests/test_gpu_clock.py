@@ -14,7 +14,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from cluster_profiles.cli_render.dispatch import render_payload
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.gpu_clock import (
     GPU_CLOCK_POLICY,
     GpuClockApplyState,
@@ -33,6 +32,7 @@ from vonk_agent_protocol.inventory import (
 from vonk_agent_protocol.reason_codes.profiles import ProjectionCode
 from vonk_agent_protocol.reason_codes.runs import RunSwitchCode
 from vonk_agent_protocol.telemetry import TelemetryRequest, TelemetrySample
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.fleet_profile_contract.definitions import FleetProfileDefinition
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.gpu.clock import gpu_clock_start_intent
@@ -48,6 +48,14 @@ from vonk_control.inventory.repository import (
 from vonk_control.model_primitives import Base
 from vonk_control.models.fleet import AgentNode
 from vonk_control.telemetry.samples import TelemetryRepository
+
+from .agent_api_support import (
+    NODE_A,
+    agent_headers,
+    make_agent_system,
+    telemetry_payload,
+)
+from .agent_api_support import agent_system as _agent_system
 
 NODE = "spk_" + "a" * 32
 
@@ -261,14 +269,6 @@ def test_start_always_binds_the_selected_clock_without_supported_levels(
         )
         assert gpu_clock_start_intent(session, NODE) == desired
 
-
-from .agent_api_support import (
-    NODE_A,
-    agent_headers,
-    make_agent_system,
-    telemetry_payload,
-)
-from .agent_api_support import agent_system as _agent_system
 
 agent_system = _agent_system
 

@@ -11,8 +11,7 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 from vonk_agent_protocol.lifecycle_vocabulary import InvalidRequestReason
 from vonk_agent_protocol.outcome import (
@@ -22,6 +21,7 @@ from vonk_agent_protocol.outcome import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_agent_protocol.state_machines import RunState
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -31,6 +31,7 @@ from ..admission_locking import (
     admission_wait_exhausted,
     node_admission_key,
 )
+from ..gpu.clock import gpu_clock_start_intent
 from ..lifecycle.evidence import (
     Residue,
 )
@@ -48,7 +49,7 @@ from ..run_admission import (
 from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from .errors import (
     RecipeRequestInvalid,
     RecipeRetryLater,
@@ -143,7 +144,7 @@ class StartMixin:
                         ),
                         AgentNodeContact.management_address.is_not(None),
                     )
-                )
+                ).all()
             )
             absent = sorted({node.node_id for node in plan.nodes} - set(presences))
             if absent:
@@ -277,8 +278,6 @@ class StartMixin:
                     canonical_message(payload)
                 )
                 if profile_application_id is not None or gpu_clock is not None:
-                    from ..gpu.clock import gpu_clock_start_intent
-
                     try:
                         desired_clock = gpu_clock_start_intent(session, node_id)
                     except ValueError as error:

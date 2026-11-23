@@ -26,7 +26,8 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.catalog import revision_contract as contract
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
-from vonk_control.stored.json_values import install_write_guard, write_guard_mode
+from vonk_control.stored.json_values import write_guard_mode
+from vonk_control.stored.rows import install_write_guard
 
 from . import metadata_type_snapshot
 from .agent_api_support import (  # noqa: F401 - pytest fixtures
@@ -279,7 +280,7 @@ class _PostgresServer:
             return
         owner = _session_owner_pid()
         state = _session_state(owner)
-        with open(state.with_suffix(".lock"), "a") as lock:
+        with state.with_suffix(".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             _stop_stale_servers()
             port = cls._running_port(state)

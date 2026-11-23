@@ -14,17 +14,17 @@ from fastapi.exception_handlers import (
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.error_response import (
     RequestValidationIssue,
     RequestValidationProblem,
 )
 from vonk_agent_protocol.reason_codes.catalog import CatalogCode
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..capabilities import CapabilityUnavailableError
 from ..catalog.api import CatalogProblem
 from ..http_errors import TemporaryHTTPError
-from ..library.api import SelectorAmbiguityHTTPError
+from ..library_projection.common import SelectorAmbiguityHTTPError
 from ..logging import redact_text
 from .common import (
     _LOGIN_PATH,

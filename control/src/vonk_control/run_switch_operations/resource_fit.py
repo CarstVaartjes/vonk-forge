@@ -70,7 +70,7 @@ from ..run_switch_contract.requests import (
     SparkGroup,
 )
 from ..spark_disk import spark_free_bytes
-from ..unused_storage_collection.common import spark_eviction_capacity
+from ..unused_storage_collection.service import spark_eviction_capacity
 from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,

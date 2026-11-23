@@ -8,24 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
 
-from vonk_agent_protocol.build_import import (
-    RecipeBuildCleanupRequest,
-    RecipeBuildRequest,
-)
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-from vonk_agent_protocol.recipe_operations import (
-    RecipeInstallPayload,
-    RecipeReconcilePayload,
-    RecipeStartPayload,
-    RecipeStopPayload,
-    RecipeUninstallPayload,
-)
+from vonk_agent_protocol.wire_model import canonical_message
 
-from ..fleet_profiles.stop_authority import (
-    ProfileJobRunStopJob,
-)
+from ..fleet_profiles.stop_contract import ProfileJobRunStopJob
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Damaged,
@@ -37,7 +22,7 @@ from ..models.catalog import CatalogDocumentRevision
 from ..models.execution import RecipeInstallation, RecipeRun
 from ..models.jobs import Job
 from ..models.mapping import ClusterMapping, ClusterMappingNode
-from ..stored.json_values import read_row_column
+from ..stored.rows import read_row_column
 from ..strict_json import read_stored_model
 from .execution_contract import (
     StoredInstallationPlan,
@@ -45,7 +30,6 @@ from .execution_contract import (
     parse_stored_installation_plan,
     parse_stored_run_plan,
 )
-from .lifecycle_contract import JOB_ACTIVATION
 from .observation_helpers import _active_recipe_revision
 from .progress import (
     _catalog_recipe,
@@ -231,39 +215,6 @@ def _profile_jobrun_parent(job: Job) -> ProfileJobRunStopJob | Residue:
     )
 
 
-def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
-    """Whether the run only hosts one-shot jobs (no service container).
-
-    The stored plan says so; when it does not parse, the evidence is the
-    activation operation that created the run, which nothing else produces.
-    """
-
-    def read() -> bool:
-        return (
-            parse_stored_run_plan(read_row_column(run, "plan")).execution_mode
-            == "one-shot-jobs"
-        )
-
-    def rebuild() -> bool:
-        return (
-            session.scalar(
-                select(Job.id)
-                .where(
-                    Job.kind == JOB_ACTIVATION,
-                    Job.owner_kind == "run",
-                    Job.owner_id == run.id,
-                )
-                .limit(1)
-            )
-            is not None
-        )
-
-    loaded = read_or_rebuild(
-        kind="recipe.run-plan", subject=run.id, read=read, rebuild=rebuild
-    )
-    return loaded is True
-
-
 def _run_observes_per_generation(run: RecipeRun) -> bool:
     """Whether the run's observations are tracked per generation.
 
@@ -281,15 +232,3 @@ def _run_observes_per_generation(run: RecipeRun) -> bool:
 
     loaded = read_or_rebuild(kind="recipe.run-plan", subject=run.id, read=read)
     return True if isinstance(loaded, Residue) else loaded
-
-
-_RECIPE_WIRE_PAYLOAD_MODELS = {
-    WireAgentOperation.RECIPE_BUILD.value: RecipeBuildRequest,
-    WireAgentOperation.RECIPE_JOB_RUN.value: RecipeJobRunRequest,
-    WireAgentOperation.RECIPE_BUILD_CLEANUP.value: RecipeBuildCleanupRequest,
-    WireAgentOperation.RECIPE_INSTALL.value: RecipeInstallPayload,
-    WireAgentOperation.RECIPE_RECONCILE.value: RecipeReconcilePayload,
-    WireAgentOperation.RECIPE_START.value: RecipeStartPayload,
-    WireAgentOperation.RECIPE_STOP.value: RecipeStopPayload,
-    WireAgentOperation.RECIPE_UNINSTALL.value: RecipeUninstallPayload,
-}

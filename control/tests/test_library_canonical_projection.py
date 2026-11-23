@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import runpy
 import subprocess
+import sys
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +19,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, event, select, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -26,15 +29,18 @@ from vonk_forge_contracts import (
     read_recipe_display,
 )
 
+import tests
 from tests.recipe_library_source import recipe_library_root
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog.api import _managed_sync
 from vonk_control.catalog.entities import CatalogEntityService
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
 from vonk_control.catalog.service import CatalogService
+from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from vonk_control.library.api import install_library_routes
 from vonk_control.library.contract import (
@@ -57,8 +63,10 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode
 from vonk_control.models.mapping import ClusterMapping
+from vonk_control.operator_acceptance import ControllerAPIRoute
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
-from vonk_control.strict_json import ControllerAPIRoute, serialize_json_value
+from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.strict_json import serialize_json_value
 
 from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword
 from .runtime_image_fixtures import place_test_image
@@ -97,7 +105,7 @@ def _model_cache_set(
 
 
 def _insert_canonical_rows(
-    sessions: sessionmaker,
+    sessions: sessionmaker[Session],
     *,
     kind: str,
     template: dict[str, object],
@@ -1536,21 +1544,6 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
         "VONK_SYNTHETIC_CANARY_INDEX",
         "tests/fixtures/canonical-synthetic-canary/index.json",
     )
-    import importlib.util
-    import sys
-    from importlib import import_module
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    import tests
-    from vonk_control.auth import TokenCodec
-    from vonk_control.catalog.api import _managed_sync
-    from vonk_control.catalog.service import CatalogService
-    from vonk_control.catalog.sync import ManagedRecipeCatalogSyncService
-    from vonk_control.library_projection.service import LibraryProjection
-    from vonk_control.model_primitives import Base
-    from vonk_control.source_bundles import SourceBundleStore
 
     # Keep the Controller test package and its pass clocks while loading the
     # shared acceptance consumer; restore package search paths after this test.

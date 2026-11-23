@@ -12,7 +12,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from importlib.resources import files
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -51,7 +51,7 @@ NOW = datetime(2026, 10, 30, tzinfo=UTC)
 PUBLISHER = "vonk-forge"
 
 
-def _example(name: str) -> dict:
+def _example(name: str) -> dict[str, Any]:
     return json.loads(
         files("vonk_forge_contracts").joinpath("examples", name).read_text("utf-8")
     )

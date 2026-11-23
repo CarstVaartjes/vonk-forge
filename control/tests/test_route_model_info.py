@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -79,18 +80,18 @@ EXAMPLES = files("vonk_forge_contracts").joinpath("examples")
 VECTORS = json.loads((FIXTURES / "vectors.json").read_text(encoding="utf-8"))
 
 
-def _document(name: str) -> dict:
+def _document(name: str) -> dict[str, Any]:
     return json.loads(EXAMPLES.joinpath(name).read_text(encoding="utf-8"))
 
 
-def _api(vector: dict) -> dict:
+def _api(vector: dict[str, Any]) -> dict[str, Any]:
     """The shipped recipe-api example, with the vector's patch over its base block."""
     document = _document(vector["api"])
     document["api"] = {**document["api"], **vector.get("api_patch", {})}
     return document
 
 
-def _built(vector: dict) -> LiteLlmModelInfo:
+def _built(vector: dict[str, Any]) -> LiteLlmModelInfo:
     return build_model_info(
         read_recipe(_document(vector["recipe"])),
         read_recipe_api(_api(vector)),
@@ -99,7 +100,9 @@ def _built(vector: dict) -> LiteLlmModelInfo:
 
 
 @pytest.mark.parametrize("vector", VECTORS, ids=lambda vector: vector["name"])
-def test_vector_builds_the_expected_model_info_and_entry(vector: dict) -> None:
+def test_vector_builds_the_expected_model_info_and_entry(
+    vector: dict[str, Any],
+) -> None:
     info = _built(vector)
     assert info.model_dump(mode="json", exclude_none=True) == vector["model_info"]
 
@@ -186,7 +189,7 @@ def test_max_tokens_is_the_output_cap() -> None:
         LiteLlmModelInfo.model_validate({**fields, "max_tokens": 5})
 
 
-def _vector(name: str) -> dict:
+def _vector(name: str) -> dict[str, Any]:
     return next(vector for vector in VECTORS if vector["name"] == name)
 
 
@@ -228,7 +231,7 @@ def test_the_speech_health_check_voice_is_the_first_voice() -> None:
     ],
     ids=["tokens", "output-tokens", "missing-block", "foreign-block", "voice", "mode"],
 )
-def test_the_mode_decides_which_audio_fields_apply(change: dict) -> None:
+def test_the_mode_decides_which_audio_fields_apply(change: dict[str, Any]) -> None:
     fields = _built(_vector("speech")).model_dump()
     with pytest.raises(ValidationError):
         LiteLlmModelInfo.model_validate({**fields, **change})
@@ -252,7 +255,7 @@ def _identity(info: LiteLlmModelInfo | None) -> RouteRunIdentity:
     )
 
 
-def _digest(document: dict) -> str:
+def _digest(document: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -336,7 +339,9 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
     assert publisher.served_model_info().routes == {"model": (run_id, info)}
 
 
-def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> None:
+def _store_api(
+    base, api_document: dict[str, Any] | None, *, corrupt: bool = False
+) -> None:
     """Record the facts beside the run's revision the way the catalog sync does."""
 
     with base.sessions.begin() as session:
@@ -360,19 +365,19 @@ def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> Non
         )
 
 
-def _source_build_api() -> dict:
+def _source_build_api() -> dict[str, Any]:
     api = _document("recipe-api-source-build.json")
     api["identity"]["slug"] = "qwen"
     return api
 
 
-def _source_build_api_with_output(tokens: int) -> dict:
+def _source_build_api_with_output(tokens: int) -> dict[str, Any]:
     api = _source_build_api()
     api["api"]["default_output_tokens"] = {"value": tokens}
     return api
 
 
-def _published_entries(root: Path) -> dict[str, dict]:
+def _published_entries(root: Path) -> dict[str, dict[str, Any]]:
     verified = verify_active_route_bundle(root)
     assert not isinstance(verified, UnknownError)
     assert verified.litellm is not None
@@ -596,7 +601,7 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
     # The current validator refuses these bytes; the earlier Controller's did not.
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(
@@ -691,7 +696,7 @@ def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
         json.dumps(earlier, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
-    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    runtime._validate_litellm = lambda _bytes: True
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(

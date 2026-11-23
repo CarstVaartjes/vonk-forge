@@ -9,8 +9,7 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from vonk_agent_protocol.contracts import AgentOperation as WireAgentOperation
-from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.agent_operations import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_agent_protocol.outcome import UnknownOutcomeError
 from vonk_agent_protocol.reason_codes.recipes import ReconcileCode
@@ -21,6 +20,7 @@ from vonk_agent_protocol.state_machines import (
     RouteState,
     RunState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 
 from ..admission_locking import (
     AdmissionLockBusy,

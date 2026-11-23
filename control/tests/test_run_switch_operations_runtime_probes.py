@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
-from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_agent_protocol.agent_operations import AgentOperation as OperationKind
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState, WaitReason
 from vonk_control.agent_jobs.waits import refresh_queue_waits
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter

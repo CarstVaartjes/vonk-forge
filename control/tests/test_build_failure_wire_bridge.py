@@ -12,19 +12,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from vonk_agent_protocol.agent_operations import AgentFailureKind, AgentFailureResult
 from vonk_agent_protocol.agent_words import FailureStage
 from vonk_agent_protocol.build_import import RecipeBuildRequest
-from vonk_agent_protocol.contracts import (
-    AgentFailureKind,
-    AgentFailureResult,
-    canonical_message,
-)
 from vonk_agent_protocol.lifecycle_vocabulary import (
     AgentResultState,
     FailureCode,
     LifecycleState,
 )
 from vonk_agent_protocol.outcome import OutcomeFailed, OutcomeUnknown
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.agent_jobs.service import AgentJobService
 from vonk_control.availability_production.production import (
     build_recipe_image_availability,
@@ -90,7 +87,7 @@ class _SourceBundleHandler(BaseHTTPRequestHandler):
         if server.body:
             self.wfile.write(server.body)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *_args: object) -> None:
         return
 
 

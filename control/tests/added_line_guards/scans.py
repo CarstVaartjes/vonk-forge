@@ -77,7 +77,6 @@ MODES = (
     "intent-ordinal",
     "savepoints",
     "durable-revocations",
-    "barriers",
     "sync-in-async",
     "git-free-tests",
     "loopback-bind",
@@ -1187,20 +1186,21 @@ def unknown_to_terminal_handlers(source: str) -> list[int]:
             name.endswith("Unknown") or name == "UnknownOutcomeError" for name in caught
         ):
             continue
-        for node in (n for stmt in handler.body for n in ast.walk(stmt)):
+        found.extend(
+            node.value.lineno if isinstance(node, ast.keyword) else node.lineno
+            for node in (n for stmt in handler.body for n in ast.walk(stmt))
             if (
                 isinstance(node, ast.Attribute)
                 and node.attr == "FAILED"
                 and ast.unparse(node.value).split(".")[-1] == "LifecycleState"
-            ) or (
+            )
+            or (
                 isinstance(node, ast.keyword)
                 and node.arg == "retryable"
                 and isinstance(node.value, ast.Constant)
                 and node.value.value is False
-            ):
-                found.append(
-                    node.value.lineno if isinstance(node, ast.keyword) else node.lineno
-                )
+            )
+        )
     return sorted(set(found))
 
 

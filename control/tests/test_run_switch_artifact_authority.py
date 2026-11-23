@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import event
 
-from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 from vonk_agent_protocol.reason_codes.catalog import LibraryAssessmentCode
 from vonk_agent_protocol.reason_codes.model_cache import ModelCacheBlockerCode
@@ -16,6 +15,7 @@ from vonk_agent_protocol.state_machines import (
     InstallationState,
     ReservationState,
 )
+from vonk_agent_protocol.wire_model import canonical_message
 from vonk_control.covered_installation_claims import (
     release_covered_installation_claims,
 )
