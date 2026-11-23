@@ -635,20 +635,13 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
     def hold_after_run_admission_key(
         _connection, _cursor, statement, parameters, _context, _many
     ):
-        thread_id = None
-        key = None
-        if "pg_try_advisory_xact_lock" in statement:
-            values = parameters if isinstance(parameters, dict) else {}
-            thread_id = threading.get_ident()
-            key = values.get("key")
-            observed_keys.append((thread_id, key))
-        assert thread_id is not None
-        if (
-            "pg_try_advisory_xact_lock" in statement
-            and key == expected_key
-            and run_thread_ids
-            and thread_id == run_thread_ids[0]
-        ):
+        if "pg_try_advisory_xact_lock" not in statement:
+            return
+        values = parameters if isinstance(parameters, dict) else {}
+        thread_id = threading.get_ident()
+        key = values.get("key")
+        observed_keys.append((thread_id, key))
+        if key == expected_key and run_thread_ids and thread_id == run_thread_ids[0]:
             run_key_acquired.set()
             assert release_run.wait(timeout=10), (
                 "test did not release the run admission"
