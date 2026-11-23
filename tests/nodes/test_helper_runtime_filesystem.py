@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shlex
 import shutil
@@ -102,10 +103,8 @@ else:
         shutil.rmtree(installation, ignore_errors=True)
         shutil.rmtree(protected, ignore_errors=True)
         for path in reversed(created):
-            try:
+            with contextlib.suppress(OSError):
                 path.rmdir()
-            except OSError:
-                pass
 
 
 if __name__ == "__main__":

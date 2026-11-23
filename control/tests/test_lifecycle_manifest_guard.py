@@ -20,9 +20,9 @@ from vonk_control.recipe_operations.persistence import PersistenceMixin
 
 def test_manifest_bound_kinds_are_the_granted_start_and_stop_kinds() -> None:
     kinds = HostRuntimeAuthorityService._ACTION_KINDS
-    assert _MANIFEST_BOUND_KINDS == (
+    assert (
         kinds[ContainerRuntimeAction.START] | kinds[ContainerRuntimeAction.STOP]
-    )
+    ) == _MANIFEST_BOUND_KINDS
 
 
 @pytest.mark.parametrize("kind", sorted(_MANIFEST_BOUND_KINDS))

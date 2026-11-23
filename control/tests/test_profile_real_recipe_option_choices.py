@@ -8,6 +8,7 @@ re-submits whatever it stored on every edit.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from typing import cast
 
@@ -106,12 +107,10 @@ def test_the_reviewed_service_alias_is_refused_naming_its_field(slug: str) -> No
     definition = {
         key: value for key, value in document.items() if key != "expected_revision"
     }
-    try:
+    with contextlib.suppress(ControlClientError):
         _profile_save(
             args, cast(ControllerClient, owner), definition, current_revision=3
         )
-    except ControlClientError:
-        pass
     assert owner.calls == []
     definition["assignments"][0]["assignment_name"] = alias.lower().replace(".", "-")
     accepted = _profile_save(

@@ -568,10 +568,7 @@ class ResolutionMixin:
                     ModelCacheCode.RECIPE_REVISION_MISSING,
                     "recipe has no active revision",
                 )
-            if exact is not None:
-                selection_pool = [exact]
-            else:
-                selection_pool = revisions
+            selection_pool = [exact] if exact is not None else revisions
 
             unreadable_candidates = False
 

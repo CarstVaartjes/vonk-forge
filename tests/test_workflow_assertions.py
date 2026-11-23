@@ -378,4 +378,4 @@ def test_pre_commit_added_line_paths_match_ci() -> None:
     assert spec
     hook = importlib.util.module_from_spec(spec)
     loader.exec_module(hook)
-    assert hook.ADDED_LINE_PATHS == match.group(1).split()
+    assert match.group(1).split() == hook.ADDED_LINE_PATHS

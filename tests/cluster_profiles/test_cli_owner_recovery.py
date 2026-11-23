@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from dataclasses import replace
 
@@ -175,10 +176,8 @@ def test_delivery_io_repairs_with_bounded_attempts_then_fresh_io_succeeds(tmp_pa
         raise OSError("storage unavailable")
 
     before = len(attempts)
-    try:
+    with contextlib.suppress(OSError):
         fleet_module._delivery_io(unavailable)
-    except OSError:
-        pass
     assert len(attempts) - before == 3
     fresh = tmp_path / "fresh.json"
     with fleet_module._delivery_io(lambda: PrivateOutput(fresh)) as output:

@@ -384,7 +384,7 @@ def test_a_stop_is_refused_only_at_a_real_edge(kind: str, edge: str) -> None:
 
 def test_every_runtime_action_is_a_cleanup_or_an_effect() -> None:
     assert CLEANUP_ACTIONS.isdisjoint(EFFECT_ACTIONS)
-    assert CLEANUP_ACTIONS | EFFECT_ACTIONS == set(ContainerRuntimeAction)
+    assert set(ContainerRuntimeAction) == CLEANUP_ACTIONS | EFFECT_ACTIONS
 
 
 def test_the_drift_matrix_covers_every_kind_a_cleanup_serves() -> None:
@@ -402,7 +402,7 @@ def test_every_cleanup_kind_is_an_order_kind_a_cleanup_action_serves() -> None:
         for action in CLEANUP_ACTIONS
         for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
     }
-    assert CLEANUP_KINDS <= served - set(OWN_ORDER_KINDS)
+    assert served - set(OWN_ORDER_KINDS) >= CLEANUP_KINDS
 
 
 def _state(session: Session, model: type[Job | AgentOperation], key: str) -> str:

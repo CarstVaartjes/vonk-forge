@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
@@ -433,7 +433,5 @@ def _atomic_json_replace(path: Path, value: Mapping[str, object]) -> None:
 
 
 def _unlink_quietly(path: Path) -> None:
-    try:
+    with suppress(OSError):
         path.unlink(missing_ok=True)
-    except OSError:
-        pass

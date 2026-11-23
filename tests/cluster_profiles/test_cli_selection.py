@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import threading
 from typing import cast
 
@@ -214,10 +215,8 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
         ]
     )
     resolved = None
-    try:
+    with contextlib.suppress(ControlClientError):
         resolved = selection_module._resolve_recipe_selector(client, "Coding")
-    except ControlClientError:
-        pass
     assert resolved is None
     assert [call[3]["timeout_seconds"] for call in client.calls] == [30, 10]
     clock[0] = 100

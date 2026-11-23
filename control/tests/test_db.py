@@ -21,9 +21,9 @@ def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
 
     module_config = Path(db.__file__).resolve().parents[1] / "alembic.ini"
     source_config = Path(db.__file__).resolve().parents[3] / "alembic.ini"
-    assert _ALEMBIC_CONFIG == (
+    assert (
         module_config if module_config.is_file() else source_config
-    )
+    ) == _ALEMBIC_CONFIG
     assert _ALEMBIC_CONFIG.is_file()
     scripts = ScriptDirectory.from_config(Config(str(_ALEMBIC_CONFIG)))
     assert scripts.get_current_head() is not None

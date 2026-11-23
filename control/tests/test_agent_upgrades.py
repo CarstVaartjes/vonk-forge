@@ -358,7 +358,7 @@ def test_controller_recovery_fence_survives_restart_without_a_retry_budget(
     # This is a controller safety contract, independent of how the package
     # helper durably recovers apt/dpkg state. The not-before value and sole
     # automatic retry are persisted on the operation attempt.
-    assert _AGENT_UPGRADE_RECOVERY_FENCE == timedelta(seconds=960)
+    assert timedelta(seconds=960) == _AGENT_UPGRADE_RECOVERY_FENCE
     with sessions() as session:
         operation = session.scalar(
             select(AgentOperation).where(

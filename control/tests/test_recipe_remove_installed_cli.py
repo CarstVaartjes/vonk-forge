@@ -202,7 +202,7 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
             for call, _ in groupby(
                 (method, path)
                 for method, path, _ in peer.calls
-                if path == request_path or path == remove_path
+                if path in (request_path, remove_path)
             )
         ] == [
             ("GET", request_path),

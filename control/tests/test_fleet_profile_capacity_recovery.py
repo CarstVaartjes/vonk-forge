@@ -1,5 +1,6 @@
 """Fleet recovery follows content and current effects, never receipt taxonomy."""
 
+import contextlib
 from datetime import UTC, timedelta
 from uuid import uuid4
 
@@ -69,12 +70,10 @@ def test_another_build_receipt_reuses_and_repairs_the_exact_memory_promise(
         # Different output bytes cannot inherit even with identical source inputs.
         sibling.image_digest = "sha256:" + "f" * 64
         accepted_claims = None
-        try:
+        with contextlib.suppress(UnknownOutcomeError):
             accepted_claims = profile_build_memory_claims(
                 session, sibling, memory_pool="shared", request_id=request_id, lock=True
             )
-        except UnknownOutcomeError:
-            pass
         assert accepted_claims is None
         assert repaired[0].owner_id == application_id
         sibling.image_digest = image.image_digest

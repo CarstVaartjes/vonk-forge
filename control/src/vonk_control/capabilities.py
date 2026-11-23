@@ -7,6 +7,7 @@ retried: effects of an invoked method remain owned by its existing reconciler.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -345,7 +346,5 @@ class CapabilityRegistry:
             asyncio.TimerHandle.cancel(timer)
         tasks = tuple(self._tasks)
         if tasks:
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.gather(*tasks), timeout=5.0)
-            except TimeoutError:
-                pass

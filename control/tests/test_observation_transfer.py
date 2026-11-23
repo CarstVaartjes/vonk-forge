@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from datetime import UTC, datetime
@@ -358,10 +359,8 @@ def test_stream_authentication_error_retains_declared_json_media(tmp_path, path)
     assert validator.is_valid(response.json())
     client = _client(tmp_path, response)
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", path)
-    except ControlClientError:
-        pass
     assert adopted is None
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
@@ -391,10 +390,8 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
     ).is_valid(response.json())
     client = _client(tmp_path, response)
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", "/api/platform", timeout_seconds=0.01)
-    except ControlClientError:
-        pass
     assert adopted is None
     fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
@@ -447,10 +444,8 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
 
     client._opener = opener
     adopted = None
-    try:
+    with contextlib.suppress(ControlClientError):
         adopted = client.request("GET", "/api/platform")
-    except ControlClientError:
-        pass
     assert adopted is None
     assert now[0] == 115.0
     assert len(peers) == 3

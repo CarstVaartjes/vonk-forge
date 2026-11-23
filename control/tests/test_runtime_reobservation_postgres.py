@@ -270,7 +270,7 @@ def test_shared_observer_covers_every_kind():
     # A newly added enum member must participate in stored receipt observation.
     from vonk_control.agent_jobs.observation_receipts import OBSERVATION_KINDS
 
-    assert OBSERVATION_KINDS == set(Kind)
+    assert set(Kind) == OBSERVATION_KINDS
 
 
 def _cancelled_job(tmp_path, postgres_engine):

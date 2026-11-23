@@ -7,7 +7,7 @@ import fcntl
 import os
 import stat
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from vonk_agent_protocol.lifecycle_vocabulary import WaitReason
@@ -99,10 +99,8 @@ class FilesystemRuntimeImageStorage:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             if descriptor is not None:
-                try:
+                with suppress(OSError):
                     os.close(descriptor)
-                except OSError:
-                    pass
             contended = error.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
             raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.PUBLICATION_CONTENDED
@@ -117,17 +115,13 @@ class FilesystemRuntimeImageStorage:
             ) from error
         except RuntimeImagePreparationUnknown:
             if descriptor is not None:
-                try:
+                with suppress(OSError):
                     os.close(descriptor)
-                except OSError:
-                    pass
             raise
         finally:
             if directory_fd is not None:
-                try:
+                with suppress(OSError):
                     os.close(directory_fd)
-                except OSError:
-                    pass
         return descriptor
 
     @contextmanager
@@ -148,14 +142,10 @@ class FilesystemRuntimeImageStorage:
         try:
             yield
         finally:
-            try:
+            with suppress(OSError):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            try:
+            with suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
     def commit(
         self, staged: Path, *, receipt: RuntimeImageReceipt

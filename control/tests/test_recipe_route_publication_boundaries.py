@@ -7,6 +7,7 @@ then a completion that only applies while the claim is still current.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Callable
@@ -235,10 +236,8 @@ def _crash_between_effect_and_completion_is_recovered(
     service.projection_in_session = die  # type: ignore[method-assign]
     with base.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
-    try:
+    with contextlib.suppress(_Crash):
         service.publish_run(run_id)
-    except _Crash:
-        pass
 
     live = ActivationMarker.model_validate_json(
         AtomicRouteBundlePublisher(root).inspect().model_dump_json()

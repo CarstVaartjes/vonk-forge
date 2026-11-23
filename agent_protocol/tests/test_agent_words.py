@@ -49,8 +49,8 @@ def test_a_current_phase_adopts_itself_and_a_word_nobody_spells_reads_as_unknown
 
 
 def test_the_transfer_and_waiting_phases_are_members_that_do_not_overlap() -> None:
-    assert TRANSFER_PHASES <= set(ProgressPhase)
-    assert WAITING_PHASES <= set(ProgressPhase)
+    assert set(ProgressPhase) >= TRANSFER_PHASES
+    assert set(ProgressPhase) >= WAITING_PHASES
     assert not TRANSFER_PHASES & WAITING_PHASES
     # The words the Controller used to list by hand as bytes-moving all still read so.
     for word in (

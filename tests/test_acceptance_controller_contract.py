@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
@@ -47,10 +49,8 @@ def test_unknown_caller_field_has_no_effect_and_a_fresh_valid_request_is_admitte
         contract.check("POST", "/api/things/1", body)
         accepted.append(body)
 
-    try:
+    with contextlib.suppress(ContractSkew):
         submit(b'{"request_key":"k","unexpected":null}')
-    except ContractSkew:
-        pass
     assert accepted == []
     submit(b'{"request_key":"fresh"}')
     assert accepted == [b'{"request_key":"fresh"}']

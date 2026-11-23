@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import logging
@@ -203,7 +204,5 @@ class ArtifactMaintenanceCadence:
             finally:
                 os.close(directory)
         finally:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 temporary.unlink()
-            except FileNotFoundError:
-                pass

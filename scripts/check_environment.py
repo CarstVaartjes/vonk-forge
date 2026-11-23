@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import os
@@ -24,10 +25,8 @@ def run_preparation(command: list[str], root: Path, deadline: float) -> None:
             status = process.wait(timeout=remaining)
         except BaseException:
             # Stop descendants too; an orphaned installer must not race a new check.
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             process.wait(timeout=30)
             raise
     if status:

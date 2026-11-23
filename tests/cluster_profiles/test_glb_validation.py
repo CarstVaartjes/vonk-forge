@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import contextlib
 import json
 import math
 import os
@@ -246,10 +247,8 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         metadata = _glb_metadata(content, "triangle-mesh")
         assert (metadata["mesh_count"], metadata["primitive_count"]) == (1, 1)
         adopted = None
-        try:
+        with contextlib.suppress(ValueError):
             adopted = _glb_metadata(b"not-a-glb", "triangle-mesh")
-        except ValueError:
-            pass
         assert adopted is None
         repaired = _glb_metadata(content, "triangle-mesh")
         assert repaired == metadata

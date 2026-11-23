@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,10 +62,8 @@ def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recove
         "https://control.invalid", token, opener=opener, timeout_seconds=1
     )
     observed = None
-    try:
+    with contextlib.suppress(ControlTransportError):
         observed = client.request("GET", "/api/fleet")
-    except ControlTransportError:
-        pass
     assert observed is None
     assert now[0] >= 100.0 + client.request_timeout_seconds
     assert len(peers) == 1

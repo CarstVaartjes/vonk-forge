@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -262,10 +263,10 @@ class DistributionHandler(BaseHTTPRequestHandler):
             server.partial_sent.set()
             server.release_partial.wait(timeout=30)
             selected = selected[3_000_000:]
-        try:
+        with contextlib.suppress(
+            BrokenPipeError, ConnectionResetError, ssl.SSLEOFError
+        ):
             self.wfile.write(selected)
-        except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
-            pass
 
     def log_message(self, _format: str, *_args: object) -> None:
         return

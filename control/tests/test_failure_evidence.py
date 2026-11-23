@@ -224,7 +224,7 @@ def test_redaction_keeps_a_constraint_violation_that_names_an_authorization_tabl
     )
     assert safe_text(violation) == violation
     header = safe_text("Authorization: Bearer super-sensitive")
-    assert "[redacted diagnostic line]" == header
+    assert header == "[redacted diagnostic line]"
     assert "super-sensitive" not in header
 
 

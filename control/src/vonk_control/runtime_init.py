@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import contextlib
 import errno
 import logging
 import os
@@ -104,10 +105,8 @@ def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
             "runtime source is unreadable", reason=WaitReason.OBSERVATION_UNAVAILABLE
         ) from error
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.close(descriptor)
-        except OSError:
-            pass
     return bytes(content)
 
 
@@ -160,10 +159,8 @@ def _stage_runtime_file_once(
         os.replace(temporary, destination)
         return destination
     except OSError as error:
-        try:
+        with contextlib.suppress(OSError):
             temporary.unlink()
-        except OSError:
-            pass
         raise UnsettledOutcome(
             "runtime file staging is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -239,10 +236,8 @@ def _write_runtime_asset_inventory_once(source_root: Path) -> None:
         temporary.write_text(inventory.model_dump_json())
         os.replace(temporary, source_root / ".inventory.json")
     finally:
-        try:
+        with contextlib.suppress(OSError):
             temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def stage_private_key(
@@ -537,10 +532,8 @@ def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
         for component in target.parts[1:]:
             if component in {"", ".", ".."}:
                 raise RuntimeSecretError("shared runtime directory is unsafe")
-            try:
+            with contextlib.suppress(FileExistsError):
                 os.mkdir(component, mode=mode, dir_fd=descriptor)
-            except FileExistsError:
-                pass
             child = os.open(component, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child

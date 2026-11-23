@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any, ClassVar
 
 import pytest
@@ -45,10 +46,8 @@ class _Probe(OptionalEvidenceModel, BaseModel):
 
 def _validations(document: dict[str, Any]) -> int:
     _Probe.validations[0] = 0
-    try:
+    with contextlib.suppress(ValidationError):
         _Probe.model_validate(document)
-    except ValidationError:
-        pass
     return _Probe.validations[0]
 
 

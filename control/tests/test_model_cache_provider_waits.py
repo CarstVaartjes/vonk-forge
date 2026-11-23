@@ -225,12 +225,15 @@ def transfer_path(
 def test_every_production_provider_is_proven_here() -> None:
     """Guard: a new production kind must join the provider-wait proofs below."""
 
-    assert PRODUCTION_KINDS == sorted(
-        [
-            ProviderKind.GITHUB_LFS_OBJECT,
-            ProviderKind.GITHUB_RELEASE_ASSET,
-            ProviderKind.HUGGINGFACE_FILE,
-        ]
+    assert (
+        sorted(
+            [
+                ProviderKind.GITHUB_LFS_OBJECT,
+                ProviderKind.GITHUB_RELEASE_ASSET,
+                ProviderKind.HUGGINGFACE_FILE,
+            ]
+        )
+        == PRODUCTION_KINDS
     )
 
 

@@ -387,7 +387,7 @@ def test_profile_add_reads_definition_recipe_and_sparks_together() -> None:
     status, _ = _profile_add(client)
 
     assert status == 0
-    assert _ADD_PATHS <= client.completed
+    assert client.completed >= _ADD_PATHS
 
 
 def test_profile_add_failing_peer_leaves_the_other_reads_intact() -> None:
@@ -435,7 +435,7 @@ def test_run_reads_the_library_and_the_fleet_together() -> None:
     with pytest.raises(_StopAfterReads):
         _run_command(client)
 
-    assert _RUN_PATHS <= client.completed
+    assert client.completed >= _RUN_PATHS
 
 
 def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:

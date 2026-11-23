@@ -409,10 +409,10 @@ def test_operator_tailscale_assets_have_no_acceptance_service_or_policy() -> Non
 def test_tailscale_disabled_service_set_excludes_both_owners() -> None:
     acceptance = _acceptance_module()
 
-    assert acceptance.TAILSCALE_SERVICES == {
+    assert {
         "tailscale-configurator",
         "tailscale-gateway",
-    }
+    } == acceptance.TAILSCALE_SERVICES
     assert acceptance.LOCAL_SERVICES == (
         acceptance.DEFAULT_SERVICES - acceptance.TAILSCALE_SERVICES
     )

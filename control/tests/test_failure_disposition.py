@@ -97,8 +97,12 @@ def test_one_http_status_table_for_controller_and_cli(
     assert http_status_disposition(status) is verdict
     # The CLI ships without the contract package; its generated copy of the
     # table must give the same verdict.
-    assert cli_words.HTTP_STATUS_DISPOSITIONS == tuple(
-        (first, last, value.value) for first, last, value in HTTP_STATUS_DISPOSITIONS
+    assert (
+        tuple(
+            (first, last, value.value)
+            for first, last, value in HTTP_STATUS_DISPOSITIONS
+        )
+        == cli_words.HTTP_STATUS_DISPOSITIONS
     )
     if status >= 400:
         error = ControlHTTPError(status, "refused")

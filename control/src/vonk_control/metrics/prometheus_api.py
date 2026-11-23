@@ -5,7 +5,7 @@ import math
 import re
 import time
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Annotated, Any, Literal
@@ -425,10 +425,8 @@ class PrometheusReader:
         finally:
             if task is not None:
                 task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
 
     async def read(
         self, path: str, params: dict[str, str | int | float]

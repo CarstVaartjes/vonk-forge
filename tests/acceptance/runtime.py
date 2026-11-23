@@ -232,10 +232,8 @@ def run_interactive(
             raise AcceptanceError(f"interactive prompts were not observed: {missing}")
         return rendered
     except BaseException:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
         if status is None:
             reap_deadline = time.monotonic() + 5  # wall-clock: grace, SIGKILL next
             child = 0
@@ -583,10 +581,8 @@ def https_over_command(
             raise AcceptanceError(
                 f"tailnet HTTPS endpoint returned {status_line[:200]!r}"
             )
-        try:
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise AcceptanceError("HTTPS tunnel timed out waiting for child exit")
@@ -602,20 +598,14 @@ def https_over_command(
             f"tailnet HTTPS endpoint is unavailable ({type(error).__name__}: {error})"
         ) from error
     finally:
-        try:
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
             process.stdin.close()
-        except (BrokenPipeError, OSError, ValueError):
-            pass
         if process.poll() is None:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.terminate()
-            except ProcessLookupError:
-                pass
         try:
             process.wait(timeout=5)  # wall-clock: terminate grace; kill follows
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            except ProcessLookupError:
-                pass
             process.wait()

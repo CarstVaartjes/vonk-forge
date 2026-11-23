@@ -303,7 +303,7 @@ def test_the_cancel_budget_is_the_one_cancellation_authority_of_an_agent_order()
 ):
     """One constant (``agent_operation_facts``), not a copy per kind."""
 
-    assert CANCEL_BUDGET == timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
+    assert timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS) == CANCEL_BUDGET
 
 
 def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:

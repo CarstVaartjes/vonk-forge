@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import stat
@@ -141,10 +142,8 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
             os.fstat(descriptors[0])
     finally:
         for descriptor in descriptors:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(descriptor)
-            except OSError:
-                pass
 
     monkeypatch.undo()
     assert run(client, destination, "--json") == 0

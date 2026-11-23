@@ -73,7 +73,7 @@ def test_litellm_bootstrap_config_enables_bounded_prometheus_metrics() -> None:
     ]
     assert settings["success_callback"] == ["prometheus"]
     assert settings["failure_callback"] == ["prometheus"]
-    assert FORBIDDEN_LABELS <= set(settings["prometheus_exclude_labels"])
+    assert set(settings["prometheus_exclude_labels"]) >= FORBIDDEN_LABELS
     # The scrape path is network-isolated, so no credential is shared.
     assert settings["require_auth_for_metrics_endpoint"] is False
 

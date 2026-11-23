@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -155,10 +155,8 @@ def _https_api_peer(
                     return
                 if state.discard_held_response:
                     self.close_connection = True
-                    try:
+                    with suppress(OSError):
                         self.connection.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
                     self.connection.close()
                     return
             if (
@@ -176,10 +174,8 @@ def _https_api_peer(
                 state.profile_edit_status = edited.status_code
                 state.drop_load_answer = False
                 self.close_connection = True
-                try:
+                with suppress(OSError):
                     self.connection.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 self.connection.close()
                 return
 
@@ -187,10 +183,8 @@ def _https_api_peer(
                 state.drop_responses.remove(response_key)
                 state.dropped_responses.append(response_key)
                 self.close_connection = True
-                try:
+                with suppress(OSError):
                     self.connection.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 self.connection.close()
                 return
 

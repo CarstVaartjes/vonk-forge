@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
@@ -1249,10 +1250,8 @@ class RecipePackageClient:
                 destination.write_bytes(content)
             marker_path = temporary / ".complete"
             marker_path.write_text(digest, encoding="ascii")
-            try:
+            with contextlib.suppress(FileExistsError):
                 os.replace(temporary, target)
-            except FileExistsError:
-                pass
         finally:
             if temporary.exists():
                 for path in sorted(temporary.rglob("*"), reverse=True):

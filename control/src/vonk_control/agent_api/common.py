@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import logging
@@ -591,10 +592,8 @@ def _commit_recipe_image_upload(
 
 
 def _unlink_if_present(path: Path) -> None:
-    try:
+    with contextlib.suppress(FileNotFoundError):
         path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _owned_artifact(

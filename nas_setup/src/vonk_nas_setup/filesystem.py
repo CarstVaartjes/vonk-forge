@@ -10,7 +10,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from vonk_agent_protocol.installer_setup import validate_secret_name
@@ -212,7 +212,5 @@ def acquire_owner(root: Path) -> Iterator[None]:
 
 def discard(path: Path) -> None:
     """Only disposable private staging is recursively removed."""
-    try:
+    with suppress(OSError):
         shutil.rmtree(path)
-    except OSError:
-        pass
