@@ -68,10 +68,9 @@ from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
 from ..models.jobs import Job
 from ..models.operations import AgentOperation, AgentOperationAttempt
-from ..operator_acceptance import operator_acceptance
+from ..operator_acceptance import ControllerAPIRoute, operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..route_declarations import raw_json_body
-from ..strict_json import ControllerAPIRoute
 from .common import (
     AgentApiServices,
     EnrollmentRateLimiter,

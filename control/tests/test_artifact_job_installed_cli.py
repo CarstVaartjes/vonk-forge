@@ -32,7 +32,7 @@ from vonk_control.auth import Actor
 from vonk_control.models.execution import ArtifactJob
 from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 from .artifact_jobs_support import _configure_artifact_recipe
 from .conftest import load_tools_module

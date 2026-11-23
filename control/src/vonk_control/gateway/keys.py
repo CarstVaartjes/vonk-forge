@@ -50,6 +50,7 @@ from ..operation_api.contracts import bounded_error_responses
 from ..operator_acceptance import OperatorReceiptResolver, operator_acceptance
 from ..runtime_init import GATEWAY_MASTER_KEY_PATH
 from ..strict_json import StrictJSONModel
+from .keys_contract import GatewayKeyCreated, GatewayKeyRevoked, GatewayKeyView
 from .route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,36 +128,10 @@ class GatewayKeyCreateRequest(StrictJSONModel):
     expires: str | None = Field(default=None, pattern=_DURATION_PATTERN)
 
 
-class GatewayKeyView(StrictJSONModel):
-    """One gateway client key without its secret. Empty `models` means all."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    name: str = Field(min_length=1, max_length=256)
-    models: list[str]
-    created_at: str | None = None
-    expires_at: str | None = None
-    last_used_at: str | None = None
-
-
-class GatewayKeyCreated(GatewayKeyView):
-    """The retained key for this mutation; the exact receipt can be replayed."""
-
-    key: str = Field(min_length=1, max_length=512)
-    request_id: str | None = Field(default=None, min_length=1, max_length=128)
-
-
 class GatewayKeyList(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     keys: list[GatewayKeyView]
-
-
-class GatewayKeyRevoked(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    name: str = Field(min_length=1, max_length=63)
-    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class _LiteLlmRequest(BaseModel):

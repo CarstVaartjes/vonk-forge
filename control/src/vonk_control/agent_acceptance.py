@@ -31,8 +31,8 @@ from .models.execution import RunNode
 from .models.fleet import AgentCertificate, AgentNode
 from .models.operations import AgentOperation, AgentOperationAttempt
 from .models.telemetry import NodeInventorySnapshot, NodeTelemetrySample
-from .operator_acceptance import _available, _identity, _refused, _require
 from .operator_receipt_contract import AcceptanceReceipt, ReceiptOwner, ReceiptPolicy
+from .receipt_checks import _available, _identity, _refused, _require
 from .telemetry.samples import _same_sample
 
 if TYPE_CHECKING:

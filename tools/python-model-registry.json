@@ -452,6 +452,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/recipe_image_availability/response_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/recipe_operations/lifecycle_contract.py",
       "kind": "controller-contract"
     },
@@ -480,6 +484,10 @@
     },
     {
       "module": "control/src/vonk_control/gateway/route_bundle_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/gateway/keys_contract.py",
       "kind": "controller-contract"
     },
     {

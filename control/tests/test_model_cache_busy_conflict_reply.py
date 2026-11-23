@@ -13,7 +13,7 @@ from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
-from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.operator_acceptance import ControllerAPIRoute
 
 
 def _app(error: BaseException) -> TestClient:

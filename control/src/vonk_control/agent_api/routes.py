@@ -9,8 +9,7 @@ from fastapi import APIRouter
 from vonk_agent_protocol.enrollment import EnrollmentSubmitRequest, ExpiredRenewRequest
 
 from ..openapi_numbers import install_canonical_openapi
-from ..operator_acceptance import OperatorReceiptResolver
-from ..strict_json import ControllerAPIRoute
+from ..operator_acceptance import ControllerAPIRoute, OperatorReceiptResolver
 from .artifacts import install_artifacts_routes
 from .authority import install_authority_routes
 from .common import AgentApiServices, EnrollmentRateLimiter

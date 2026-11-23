@@ -27,7 +27,7 @@ from vonk_control.operations.contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.recipe_image_availability.api import (
+from vonk_control.recipe_image_availability.response_contract import (
     RecipeImageAvailabilityAction,
     RecipeImageAvailabilityResponse,
     RecipeImageAvailabilityResult,
