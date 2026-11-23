@@ -202,6 +202,3 @@ def _checkpoint_matches(
         and progress.item_index == item_index
         and progress.child_operation_id == child_id
     )
-
-
-_UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32

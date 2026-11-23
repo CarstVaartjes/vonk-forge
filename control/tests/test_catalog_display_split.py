@@ -24,7 +24,6 @@ from vonk_control.catalog.entities import (
     CatalogEntityService,
     CatalogValidationError,
     _parse,
-    recipe_document_projection,
 )
 from vonk_control.catalog.revision_contract import (
     ModelRevisionProjection,
@@ -32,6 +31,7 @@ from vonk_control.catalog.revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    recipe_document_projection,
 )
 from vonk_control.catalog.service import CatalogService
 from vonk_control.model_primitives import Base

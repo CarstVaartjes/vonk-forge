@@ -23,7 +23,7 @@ from vonk_forge_contracts import EndpointAlias
 from vonk_agent_protocol.state_machines import RunState
 
 from ..compiled_artifact_contract import CompiledArtifactContract
-from ..library.contract import UuidId
+from ..identifiers import UuidId
 from ..lifecycle.evidence import Damaged
 from ..models.execution import RecipeInstallation, RecipeRun
 from .contracts import (

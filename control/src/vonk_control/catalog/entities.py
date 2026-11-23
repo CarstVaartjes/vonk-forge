@@ -55,8 +55,11 @@ from .revision_contract import (
     PublishedDocument,
     PublishedValue,
     RecipeRevisionProjection,
+    build_policy_projection,
+    model_document_projection,
     read_catalog_document,
     read_catalog_projection,
+    recipe_document_projection,
     rederive_projection,
     write_catalog_projection,
 )
@@ -806,38 +809,6 @@ def _revision(
     )
 
 
-def model_document_projection(model: ModelDefinition) -> ModelRevisionProjection:
-    """Every projection field the immutable Model document alone determines."""
-    return ModelRevisionProjection(
-        identity=model.identity,
-        format=model.format,
-        artifact_count=len(model.files),
-        download_bytes=model.download_bytes,
-        installed_bytes=model.installed_bytes,
-    )
-
-
-def recipe_document_projection(recipe: RecipeDefinition) -> dict[str, object]:
-    """Every projection field the immutable recipe document alone determines."""
-    return {
-        "identity": recipe.identity.model_dump(mode="json"),
-        "provenance": recipe.provenance.model_dump(mode="json"),
-        "release": recipe.release.model_dump(mode="json"),
-        "models": [
-            selection.model.model_dump(mode="json") for selection in recipe.models
-        ],
-        "interfaces": [
-            interface.model_dump(mode="json") for interface in recipe.interfaces
-        ],
-        "validation": recipe.validation.model_dump(mode="json"),
-        "base_image_digest": recipe.execution.build.base_image.digest,
-        "options": [option.model_dump(mode="json") for option in recipe.options],
-        "runtime_engine": recipe.runtime.engine,
-        "topology": recipe.topology.model_dump(mode="json"),
-        **build_policy_projection(recipe),
-    }
-
-
 def _active_recipe_revisions(session: Session) -> list[CatalogDocumentRevision]:
     return list(
         session.scalars(
@@ -958,68 +929,6 @@ def _build_policy_problem(
         code=CatalogSyncCode.ITEM_FAILED,
         detail=(f"build policy observation unavailable: {error}"[:256]),
     )
-
-
-def build_policy_projection(recipe: RecipeDefinition) -> dict[str, object]:
-    """Compile platform-owned rootless build policy for every source recipe.
-
-    These are admission budgets, not measured image sizes. The builder still
-    measures and verifies the exported archive before it can be distributed.
-    No public Recipe fields or local author overrides grant build authority.
-    """
-    gib = 1024**3
-    disks = [role.resources.disk for role in recipe.topology.roles]
-    image_bytes = max(disk.image_bytes for disk in disks)
-    return {
-        "build_resources": {
-            "cpu_cores": 8,
-            "download_bytes": image_bytes,
-            "temporary_bytes": min(
-                16 * 1024**4,
-                max(3 * image_bytes, *(disk.working_bytes for disk in disks)),
-            ),
-            "memory_bytes": min(64 * gib, max(2 * gib, image_bytes)),
-            "processes": 4096,
-            "timeout_seconds": 86_400,
-        },
-        # Installation/ownership operations inside the existing rootless
-        # namespace only. GPU, host mounts, sockets and privilege stay off.
-        "build_security": {
-            "capabilities": [
-                "CHOWN",
-                "DAC_OVERRIDE",
-                "FOWNER",
-                "FSETID",
-                "SETFCAP",
-                "SETGID",
-                "SETUID",
-            ],
-        },
-        "build_options": {
-            "additional_contexts": [],
-            "annotations": [],
-            "environment": [],
-            "format": "oci",
-            "identity_label": True,
-            "ignorefile": None,
-            "jobs": 1,
-            "labels": [],
-            "layer_compression": "disabled",
-            "layer_labels": [],
-            "layers": False,
-            "no_hostname": False,
-            "no_hosts": False,
-            "omit_history": False,
-            "os_features": [],
-            "os_version": None,
-            "shm_bytes": 64 * 1024**2,
-            "skip_unused_stages": True,
-            "squash": "none",
-            "timestamp": None,
-            "unset_environment": [],
-            "unset_labels": [],
-        },
-    }
 
 
 def _model_artifact_files(parsed: ModelDefinition) -> list[dict[str, object]]:

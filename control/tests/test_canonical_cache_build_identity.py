@@ -14,11 +14,11 @@ from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from vonk_control import execution_plan_service
-from vonk_control.catalog.entities import (
+from vonk_control.catalog.revision_contract import (
     model_document_projection,
     recipe_document_projection,
+    write_catalog_projection,
 )
-from vonk_control.catalog.revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.distribution.sources import verified_model_receipts
 from vonk_control.execution_plan_service import (
