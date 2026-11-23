@@ -21,7 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from vonk_control.oci_image_store import OciImageStore
+from vonk_control.oci_image_store import OciImageStore, StoredImage
 
 
 def _stored(blobs: Path) -> dict[str, int]:
@@ -44,6 +44,7 @@ def main() -> int:
             before = _stored(blobs)
             started = time.monotonic()
             image = store.import_reference(reference)
+            assert isinstance(image, StoredImage), image
             seconds = time.monotonic() - started
             added = {
                 name: size

@@ -15,7 +15,11 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledJobInput,
 )
 from vonk_agent_protocol.contracts import AgentClaim
-from vonk_agent_protocol.recipe_operations import RecipeOperationRequest
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
+    RecipeOperationRequest,
+    RecipeStartPayload,
+)
 from vonk_agent_protocol.wire_model import AgentProtocolError
 
 PLAN = json.loads(
@@ -124,6 +128,7 @@ def test_agent_claim_dispatches_the_same_typed_install_and_start_models() -> Non
                 "payload": payload,
             }
         )
+        assert isinstance(claim.payload, RecipeInstallPayload | RecipeStartPayload)
         assert claim.payload.installation_id == INSTALLATION_ID
 
 

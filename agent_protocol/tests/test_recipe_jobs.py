@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,7 @@ from vonk_agent_protocol.wire_model import AgentProtocolError, canonical_message
 VECTORS = Path(__file__).parents[1] / "src/vonk_agent_protocol/vectors"
 
 
-def documents() -> tuple[dict[str, object], dict[str, object]]:
+def documents() -> tuple[dict[str, Any], dict[str, Any]]:
     return (
         json.loads((VECTORS / "recipe-job-run-claim-v1.json").read_text()),
         json.loads((VECTORS / "recipe-job-run-result-v1.json").read_text()),
@@ -173,12 +174,9 @@ def test_recipe_job_result_rejects_manifest_drift() -> None:
 def test_failed_process_result_is_valid_only_for_its_current_operation() -> None:
     _, envelope = documents()
     result = dict(envelope["result"], exit_code=1, reason="runtime failed")
-    assert (
-        validate_result_for_operation(
-            "recipe.job.run.v1", result, state="failed"
-        ).exit_code
-        == 1
-    )
+    failed = validate_result_for_operation("recipe.job.run.v1", result, state="failed")
+    assert isinstance(failed, RecipeJobRunResult)
+    assert failed.exit_code == 1
     with pytest.raises(AgentProtocolError, match="typed model"):
         validate_result_for_operation("recipe.stop", result, state="failed")
     with pytest.raises(AgentProtocolError, match="nonzero process exit code"):
@@ -187,12 +185,11 @@ def test_failed_process_result_is_valid_only_for_its_current_operation() -> None
         )
     # A process that exited 0 fails for the reason it states.
     stated = dict(envelope["result"], reason="job output delivery remains unobserved")
-    assert (
-        validate_result_for_operation(
-            "recipe.job.run.v1", stated, state="failed"
-        ).reason
-        == "job output delivery remains unobserved"
+    stated_failure = validate_result_for_operation(
+        "recipe.job.run.v1", stated, state="failed"
     )
+    assert isinstance(stated_failure, RecipeJobRunResult)
+    assert stated_failure.reason == "job output delivery remains unobserved"
 
 
 def test_result_validation_names_the_failing_field_without_echoing_values() -> None:
