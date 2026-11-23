@@ -18,7 +18,7 @@ from .test_profile_load_installed_cli import (
     _process_environment,
     _run_pty,
 )
-from .test_profile_load_submission import _profile_api
+from .test_profile_load_submission import _stopping_profile_api
 
 
 @pytest.mark.lane
@@ -32,7 +32,9 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
     mode: str,
     expected_status: int,
 ) -> None:
-    sessions, api, _codec, headers, preview = _profile_api(postgres_engine)
+    sessions, api, _codec, headers, preview = _stopping_profile_api(
+        tmp_path, postgres_engine
+    )
     digest = preview.get("plan_digest")
     assert isinstance(digest, str)
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, state):

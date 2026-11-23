@@ -46,8 +46,8 @@ from cluster_profiles.generated_control.models.fleet_profile_effects import (
 from cluster_profiles.generated_control.models.fleet_profile_plan_summary import (
     FleetProfilePlanSummary,
 )
-from cluster_profiles.generated_control.models.fleet_profile_preview import (
-    FleetProfilePreview,
+from cluster_profiles.generated_control.models.fleet_profile_preview_response import (
+    FleetProfilePreviewResponse,
 )
 from cluster_profiles.generated_control.models.fleet_profile_scope_preview import (
     FleetProfileScopePreview,
@@ -202,8 +202,9 @@ def _artifact_job_response() -> dict[str, object]:
 
 
 def _profile_preview_response():
-    return FleetProfilePreview(
+    return FleetProfilePreviewResponse(
         allowed=True,
+        next_action="load",
         assignments=[],
         generated_at=datetime(2026, 9, 13, tzinfo=UTC),
         plan_digest="a" * 64,
