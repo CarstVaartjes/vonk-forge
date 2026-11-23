@@ -8,7 +8,7 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.resources import files
-from threading import Barrier, Event
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -81,6 +81,7 @@ from vonk_control.runtime_image_preparation.storage import (
 
 from .display_fixtures import create_draft, reworded
 from .fleet_profiles_support import _SwitchAdapter
+from .insert_collision_support import Rendezvous
 from .pass_budget_clocks import completing_wait, expiring_wait
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -311,11 +312,11 @@ def test_competing_profile_saves_accept_only_one_observed_revision(
     if existing:
         service.update_number(2, FleetProfileInput(name="Original"), actor="test")
     observed = service.definition_number(2)
-    ready = Barrier(2)
+    ready = Rendezvous(2, timeout=10)
 
     def save(name):
         value = FleetProfileInput(name=name, expected_revision=observed.revision)
-        ready.wait(timeout=10)
+        ready.wait()
         try:
             return service.update_number(2, value, actor="test")
         except FleetProfileConflict:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -48,6 +47,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
 from vonk_control.recipe_routes.publisher import AtomicRecipeRoutePublisher
 
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import (
     NOW,
     ConcurrentPublisher,
@@ -793,7 +793,7 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         evidence = start_evidence(child.payload)
     # Every rank launches in one phase; the last two results race.
     service.record_node_result(start.id, nodes[0], succeeded=True, evidence={})
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def result(node_id: str, succeeded: bool) -> None:
         barrier.wait()
@@ -883,7 +883,7 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         first.owner_id: service.preview_stop(first.owner_id),
         second_run_id: service.preview_stop(second_run_id),
     }
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
 
     def stop(item: tuple[str, str]) -> str:
         run_id, request_key = item

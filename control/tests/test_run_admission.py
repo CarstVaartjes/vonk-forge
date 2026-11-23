@@ -1,5 +1,4 @@
 import json
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -45,6 +44,7 @@ from vonk_control.run_admission import (
 )
 
 from .display_fixtures import legacy_model_display, model_display_denying
+from .insert_collision_support import Rendezvous
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
@@ -817,7 +817,7 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
         alias: service.plan_run(installation, alias, now=now)
         for alias in ("qwen-a", "qwen-b")
     }
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def accept(alias: str) -> bool:
         barrier.wait()

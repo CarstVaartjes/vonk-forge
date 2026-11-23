@@ -21,6 +21,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.operations import AgentOperation
 
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -101,7 +102,7 @@ def _concurrent_node_lock_calls(engine, calls):
     Agent contact paths read the nodes and lock the parent Job first; workers
     lock the nodes first. Either way both must serialize, not cross.
     """
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
     seen = set()
     guard = threading.Lock()
 
@@ -114,7 +115,7 @@ def _concurrent_node_lock_calls(engine, calls):
                 return
             seen.add(identity)
         context.first_test_node_lock = True
-        barrier.wait(timeout=30)
+        barrier.wait()
 
     def after(_conn, _cursor, _statement, _parameters, context, _many):
         if getattr(context, "first_test_node_lock", False):

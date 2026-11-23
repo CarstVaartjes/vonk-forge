@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import itertools
 import shutil
-import threading
 import uuid
 from concurrent.futures import Future, wait
 from datetime import timedelta
@@ -47,6 +46,7 @@ from vonk_control.models.catalog import (
 )
 
 from .display_fixtures import create_draft
+from .insert_collision_support import Rendezvous
 from .model_cache_support import (
     NOW,
     _admit_fresh_download,
@@ -401,7 +401,7 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
     monkeypatch.setattr(
         "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
     )
-    barrier = threading.Barrier(4)
+    barrier = Rendezvous(4)
     requests = []
 
     class AfterPeers(httpx2.SyncByteStream):
@@ -411,7 +411,7 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
             self.content = content
 
         def __iter__(self):
-            barrier.wait(timeout=30)  # fails if the range transfers serialize
+            barrier.wait()  # fails if the range transfers serialize
             yield self.content
 
     def handler(request):

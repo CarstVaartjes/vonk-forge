@@ -62,6 +62,7 @@ from vonk_control.step_ca import StepCAUnavailable
 from .agent_fences import fenced_operation
 from .ca_test_authority import FixtureCertificateAuthority
 from .ca_test_authority import fixture_certificate as _fixture_certificate
+from .insert_collision_support import Rendezvous
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 
@@ -574,7 +575,7 @@ def test_sqlite_simultaneous_exact_replay_is_idempotent(service) -> None:
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
-    barrier = threading.Barrier(4)
+    barrier = Rendezvous(4)
 
     def submit() -> object:
         barrier.wait()
@@ -1463,7 +1464,7 @@ def test_postgres_separate_services_return_one_idempotent_exact_replay(
     request = csr()
     grant = first.create(NODE_ID, "admin", 600)
     assert isinstance(grant, EnrollmentGrant)
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def submit(service: EnrollmentService) -> object:
         barrier.wait()
@@ -1852,12 +1853,12 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
     )
     assert isinstance(grant, EnrollmentGrant)
     request = csr()
-    ready = threading.Barrier(2)
+    ready = Rendezvous(2, timeout=10)
     consumption_done = threading.Event()
     revocation_done = threading.Event()
 
     def submit() -> EnrollmentGrantState | SecurityRefusalReason:
-        ready.wait(timeout=10)
+        ready.wait()
         if first == EnrollmentGrantState.REVOKED:
             assert revocation_done.wait(timeout=10)
         try:
@@ -1871,7 +1872,7 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine,
             consumption_done.set()
 
     def revoke() -> EnrollmentGrantState | SecurityRefusalReason:
-        ready.wait(timeout=10)
+        ready.wait()
         if first == EnrollmentGrantState.CONSUMED:
             assert consumption_done.wait(timeout=10)
         try:

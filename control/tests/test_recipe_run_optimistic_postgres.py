@@ -46,6 +46,7 @@ from vonk_control.recovery_policy import ROUTE_RECOVERY, WAIT_STEP
 
 from .agent_fences import fenced_attempt
 from .agent_jobs_support import COMMIT, parent
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .recipe_operations_support import NOW as OPERATION_NOW
 from .recipe_operations_support import (
@@ -65,14 +66,14 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
     """Catches lost run updates and child-only effects escaping a stale decision."""
     routes, _publisher, _applied, run_id = setup(tmp_path, engine=postgres_engine)
     sessions = routes.sessions
-    read = threading.Barrier(2)
+    read = Rendezvous(2)
     committed = threading.Event()
     seen: list[str] = []
 
     def winner(session: Session) -> None:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        read.wait(timeout=30)
+        read.wait()
         run.state = RunState.STOPPED
 
     def loser(session: Session) -> bool:
@@ -81,7 +82,7 @@ def test_concurrent_run_decisions_replan_and_rollback_rank_effects(
         seen.append(run.state)
         if run.state == RunState.STOPPED:
             return False
-        read.wait(timeout=30)
+        read.wait()
         assert committed.wait(timeout=30)
         rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
         assert rank is not None

@@ -58,6 +58,7 @@ from vonk_control.recipe_routes.shared import (
     route_publication_owner_lock_statement,
 )
 
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .observed_actions import observe_action
 from .recipe_routes_support import (
@@ -324,7 +325,7 @@ def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
     second_generation = service.publish_run(second_run)
     overlap = OverlapPublisher(second_generation.generation)
     service._publisher = overlap
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
 
     def withdraw(run_id: str) -> None:
         start.wait()

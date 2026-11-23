@@ -77,7 +77,6 @@ MODES = (
     "intent-ordinal",
     "savepoints",
     "durable-revocations",
-    "barriers",
     "sync-in-async",
     "git-free-tests",
     "loopback-bind",

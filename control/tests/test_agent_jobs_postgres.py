@@ -72,6 +72,7 @@ from .agent_jobs_support import (
     superseded_order_payload,
 )
 from .ca_test_authority import FixtureCertificateAuthority
+from .insert_collision_support import Rendezvous
 from .node_contacts import contact_row
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
@@ -206,7 +207,7 @@ def test_postgres_resume_transition_has_one_concurrent_winner(
         clock=clock,
         cursors=TokenCodec(b"k" * 32).cursor_codec(),
     )
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def resume(services) -> str:
         barrier.wait()
@@ -410,7 +411,7 @@ def test_postgres_separate_services_cannot_claim_the_same_operation(service) -> 
     operation = first_service.enqueue(
         parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
     )
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def claim(service):
         barrier.wait()
@@ -1214,10 +1215,10 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         AgentJobService(sessions, clock=clock),
         AgentJobService(sessions, clock=clock),
     )
-    barrier = threading.Barrier(2)
+    barrier = Rendezvous(2)
 
     def claim_from(service):
-        barrier.wait(timeout=30)
+        barrier.wait()
         return claim_agent(
             service,
             NODE_A,
@@ -1473,7 +1474,7 @@ def test_postgres_abandon_and_a_concurrent_claim_never_wait_and_both_settle(
     for _ in range(12):
         owner = parent(sessions, clock)
         probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
-        start = threading.Barrier(2)
+        start = Rendezvous(2)
 
         def claim(start=start):
             start.wait()
@@ -1516,7 +1517,7 @@ def test_postgres_abandon_and_a_concurrent_late_result_never_wait_and_settle(
         probe = jobs.enqueue(owner.id, NODE_A, "runtime.preflight.v1", COMMIT, _PROBE)
         claimed = claim_agent(jobs, NODE_A, "serial-a")
         assert claimed is not None
-        start = threading.Barrier(2)
+        start = Rendezvous(2)
 
         def report(claimed=claimed, start=start):
             start.wait()

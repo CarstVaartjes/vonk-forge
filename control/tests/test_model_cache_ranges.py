@@ -2,7 +2,7 @@ import os
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from threading import Barrier, Event, Semaphore
+from threading import Event, Semaphore
 
 import httpx2
 import pytest
@@ -12,6 +12,7 @@ from vonk_control.model_cache.ranges import (
     range_partial_bytes,
 )
 
+from .insert_collision_support import Rendezvous
 from .test_model_cache_recovery_support import observe_unknown
 
 
@@ -32,7 +33,7 @@ class _AfterPeers(httpx2.SyncByteStream):
         self.content = content
 
     def __iter__(self):
-        self.barrier.wait(timeout=30)  # Fails if the actual transfers serialize.
+        self.barrier.wait()  # Fails if the actual transfers serialize.
         yield self.content
 
 
@@ -40,7 +41,7 @@ def test_parallel_ranges_assemble_and_reuse_contiguous_prefix(tmp_path):
     target = tmp_path / "model.part"
     data = bytes(range(100))
     target.write_bytes(data[:10])
-    barrier = Barrier(4)
+    barrier = Rendezvous(4)
     requests = []
     progress = []
 
@@ -82,7 +83,7 @@ def test_opens_after_the_first_accepted_range_run_concurrently(tmp_path):
 
     target = tmp_path / "model.part"
     data = bytes(range(100))
-    peers = Barrier(3)
+    peers = Rendezvous(3)
     opened = []
 
     def open_range(start, end):
@@ -90,7 +91,7 @@ def test_opens_after_the_first_accepted_range_run_concurrently(tmp_path):
         if len(opened) == 1:
             time.sleep(0.2)  # the probe: every peer queues behind it
         else:
-            peers.wait(timeout=30)  # fails if the peers' opens serialize
+            peers.wait()  # fails if the peers' opens serialize
         return response(start, end, len(data), data[start : end + 1])
 
     assert download_ranges(target, len(data), open_range, Event(), lambda value: None)

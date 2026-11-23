@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -48,6 +47,7 @@ from vonk_control.recipe_operations.lifecycle_contract import (
     RecipeOperationResult,
 )
 
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import (
     NOW,
     FailingQueue,
@@ -329,7 +329,7 @@ def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
         request_id="4" * 35 + "f",
     )
     plan = service.preview_stop(run.owner_id)
-    start = threading.Barrier(2)
+    start = Rendezvous(2)
     request_key = "4" * 35 + "0"
 
     def stop() -> str:

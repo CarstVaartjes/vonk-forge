@@ -75,6 +75,7 @@ from vonk_control.runtime_image_preparation.contracts import PulledImageEvidence
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.source_policy import SourcePolicyFinding, SourcePolicyReport
 
+from .insert_collision_support import Rendezvous
 from .recipe_builds_support import _write_controller_build_receipt
 from .recipe_builds_support import setup as _build_setup
 from .recipe_image_availability_support import _typed_availability_payload
@@ -2147,7 +2148,10 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
             )
         )
 
-    barrier = threading.Barrier(2)
+    # Both dispatches meet once at their first preparation and once at their
+    # build: two rendezvous, each passed once per thread.
+    prepared = Rendezvous(2)
+    building = Rendezvous(2)
     preparation_lock = threading.Lock()
     prepared_threads: set[int] = set()
     persisted_nodes: list[str] = []
@@ -2168,7 +2172,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
                 first_preparation = thread_id not in prepared_threads
                 prepared_threads.add(thread_id)
             if first_preparation:
-                barrier.wait(timeout=30)
+                prepared.wait()
             suffix = node_id[-1]
             return SimpleNamespace(
                 build_input_sha256=(suffix * 64),
@@ -2202,7 +2206,7 @@ def test_postgres_builder_transaction_does_not_cross_session_block(
         def build(self, plan, **_kwargs):
             # Keep both builds in flight: an instant completion permits the
             # second request to legitimately reuse the first builder.
-            barrier.wait(timeout=30)
+            building.wait()
             return SimpleNamespace(
                 id=str(uuid.uuid4()),
                 state="succeeded",

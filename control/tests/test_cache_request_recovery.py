@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -44,6 +43,7 @@ from vonk_control.recipe_image_availability.view_contract import (
 )
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 
+from .insert_collision_support import Rendezvous
 from .model_cache_support import _artifact
 from .recipe_image_availability_support import (
     Transport,
@@ -60,7 +60,7 @@ def _start_together(
 ) -> list[tuple[int, object]]:
     """Start two real PostgreSQL submissions together without pinning their order."""
 
-    barrier = threading.Barrier(2, timeout=10)
+    barrier = Rendezvous(2, timeout=10)
 
     def capture(index: int, call: Callable[[], object]) -> tuple[int, object]:
         barrier.wait()

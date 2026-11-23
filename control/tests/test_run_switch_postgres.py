@@ -6,7 +6,6 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
-from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
@@ -48,6 +47,7 @@ from vonk_control.settings import Settings
 
 from .agent_api_support import agent_headers
 from .agent_fences import fenced_operation
+from .insert_collision_support import Rendezvous
 from .non_blocking import assert_ended_without_blocking
 from .recipe_operations_support import (
     NOW,
@@ -605,10 +605,10 @@ def test_postgres_duplicate_apply_converges_under_target_lock(
     service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     key = str(uuid.uuid4())
-    barrier = Barrier(2)
+    barrier = Rendezvous(2)
 
     def apply():
-        barrier.wait(timeout=30)
+        barrier.wait()
         return service._apply_plan(
             plan,
             request_key=key,

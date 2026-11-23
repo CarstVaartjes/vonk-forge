@@ -24,6 +24,8 @@ from vonk_control.models.jobs import Job
 from vonk_control.models.telemetry import FleetEventCursor, FleetStreamEvent
 from vonk_control.stored.json_values import write_guard_mode
 
+from .insert_collision_support import Rendezvous
+
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 WRITERS = 8
 EVENTS_PER_WRITER = 25
@@ -123,12 +125,12 @@ def test_concurrent_appends_reach_a_live_reader_once_in_order_without_gaps(
 ) -> None:
     sessions = _fresh_sessions(postgres_engine)
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
-    start = threading.Barrier(WRITERS + 1)
+    start = Rendezvous(WRITERS + 1, timeout=10)
     writers_done = threading.Event()
 
     def writer(index: int) -> None:
         pause = random.Random(index)
-        start.wait(timeout=10)
+        start.wait()
         for sequence in range(EVENTS_PER_WRITER):
             with sessions.begin() as session:
                 # Writers queue only for one another's commit, never for open work.
@@ -143,7 +145,7 @@ def test_concurrent_appends_reach_a_live_reader_once_in_order_without_gaps(
         # Polls like FleetStream: any hole raises, so passing proves none showed.
         cursor = 0
         seen: list[tuple[int, str]] = []
-        start.wait(timeout=10)
+        start.wait()
         while True:
             done = writers_done.is_set()
             replay = repository.replay_after(cursor, NOW, limit=128)

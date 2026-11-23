@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from threading import Barrier
 
 import pytest
 from sqlalchemy import select
@@ -21,6 +20,7 @@ from vonk_control.models.execution import (
     ResourceReservation,
 )
 
+from .insert_collision_support import Rendezvous
 from .recipe_operations_support import NOW, installed_recipe, setup_services
 from .run_switch_operations_support import RecordingArtifactExecutor, _request, _service
 
@@ -91,10 +91,10 @@ def test_postgres_completed_install_is_not_reserved_twice(tmp_path, postgres_eng
     admission = lifecycle._install_admission
     plan = admission.plan_install(mapping, build, now=latest)
     assert plan.allowed
-    barrier = Barrier(2)
+    barrier = Rendezvous(2)
 
     def accept():
-        barrier.wait(timeout=30)
+        barrier.wait()
         try:
             return admission.accept_install(plan, actor="admin", now=latest)
         except InstallPlanConflict:
