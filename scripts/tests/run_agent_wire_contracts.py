@@ -140,7 +140,7 @@ def main() -> int:
             "control/tests/test_agent_jobs_distribution_recovery_claims.py::test_queue_stores_and_claims_the_canonical_payload_hash",
         ],
         [
-            "tests/scripts/test_install_release_publication.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
+            "tests/scripts/test_install_release_publication_refresh_cli.py::test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary",
         ],
     ]
     for selection in selections:

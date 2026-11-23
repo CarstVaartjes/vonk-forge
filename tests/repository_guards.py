@@ -402,7 +402,15 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "hook environment: fixed entrypoint/fixture behavior. The cross-area scan is selected separately in GUARDS.",
     ),
     (
-        "tests/scripts/test_install_release_publication.py",
+        "tests/scripts/test_install_release_publication_acceptance_evidence.py",
+        "install release publication: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/scripts/test_install_release_publication_promotion_rclone.py",
+        "install release publication: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/scripts/test_install_release_publication_refresh_cli.py",
         "install release publication: fixed entrypoint/fixture behavior.",
     ),
     (
