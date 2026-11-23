@@ -237,7 +237,7 @@ export function LibraryCacheAction({
             <button
               type="button"
               className="button secondary compact"
-              disabled={busy || !review || review.blockers.length > 0}
+              disabled={busy || !review?.submittable}
               onClick={() => void remove()}
             >
               Confirm remove

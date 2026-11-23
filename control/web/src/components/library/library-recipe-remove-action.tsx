@@ -67,7 +67,7 @@ export function LibraryRecipeRemoveAction({
   );
 
   const remove = useCallback(async () => {
-    if (!review || review.blockers.length || typeof review.with_model !== "boolean") return;
+    if (!review?.submittable || typeof review.with_model !== "boolean") return;
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
@@ -168,7 +168,7 @@ export function LibraryRecipeRemoveAction({
           <button
             type="button"
             className="button secondary"
-            disabled={busy || review.blockers.length > 0}
+            disabled={busy || !review.submittable}
             onClick={() => void remove()}
           >
             Confirm remove

@@ -192,8 +192,9 @@ def test_blocked_review_prints_only_the_controllers_blockers(
     assert f"Blocked: {ArtifactLifecycleCode.DELETION_IN_PROGRESS} (retryable)" in text
     assert "  Next: resolve_reference" in text
     assert "  Next: observe_removal_operation" in text
-    # The Controller decides on submit; the confirm command is always shown.
-    assert f"Confirm: vonkctl model remove {_SELECTOR} --yes --detach" in text
+    # A blocked review is not submittable, so no command to confirm it is shown.
+    assert review["submittable"] is False
+    assert "Confirm:" not in text
 
 
 def test_recipe_aggregated_blocker_is_shown_as_the_controller_sent_it(
@@ -330,7 +331,9 @@ def test_protected_nas_copy_keeps_every_asset_without_inventing_a_reason(
     assert "Removes" not in text
     assert "Blocked" not in text
     assert "other cached model" not in text
-    assert f"Confirm: vonkctl model remove {_SELECTOR} --fleet --yes --detach" in text
+    # Everything is kept, so there is nothing to confirm.
+    assert review["submittable"] is False
+    assert "Confirm:" not in text
 
 
 def test_shared_fleet_object_without_membership_finding_names_no_sets(

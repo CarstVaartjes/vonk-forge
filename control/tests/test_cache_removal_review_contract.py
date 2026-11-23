@@ -178,3 +178,36 @@ def test_saved_draft_does_not_add_an_admission_blocker() -> None:
         )
     )
     assert refusing_removal_blockers(active_review) == [other]
+
+
+def test_a_review_is_submittable_only_when_nothing_blocks_and_something_goes() -> None:
+    """Both clients offer Confirm from this one answer, so it is never offered for
+    a blocked review that frees nothing."""
+
+    removes = _content()
+    blocker = CacheRemovalBlocker(
+        code=ModelCacheCode.REMOVAL_REFERENCED, detail="in use", retryable=True
+    )
+    keeps = removes.model_copy(
+        update={
+            "assets": [
+                asset.model_copy(
+                    update={"disposition": CacheAssetDisposition.RETAIN_SHARED}
+                )
+                for asset in removes.assets
+            ]
+        }
+    )
+
+    assert seal_cache_removal_review(removes).submittable is True
+    assert (
+        seal_cache_removal_review(
+            removes.model_copy(update={"blockers": [blocker]})
+        ).submittable
+        is False
+    )
+    assert seal_cache_removal_review(keeps).submittable is False
+    # The answer is derived, so it never changes the reviewed identity.
+    sealed = seal_cache_removal_review(removes)
+    assert sealed.review_digest == review_contract.cache_removal_review_digest(removes)
+    assert sealed.model_dump(mode="json")["submittable"] is True

@@ -38,6 +38,8 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
         recovery_actions: [],
       },
     ],
+    // The Controller says a blocked review cannot be confirmed.
+    submittable: false,
   });
   const removeRecipe = vi.fn();
   const api = {
