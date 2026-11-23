@@ -38,7 +38,7 @@ from .test_recipe_operations import (
     setup_services,
     started_recipe,
 )
-from .test_unused_storage_collection_part1 import _agents_succeed
+from .test_unused_storage_collection import _agents_succeed
 
 
 def _claims(sessions, run_id: str) -> int:

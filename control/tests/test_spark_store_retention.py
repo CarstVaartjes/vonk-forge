@@ -26,7 +26,7 @@ from vonk_control.operations.blockers import OperationBlocker, StorageReliefEvid
 from vonk_control.spark_store_retention import store_retention_request
 
 from .test_catalog_revision_collection import NODE, NOW, Catalog
-from .unused_storage_collection_support import (
+from .test_unused_storage_collection import (
     A_MODEL,
     GIB,
     _application,
@@ -35,8 +35,12 @@ from .unused_storage_collection_support import (
     _profile,
     _report_disk,
 )
-from .unused_storage_collection_support import cached as cached_fixture
-from .unused_storage_collection_support import world as world_fixture
+from .test_unused_storage_collection import (
+    cached as cached_fixture,
+)
+from .test_unused_storage_collection import (
+    world as world_fixture,
+)
 
 world = world_fixture
 cached = cached_fixture
