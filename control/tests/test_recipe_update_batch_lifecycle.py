@@ -23,7 +23,7 @@ from vonk_control.models.jobs import Job
 from vonk_control.recipe_image_availability.contracts import (
     RecipeImageAvailabilityError,
 )
-from vonk_control.recipe_update_contract import (
+from vonk_control.recipe_update_batches.contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,

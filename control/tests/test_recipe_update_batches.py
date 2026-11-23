@@ -28,7 +28,7 @@ from vonk_control.recipe_image_availability.contracts import (
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
-from vonk_control.recipe_update_contract import RecipeUpdateResponse
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition, document_sha256

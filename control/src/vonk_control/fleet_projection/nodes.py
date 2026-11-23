@@ -28,7 +28,7 @@ from ..models.fleet import AgentCertificate, AgentNode, AgentNodeProfile
 from ..models.telemetry import NodeInventorySnapshot
 from ..nas_route_notice import nas_route_notice
 from ..nas_transfer_rate import NasTransferNotice, nas_transfer_detail
-from ..recipe_update_notice import RECIPE_UPDATE_AVAILABLE
+from ..recipe_update_batches.notice import RECIPE_UPDATE_AVAILABLE
 from ..strict_json import warn_unreadable_once
 from ..telemetry.samples import TelemetrySampleView, sustained_low_cpu_clock
 from .common import (

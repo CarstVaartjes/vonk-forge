@@ -2546,7 +2546,7 @@ _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references
             "kept = revision.content_digest in head_digests\n",
         ),
         (
-            "control/src/vonk_control/recipe_update_notice.py",
+            "control/src/vonk_control/recipe_update_batches/notice.py",
             "same = newest.content_digest == running.content_digest\n",
         ),
         (

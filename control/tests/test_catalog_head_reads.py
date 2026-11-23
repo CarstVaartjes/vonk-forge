@@ -20,7 +20,7 @@ from vonk_control.library_projection.service import LibraryProjection
 from vonk_control.model_cache.service import ModelCacheService
 from vonk_control.model_primitives import Base
 from vonk_control.models.catalog import CatalogDocumentHead, CatalogDocumentRevision
-from vonk_control.recipe_update_notice import newest_active_revisions
+from vonk_control.recipe_update_batches.notice import newest_active_revisions
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .display_fixtures import create_draft, reword

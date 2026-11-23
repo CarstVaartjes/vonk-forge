@@ -65,7 +65,7 @@ from vonk_control.models.operations import (
 )
 from vonk_control.models.telemetry import NodeInventorySnapshot
 from vonk_control.recipe_operations.errors import RecipeOperationConflict
-from vonk_control.recipe_update_notice import recipe_update_notice
+from vonk_control.recipe_update_batches.notice import recipe_update_notice
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,

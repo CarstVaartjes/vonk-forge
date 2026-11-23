@@ -31,7 +31,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..model_cache_contract import CachedResourceEstimate
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.fleet import AgentNode, AgentNodeProfile, FleetProfile
-from ..recipe_update_notice import RecipeUpdateNotice, recipe_update_notice
+from ..recipe_update_batches.notice import RecipeUpdateNotice, recipe_update_notice
 from ..stored.states import CatalogRevisionState
 from .assignment_assessment import _AssignmentRows
 from .contracts import _SelectedProfileSnapshot

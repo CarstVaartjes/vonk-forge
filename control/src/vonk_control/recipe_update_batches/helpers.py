@@ -8,11 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from ..recipe_image_availability.contracts import RecipeImageAvailabilityUnknown
-from ..recipe_update_contract import (
-    RecipeUpdateBinding,
-    RecipeUpdateDocument,
-)
 from ..strict_json import serialize_json_value
+from .contract import RecipeUpdateBinding, RecipeUpdateDocument
 
 _SETTLED = frozenset({"succeeded", "failed", "cancelled"})
 

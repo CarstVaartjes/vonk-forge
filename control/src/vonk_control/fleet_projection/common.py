@@ -45,7 +45,7 @@ from ..metrics.contract import PrometheusAttention
 from ..models.catalog import CatalogDocument, CatalogDocumentRevision
 from ..models.execution import InstallationNode, RecipeInstallation, RecipeRun, RunNode
 from ..models.mapping import ClusterMapping
-from ..recipe_update_notice import RecipeUpdateNotice
+from ..recipe_update_batches.notice import RecipeUpdateNotice
 from ..stored.states import CatalogRevisionState
 from ..strict_json import StrictModel
 from ..telemetry.samples import TelemetrySampleView

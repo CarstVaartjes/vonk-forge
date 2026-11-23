@@ -52,7 +52,7 @@ from vonk_control.recipe_image_availability.service import (
     RecipeImageAvailabilityService,
 )
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
-from vonk_control.recipe_update_contract import UPDATE_KIND
+from vonk_control.recipe_update_batches.contract import UPDATE_KIND
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 

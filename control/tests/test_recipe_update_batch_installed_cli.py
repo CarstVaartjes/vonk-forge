@@ -28,7 +28,7 @@ from vonk_control.recipe_image_availability.service import (
 from vonk_control.recipe_image_availability_api import (
     install_recipe_operator_routes,
 )
-from vonk_control.recipe_update_contract import RecipeUpdateResponse
+from vonk_control.recipe_update_batches.contract import RecipeUpdateResponse
 from vonk_control.runtime_image_preparation.preparation import prepare_runtime_image
 from vonk_control.runtime_image_preparation.storage import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import ControllerAPIRoute

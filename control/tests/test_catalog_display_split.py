@@ -38,7 +38,7 @@ from vonk_control.models.catalog import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_control.recipe_update_notice import (
+from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )

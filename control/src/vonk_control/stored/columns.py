@@ -128,7 +128,7 @@ from ..recipe_lifecycle_contract import (
     RecipeOperationResult,
     RecipeOperationStoppedResult,
 )
-from ..recipe_update_contract import RecipeUpdateDocument, RecipeUpdateFailure
+from ..recipe_update_batches.contract import RecipeUpdateDocument, RecipeUpdateFailure
 from ..run_switch_contract.operations import RunSwitchOperationResult
 from ..run_switch_contract.phase_results import RunSwitchDistributionChildResult
 from ..run_switch_journal_contract import (

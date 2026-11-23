@@ -20,7 +20,7 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 from vonk_forge_contracts import EndpointAlias
 
 from ..model_cache_contract import CachedResourceEstimate
-from ..recipe_update_notice import RecipeUpdateNotice
+from ..recipe_update_batches.notice import RecipeUpdateNotice
 from ..run_switch_contract.requests import SparkGroupNode
 from ..strict_json import StrictModel
 from ..wait_contract import QueueWait

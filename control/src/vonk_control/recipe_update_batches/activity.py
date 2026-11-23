@@ -21,11 +21,9 @@ from ..operation_api.contracts import (
 from ..operation_api.providers import _activity_keyset_filter
 from ..operations.contract import AvailabilityOperationFailure
 from ..operations.item_contract import OperationItem, OperationOwnerReference
-from ..recipe_update_contract import (
-    UPDATE_KIND,
-)
 from ..state_filters import state_filter
 from ..strict_json import serialize_json_value
+from .contract import UPDATE_KIND
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches

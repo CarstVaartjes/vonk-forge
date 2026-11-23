@@ -55,7 +55,7 @@ from .recipe_image_availability_view_contract import (
 )
 from .recipe_image_removal_contract import RecipeRemovalUnavailableView
 from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .recipe_update_contract import RecipeUpdateRequest, RecipeUpdateResponse
+from .recipe_update_batches.contract import RecipeUpdateRequest, RecipeUpdateResponse
 from .stored.json_values import Residue
 from .strict_json import StrictJSONModel, read_stored_model
 

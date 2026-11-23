@@ -27,7 +27,7 @@ from vonk_control.models.catalog import (
 from vonk_control.models.execution import RecipeInstallation, RecipeRun, RunNode
 from vonk_control.models.fleet import AgentNode, AgentNodeContact
 from vonk_control.models.mapping import ClusterMapping, ClusterMappingNode
-from vonk_control.recipe_update_notice import (
+from vonk_control.recipe_update_batches.notice import (
     newest_active_revisions,
     recipe_update_notice,
 )

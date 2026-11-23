@@ -31,7 +31,11 @@ from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityUnknown,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import (
+from ..revision_images import revision_images
+from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
+from ..stored.states import CatalogRevisionState
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -40,10 +44,6 @@ from ..recipe_update_contract import (
     RecipeUpdateScope,
     read_update_document,
 )
-from ..revision_images import revision_images
-from ..runtime_image_preparation.contracts import RuntimeImagePreparationError
-from ..stored.states import CatalogRevisionState
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches

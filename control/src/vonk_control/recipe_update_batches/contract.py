@@ -20,9 +20,9 @@ from vonk_agent_protocol.integer_domains import MAX_DATABASE_INTEGER
 
 from vonk_control.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from .recipe_lifecycle_contract import RecipeOperationCancellationResult
-from .strict_json import StrictJSONModel
-from .wait_contract import QueueWait
+from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..strict_json import StrictJSONModel
+from ..wait_contract import QueueWait
 
 UPDATE_KIND = "recipe.cache.update.v2"
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]

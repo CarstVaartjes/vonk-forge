@@ -244,7 +244,7 @@ def wait_due(owner: ScheduledWaitOwner) -> datetime | None:
     if isinstance(owner, Job):
         from .jobs.documents import AvailabilityJobPayload, RunSwitchJobPayload
         from .recipe_image_removal_contract import RecipeCacheRemovalOwner
-        from .recipe_update_contract import RecipeUpdateDocument
+        from .recipe_update_batches.contract import RecipeUpdateDocument
 
         if _job_owns_contract(owner, RunSwitchJobPayload):
             document = owner.result
@@ -326,7 +326,7 @@ def owner_identity(
                 RunSwitchJobPayload,
             )
             from .recipe_image_removal_contract import RecipeCacheRemovalOwner
-            from .recipe_update_contract import RecipeUpdateDocument
+            from .recipe_update_batches.contract import RecipeUpdateDocument
 
             for model, candidate in (
                 (AgentUpgradeRolloutPayload, WaitOwnerKind.AGENT_UPGRADE),

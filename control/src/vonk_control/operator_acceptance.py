@@ -229,7 +229,7 @@ class OperatorReceiptResolver:
         )
         from .recipe_image_availability_view_contract import RecipeCacheRemovalStatus
         from .recipe_image_removal_contract import RecipeRemovalUnavailableView
-        from .recipe_update_contract import RecipeUpdateResponse
+        from .recipe_update_batches.contract import RecipeUpdateResponse
         from .run_switch_contract.operations import RunSwitchOperation
 
         if policy in AGENT_POLICIES:

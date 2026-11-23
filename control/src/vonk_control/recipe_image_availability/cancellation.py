@@ -36,7 +36,7 @@ from ..recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import UPDATE_KIND, RecipeUpdateResponse
+from ..recipe_update_batches.contract import UPDATE_KIND, RecipeUpdateResponse
 from ..stored.json_values import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (

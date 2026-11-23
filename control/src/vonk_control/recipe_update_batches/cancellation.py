@@ -18,14 +18,14 @@ from ..logging import redact_text
 from ..models.jobs import Job
 from ..persisted_waits import schedule_wait
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import (
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateFailure,
     RecipeUpdateResponse,
     UpdateState,
     read_update_document,
 )
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches

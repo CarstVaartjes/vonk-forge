@@ -62,7 +62,7 @@ from ..recipe_image_removal_contract import (
     RecipeRemovalUnavailableView,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
-from ..recipe_update_contract import RecipeUpdateResponse
+from ..recipe_update_batches.contract import RecipeUpdateResponse
 from ..runtime_image_preparation.contracts import (
     OCIImageTransport,
     RuntimeImageReceipt,

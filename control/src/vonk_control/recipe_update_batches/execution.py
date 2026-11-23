@@ -28,7 +28,10 @@ from ..recipe_image_availability.contracts import (
     RecipeImageAvailabilityRefused,
     RecipeImageAvailabilityUnknown,
 )
-from ..recipe_update_contract import (
+from ..reservation_owners import OwnerKind, OwnerRef, owner
+from ..stall_window import progress_deadline
+from ..strict_json import serialize_json_value
+from .contract import (
     UPDATE_KIND,
     RecipeUpdateChild,
     RecipeUpdateDocument,
@@ -36,9 +39,6 @@ from ..recipe_update_contract import (
     UpdateChildState,
     read_update_document,
 )
-from ..reservation_owners import OwnerKind, OwnerRef, owner
-from ..stall_window import progress_deadline
-from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches
