@@ -36,6 +36,7 @@ import { CancelOperation } from "../ui/cancel-operation";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { StatusPill } from "../ui/status-pill";
 import { WaitingFor } from "../ui/waiting-for";
+import { useLibraryNodeName } from "./library-node-names";
 import { availabilityProgress, LibraryAvailabilityProgress } from "./library-availability-progress";
 import { ObservationNotice } from "../ui/observation-notice";
 import { useOperationObserver } from "../../hooks/use-operation-observer";
@@ -297,6 +298,7 @@ function ProfileProgress({
   // The child's measured operation carries bytes, rate, ETA and a bar per Spark. The child's
   // own byte counts are the whole-load budget, a different quantity, so they are not shown here.
   const measured = availabilityProgress(progress.operation ?? { phase: progress.phase });
+  const nodeName = useLibraryNodeName();
   const nodeIds = Array.isArray(progress.node_ids)
     ? progress.node_ids.filter((id): id is string => typeof id === "string")
     : [];
@@ -314,7 +316,7 @@ function ProfileProgress({
         <ul className="library-profile-application-members" aria-label="Profile load targets">
           {nodeIds.map((nodeId) => (
             <li key={nodeId}>
-              <span>{nodeId}</span>
+              <span>{nodeName(nodeId)}</span>
               <small>Participating</small>
             </li>
           ))}

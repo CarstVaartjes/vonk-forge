@@ -131,11 +131,10 @@ test("shows the phase in plain words and one bar per Spark from the server field
   expect(bars[2]).toHaveAttribute("aria-valuenow", "10");
   expect(screen.getByText(/2\.0 KiB\/s/)).toBeInTheDocument();
   const [overall, first, second] = screen.getAllByRole("progressbar");
-  const etasIn = (bar: HTMLElement) =>
-    bar.parentElement?.querySelectorAll(":scope > div .library-availability-progress-eta").length;
-  expect(etasIn(overall as HTMLElement)).toBe(1);
-  expect(etasIn(first as HTMLElement)).toBe(1);
-  expect(etasIn(second as HTMLElement)).toBe(0);
+  // 1m 30s overall and 30s for the first Spark; the second reports none.
+  expect(overall).toHaveAttribute("aria-valuetext", expect.stringMatching(/30s/));
+  expect(first).toHaveAttribute("aria-valuetext", expect.stringMatching(/30s/));
+  expect(second?.getAttribute("aria-valuetext")).not.toMatch(/\ds\b/);
 });
 
 test("a rate is shown only from the smoothed field", () => {

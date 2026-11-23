@@ -257,7 +257,11 @@ def test_builder_progress_survives_the_column_guard_and_completes(
     def build(*args, progress, **kwargs):
         progress(
             OperationProgress(
-                phase="build", completed_bytes=7, total_bytes=10, total_bytes_known=True
+                phase="build",
+                completed_bytes=7,
+                total_bytes=10,
+                total_bytes_known=True,
+                smoothed_bytes_per_second=5.0,
             ).model_dump(mode="json")
         )
         with sessions() as session:
@@ -265,12 +269,17 @@ def test_builder_progress_survives_the_column_guard_and_completes(
             assert row is not None
             readable = read_row_column(row, "payload")
             assert isinstance(readable, AvailabilityJobPayload)
-            observed.append(readable.progress.completed_bytes)
+            observed.append(
+                (
+                    readable.progress.completed_bytes,
+                    readable.progress.smoothed_bytes_per_second,
+                )
+            )
         return original_builder(*args, **kwargs)
 
     service._builder = build
     assert service.run_pending() == 1
-    assert observed == [7]
+    assert observed == [(7, 5.0)]
     assert service.get(operation.id).state == "succeeded"
     engine.dispose()
 

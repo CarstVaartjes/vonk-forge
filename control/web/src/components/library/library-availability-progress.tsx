@@ -130,18 +130,19 @@ function MemberBar({ member }: { member: AvailabilityMember }) {
       : member.totalBytes === undefined
         ? `${formatBytes(member.completedBytes)} received`
         : `${formatBytes(member.completedBytes)} / ${formatBytes(member.totalBytes)}`;
+  const pace = [
+    sizes,
+    percent !== undefined && `${Math.floor(percent)}%`,
+    member.bytesPerSecond !== undefined && `${formatBytes(member.bytesPerSecond)}/s`,
+    member.etaSeconds !== undefined && eta(member.etaSeconds),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <li className="library-availability-progress-member">
       <div className="library-availability-progress-heading">
         <strong>{memberName(member.memberId)}</strong>
-        <span>
-          {sizes}
-          {percent !== undefined && ` · ${Math.floor(percent)}%`}
-          {member.bytesPerSecond !== undefined && ` · ${formatBytes(member.bytesPerSecond)}/s`}
-          {member.etaSeconds !== undefined && (
-            <span className="library-availability-progress-eta"> · {eta(member.etaSeconds)}</span>
-          )}
-        </span>
+        <span>{pace}</span>
       </div>
       <div
         className={`library-availability-progress-track${percent === undefined ? " is-indeterminate" : ""}`}
@@ -150,6 +151,7 @@ function MemberBar({ member }: { member: AvailabilityMember }) {
         aria-valuemax={percent === undefined ? undefined : 100}
         aria-valuenow={percent}
         aria-label={`${memberName(member.memberId)} ${phaseWords(member.phase)}`}
+        aria-valuetext={pace}
       >
         {percent !== undefined && <span style={{ width: `${percent}%` }} />}
       </div>
@@ -178,6 +180,16 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
       : progress.totalBytes === undefined
         ? `${formatBytes(progress.completedBytes)} received`
         : `${formatBytes(progress.completedBytes)} / ${formatBytes(progress.totalBytes)}`;
+  const pace = [
+    transfer,
+    percentage !== undefined && `${Math.floor(percentage)}%`,
+    measured &&
+      progress.bytesPerSecond !== undefined &&
+      `${formatBytes(progress.bytesPerSecond)}/s`,
+    measured && progress.etaSeconds !== undefined && eta(progress.etaSeconds),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <section
       className="library-availability-progress"
@@ -185,16 +197,7 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
     >
       <div className="library-availability-progress-heading">
         <strong>{phaseWords(progress.phase)}</strong>
-        <span>
-          {transfer}
-          {percentage !== undefined && ` · ${Math.floor(percentage)}%`}
-          {measured &&
-            progress.bytesPerSecond !== undefined &&
-            ` · ${formatBytes(progress.bytesPerSecond)}/s`}
-          {measured && progress.etaSeconds !== undefined && (
-            <span className="library-availability-progress-eta"> · {eta(progress.etaSeconds)}</span>
-          )}
-        </span>
+        <span>{pace}</span>
       </div>
       <div
         className={`library-availability-progress-track${percentage === undefined ? " is-indeterminate" : ""}`}
@@ -202,7 +205,7 @@ export function LibraryAvailabilityProgress({ progress }: { progress: Availabili
         aria-valuemin={0}
         aria-valuemax={percentage === undefined ? undefined : 100}
         aria-valuenow={percentage}
-        aria-valuetext={transfer}
+        aria-valuetext={pace}
         aria-label={`${phaseWords(progress.phase)} transfer`}
       >
         {percentage !== undefined && <span style={{ width: `${percentage}%` }} />}

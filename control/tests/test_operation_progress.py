@@ -1,8 +1,6 @@
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
-from pydantic import BaseModel
 from vonk_agent_protocol.wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
@@ -16,7 +14,6 @@ from vonk_control.operations.progress import (
     project_progress,
     sample_progress,
 )
-from vonk_control.recipe_image_availability.image_preparation import _set_progress
 
 NOW = datetime(2026, 9, 8, tzinfo=UTC)
 
@@ -335,23 +332,3 @@ def test_rust_restart_vector_is_accepted_and_resets_throughput():
         measured, second.model_copy(update={"completed_bytes": 6}), partial=False
     )
     assert progress_advanced(measured, advancing)
-
-
-class _Payload(BaseModel):
-    progress: OperationProgress | None = None
-
-
-def test_image_availability_progress_keeps_its_smoothed_rate():
-    operation = SimpleNamespace(payload=None)
-    service = SimpleNamespace(_payload=lambda _operation: _Payload())
-    _set_progress(
-        service,  # type: ignore[arg-type]
-        operation,  # type: ignore[arg-type]
-        "building",
-        total_bytes=100,
-        completed_bytes=10,
-        smoothed_bytes_per_second=5.0,
-    )
-    progress = _Payload.model_validate(operation.payload).progress
-    assert progress is not None
-    assert progress.smoothed_bytes_per_second == 5.0

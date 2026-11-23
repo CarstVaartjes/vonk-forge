@@ -892,7 +892,7 @@ test("downloads diagnostics for the exact failed attempt without losing the erro
   expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
 });
 
-test("shows canonical profile failure, attempt, phase and uncertain recovery directly in both views", async () => {
+test("shows canonical profile failure, attempt and uncertain recovery directly in both views", async () => {
   const user = userEvent.setup();
   const client = canonicalApi([canonicalOperation()]);
   render(<ActivityPage api={client} now={NOW} />);
