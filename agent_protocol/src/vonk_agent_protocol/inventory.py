@@ -12,7 +12,7 @@ from .contracts import canonical_message
 from .display_memory import DisplayMemoryObservation
 from .gpu_clock import GpuClockSupport
 from .host_helper import SignedHostHelperGrant
-from .host_tuning import HostTuning
+from .host_tuning import HostTuning, MemoryFragmentation
 from .optional_evidence import (
     EvidenceGroup,
     OptionalEvidenceModel,
@@ -124,6 +124,9 @@ class HostSettings(WireModel):
     swap: SwapObservation | None = None
     # None: the agent predates the host checks.
     tuning: HostTuning | None = None
+    # Readings around workload loads and stops since boot; None before the
+    # first one and when the agent could not take any.
+    memory_fragmentation: MemoryFragmentation | None = None
 
 
 class ModelStoreObject(WireModel):

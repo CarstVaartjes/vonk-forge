@@ -19,6 +19,7 @@ mod host_tuning;
 pub mod identity;
 pub mod image_store;
 pub mod inventory;
+pub mod memory_readings;
 pub mod network;
 pub mod oci;
 pub mod outcome;

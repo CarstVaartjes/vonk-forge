@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from .wire_model import MAX_TELEMETRY_CAPACITY_BYTES, WireEnum, WireModel
 
@@ -79,6 +79,8 @@ class HostTuning(WireModel):
     # The kernel command line has the word ``splash``.
     kernel_splash: bool | None = None
     free_memory: FreeMemory | None = None
+    # /proc/meminfo SecPageTables: the IOMMU and secondary-MMU page tables.
+    sec_page_tables_bytes: MemoryBytes | None = None
 
     @model_validator(mode="after")
     def _distinct(self) -> HostTuning:
@@ -88,3 +90,39 @@ class HostTuning(WireModel):
         if self.snaps is not None and len(set(self.snaps)) != len(self.snaps):
             raise ValueError("a snap is reported twice")
         return self
+
+
+class MemoryPoint(WireModel):
+    """The memory fragmentation readings at one lifecycle point: the kernel's
+    secondary page tables (``SecPageTables``) and free memory by block size."""
+
+    at: AwareDatetime
+    sec_page_tables_bytes: MemoryBytes | None = None
+    free_memory: FreeMemory | None = None
+
+
+class MemoryFragmentation(WireModel):
+    """What the agent read around workload loads and stops since this boot.
+
+    Informative only: the Controller derives a reboot recommendation, and
+    nothing acts on it. Page-table pages that a process leaves behind (PyTorch
+    ``expandable_segments`` maps many IOMMU pages) are not freed when it exits,
+    fragment memory, and only a reboot returns them, so the readings are keyed
+    by ``boot_id`` and the agent starts them afresh when the boot changes.
+    Every reading is optional evidence: one that could not be taken is absent.
+    """
+
+    # /proc/sys/kernel/random/boot_id.
+    boot_id: Annotated[str, Field(pattern=r"^[0-9a-f-]{36}$")]
+    # The running kernel's page size, which turns pages into blocks.
+    page_size_bytes: Annotated[int, Field(strict=True, ge=1, le=2**30)]
+    # Around the latest workload start and the latest workload stop.
+    load_before: MemoryPoint | None = None
+    load_after: MemoryPoint | None = None
+    stop_before: MemoryPoint | None = None
+    stop_after: MemoryPoint | None = None
+    # The after-stop readings taken while no other workload was resident on the
+    # Spark (a co-resident workload holds its own page tables), the first of
+    # this boot and the latest.
+    idle_stop_first: MemoryPoint | None = None
+    idle_stop_latest: MemoryPoint | None = None

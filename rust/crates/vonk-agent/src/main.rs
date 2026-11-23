@@ -270,6 +270,11 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
     let stops = PostStopInventory::default();
+    let memory = std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+        Path::new("/"),
+        &config.data_dir,
+        rustix::param::page_size() as u64,
+    ));
     let control = run_control_lane(
         config,
         runtime_identity,
@@ -277,12 +282,14 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         state,
         verdict.clone(),
         stops.clone(),
+        memory.clone(),
     );
     let mut inventory = tokio::spawn(run_inventory_lane(
         config.clone(),
         client.clone(),
         verdict,
         stops,
+        memory,
     ));
     let outcome = supervise_lanes_with_rotation(
         control,
@@ -313,6 +320,7 @@ struct CustodyExecutor<'a, E> {
     executor: &'a E,
     available: bool,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 }
 
 /// Seconds after a completed `recipe.stop` at which an inventory is collected.
@@ -329,6 +337,7 @@ const POST_STOP_INVENTORY_SECONDS: [u64; 4] = [31, 46, 61, 91];
 struct InventoryLink {
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 }
 
 /// The claim lane tells the inventory lane when a stop completed; the inventory
@@ -392,16 +401,54 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
                 ),
             );
         }
+        let run = memory_run(claim);
+        match (claim.operation, run) {
+            (vonk_agent_protocol::generated::AgentOperation::RecipeStart, Some(run)) => {
+                self.memory.load_begins(run);
+            }
+            (vonk_agent_protocol::generated::AgentOperation::RecipeStop, _) => {
+                self.memory.stop_begins();
+            }
+            (vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1, _) => {
+                self.memory.job_begins();
+            }
+            _ => {}
+        }
         let result = self
             .executor
             .execute(claim, lease_deadline, cancellation)
             .await;
+        match (claim.operation, run, &result) {
+            (
+                vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+                _,
+                vonk_agent::outcome::ExecutionResult::Done(_),
+            ) => self.memory.load_ends(),
+            (
+                vonk_agent_protocol::generated::AgentOperation::RecipeStop,
+                Some(run),
+                vonk_agent::outcome::ExecutionResult::Done(_),
+            ) => self.memory.stop_ends(run),
+            (vonk_agent_protocol::generated::AgentOperation::RecipeJobRunV1, _, _) => {
+                self.memory.job_ends();
+            }
+            _ => {}
+        }
         if claim.operation == vonk_agent_protocol::generated::AgentOperation::RecipeStop
             && matches!(result, vonk_agent::outcome::ExecutionResult::Done(_))
         {
             self.stops.stopped();
         }
         result
+    }
+}
+
+/// The run a start or stop order is for; `None` for any other order.
+fn memory_run(claim: &vonk_agent_protocol::AgentClaim) -> Option<uuid::Uuid> {
+    match vonk_agent_protocol::RecipeOperationRequest::parse(claim).ok()? {
+        vonk_agent_protocol::RecipeOperationRequest::Start(request) => Some(request.run_id),
+        vonk_agent_protocol::RecipeOperationRequest::Stop(request) => Some(request.run_id),
+        _ => None,
     }
 }
 
@@ -465,6 +512,7 @@ async fn run_control_lane(
     state: StateStore,
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // A build compiles beside the lane: the Spark keeps claiming other work.
     let runner = SystemProcessRunner;
@@ -483,7 +531,11 @@ async fn run_control_lane(
         runtime_identity,
         client.clone(),
         state,
-        InventoryLink { verdict, stops },
+        InventoryLink {
+            verdict,
+            stops,
+            memory,
+        },
         &builds,
         &beside,
     );
@@ -615,6 +667,7 @@ async fn claim_lane<'a>(
             )
             .is_ok(),
             stops: inventory.stops.clone(),
+            memory: inventory.memory.clone(),
         };
         let operation = async {
             run_once_with_claim_hook(
@@ -654,11 +707,13 @@ async fn claim_lane<'a>(
                             let client = client.clone();
                             let available = guarded.available;
                             let stops = inventory.stops.clone();
+                            let memory = inventory.memory.clone();
                             beside.start(fence, async move {
                                 let executor = CustodyExecutor {
                                     executor: builds,
                                     available,
                                     stops,
+                                    memory,
                                 };
                                 claim.execute(client, store, &executor).await
                             });
@@ -754,6 +809,7 @@ async fn run_inventory_lane(
     client: AgentHttpClient,
     verdict: LatestVerdict,
     stops: PostStopInventory,
+    memory: std::sync::Arc<vonk_agent::memory_readings::Ledger>,
 ) {
     inventory_lane(
         || {
@@ -778,10 +834,14 @@ async fn run_inventory_lane(
             let config = config.clone();
             let client = client.clone();
             let verdict = verdict.clone();
+            let memory = memory.clone();
             async move {
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
+                if let Some(host) = inventory.host_settings.as_mut() {
+                    host.memory_fragmentation = memory.snapshot();
+                }
                 let installations = inventory.installations.clone().unwrap_or_default();
                 let runs = inventory.runs.clone().unwrap_or_default();
                 let answer = client.report_inventory_request(inventory).await?;

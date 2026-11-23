@@ -8270,6 +8270,17 @@
           "title": "Graphical Default Target",
           "type": "boolean"
         },
+        "memory_fragmentation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryFragmentation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "store_retention_failure": {
           "anyOf": [
             {
@@ -8350,6 +8361,20 @@
           ],
           "default": null,
           "title": "Kernel Splash"
+        },
+        "sec_page_tables_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sec Page Tables Bytes"
         },
         "snaps": {
           "anyOf": [
@@ -10101,6 +10126,134 @@
         "phase_index"
       ],
       "title": "LifecyclePreflightCheckpoint",
+      "type": "object"
+    },
+    "MemoryFragmentation": {
+      "description": "What the agent read around workload loads and stops since this boot.\n\nInformative only: the Controller derives a reboot recommendation, and\nnothing acts on it. Page-table pages that a process leaves behind (PyTorch\n``expandable_segments`` maps many IOMMU pages) are not freed when it exits,\nfragment memory, and only a reboot returns them, so the readings are keyed\nby ``boot_id`` and the agent starts them afresh when the boot changes.\nEvery reading is optional evidence: one that could not be taken is absent.",
+      "properties": {
+        "boot_id": {
+          "pattern": "^[0-9a-f-]{36}$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "idle_stop_first": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "idle_stop_latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "load_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "load_before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "page_size_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Page Size Bytes",
+          "type": "integer"
+        },
+        "stop_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "boot_id",
+        "page_size_bytes"
+      ],
+      "title": "MemoryFragmentation",
+      "type": "object"
+    },
+    "MemoryPoint": {
+      "description": "The memory fragmentation readings at one lifecycle point: the kernel's\nsecondary page tables (``SecPageTables``) and free memory by block size.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "free_memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FreeMemory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sec_page_tables_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sec Page Tables Bytes"
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "title": "MemoryPoint",
       "type": "object"
     },
     "MemoryUsageUncertainty": {
@@ -13265,6 +13418,7 @@
         "host.store-retention",
         "host.display-memory",
         "host.gpu-clock-uncapped",
+        "host.memory-fragmented",
         "host.swap-short",
         "model.store_layout",
         "install.partial",

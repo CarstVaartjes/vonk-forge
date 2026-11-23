@@ -49,6 +49,7 @@ from .common import (
 )
 from .display_memory import display_memory_advice
 from .host_checks import host_checks, host_checks_note
+from .memory_fragmentation import memory_fragmentation_warning
 
 if TYPE_CHECKING:
     from .service import FleetProjection
@@ -512,6 +513,8 @@ def _host_settings_warnings(host: HostSettings | None) -> list[ProjectionReason]
     advice = display_memory_advice(host)
     if advice is not None:
         warnings.append(advice)
+    if host is not None and (fragmented := memory_fragmentation_warning(host)):
+        warnings.append(fragmented)
     return warnings
 
 

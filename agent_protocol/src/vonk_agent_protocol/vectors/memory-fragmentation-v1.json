@@ -1,0 +1,166 @@
+{
+  "comment": "MemoryFragmentation as the agent reports it in HostSettings, and whether the Controller advises a reboot (a host.memory-fragmented warning). Page size 4096: the margin is 1 GiB of large blocks pinned, which 2 MiB of leftover page tables reach. The Rust agent test reads every readings value through the generated contract; the Controller test projects each one onto a node.",
+  "cases": [
+    {
+      "name": "no readings yet",
+      "readings": null,
+      "fragmented": false
+    },
+    {
+      "name": "idle stops leave about what they found",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "stop_before": {
+          "at": "2026-11-20T10:10:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 10737418240,
+            "free_2mib_block_bytes": 6442450944
+          }
+        },
+        "stop_after": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 252706816,
+          "free_memory": {
+            "free_bytes": 118111600640,
+            "free_2mib_block_bytes": 113816633344
+          }
+        },
+        "idle_stop_first": {
+          "at": "2026-11-20T10:05:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 107374182400,
+            "free_2mib_block_bytes": 68719476736
+          }
+        },
+        "idle_stop_latest": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 252706816,
+          "free_memory": {
+            "free_bytes": 118111600640,
+            "free_2mib_block_bytes": 113816633344
+          }
+        }
+      },
+      "fragmented": false
+    },
+    {
+      "name": "idle stop page tables grew past the margin",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "idle_stop_first": {
+          "at": "2026-11-20T10:05:00Z",
+          "sec_page_tables_bytes": 251658240
+        },
+        "idle_stop_latest": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 257949696
+        }
+      },
+      "fragmented": true
+    },
+    {
+      "name": "page tables grew only while another workload stayed up",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "stop_after": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 314572800
+        }
+      },
+      "fragmented": false
+    },
+    {
+      "name": "idle stop freed memory that did not come back in 2 MiB blocks",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "stop_before": {
+          "at": "2026-11-20T10:10:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 21474836480,
+            "free_2mib_block_bytes": 10737418240
+          }
+        },
+        "stop_after": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 128849018880,
+            "free_2mib_block_bytes": 85899345920
+          }
+        },
+        "idle_stop_first": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 128849018880,
+            "free_2mib_block_bytes": 85899345920
+          }
+        },
+        "idle_stop_latest": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 128849018880,
+            "free_2mib_block_bytes": 85899345920
+          }
+        }
+      },
+      "fragmented": true
+    },
+    {
+      "name": "the same shortfall while another workload stayed up",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "stop_before": {
+          "at": "2026-11-20T10:10:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 21474836480,
+            "free_2mib_block_bytes": 10737418240
+          }
+        },
+        "stop_after": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240,
+          "free_memory": {
+            "free_bytes": 128849018880,
+            "free_2mib_block_bytes": 85899345920
+          }
+        }
+      },
+      "fragmented": false
+    },
+    {
+      "name": "free memory could not be read",
+      "readings": {
+        "boot_id": "6f1c1d8e-0000-4000-8000-000000000001",
+        "page_size_bytes": 4096,
+        "stop_before": {
+          "at": "2026-11-20T10:10:00Z",
+          "sec_page_tables_bytes": 251658240
+        },
+        "stop_after": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240
+        },
+        "idle_stop_first": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240
+        },
+        "idle_stop_latest": {
+          "at": "2026-11-20T10:20:00Z",
+          "sec_page_tables_bytes": 251658240
+        }
+      },
+      "fragmented": false
+    }
+  ]
+}

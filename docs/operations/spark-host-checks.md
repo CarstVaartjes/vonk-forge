@@ -10,7 +10,7 @@ them: on the Spark itself, in a terminal or over SSH, as a user with `sudo`;
 the Controller never changes a Spark. The web page has a copy button per command.
 
 The checks are informative. They never gate admission or a load, never mark a
-Spark as needing attention, and the platform never runs these commands: each
+Spark as needing attention (except the memory fragmentation advice below), and the platform never runs these commands: each
 `sudo` is the operator's decision. A reading the agent cannot take (an older
 agent, systemd not answering, a file missing) gives no advice rather than a
 guess. Advice disappears with the next inventory (about 2-3 minutes: the agent
@@ -80,6 +80,44 @@ Compaction moves movable pages, so workloads already serving on the Spark can
 stall briefly while it runs. It is not skipped for them yet: measure the
 reported duration on a Spark that serves while another workload starts
 before adding a rule.
+
+## Memory fragmentation advice (reboot recommended)
+
+Unlike the checks above, this one is an attention item: the Spark warns
+`host.memory-fragmented` ("Memory fragmented; reboot recommended") and
+`vonkctl fleet` lists it with the other warnings ("nothing needs attention"
+otherwise). Page-table pages a workload maps through the IOMMU (PyTorch
+`expandable_segments` makes many) can stay in `SecPageTables` after it exits.
+They are unmovable, so each can pin a whole 2 MiB block of free memory that the
+GPU driver wants, and only a reboot returns them (about 1 to 1.5% decode speed
+reported). Nothing acts on the advice.
+
+The agent reads `SecPageTables` (`/proc/meminfo`) and free memory by block size
+(`/proc/buddyinfo`, the 2 MiB notion of the check above) before and after every
+workload start and stop and reports them as `HostSettings.memory_fragmentation`
+(`MemoryFragmentation`, shared vector `memory-fragmentation-v1.json`). They are
+keyed by `/proc/sys/kernel/random/boot_id`, kept in the agent's data directory
+across agent restarts, and begin again after a reboot. The Controller
+(`fleet_projection/memory_fragmentation.py`) advises a reboot when either holds:
+
+- **Page tables grew:** `SecPageTables` after the latest idle stop is higher than
+  after the first idle stop of this boot by more than the margin. An idle stop
+  is one after which no other workload or job was resident, since a co-resident
+  workload holds its own tables. Growth is monotonic, so the advice holds until
+  the boot changes (the "previous stop" pair would clear on the next quiet stop
+  although only a reboot heals).
+- **Large blocks short:** what the latest idle stop freed (free memory after
+  minus before) did not come back as 2 MiB blocks by more than the margin. The
+  need is measured, not a formula: it is what reloading the stopped workload
+  takes. The helper's compaction at the next load can heal scatter of movable
+  pages, so this signal can clear without a reboot.
+
+The margin is 1 GiB of large blocks at risk. One unmovable page can pin one
+block, so `n` leftover page-table bytes put `n / page_size * 2 MiB` at risk: at
+a 4 KiB page, 2 MiB of leftover tables. 1 GiB is under 1% of 128 GiB, the order
+of the reported cost. Readings the agent could not take, or too few of them,
+give no advice. After an agent restart the readings continue; after an upgrade
+the Controller must be new first (strict readers).
 
 ## Related choices that are not host checks
 

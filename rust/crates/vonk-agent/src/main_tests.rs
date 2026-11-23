@@ -242,10 +242,16 @@ async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
         (AgentOperation::RecipeStart, done(), false),
     ] {
         let stops = PostStopInventory::default();
+        let data = tempfile::tempdir().unwrap();
         let executor = super::CustodyExecutor {
             executor: &Fake(result),
             available: true,
             stops: stops.clone(),
+            memory: std::sync::Arc::new(vonk_agent::memory_readings::Ledger::open(
+                std::path::Path::new("/nonexistent"),
+                data.path(),
+                4096,
+            )),
         };
         let mut claim = template.clone();
         claim.operation = operation;

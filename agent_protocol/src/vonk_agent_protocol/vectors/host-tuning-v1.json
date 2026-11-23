@@ -4,6 +4,7 @@
     "page_size": 4096,
     "systemctl_show": "MemoryCurrent=2621440\nId=bluetooth.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=4194304\nId=cups.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=[not set]\nId=cups.socket\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=[not set]\nId=cups.path\nLoadState=loaded\nActiveState=inactive\n\nMemoryCurrent=9437184\nId=cups-browsed.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=27262976\nId=snapd.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=[not set]\nId=snapd.socket\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=[not set]\nId=snapd.seeded.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=[not set]\nId=snapd.snap-repair.timer\nLoadState=not-found\nActiveState=inactive\n\nMemoryCurrent=75497472\nId=dgx-dashboard.service\nLoadState=loaded\nActiveState=active\n\nMemoryCurrent=41943040\nId=dgx-dashboard-admin.service\nLoadState=loaded\nActiveState=active\n\nId=fwupd-refresh.timer\nLoadState=loaded\nActiveState=active\n",
     "files": {
+      "proc/meminfo": "MemTotal:       126400000 kB\nSecPageTables:    236544 kB\nPageTables:       120000 kB\n",
       "proc/buddyinfo": "Node 0, zone      DMA     12      9      7      5      4      3      2      2      1      1    120\nNode 0, zone   Normal 1048576 655360 327680 131072  65536  32768  16384   8192   4096   2048  19000\n",
       "proc/cmdline": "BOOT_IMAGE=/boot/vmlinuz-6.11.0-1016-nvidia root=UUID=0b1c ro quiet splash vt.handoff=7\n",
       "proc/sys/vm/compaction_proactiveness": "20\n",
@@ -98,6 +99,7 @@
     "free_memory": {
       "free_bytes": 125298024448,
       "free_2mib_block_bytes": 84492156928
-    }
+    },
+    "sec_page_tables_bytes": 242221056
   }
 }

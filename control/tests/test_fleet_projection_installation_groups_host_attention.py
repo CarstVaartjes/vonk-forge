@@ -23,6 +23,7 @@ from vonk_control.fleet_projection.common import (
     RecipePresence,
     _install_partial_warnings,
 )
+from vonk_control.fleet_projection.memory_fragmentation import at_risk_bytes
 from vonk_control.fleet_projection.service import FleetProjection
 from vonk_control.inventory.repository import (
     InventoryRepository,
@@ -1317,3 +1318,34 @@ def test_system_memory_is_everything_in_use_outside_gpu_processes(
         )
     )
     assert telemetry_point(view).system_memory_bytes == expected
+
+
+def _fragmentation_cases() -> list[dict[str, object]]:
+    vector = json.loads(
+        files("vonk_agent_protocol")
+        .joinpath("vectors/memory-fragmentation-v1.json")
+        .read_text(encoding="utf-8")
+    )
+    return vector["cases"]
+
+
+@pytest.mark.parametrize("case", _fragmentation_cases(), ids=lambda case: case["name"])
+def test_memory_fragmentation_readings_decide_the_reboot_advice(
+    case: dict[str, object],
+) -> None:
+    host: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+    }
+    if case["readings"] is not None:
+        host["memory_fragmentation"] = case["readings"]
+    advised = "host.memory-fragmented" in _host_codes(host)
+    assert advised is case["fragmented"]
+
+
+def test_page_table_growth_is_judged_by_the_large_blocks_it_can_pin() -> None:
+    # One 4 KiB page-table page can pin one whole 2 MiB block; at a 64 KiB page
+    # the same bytes are fewer pages.
+    assert at_risk_bytes(4096, 4096) == 2 * 1024 * 1024
+    assert at_risk_bytes(65536, 65536) == 2 * 1024 * 1024
+    assert at_risk_bytes(2 * 1024 * 1024, 4096) == 1024**3
